@@ -249,19 +249,22 @@ export function MobileCalendrierScreen() {
 
       {view === "mois" ? (
         <div className="flex-1 overflow-y-auto px-2 pb-2">
-          <div className="grid grid-cols-7 px-2 pb-1">
+          <div className="grid grid-cols-7 px-1 pb-1">
             {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => (
               <div key={i} className="text-center font-mono text-[9px] uppercase text-ink-4">
                 {d}
               </div>
             ))}
           </div>
-          <div className="space-y-1">
-            {weeks.map((week) => {
+          <div className="overflow-hidden rounded-panel border border-line bg-card">
+            {weeks.map((week, weekIdx) => {
               const banners = bannersForWeek(week);
               return (
-                <div key={week[0].toISOString()} className="grid grid-cols-7 gap-1">
-                  {week.map((day) => {
+                <div
+                  key={week[0].toISOString()}
+                  className={`grid grid-cols-7 ${weekIdx > 0 ? "border-t border-line" : ""}`}
+                >
+                  {week.map((day, dayIdx) => {
                     const dayEvents = singleDayEventsForDay(day);
                     const inMonth = isSameMonth(day, anchor);
                     const isToday = isSameDay(day, new Date());
@@ -269,9 +272,9 @@ export function MobileCalendrierScreen() {
                       <button
                         key={day.toISOString()}
                         onClick={() => setSelectedDay(day)}
-                        className={`flex min-h-[52px] flex-col gap-0.5 rounded-btn border p-1 text-left ${
-                          inMonth ? "border-line bg-card" : "border-transparent bg-transparent opacity-40"
-                        }`}
+                        className={`flex min-h-[52px] flex-col gap-0.5 p-1 text-left ${
+                          dayIdx > 0 ? "border-l border-line" : ""
+                        } ${inMonth ? "bg-card" : "bg-subtle/40 opacity-50"}`}
                       >
                         <span
                           className={`self-start rounded-full px-1 text-[10px] font-bold ${
