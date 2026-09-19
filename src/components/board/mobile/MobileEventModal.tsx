@@ -237,7 +237,12 @@ export function MobileEventModal({
       <div className="flex shrink-0 flex-col gap-2 border-t border-line px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">
         {isEditing && (
           <div className="flex justify-end">
-            <CoverageActions role={m.role} technicians={m.technicians} coverage={m.coverage} />
+            <CoverageActions
+              role={m.role}
+              technicians={m.technicians}
+              coverage={m.coverage}
+              eventInfo={{ title: m.title, start: m.start }}
+            />
           </div>
         )}
         <div className="flex items-center justify-between">

@@ -226,24 +226,28 @@ export function CarteTab({ location }: { location: string }) {
   );
 }
 
-/** "Demander une couverture" / "Désigner directement" — pied du modal (§5.5 du handoff). */
+/** "Demander une couverture" / "Assigner" / "Désigner directement" — pied du modal (§5.5 du handoff). */
 export function CoverageActions({
   role,
   technicians,
   coverage,
+  eventInfo,
 }: {
   role: ReturnType<typeof useUserRole>;
   technicians: ReturnType<typeof useAvailableTechnicians>["technicians"];
   coverage: ReturnType<typeof useEventCoverage>;
+  eventInfo: { title: string; start: Date };
 }) {
-  const [assignOpen, setAssignOpen] = useState(false);
+  const [mode, setMode] = useState<"assign" | "direct" | null>(null);
   const req = coverage.request;
+  const isPendingResponse = req?.assigned_technician_name && req.technician_response === "pending";
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       {req?.assigned_technician_name && (
         <span className="flex items-center gap-1 rounded-full bg-subtle px-2 py-1 text-ink-3" title="Technicien assigné">
           <Video size={12} /> {req.assigned_technician_name}
+          {isPendingResponse && " (en attente de réponse)"}
         </span>
       )}
 
@@ -257,21 +261,31 @@ export function CoverageActions({
       )}
 
       {role.isSuperUser && (
-        <button
-          onClick={() => setAssignOpen(true)}
-          className="rounded-btn border border-line px-3 py-2 font-semibold text-ink-2 hover:bg-hover"
-        >
-          Désigner directement
-        </button>
+        <>
+          <button
+            onClick={() => setMode("assign")}
+            className="rounded-btn border border-line px-3 py-2 font-semibold text-ink-2 hover:bg-hover"
+          >
+            Assigner
+          </button>
+          <button
+            onClick={() => setMode("direct")}
+            className="rounded-btn border border-line px-3 py-2 font-semibold text-ink-2 hover:bg-hover"
+          >
+            Désigner directement
+          </button>
+        </>
       )}
 
-      {assignOpen && (
+      {mode && (
         <TechnicianPickerModal
+          mode={mode}
           technicians={technicians}
-          onClose={() => setAssignOpen(false)}
+          onClose={() => setMode(null)}
           onSelect={async (t) => {
-            await coverage.assignTechnician(t);
-            setAssignOpen(false);
+            if (mode === "direct") await coverage.assignTechnician(t);
+            else await coverage.assignPending(t, eventInfo);
+            setMode(null);
           }}
         />
       )}
@@ -279,12 +293,14 @@ export function CoverageActions({
   );
 }
 
-/** Modal de recherche pour désigner un technicien — même logique que DirectAssignModal.tsx de calendrier-lgef, sans le volet WhatsApp/contacts externes (pas d'infrastructure équivalente ici). */
+/** Modal de recherche pour assigner un technicien — même logique que DirectAssignModal.tsx / TechnicianAssignmentModal.tsx de calendrier-lgef, sans le volet WhatsApp/contacts externes (pas d'infrastructure équivalente ici). */
 function TechnicianPickerModal({
+  mode,
   technicians,
   onClose,
   onSelect,
 }: {
+  mode: "assign" | "direct";
   technicians: ReturnType<typeof useAvailableTechnicians>["technicians"];
   onClose: () => void;
   onSelect: (t: ReturnType<typeof useAvailableTechnicians>["technicians"][number]) => void;
@@ -299,13 +315,15 @@ function TechnicianPickerModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-ink">Désigner un technicien</h3>
+          <h3 className="text-sm font-bold text-ink">{mode === "direct" ? "Désigner directement" : "Assigner un technicien"}</h3>
           <button onClick={onClose} className="text-ink-4 hover:text-ink">
             ✕
           </button>
         </div>
         <p className="mb-3 text-xs text-ink-3">
-          La mission est validée immédiatement, sans attendre de réponse du technicien.
+          {mode === "direct"
+            ? "La mission est validée immédiatement, sans attendre de réponse du technicien."
+            : "Le technicien reçoit une notification et doit accepter ou refuser la mission."}
         </p>
         <input
           autoFocus

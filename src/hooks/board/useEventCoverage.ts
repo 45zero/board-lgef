@@ -99,5 +99,73 @@ export function useEventCoverage(eventId?: string) {
     return true;
   };
 
-  return { request, loading, requestCoverage, assignTechnician, refetch: fetchRequest };
+  /**
+   * Assigne un technicien mais laisse la demande "en attente" — il reçoit une
+   * notification et doit l'accepter/la refuser lui-même (voir
+   * TechnicianAssignmentModal.tsx + le bloc notification de
+   * useCoverageRequests.ts dans calendrier-lgef), à la différence de
+   * assignTechnician() qui valide tout de suite.
+   */
+  const assignPending = async (
+    tech: TechnicianOption,
+    eventInfo: { title: string; start: Date }
+  ) => {
+    if (!eventId || !user) return false;
+    const supabase = createClient();
+
+    const payload = {
+      assigned_technician_id: tech.id,
+      assigned_technician_name: tech.name,
+      assigned_technician_email: tech.email,
+      technician_response: "pending",
+      status: "pending" as const,
+      coverage_symbol: null,
+    };
+
+    const { error } = request
+      ? await supabase.from("coverage_requests").update(payload).eq("id", request.id)
+      : await supabase.from("coverage_requests").insert({
+          event_id: eventId,
+          requester_id: user.id,
+          details: null,
+          ...payload,
+        });
+
+    if (error) {
+      console.error("[useEventCoverage.assignPending]", error);
+      return false;
+    }
+
+    await supabase.from("events").update({ requires_coverage: true }).eq("id", eventId);
+
+    try {
+      const { data: me } = await supabase
+        .from("profiles")
+        .select("first_name, last_name, email")
+        .eq("id", user.id)
+        .maybeSingle();
+      const actorName = [me?.first_name, me?.last_name].filter(Boolean).join(" ").trim() || me?.email || "";
+      const eventDate = eventInfo.start.toLocaleDateString("fr-FR", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      });
+
+      await supabase.rpc("create_notification", {
+        p_user_id: tech.id,
+        p_type: "coverage_assignment",
+        p_title: `${actorName} vous a assigné à une mission`,
+        p_message: `${eventInfo.title} — ${eventDate}`,
+        p_actor_name: actorName,
+        p_data: { event_id: eventId, technician_id: tech.id, assigned_by: user.id, assigned_by_name: actorName },
+      });
+    } catch (e) {
+      console.warn("[useEventCoverage.assignPending] notification failed:", e);
+    }
+
+    await fetchRequest();
+    return true;
+  };
+
+  return { request, loading, requestCoverage, assignTechnician, assignPending, refetch: fetchRequest };
 }

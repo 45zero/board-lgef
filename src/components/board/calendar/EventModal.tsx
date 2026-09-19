@@ -274,7 +274,14 @@ export function EventModal({
             )}
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {isEditing && <CoverageActions role={m.role} technicians={m.technicians} coverage={m.coverage} />}
+            {isEditing && (
+              <CoverageActions
+                role={m.role}
+                technicians={m.technicians}
+                coverage={m.coverage}
+                eventInfo={{ title: m.title, start: m.start }}
+              />
+            )}
             <button onClick={onClose} className="rounded-btn border border-line px-4 py-2 text-sm text-ink-2">
               Annuler
             </button>
