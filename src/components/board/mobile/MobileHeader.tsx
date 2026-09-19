@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { Bell, Settings } from "lucide-react";
 
 export function MobileHeader({ title, kicker }: { title: string; kicker: string }) {
@@ -9,9 +10,7 @@ export function MobileHeader({ title, kicker }: { title: string; kicker: string 
       style={{ background: "linear-gradient(160deg, var(--navy) 0%, var(--navy-500) 100%)" }}
     >
       <div className="flex items-center gap-2.5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-btn bg-white/15 text-xs font-extrabold">
-          LG
-        </div>
+        <Image src="/lgef-logo.png" alt="Ligue Grand Est de Football" width={30} height={30} className="rounded-btn" />
         <div>
           <div className="text-[15px] font-extrabold leading-tight">{title}</div>
           <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-white/70">{kicker}</div>

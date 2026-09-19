@@ -1,6 +1,6 @@
 "use client";
 
-import { Calendar, Home, Mail, Kanban, Clock } from "lucide-react";
+import { Calendar, Home, Mail, Kanban, Camera } from "lucide-react";
 
 export type MobileTab = "calendrier" | "accueil" | "mails" | "trello";
 
@@ -17,12 +17,10 @@ export function MobileBottomNav({
   active,
   onSelect,
   onCenterPress,
-  centerActive,
 }: {
   active: MobileTab;
   onSelect: (tab: MobileTab) => void;
   onCenterPress: () => void;
-  centerActive: boolean;
 }) {
   return (
     <div
@@ -37,15 +35,11 @@ export function MobileBottomNav({
         <div className="flex items-center justify-center">
           <button
             onClick={onCenterPress}
-            className={`flex -translate-y-4 flex-col items-center justify-center gap-0.5 rounded-[22px] shadow-btn-red transition ${
-              centerActive ? "bg-red text-white" : "bg-navy text-white"
-            }`}
+            className="flex -translate-y-4 flex-col items-center justify-center gap-0.5 rounded-[22px] bg-red text-white shadow-btn-red"
             style={{ width: 62, height: 62 }}
           >
-            <Clock size={22} />
-            <span className="font-mono text-[8px] uppercase tracking-[0.08em]">
-              {centerActive ? "Sortie" : "Pointer"}
-            </span>
+            <Camera size={22} />
+            <span className="font-mono text-[8px] uppercase tracking-[0.08em]">Frais</span>
           </button>
         </div>
 

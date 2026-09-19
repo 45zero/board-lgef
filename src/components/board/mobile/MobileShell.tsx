@@ -15,12 +15,19 @@ const TITLES: Record<MobileTab, { title: string; kicker: string }> = {
 /** Coque mobile — même app Next.js, bascule vers cette coque sous ~768px (voir useIsMobile). */
 export function MobileShell() {
   const [tab, setTab] = useState<MobileTab>("calendrier");
-  const [punchedIn, setPunchedIn] = useState(false);
+  const [toast, setToast] = useState(false);
 
   const { title, kicker } = TITLES[tab];
 
+  const handleCenterPress = () => {
+    // Capture de frais (scan de justificatif) — pas encore construite ; le
+    // bouton central configurable (§6.3 du handoff) non plus.
+    setToast(true);
+    setTimeout(() => setToast(false), 2200);
+  };
+
   return (
-    <div className="flex h-screen flex-col bg-shell">
+    <div className="relative flex h-screen flex-col bg-shell">
       <MobileHeader title={title} kicker={kicker} />
 
       <main className="flex-1 overflow-hidden">
@@ -33,12 +40,13 @@ export function MobileShell() {
         )}
       </main>
 
-      <MobileBottomNav
-        active={tab}
-        onSelect={setTab}
-        centerActive={punchedIn}
-        onCenterPress={() => setPunchedIn((p) => !p)}
-      />
+      {toast && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white shadow-modal">
+          Capture de frais — bientôt disponible
+        </div>
+      )}
+
+      <MobileBottomNav active={tab} onSelect={setTab} onCenterPress={handleCenterPress} />
     </div>
   );
 }

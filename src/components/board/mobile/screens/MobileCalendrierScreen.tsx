@@ -7,6 +7,10 @@ import {
   ChevronDown,
   User,
   Camera,
+  Video,
+  Clock,
+  Ban,
+  List,
   X,
   Plus,
 } from "lucide-react";
@@ -14,12 +18,14 @@ import {
   addDays,
   addMonths,
   addWeeks,
+  differenceInCalendarDays,
   endOfMonth,
   endOfWeek,
   format,
   isSameDay,
   isSameMonth,
   parseISO,
+  startOfDay,
   startOfMonth,
   startOfWeek,
   subMonths,
@@ -28,10 +34,23 @@ import {
 import { fr } from "date-fns/locale";
 import { useCalendarEvents } from "@/hooks/board/useCalendarEvents";
 import { CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
-import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
+import { ORG_COLORS, ORG_LABELS, COVERAGE_COLORS, type CoverageState, type OrgKey } from "@/lib/board/tokens";
 import type { CalendarEvent } from "@/lib/board/calendar";
 import { MobileEventModal } from "@/components/board/mobile/MobileEventModal";
 import { useAuth } from "@/contexts/AuthContext";
+
+const COVERAGE_ICONS: Record<CoverageState, typeof Camera> = {
+  photo: Camera,
+  video: Video,
+  both: Camera,
+  wait: Clock,
+  no: Ban,
+};
+
+function CoverageIcon({ state, size = 9 }: { state: CoverageState; size?: number }) {
+  const Icon = COVERAGE_ICONS[state];
+  return <Icon size={size} className="shrink-0" style={{ color: COVERAGE_COLORS[state].ink }} />;
+}
 
 type View = "mois" | "semaine";
 
@@ -85,6 +104,33 @@ export function MobileCalendrierScreen() {
   const eventsForDay = (day: Date) =>
     filtered.filter((e) => isSameDay(parseISO(e.start), day)).sort((a, b) => a.start.localeCompare(b.start));
 
+  // Un événement est "multi-jours" s'il s'étend sur plus d'une journée calendaire
+  // locale (ex: BMF Apprentissage sur 4-5 jours) — rendu en bandeau plutôt qu'en
+  // puce dans une seule case, comme dans le prototype (§6.4 du handoff).
+  const isMultiDay = (e: CalendarEvent) =>
+    differenceInCalendarDays(startOfDay(parseISO(e.end)), startOfDay(parseISO(e.start))) >= 1;
+
+  const multiDayEvents = useMemo(() => filtered.filter(isMultiDay), [filtered]);
+  const singleDayEventsForDay = (day: Date) => eventsForDay(day).filter((e) => !isMultiDay(e));
+
+  const weeks = useMemo(() => {
+    const chunks: Date[][] = [];
+    for (let i = 0; i < days.length; i += 7) chunks.push(days.slice(i, i + 7));
+    return chunks;
+  }, [days]);
+
+  const bannersForWeek = (week: Date[]) => {
+    const weekStart = week[0];
+    const weekEnd = week[6];
+    return multiDayEvents
+      .filter((e) => parseISO(e.start) <= weekEnd && parseISO(e.end) >= weekStart)
+      .map((e) => {
+        const colStart = Math.max(0, differenceInCalendarDays(startOfDay(parseISO(e.start)), weekStart));
+        const colEnd = Math.min(6, differenceInCalendarDays(startOfDay(parseISO(e.end)), weekStart));
+        return { event: e, colStart, colEnd };
+      });
+  };
+
   const orgCounts = useMemo(() => {
     const counts: Partial<Record<OrgKey, number>> = {};
     for (const e of events) counts[e.org] = (counts[e.org] ?? 0) + 1;
@@ -121,28 +167,32 @@ export function MobileCalendrierScreen() {
       <div className="flex h-[30px] items-center gap-2 px-4">
         <button
           onClick={() => setFiltersOpen((o) => !o)}
-          className={`flex h-6 w-6 items-center justify-center rounded-full text-white transition-transform ${
-            anyFilterActive ? "bg-red" : "bg-navy"
-          }`}
-          style={{ transform: filtersOpen ? "rotate(180deg)" : undefined }}
+          className="flex h-[30px] w-[30px] items-center justify-center rounded-full border-[1.5px] bg-card transition-transform"
+          style={{
+            borderColor: filtersOpen ? "var(--red)" : "var(--navy-600)",
+            color: filtersOpen ? "var(--red)" : "var(--navy-600)",
+            transform: filtersOpen ? "rotate(180deg)" : undefined,
+          }}
         >
-          <ChevronDown size={13} />
+          <ChevronDown size={15} />
         </button>
         <button
           onClick={() => setMineOnly((v) => !v)}
-          className={`flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${
-            mineOnly ? "bg-navy text-white" : "bg-subtle text-ink-3"
+          className={`flex h-[30px] w-[30px] items-center justify-center rounded-btn border ${
+            mineOnly ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
           }`}
+          title="Mes événements"
         >
-          <User size={11} /> Mes événements
+          <User size={15} />
         </button>
         <button
           onClick={() => setCoveredOnly((v) => !v)}
-          className={`flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${
-            coveredOnly ? "bg-navy text-white" : "bg-subtle text-ink-3"
+          className={`flex h-[30px] w-[30px] items-center justify-center rounded-btn border ${
+            coveredOnly ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
           }`}
+          title="Couverts"
         >
-          <Camera size={11} /> Couverts
+          <Camera size={15} />
         </button>
         <div className="flex-1" />
         <button
@@ -151,9 +201,10 @@ export function MobileCalendrierScreen() {
             setMineOnly(false);
             setCoveredOnly(false);
           }}
-          className="text-[10px] font-bold text-ink-4"
+          className="flex items-center gap-1.5 rounded-btn border border-line bg-card px-2.5 py-1.5 text-ink-2"
         >
-          {anyFilterActive ? "Tous" : "Filtré"}
+          <List size={14} />
+          <span className="text-[11.5px] font-semibold">{anyFilterActive ? "Filtré" : "Tous"}</span>
         </button>
       </div>
 
@@ -198,39 +249,70 @@ export function MobileCalendrierScreen() {
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-7 gap-1">
-            {days.map((day) => {
-              const dayEvents = eventsForDay(day);
-              const inMonth = isSameMonth(day, anchor);
-              const isToday = isSameDay(day, new Date());
+          <div className="space-y-1">
+            {weeks.map((week) => {
+              const banners = bannersForWeek(week);
               return (
-                <button
-                  key={day.toISOString()}
-                  onClick={() => setSelectedDay(day)}
-                  className={`flex min-h-[52px] flex-col gap-0.5 rounded-btn border p-1 text-left ${
-                    inMonth ? "border-line bg-card" : "border-transparent bg-transparent opacity-40"
-                  }`}
-                >
-                  <span
-                    className={`self-start rounded-full px-1 text-[10px] font-bold ${
-                      isToday ? "bg-red text-white" : "text-ink-2"
-                    }`}
-                  >
-                    {format(day, "d")}
-                  </span>
-                  {dayEvents.slice(0, 3).map((ev) => (
-                    <span
+                <div key={week[0].toISOString()} className="grid grid-cols-7 gap-1">
+                  {week.map((day) => {
+                    const dayEvents = singleDayEventsForDay(day);
+                    const inMonth = isSameMonth(day, anchor);
+                    const isToday = isSameDay(day, new Date());
+                    return (
+                      <button
+                        key={day.toISOString()}
+                        onClick={() => setSelectedDay(day)}
+                        className={`flex min-h-[52px] flex-col gap-0.5 rounded-btn border p-1 text-left ${
+                          inMonth ? "border-line bg-card" : "border-transparent bg-transparent opacity-40"
+                        }`}
+                      >
+                        <span
+                          className={`self-start rounded-full px-1 text-[10px] font-bold ${
+                            isToday ? "bg-red text-white" : "text-ink-2"
+                          }`}
+                        >
+                          {format(day, "d")}
+                        </span>
+                        {dayEvents.slice(0, 3).map((ev) => (
+                          <span
+                            key={ev.id}
+                            className="flex items-center gap-0.5 overflow-hidden rounded-[4px] pr-0.5"
+                            style={{ background: ORG_COLORS[ev.org].bg, height: 15 }}
+                          >
+                            <span className="h-full w-[3px] shrink-0" style={{ background: ORG_COLORS[ev.org].base }} />
+                            <span
+                              className="min-w-0 flex-1 truncate text-[8px] font-bold"
+                              style={{ color: ORG_COLORS[ev.org].ink }}
+                            >
+                              {ev.title}
+                            </span>
+                            {ev.coverage && <CoverageIcon state={ev.coverage} />}
+                          </span>
+                        ))}
+                        {dayEvents.length > 3 && (
+                          <span className="text-[8px] font-bold text-ink-4">+{dayEvents.length - 3}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+
+                  {banners.map(({ event: ev, colStart, colEnd }) => (
+                    <button
                       key={ev.id}
-                      className="truncate rounded-[3px] border-l-2 pl-1 text-[8px] font-bold"
-                      style={{ borderLeftColor: ORG_COLORS[ev.org].base, color: ORG_COLORS[ev.org].ink }}
+                      onClick={() => setEditing(ev)}
+                      className="mt-0.5 flex h-[18px] items-center gap-1.5 overflow-hidden rounded-[6px] px-1.5"
+                      style={{
+                        gridColumn: `${colStart + 1} / ${colEnd + 2}`,
+                        background: ORG_COLORS[ev.org].bg,
+                        color: ORG_COLORS[ev.org].ink,
+                      }}
                     >
-                      {ev.title}
-                    </span>
+                      <span className="h-1 w-1 shrink-0 rounded-full" style={{ background: ORG_COLORS[ev.org].base }} />
+                      <span className="min-w-0 flex-1 truncate text-left text-[10.5px] font-bold">{ev.title}</span>
+                      {ev.coverage && <CoverageIcon state={ev.coverage} size={10} />}
+                    </button>
                   ))}
-                  {dayEvents.length > 3 && (
-                    <span className="text-[8px] font-bold text-ink-4">+{dayEvents.length - 3}</span>
-                  )}
-                </button>
+                </div>
               );
             })}
           </div>

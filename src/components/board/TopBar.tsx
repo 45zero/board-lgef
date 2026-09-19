@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { Search, Bell, Moon, Sun } from "lucide-react";
 import type { BoardApp } from "@/lib/board/tokens";
 import type { Theme } from "./BoardShell";
@@ -16,9 +17,8 @@ export function TopBar({
   return (
     <header className="mx-4 mt-4 flex h-[62px] items-center gap-4 rounded-btn border border-line bg-card/80 px-4 shadow-bar backdrop-blur">
       <div className="flex items-center gap-2">
-        <div className="flex h-[34px] w-[34px] items-center justify-center rounded-lg bg-navy text-sm font-extrabold text-white">
-          LG
-        </div>
+        <Image src="/lgef-logo.png" alt="Ligue Grand Est de Football" width={34} height={34} className="rounded-lg" />
+
         <div className="leading-tight">
           <div className="text-sm font-extrabold text-ink">{currentApp.label}</div>
           <div className="font-mono text-[9px] tracking-[0.12em] text-ink-4 uppercase">
