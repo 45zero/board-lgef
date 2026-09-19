@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Send, UserPlus, Navigation, Video } from "lucide-react";
+import { Send, UserPlus, Navigation, Video, MessageSquare } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { COVERAGE_COLORS } from "@/lib/board/tokens";
 import { useEventTeam } from "@/hooks/board/useEventTeam";
 import { useEventComments } from "@/hooks/board/useEventComments";
 import { useEventExpenses } from "@/hooks/board/useEventExpenses";
 import type { useUserRole } from "@/hooks/board/useUserRole";
 import type { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
-import type { useEventCoverage } from "@/hooks/board/useEventCoverage";
+import { type useEventCoverage, type CoverageRequest } from "@/hooks/board/useEventCoverage";
 
 export function personName(
   p: { first_name: string | null; last_name: string | null; email: string | null } | null
@@ -238,17 +240,37 @@ export function CoverageActions({
   coverage: ReturnType<typeof useEventCoverage>;
   eventInfo: { title: string; start: Date };
 }) {
+  const { user } = useAuth();
   const [mode, setMode] = useState<"assign" | "direct" | null>(null);
+  const [responseOpen, setResponseOpen] = useState(false);
   const req = coverage.request;
-  const isPendingResponse = req?.assigned_technician_name && req.technician_response === "pending";
+  const isAssignedTech = !!user && !!req && req.assigned_technician_id === user.id;
+
+  const statusColor =
+    req?.technician_response === "accepted"
+      ? COVERAGE_COLORS.photo
+      : req?.technician_response === "rejected"
+        ? COVERAGE_COLORS.no
+        : COVERAGE_COLORS.wait;
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       {req?.assigned_technician_name && (
-        <span className="flex items-center gap-1 rounded-full bg-subtle px-2 py-1 text-ink-3" title="Technicien assigné">
+        <button
+          onClick={() => setResponseOpen(true)}
+          className="flex items-center gap-1 rounded-full px-2 py-1 font-semibold"
+          style={{ background: statusColor.bg, color: statusColor.ink }}
+          title={
+            req.technician_response === "accepted"
+              ? "Accepté"
+              : req.technician_response === "rejected"
+                ? "Refusé"
+                : "En attente de réponse"
+          }
+        >
           <Video size={12} /> {req.assigned_technician_name}
-          {isPendingResponse && " (en attente de réponse)"}
-        </span>
+          {req.technician_response_notes && <MessageSquare size={11} />}
+        </button>
       )}
 
       {!req && role.isOrganizer && (
@@ -289,6 +311,112 @@ export function CoverageActions({
           }}
         />
       )}
+
+      {responseOpen && req && (
+        <TechnicianResponseModal
+          request={req}
+          canRespond={isAssignedTech && req.technician_response === "pending"}
+          onClose={() => setResponseOpen(false)}
+          onRespond={async (response, notes) => {
+            await coverage.respondToCoverage(response, notes);
+            setResponseOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Réponse du technicien assigné (accepter/refuser + commentaire) — même logique
+ * que le flux d'acceptation de calendrier-lgef — ou, pour tout autre spectateur,
+ * simple consultation du statut et du message laissé. */
+function TechnicianResponseModal({
+  request,
+  canRespond,
+  onClose,
+  onRespond,
+}: {
+  request: CoverageRequest;
+  canRespond: boolean;
+  onClose: () => void;
+  onRespond: (response: "accepted" | "rejected", notes?: string) => void;
+}) {
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (response: "accepted" | "rejected") => {
+    setSubmitting(true);
+    try {
+      await onRespond(response, notes);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-sm rounded-modal border border-line bg-card p-4 shadow-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-ink">
+            {canRespond ? "Mission de couverture média" : "Réponse du technicien"}
+          </h3>
+          <button onClick={onClose} className="text-ink-4 hover:text-ink">
+            ✕
+          </button>
+        </div>
+
+        {canRespond ? (
+          <>
+            <p className="mb-3 text-xs text-ink-3">
+              On vous a désigné(e) pour couvrir cet événement. Acceptez-vous la mission ?
+            </p>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Commentaire (optionnel)"
+              rows={3}
+              className="mb-3 w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => submit("rejected")}
+                disabled={submitting}
+                className="rounded-btn border border-line px-3 py-2 text-sm font-semibold text-red disabled:opacity-60"
+              >
+                Refuser
+              </button>
+              <button
+                onClick={() => submit("accepted")}
+                disabled={submitting}
+                className="rounded-btn bg-red px-3 py-2 text-sm font-bold text-white shadow-btn-red disabled:opacity-60"
+              >
+                Accepter
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-2 text-sm text-ink-2">
+            <p>
+              Statut :{" "}
+              <strong>
+                {request.technician_response === "accepted"
+                  ? "Accepté"
+                  : request.technician_response === "rejected"
+                    ? "Refusé"
+                    : "En attente de réponse"}
+              </strong>
+            </p>
+            {request.technician_response_notes ? (
+              <div className="rounded-btn bg-subtle px-3 py-2 text-ink-2">{request.technician_response_notes}</div>
+            ) : (
+              <p className="text-xs italic text-ink-4">Aucun message laissé.</p>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

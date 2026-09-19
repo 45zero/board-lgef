@@ -271,7 +271,9 @@ export function CalendrierScreen() {
                           <span className="truncate text-[11.5px] font-bold" style={{ color: color.ink }}>
                             {ev.title}
                           </span>
-                          {CoverageIcon && <CoverageIcon size={10} style={{ color: color.ink }} />}
+                          {CoverageIcon && ev.coverage && (
+                            <CoverageIcon size={10} style={{ color: COVERAGE_COLORS[ev.coverage].ink }} />
+                          )}
                         </div>
                         <div className="font-mono text-[10px]" style={{ color: color.ink }}>
                           {format(parseISO(ev.start), "HH:mm")}

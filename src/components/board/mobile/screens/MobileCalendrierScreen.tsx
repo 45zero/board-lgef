@@ -363,15 +363,14 @@ export function MobileCalendrierScreen() {
         </div>
       )}
 
-      {selectedDay && (
-        <DayPanel
-          day={selectedDay}
-          events={eventsForDay(selectedDay)}
-          onClose={() => setSelectedDay(null)}
-          onOpenEvent={(ev) => setEditing(ev)}
-          onCreate={() => setEditing("new")}
-        />
-      )}
+      <DayPanel
+        open={!!selectedDay}
+        day={selectedDay ?? new Date()}
+        events={selectedDay ? eventsForDay(selectedDay) : []}
+        onClose={() => setSelectedDay(null)}
+        onOpenEvent={(ev) => setEditing(ev)}
+        onCreate={() => setEditing("new")}
+      />
 
       {editing && (
         <MobileEventModal
@@ -386,12 +385,14 @@ export function MobileCalendrierScreen() {
 }
 
 function DayPanel({
+  open,
   day,
   events,
   onClose,
   onOpenEvent,
   onCreate,
 }: {
+  open: boolean;
   day: Date;
   events: CalendarEvent[];
   onClose: () => void;
@@ -399,9 +400,17 @@ function DayPanel({
   onCreate: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-40 flex justify-end">
-      <button className="w-[52px] bg-black/20" onClick={onClose} aria-label="Fermer" />
-      <div className="flex h-full w-[calc(100%-52px)] max-w-sm flex-col rounded-l-sheet bg-card shadow-modal">
+    <div
+      className={`fixed inset-0 z-40 flex justify-end transition-opacity duration-300 ${
+        open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+      }`}
+    >
+      <button className="w-[52px] bg-black/20" onClick={onClose} aria-label="Fermer" tabIndex={open ? 0 : -1} />
+      <div
+        className={`flex h-full w-[calc(100%-52px)] max-w-sm flex-col rounded-l-sheet bg-card shadow-modal transition-transform duration-300 ease-out ${
+          open ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <div>
             <div className="font-mono text-[10px] text-ink-4">{events.length} événement{events.length > 1 ? "s" : ""}</div>
@@ -424,8 +433,11 @@ function DayPanel({
               className="block w-full rounded-btn px-3 py-2 text-left"
               style={{ background: ORG_COLORS[ev.org].bg }}
             >
-              <div className="font-mono text-[10px]" style={{ color: ORG_COLORS[ev.org].ink }}>
-                {format(parseISO(ev.start), "HH:mm")}
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10px]" style={{ color: ORG_COLORS[ev.org].ink }}>
+                  {format(parseISO(ev.start), "HH:mm")}
+                </span>
+                {ev.coverage && <CoverageIcon state={ev.coverage} size={13} />}
               </div>
               <div className="text-sm font-bold" style={{ color: ORG_COLORS[ev.org].ink }}>
                 {ev.title}

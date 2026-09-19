@@ -15,6 +15,8 @@ export interface CoverageRequest {
   assigned_technician_name: string | null;
   assigned_technician_email: string | null;
   technician_response: string | null;
+  technician_response_notes: string | null;
+  technician_response_date: string | null;
 }
 
 /**
@@ -35,7 +37,7 @@ export function useEventCoverage(eventId?: string) {
     const { data } = await supabase
       .from("coverage_requests")
       .select(
-        "id, event_id, requester_id, status, details, assigned_technician_id, assigned_technician_name, assigned_technician_email, technician_response"
+        "id, event_id, requester_id, status, details, assigned_technician_id, assigned_technician_name, assigned_technician_email, technician_response, technician_response_notes, technician_response_date"
       )
       .eq("event_id", eventId)
       .order("created_at", { ascending: false })
@@ -167,5 +169,34 @@ export function useEventCoverage(eventId?: string) {
     return true;
   };
 
-  return { request, loading, requestCoverage, assignTechnician, assignPending, refetch: fetchRequest };
+  /** Le technicien assigné répond lui-même — accepte ou refuse, avec un commentaire libre optionnel. */
+  const respondToCoverage = async (response: "accepted" | "rejected", notes?: string) => {
+    if (!request) return false;
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("coverage_requests")
+      .update({
+        technician_response: response,
+        technician_response_notes: notes?.trim() || null,
+        technician_response_date: new Date().toISOString(),
+        status: response === "accepted" ? "approved" : "rejected",
+      })
+      .eq("id", request.id);
+    if (error) {
+      console.error("[useEventCoverage.respondToCoverage]", error);
+      return false;
+    }
+    await fetchRequest();
+    return true;
+  };
+
+  return {
+    request,
+    loading,
+    requestCoverage,
+    assignTechnician,
+    assignPending,
+    respondToCoverage,
+    refetch: fetchRequest,
+  };
 }
