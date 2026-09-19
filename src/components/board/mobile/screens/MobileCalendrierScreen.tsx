@@ -156,12 +156,19 @@ export function MobileCalendrierScreen() {
             <ChevronRight size={16} />
           </button>
         </div>
-        <button
-          onClick={() => setView((v) => (v === "mois" ? "semaine" : "mois"))}
-          className="rounded-full border border-line px-3 py-1 text-[11px] font-bold text-ink-2"
-        >
-          {view === "mois" ? "Semaine" : "Mois"}
-        </button>
+        <div className="flex items-center gap-0.5 rounded-full border border-line bg-subtle p-0.5">
+          {(["semaine", "mois"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`rounded-full px-3 py-1 text-[11px] font-bold capitalize transition-colors ${
+                view === v ? "bg-card text-ink shadow-card" : "text-ink-3"
+              }`}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex h-[30px] items-center gap-2 px-4">
@@ -273,10 +280,10 @@ export function MobileCalendrierScreen() {
                         >
                           {format(day, "d")}
                         </span>
-                        {dayEvents.slice(0, 3).map((ev) => (
+                        {dayEvents.map((ev) => (
                           <span
                             key={ev.id}
-                            className="flex items-center gap-0.5 overflow-hidden rounded-[4px] pr-0.5"
+                            className="flex shrink-0 items-center gap-0.5 overflow-hidden rounded-[4px] pr-0.5"
                             style={{ background: ORG_COLORS[ev.org].bg, height: 15 }}
                           >
                             <span className="h-full w-[3px] shrink-0" style={{ background: ORG_COLORS[ev.org].base }} />
@@ -289,9 +296,6 @@ export function MobileCalendrierScreen() {
                             {ev.coverage && <CoverageIcon state={ev.coverage} />}
                           </span>
                         ))}
-                        {dayEvents.length > 3 && (
-                          <span className="text-[8px] font-bold text-ink-4">+{dayEvents.length - 3}</span>
-                        )}
                       </button>
                     );
                   })}
