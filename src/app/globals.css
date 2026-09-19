@@ -1,5 +1,124 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  /* marque */
+  --navy: #0b1d3c;
+  --navy-600: #12305f;
+  --navy-500: #16386e;
+  --red: #e1141b;
+  --red-700: #c90f16;
+
+  /* surface — theme clair (bureau) */
+  --card: #ffffff;
+  --panel: #f7f9fd;
+  --shell: #d9e1ee;
+  --ink: #07172e;
+  --ink-2: #27334c;
+  --ink-3: #525e77;
+  --ink-4: #79859a;
+  --line: rgba(11, 29, 60, 0.14);
+  --line-strong: rgba(11, 29, 60, 0.26);
+  --subtle: #eaeff7;
+  --head: #f2f5fb;
+  --hover: rgba(11, 29, 60, 0.06);
+  --chip-bg: #e3e9f4;
+  --track: #ccd6e5;
+  --sel-bg: #e9effa;
+  --good: #146447;
+  --good-bg: #dcf0e6;
+  --bad: #a50e15;
+  --bad-bg: #fbdfe1;
+  --warn: #7a4e06;
+  --warn-bg: #fcedd5;
+  --link: #12305f;
+
+  /* geometrie */
+  --radius-chip: 6px;
+  --radius-btn: 12px;
+  --radius-card: 16px;
+  --radius-panel: 18px;
+  --radius-modal: 22px;
+  --radius-sheet: 26px;
+
+  --shadow-card: 0 18px 44px rgba(11, 29, 60, 0.18);
+  --shadow-bar: 0 10px 30px rgba(11, 29, 60, 0.16);
+  --shadow-modal: 0 30px 80px rgba(6, 14, 28, 0.35);
+  --shadow-btn-red: 0 8px 20px rgba(225, 20, 27, 0.28);
+}
+
+[data-theme="dark"] {
+  --card: #101b2e;
+  --panel: #0a1322;
+  --shell: #060c18;
+  --ink: #f2f6ff;
+  --ink-2: #c7d2e4;
+  --ink-3: #93a0b6;
+  --ink-4: #74829a;
+  --line: rgba(255, 255, 255, 0.11);
+  --line-strong: rgba(255, 255, 255, 0.2);
+  --subtle: rgba(255, 255, 255, 0.06);
+  --head: rgba(255, 255, 255, 0.05);
+  --hover: rgba(255, 255, 255, 0.07);
+  --chip-bg: rgba(255, 255, 255, 0.09);
+  --track: rgba(255, 255, 255, 0.16);
+  --sel-bg: rgba(156, 194, 255, 0.16);
+  --good: #6fd4a8;
+  --good-bg: rgba(111, 212, 168, 0.16);
+  --bad: #ff9da1;
+  --bad-bg: rgba(255, 157, 161, 0.16);
+  --warn: #f0b457;
+  --warn-bg: rgba(240, 180, 87, 0.16);
+  --link: #9cc2ff;
+}
+
+@theme inline {
+  --font-sans: var(--font-manrope), sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
+
+  --color-navy: var(--navy);
+  --color-navy-600: var(--navy-600);
+  --color-navy-500: var(--navy-500);
+  --color-red: var(--red);
+  --color-red-700: var(--red-700);
+
+  --color-card: var(--card);
+  --color-panel: var(--panel);
+  --color-shell: var(--shell);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-subtle: var(--subtle);
+  --color-head: var(--head);
+  --color-hover: var(--hover);
+  --color-chip-bg: var(--chip-bg);
+  --color-track: var(--track);
+  --color-sel-bg: var(--sel-bg);
+  --color-good: var(--good);
+  --color-good-bg: var(--good-bg);
+  --color-bad: var(--bad);
+  --color-bad-bg: var(--bad-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-link: var(--link);
+
+  --radius-chip: var(--radius-chip);
+  --radius-btn: var(--radius-btn);
+  --radius-card: var(--radius-card);
+  --radius-panel: var(--radius-panel);
+  --radius-modal: var(--radius-modal);
+  --radius-sheet: var(--radius-sheet);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-bar: var(--shadow-bar);
+  --shadow-modal: var(--shadow-modal);
+  --shadow-btn-red: var(--shadow-btn-red);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -8,4 +127,10 @@ html,
 body {
   margin: 0;
   padding: 0;
+  background: var(--shell);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-sans);
 }
