@@ -8,6 +8,8 @@ import { ContextPanel } from "./ContextPanel";
 import { AccueilScreen } from "./screens/AccueilScreen";
 import { MailsScreen } from "./screens/MailsScreen";
 import { CalendrierScreen } from "./screens/CalendrierScreen";
+import { MobileShell } from "./mobile/MobileShell";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { BOARD_APPS } from "@/lib/board/tokens";
 
 export type NavLayout = "rail" | "list";
@@ -18,8 +20,12 @@ export function BoardShell() {
   const [theme, setTheme] = useState<Theme>("light");
   const [nav, setNav] = useState<NavLayout>("rail");
   const [punchedIn, setPunchedIn] = useState(true);
+  const isMobile = useIsMobile();
 
   const currentApp = BOARD_APPS.find((a) => a.id === app) ?? BOARD_APPS[0];
+
+  if (isMobile === null) return null;
+  if (isMobile) return <MobileShell />;
 
   return (
     <div data-theme={theme} className="min-h-screen bg-shell relative overflow-hidden">
