@@ -236,55 +236,97 @@ export function CoverageActions({
   technicians: ReturnType<typeof useAvailableTechnicians>["technicians"];
   coverage: ReturnType<typeof useEventCoverage>;
 }) {
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
   const req = coverage.request;
 
   return (
-    <div className="flex flex-wrap items-center gap-3 text-xs">
-      {req ? (
-        <span className="flex items-center gap-1.5 text-ink-3">
-          <Video size={13} />
-          {req.assigned_technician_name
-            ? `Technicien assigné : ${req.assigned_technician_name}${req.technician_response === "pending" ? " (en attente de réponse)" : ""}`
-            : "Couverture demandée — en attente d'assignation"}
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      {req?.assigned_technician_name && (
+        <span className="flex items-center gap-1 rounded-full bg-subtle px-2 py-1 text-ink-3" title="Technicien assigné">
+          <Video size={12} /> {req.assigned_technician_name}
         </span>
-      ) : (
-        role.isOrganizer && (
-          <button
-            onClick={() => coverage.requestCoverage()}
-            className="flex items-center gap-1.5 font-semibold text-ink-2 hover:underline"
-          >
-            <Video size={13} /> Demander une couverture
-          </button>
-        )
+      )}
+
+      {!req && role.isOrganizer && (
+        <button
+          onClick={() => coverage.requestCoverage()}
+          className="rounded-btn border border-line px-3 py-2 font-semibold text-ink-2 hover:bg-hover"
+        >
+          Demander une couverture
+        </button>
       )}
 
       {role.isSuperUser && (
-        <div className="relative">
-          <button onClick={() => setPickerOpen((o) => !o)} className="font-semibold text-ink-2 hover:underline">
-            Désigner directement
-          </button>
-          {pickerOpen && (
-            <div className="absolute bottom-full left-0 z-10 mb-1 w-56 rounded-btn border border-line bg-card p-1 shadow-card">
-              {technicians.length === 0 && (
-                <div className="px-2 py-1.5 text-xs text-ink-4">Aucun technicien disponible</div>
-              )}
-              {technicians.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={async () => {
-                    await coverage.assignTechnician(t);
-                    setPickerOpen(false);
-                  }}
-                  className="block w-full rounded-btn px-2 py-1.5 text-left text-sm hover:bg-hover"
-                >
-                  {t.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <button
+          onClick={() => setAssignOpen(true)}
+          className="rounded-btn border border-line px-3 py-2 font-semibold text-ink-2 hover:bg-hover"
+        >
+          Désigner directement
+        </button>
       )}
+
+      {assignOpen && (
+        <TechnicianPickerModal
+          technicians={technicians}
+          onClose={() => setAssignOpen(false)}
+          onSelect={async (t) => {
+            await coverage.assignTechnician(t);
+            setAssignOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Modal de recherche pour désigner un technicien — même logique que DirectAssignModal.tsx de calendrier-lgef, sans le volet WhatsApp/contacts externes (pas d'infrastructure équivalente ici). */
+function TechnicianPickerModal({
+  technicians,
+  onClose,
+  onSelect,
+}: {
+  technicians: ReturnType<typeof useAvailableTechnicians>["technicians"];
+  onClose: () => void;
+  onSelect: (t: ReturnType<typeof useAvailableTechnicians>["technicians"][number]) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const filtered = technicians.filter((t) => t.name.toLowerCase().includes(query.toLowerCase()));
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-sm rounded-modal border border-line bg-card p-4 shadow-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-ink">Désigner un technicien</h3>
+          <button onClick={onClose} className="text-ink-4 hover:text-ink">
+            ✕
+          </button>
+        </div>
+        <p className="mb-3 text-xs text-ink-3">
+          La mission est validée immédiatement, sans attendre de réponse du technicien.
+        </p>
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Rechercher…"
+          className="mb-2 w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
+        />
+        <div className="max-h-64 space-y-0.5 overflow-y-auto">
+          {filtered.length === 0 && <div className="px-2 py-2 text-xs text-ink-4">Aucun résultat.</div>}
+          {filtered.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => onSelect(t)}
+              className="block w-full rounded-btn px-2 py-2 text-left text-sm hover:bg-hover"
+            >
+              {t.name}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

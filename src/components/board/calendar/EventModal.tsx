@@ -262,7 +262,7 @@ export function EventModal({
 
         {/* Pied */}
         <div className="flex items-center justify-between gap-3 border-t border-line px-6 py-3">
-          <div className="flex items-center gap-4">
+          <div>
             {isEditing && (
               <button
                 onClick={m.handleDelete}
@@ -272,9 +272,9 @@ export function EventModal({
                 <Trash2 size={13} /> Supprimer
               </button>
             )}
-            {isEditing && <CoverageActions role={m.role} technicians={m.technicians} coverage={m.coverage} />}
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {isEditing && <CoverageActions role={m.role} technicians={m.technicians} coverage={m.coverage} />}
             <button onClick={onClose} className="rounded-btn border border-line px-4 py-2 text-sm text-ink-2">
               Annuler
             </button>

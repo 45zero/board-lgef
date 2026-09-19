@@ -71,12 +71,14 @@ export function useEventCoverage(eventId?: string) {
     if (!eventId || !user) return false;
     const supabase = createClient();
 
+    // Désignation directe = validée immédiatement, sans passer par le flux
+    // d'acceptation du technicien (voir DirectAssignModal.tsx de calendrier-lgef).
     const payload = {
       assigned_technician_id: tech.id,
       assigned_technician_name: tech.name,
       assigned_technician_email: tech.email,
-      technician_response: "pending",
-      status: "pending" as const,
+      technician_response: "accepted",
+      status: "approved" as const,
     };
 
     const { error } = request

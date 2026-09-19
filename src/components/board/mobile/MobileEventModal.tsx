@@ -234,31 +234,32 @@ export function MobileEventModal({
         {tab === "carte" && <CarteTab location={m.location} />}
       </div>
 
-      {isEditing && (
-        <div className="shrink-0 border-t border-line px-4 py-2">
-          <CoverageActions role={m.role} technicians={m.technicians} coverage={m.coverage} />
-        </div>
-      )}
-
-      <div className="flex shrink-0 items-center justify-between border-t border-line px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">
-        {isEditing ? (
-          <button
-            onClick={m.handleDelete}
-            disabled={m.saving}
-            className="flex items-center gap-1.5 text-xs font-semibold text-red disabled:opacity-60"
-          >
-            <Trash2 size={13} /> Supprimer
-          </button>
-        ) : (
-          <span />
+      <div className="flex shrink-0 flex-col gap-2 border-t border-line px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">
+        {isEditing && (
+          <div className="flex justify-end">
+            <CoverageActions role={m.role} technicians={m.technicians} coverage={m.coverage} />
+          </div>
         )}
-        <button
-          onClick={m.handleSave}
-          disabled={m.saving || !m.title.trim()}
-          className="rounded-btn bg-red px-5 py-2.5 text-sm font-bold text-white shadow-btn-red disabled:opacity-60"
-        >
-          {m.saving ? "Enregistrement…" : "Enregistrer"}
-        </button>
+        <div className="flex items-center justify-between">
+          {isEditing ? (
+            <button
+              onClick={m.handleDelete}
+              disabled={m.saving}
+              className="flex items-center gap-1.5 text-xs font-semibold text-red disabled:opacity-60"
+            >
+              <Trash2 size={13} /> Supprimer
+            </button>
+          ) : (
+            <span />
+          )}
+          <button
+            onClick={m.handleSave}
+            disabled={m.saving || !m.title.trim()}
+            className="rounded-btn bg-red px-5 py-2.5 text-sm font-bold text-white shadow-btn-red disabled:opacity-60"
+          >
+            {m.saving ? "Enregistrement…" : "Enregistrer"}
+          </button>
+        </div>
       </div>
     </div>
   );
