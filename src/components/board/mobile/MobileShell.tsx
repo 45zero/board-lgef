@@ -27,7 +27,7 @@ export function MobileShell() {
   };
 
   return (
-    <div className="relative flex h-screen flex-col bg-shell">
+    <div className="relative flex h-dvh flex-col bg-shell">
       <MobileHeader title={title} kicker={kicker} />
 
       <main className="flex-1 overflow-hidden">
