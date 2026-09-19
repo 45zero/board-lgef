@@ -1,0 +1,44 @@
+// Board LGEF — schema dédié "board", isolé de public/auth
+// (même pattern que ir2f/accred : évite qu'un `prisma db push` depuis ce repo
+// ne touche aux tables d'un autre compartiment du même projet Supabase).
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["board"]
+}
+
+/// Compte externe (Gmail, puis Outlook) qu'un utilisateur Board LGEF a connecté
+/// volontairement pour importer ses mails / agenda / drive dans l'app.
+/// Connexion facultative : l'app fonctionne sans, avec les seules données
+/// internes Supabase — voir Calendrier, Mails.
+///
+/// user_id référence auth.users(id) par convention (pas de FK Prisma : "auth"
+/// n'est jamais inclus dans datasource.schemas, pour qu'un `db push` depuis ce
+/// repo ne puisse jamais toucher au schéma d'authentification partagé — voir
+/// le même choix dans ir2f/accred).
+model ConnectedAccount {
+  id      String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id String @db.Uuid
+
+  provider            String // "google" pour l'instant, "microsoft" une fois le portail Azure FFF ouvert
+  provider_account_id String // identifiant stable côté fournisseur (sub Google)
+  email               String
+  label               String? // ex: "Perso", "FFF" — pour distinguer plusieurs comptes du même fournisseur
+
+  access_token     String // chiffré (AES-256-GCM) — jamais la valeur brute
+  refresh_token    String // chiffré
+  token_expires_at DateTime @db.Timestamptz(6)
+  scopes           String[]
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @updatedAt @db.Timestamptz(6)
+
+  @@unique([user_id, provider, provider_account_id])
+  @@index([user_id])
+  @@schema("board")
+}

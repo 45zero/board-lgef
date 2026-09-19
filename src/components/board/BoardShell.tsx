@@ -6,6 +6,8 @@ import { AppRail } from "./AppRail";
 import { Dock } from "./Dock";
 import { ContextPanel } from "./ContextPanel";
 import { AccueilScreen } from "./screens/AccueilScreen";
+import { MailsScreen } from "./screens/MailsScreen";
+import { CalendrierScreen } from "./screens/CalendrierScreen";
 import { BOARD_APPS } from "@/lib/board/tokens";
 
 export type NavLayout = "rail" | "list";
@@ -43,6 +45,10 @@ export function BoardShell() {
           <main className="flex-1 overflow-y-auto rounded-panel">
             {app === "accueil" ? (
               <AccueilScreen punchedIn={punchedIn} onTogglePunch={() => setPunchedIn((p) => !p)} />
+            ) : app === "mails" ? (
+              <MailsScreen />
+            ) : app === "calendrier" ? (
+              <CalendrierScreen />
             ) : (
               <div className="flex h-full items-center justify-center rounded-panel border border-line bg-card/60 text-ink-3">
                 Module « {currentApp.label} » — à venir
