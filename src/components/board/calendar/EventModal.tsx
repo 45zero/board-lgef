@@ -14,6 +14,7 @@ import {
   FraisTab,
   GestionFraisPlaceholder,
   CarteTab,
+  CoverageActions,
 } from "@/components/board/calendar/EventTabs";
 
 type Tab = "details" | "discussion" | "equipe" | "frais" | "gestion" | "carte";
@@ -260,19 +261,20 @@ export function EventModal({
         </div>
 
         {/* Pied */}
-        <div className="flex items-center justify-between border-t border-line px-6 py-3">
-          <div>
+        <div className="flex items-center justify-between gap-3 border-t border-line px-6 py-3">
+          <div className="flex items-center gap-4">
             {isEditing && (
               <button
                 onClick={m.handleDelete}
                 disabled={m.saving}
-                className="flex items-center gap-1.5 text-xs font-semibold text-red hover:underline disabled:opacity-60"
+                className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-red hover:underline disabled:opacity-60"
               >
                 <Trash2 size={13} /> Supprimer
               </button>
             )}
+            {isEditing && <CoverageActions role={m.role} technicians={m.technicians} coverage={m.coverage} />}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <button onClick={onClose} className="rounded-btn border border-line px-4 py-2 text-sm text-ink-2">
               Annuler
             </button>

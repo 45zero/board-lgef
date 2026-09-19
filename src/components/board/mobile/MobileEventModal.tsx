@@ -14,6 +14,7 @@ import {
   FraisTab,
   GestionFraisPlaceholder,
   CarteTab,
+  CoverageActions,
 } from "@/components/board/calendar/EventTabs";
 
 type Tab = "details" | "discussion" | "equipe" | "frais" | "gestion" | "carte";
@@ -232,6 +233,12 @@ export function MobileEventModal({
         {tab === "gestion" && <GestionFraisPlaceholder />}
         {tab === "carte" && <CarteTab location={m.location} />}
       </div>
+
+      {isEditing && (
+        <div className="shrink-0 border-t border-line px-4 py-2">
+          <CoverageActions role={m.role} technicians={m.technicians} coverage={m.coverage} />
+        </div>
+      )}
 
       <div className="flex shrink-0 items-center justify-between border-t border-line px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">
         {isEditing ? (

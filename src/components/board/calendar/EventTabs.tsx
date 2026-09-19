@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Send, UserPlus, Navigation } from "lucide-react";
+import { Send, UserPlus, Navigation, Video } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useEventTeam } from "@/hooks/board/useEventTeam";
 import { useEventComments } from "@/hooks/board/useEventComments";
 import { useEventExpenses } from "@/hooks/board/useEventExpenses";
+import type { useUserRole } from "@/hooks/board/useUserRole";
+import type { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
+import type { useEventCoverage } from "@/hooks/board/useEventCoverage";
 
 export function personName(
   p: { first_name: string | null; last_name: string | null; email: string | null } | null
@@ -218,6 +221,69 @@ export function CarteTab({ location }: { location: string }) {
         >
           <Navigation size={13} /> Itinéraire
         </a>
+      )}
+    </div>
+  );
+}
+
+/** "Demander une couverture" / "Désigner directement" — pied du modal (§5.5 du handoff). */
+export function CoverageActions({
+  role,
+  technicians,
+  coverage,
+}: {
+  role: ReturnType<typeof useUserRole>;
+  technicians: ReturnType<typeof useAvailableTechnicians>["technicians"];
+  coverage: ReturnType<typeof useEventCoverage>;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const req = coverage.request;
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-xs">
+      {req ? (
+        <span className="flex items-center gap-1.5 text-ink-3">
+          <Video size={13} />
+          {req.assigned_technician_name
+            ? `Technicien assigné : ${req.assigned_technician_name}${req.technician_response === "pending" ? " (en attente de réponse)" : ""}`
+            : "Couverture demandée — en attente d'assignation"}
+        </span>
+      ) : (
+        role.isOrganizer && (
+          <button
+            onClick={() => coverage.requestCoverage()}
+            className="flex items-center gap-1.5 font-semibold text-ink-2 hover:underline"
+          >
+            <Video size={13} /> Demander une couverture
+          </button>
+        )
+      )}
+
+      {role.isSuperUser && (
+        <div className="relative">
+          <button onClick={() => setPickerOpen((o) => !o)} className="font-semibold text-ink-2 hover:underline">
+            Désigner directement
+          </button>
+          {pickerOpen && (
+            <div className="absolute bottom-full left-0 z-10 mb-1 w-56 rounded-btn border border-line bg-card p-1 shadow-card">
+              {technicians.length === 0 && (
+                <div className="px-2 py-1.5 text-xs text-ink-4">Aucun technicien disponible</div>
+              )}
+              {technicians.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={async () => {
+                    await coverage.assignTechnician(t);
+                    setPickerOpen(false);
+                  }}
+                  className="block w-full rounded-btn px-2 py-1.5 text-left text-sm hover:bg-hover"
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

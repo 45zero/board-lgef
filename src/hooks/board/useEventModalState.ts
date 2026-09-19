@@ -11,6 +11,9 @@ import { useDirectorAttendance } from "@/hooks/board/useDirectorAttendance";
 import { useEventComments } from "@/hooks/board/useEventComments";
 import { useEventExpenses } from "@/hooks/board/useEventExpenses";
 import { useEventActions, type EventFormPayload } from "@/hooks/board/useEventActions";
+import { useUserRole } from "@/hooks/board/useUserRole";
+import { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
+import { useEventCoverage } from "@/hooks/board/useEventCoverage";
 
 /** État + logique partagés entre EventModal (bureau) et MobileEventModal. */
 export function useEventModalState({
@@ -48,6 +51,9 @@ export function useEventModalState({
   const director = useDirectorAttendance(event?.id);
   const comments = useEventComments(event?.id ?? "");
   const expenses = useEventExpenses(event?.id ?? "");
+  const role = useUserRole();
+  const { technicians } = useAvailableTechnicians();
+  const coverage = useEventCoverage(event?.id);
 
   useEffect(() => {
     if (!event) return;
@@ -139,6 +145,9 @@ export function useEventModalState({
     director,
     comments,
     expenses,
+    role,
+    technicians,
+    coverage,
     handleSave,
     handleDelete,
   };
