@@ -164,6 +164,41 @@ export async function uploadFile(
   return mapFile(data);
 }
 
+/**
+ * Session d'upload direct-navigateur (protocole resumable Drive) — le fichier
+ * n'a jamais à transiter par notre serveur (évite toute limite de taille de
+ * requête côté hébergeur), le client PUT ses octets directement sur l'URL
+ * retournée par Google.
+ */
+export async function createResumableUploadSession(
+  account: ConnectedAccount,
+  params: { name: string; parentId?: string; mimeType: string; description?: string }
+): Promise<{ uploadUrl: string }> {
+  const accessToken = await getValidGoogleAccessToken(account);
+  const res = await fetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,webViewLink",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json; charset=UTF-8",
+        "X-Upload-Content-Type": params.mimeType,
+      },
+      body: JSON.stringify({
+        name: params.name,
+        parents: [params.parentId ?? "root"],
+        description: params.description,
+      }),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Échec de l'initialisation de l'upload Drive : ${await res.text()}`);
+  }
+  const uploadUrl = res.headers.get("location");
+  if (!uploadUrl) throw new Error("URL de session d'upload Drive absente.");
+  return { uploadUrl };
+}
+
 export async function downloadFile(
   account: ConnectedAccount,
   fileId: string

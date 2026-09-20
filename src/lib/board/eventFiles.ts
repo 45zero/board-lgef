@@ -94,21 +94,56 @@ async function uploadEventFilesToSupabase(eventId: string, files: File[]) {
   return results;
 }
 
+/**
+ * Le fichier n'est JAMAIS envoyé à notre serveur (évite toute limite de taille
+ * de requête côté hébergeur, cf. 413 sur de grosses vidéos) : le navigateur
+ * PUT directement ses octets sur l'URL de session que Google nous renvoie.
+ */
 async function uploadEventFilesToDrive(eventId: string, files: File[]) {
   const results: { ok: boolean; name: string; error?: string }[] = [];
   for (const file of files) {
-    const form = new FormData();
-    form.append("file", file);
     try {
-      const res = await fetch(`/api/events/${eventId}/attachments/drive`, { method: "POST", body: form });
-      const json = await res.json();
-      if (!res.ok || !json.ok) {
-        if (json.reason === "no_drive") {
+      const initRes = await fetch(`/api/events/${eventId}/attachments/drive`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: file.name, mimeType: file.type }),
+      });
+      const initJson = await initRes.json();
+      if (!initRes.ok || !initJson.ok) {
+        if (initJson.reason === "no_drive") {
           const fallback = await uploadEventFilesToSupabase(eventId, [file]);
           results.push(...fallback);
           continue;
         }
-        results.push({ ok: false, name: file.name, error: json.error ?? "Échec de l'upload vers Drive." });
+        results.push({ ok: false, name: file.name, error: initJson.error ?? "Échec de l'upload vers Drive." });
+        continue;
+      }
+
+      const putRes = await fetch(initJson.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      if (!putRes.ok) {
+        results.push({ ok: false, name: file.name, error: `Échec de l'envoi vers Drive (${putRes.status}).` });
+        continue;
+      }
+      const driveFile = await putRes.json();
+
+      const confirmRes = await fetch(`/api/events/${eventId}/attachments/drive/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileId: driveFile.id,
+          webViewLink: driveFile.webViewLink,
+          filename: file.name,
+          contentType: file.type,
+          sizeBytes: file.size,
+        }),
+      });
+      const confirmJson = await confirmRes.json();
+      if (!confirmRes.ok || !confirmJson.ok) {
+        results.push({ ok: false, name: file.name, error: confirmJson.error ?? "Échec de l'enregistrement." });
         continue;
       }
       results.push({ ok: true, name: file.name });
