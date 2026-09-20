@@ -7,6 +7,8 @@ import {
   getMessage,
   sendMessage,
   replyToMessage,
+  forwardMessage,
+  archiveMessage,
   trashMessage,
   untrashMessage,
   modifyMessageLabels,
@@ -58,6 +60,22 @@ export async function replyToMyMessage(accountId: string, messageId: string, par
   const userId = await requireUserId();
   const account = await getOwnedGoogleAccount(accountId, userId);
   await replyToMessage(account, messageId, params);
+}
+
+export async function forwardMyMessage(
+  accountId: string,
+  messageId: string,
+  params: { to: string; body: string }
+) {
+  const userId = await requireUserId();
+  const account = await getOwnedGoogleAccount(accountId, userId);
+  await forwardMessage(account, messageId, params);
+}
+
+export async function archiveMyMessage(accountId: string, messageId: string) {
+  const userId = await requireUserId();
+  const account = await getOwnedGoogleAccount(accountId, userId);
+  await archiveMessage(account, messageId);
 }
 
 export async function trashMyMessage(accountId: string, messageId: string) {

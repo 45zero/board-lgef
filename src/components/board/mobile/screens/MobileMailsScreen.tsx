@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Mail,
   Plus,
@@ -9,12 +9,15 @@ import {
   X,
   Trash2,
   Reply,
+  Forward,
+  Archive,
   Paperclip,
   Download,
   Inbox as InboxIcon,
   AlertOctagon,
   FileEdit,
   ChevronLeft,
+  Check,
 } from "lucide-react";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import {
@@ -22,6 +25,8 @@ import {
   getMyMessage,
   sendMyMessage,
   replyToMyMessage,
+  forwardMyMessage,
+  archiveMyMessage,
   trashMyMessage,
   getMyAttachment,
   listMyLabels,
@@ -31,6 +36,7 @@ import {
   sendMyDraft,
   deleteMyDraft,
 } from "@/app/actions/gmail";
+import { EmailBody } from "@/components/board/mail/EmailBody";
 
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
 type MessageListItem = Awaited<ReturnType<typeof listMyMessages>>["messages"][number];
@@ -45,6 +51,9 @@ const SYSTEM_FOLDERS = [
   { id: "SPAM", name: "Spam", labelIds: ["SPAM"], icon: AlertOctagon },
   { id: "TRASH", name: "Corbeille", labelIds: ["TRASH"], icon: Trash2 },
 ] as const;
+
+const SWIPE_THRESHOLD = -72;
+const LONG_PRESS_MS = 450;
 
 function base64UrlToBlob(base64url: string, mimeType: string) {
   const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
@@ -67,7 +76,11 @@ export function MobileMailsScreen() {
   const [loading, setLoading] = useState(false);
   const [composing, setComposing] = useState(false);
   const [replying, setReplying] = useState(false);
+  const [forwarding, setForwarding] = useState<MessageDetail | null>(null);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     getMyConnectedAccounts().then((accs) => {
@@ -118,8 +131,21 @@ export function MobileMailsScreen() {
   const handleTrash = async (id: string) => {
     if (!activeAccountId) return;
     await trashMyMessage(activeAccountId, id);
-    setSelected(null);
+    setSelected((s) => (s?.id === id ? null : s));
     refresh();
+  };
+
+  const handleArchive = async (id: string) => {
+    if (!activeAccountId) return;
+    await archiveMyMessage(activeAccountId, id);
+    setSelected((s) => (s?.id === id ? null : s));
+    refresh();
+  };
+
+  const handleForward = async (id: string) => {
+    if (!activeAccountId) return;
+    const detail = await getMyMessage(activeAccountId, id);
+    setForwarding(detail);
   };
 
   const handleDownload = async (messageId: string, attachmentId: string, filename: string, mimeType: string) => {
@@ -132,6 +158,42 @@ export function MobileMailsScreen() {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const enterSelectMode = (id: string) => {
+    setSelectMode(true);
+    setSelectedIds(new Set([id]));
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      if (next.size === 0) setSelectMode(false);
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const handleBulkArchive = async () => {
+    if (!activeAccountId) return;
+    const ids = Array.from(selectedIds);
+    await Promise.all(ids.map((id) => archiveMyMessage(activeAccountId, id)));
+    exitSelectMode();
+    refresh();
+  };
+
+  const handleBulkTrash = async () => {
+    if (!activeAccountId) return;
+    const ids = Array.from(selectedIds);
+    await Promise.all(ids.map((id) => trashMyMessage(activeAccountId, id)));
+    exitSelectMode();
+    refresh();
   };
 
   if (accounts === null) {
@@ -202,7 +264,7 @@ export function MobileMailsScreen() {
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto pb-16">
         {loading && (
           <div className="p-4 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">Chargement…</div>
         )}
@@ -230,10 +292,13 @@ export function MobileMailsScreen() {
         {!loading &&
           folder !== "DRAFTS" &&
           messages.map((m) => (
-            <button
+            <SwipeableMailRow
               key={m.id}
-              onClick={() => openMessage(m.id)}
-              className="block w-full border-b border-line px-4 py-3 text-left active:bg-hover"
+              selectMode={selectMode}
+              selected={selectedIds.has(m.id)}
+              onTap={() => (selectMode ? toggleSelected(m.id) : openMessage(m.id))}
+              onLongPress={() => enterSelectMode(m.id)}
+              onArchive={() => handleArchive(m.id)}
             >
               <div className="flex items-center justify-between gap-2">
                 <span className={`truncate text-sm ${m.unread ? "font-bold text-ink" : "font-medium text-ink-2"}`}>
@@ -243,27 +308,56 @@ export function MobileMailsScreen() {
               </div>
               <div className="truncate text-sm text-ink-2">{m.subject}</div>
               <div className="truncate text-xs text-ink-4">{m.snippet}</div>
-            </button>
+            </SwipeableMailRow>
           ))}
       </div>
 
-      <button
-        onClick={() => {
-          setEditingDraftId(null);
-          setComposing(true);
-        }}
-        className="absolute bottom-4 right-4 flex items-center justify-center rounded-full bg-red text-white shadow-btn-red"
-        style={{ width: 52, height: 52 }}
-        aria-label="Nouveau message"
-      >
-        <Plus size={22} />
-      </button>
+      {selectMode ? (
+        <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-between border-t border-line bg-card px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+12px)] shadow-modal">
+          <button onClick={exitSelectMode} className="text-sm font-semibold text-ink-3">
+            Annuler
+          </button>
+          <div className="text-sm font-semibold text-ink-2">
+            {selectedIds.size} sélectionné{selectedIds.size > 1 ? "s" : ""}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleBulkArchive}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-line text-ink-2"
+              aria-label="Archiver la sélection"
+            >
+              <Archive size={16} />
+            </button>
+            <button
+              onClick={handleBulkTrash}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-line text-ink-2"
+              aria-label="Supprimer la sélection"
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => {
+            setEditingDraftId(null);
+            setComposing(true);
+          }}
+          className="absolute bottom-4 right-4 flex items-center justify-center rounded-full bg-red text-white shadow-btn-red"
+          style={{ width: 52, height: 52 }}
+          aria-label="Nouveau message"
+        >
+          <Plus size={22} />
+        </button>
+      )}
 
       {selected && (
         <MobileMessageDetail
           message={selected}
           onClose={() => setSelected(null)}
           onReply={() => setReplying(true)}
+          onForward={() => handleForward(selected.id)}
+          onArchive={() => handleArchive(selected.id)}
           onTrash={() => handleTrash(selected.id)}
           onDownload={handleDownload}
         />
@@ -288,6 +382,108 @@ export function MobileMailsScreen() {
           onClose={() => setReplying(false)}
         />
       )}
+
+      {forwarding && activeAccountId && (
+        <MobileForwardModal
+          accountId={activeAccountId}
+          message={forwarding}
+          onClose={() => setForwarding(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Ligne swipeable — glisser vers la gauche archive (comme Outlook), appui long entre en mode sélection. */
+function SwipeableMailRow({
+  selectMode,
+  selected,
+  onTap,
+  onLongPress,
+  onArchive,
+  children,
+}: {
+  selectMode: boolean;
+  selected: boolean;
+  onTap: () => void;
+  onLongPress: () => void;
+  onArchive: () => void;
+  children: React.ReactNode;
+}) {
+  const [dragX, setDragX] = useState(0);
+  const dragging = useRef(false);
+  const moved = useRef(false);
+  const startX = useRef(0);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (selectMode) return;
+    startX.current = e.clientX;
+    dragging.current = true;
+    moved.current = false;
+    longPressTimer.current = setTimeout(() => {
+      if (!moved.current) {
+        onLongPress();
+        dragging.current = false;
+        setDragX(0);
+      }
+    }, LONG_PRESS_MS);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!dragging.current) return;
+    const delta = e.clientX - startX.current;
+    if (Math.abs(delta) > 8) {
+      moved.current = true;
+      clearLongPress();
+    }
+    if (delta < 0) setDragX(Math.max(delta, -110));
+  };
+
+  const handlePointerUp = () => {
+    clearLongPress();
+    if (dragging.current && !moved.current) {
+      onTap();
+    } else if (dragX < SWIPE_THRESHOLD) {
+      onArchive();
+    }
+    setDragX(0);
+    dragging.current = false;
+  };
+
+  return (
+    <div className="relative overflow-hidden border-b border-line">
+      <div className="absolute inset-y-0 right-0 flex w-24 items-center justify-center bg-good text-white">
+        <Archive size={18} />
+      </div>
+      <div
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        style={{ transform: `translateX(${dragX}px)`, touchAction: "pan-y" }}
+        className={`relative flex items-center gap-2 bg-card px-4 py-3 transition-transform active:bg-hover ${
+          selected ? "bg-sel-bg" : ""
+        }`}
+      >
+        {selectMode && (
+          <span
+            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
+              selected ? "border-navy bg-navy text-white" : "border-line-strong"
+            }`}
+          >
+            {selected && <Check size={12} />}
+          </span>
+        )}
+        <div className="min-w-0 flex-1">{children}</div>
+      </div>
     </div>
   );
 }
@@ -296,12 +492,16 @@ function MobileMessageDetail({
   message,
   onClose,
   onReply,
+  onForward,
+  onArchive,
   onTrash,
   onDownload,
 }: {
   message: MessageDetail;
   onClose: () => void;
   onReply: () => void;
+  onForward: () => void;
+  onArchive: () => void;
   onTrash: () => void;
   onDownload: (messageId: string, attachmentId: string, filename: string, mimeType: string) => void;
 }) {
@@ -333,23 +533,25 @@ function MobileMessageDetail({
             ))}
           </div>
         )}
-        <div className="whitespace-pre-wrap text-sm text-ink-2">
-          {message.bodyText || message.bodyHtml || "(message vide)"}
-        </div>
+        <EmailBody bodyText={message.bodyText} bodyHtml={message.bodyHtml} className="h-[55vh]" />
       </div>
 
-      <div className="flex shrink-0 items-center gap-2 border-t border-line px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">
-        <button
-          onClick={onReply}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-btn border border-line px-3 py-2.5 text-sm font-semibold text-ink-2"
-        >
-          <Reply size={14} /> Répondre
+      <div className="flex shrink-0 items-center justify-around border-t border-line py-2 pb-[calc(env(safe-area-inset-bottom)+8px)]">
+        <button onClick={onReply} className="flex flex-col items-center gap-1 px-2 text-ink-2">
+          <Reply size={18} />
+          <span className="text-[10px] font-semibold">Répondre</span>
         </button>
-        <button
-          onClick={onTrash}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-btn border border-line px-3 py-2.5 text-sm font-semibold text-ink-2"
-        >
-          <Trash2 size={14} /> Supprimer
+        <button onClick={onForward} className="flex flex-col items-center gap-1 px-2 text-ink-2">
+          <Forward size={18} />
+          <span className="text-[10px] font-semibold">Transférer</span>
+        </button>
+        <button onClick={onArchive} className="flex flex-col items-center gap-1 px-2 text-ink-2">
+          <Archive size={18} />
+          <span className="text-[10px] font-semibold">Archiver</span>
+        </button>
+        <button onClick={onTrash} className="flex flex-col items-center gap-1 px-2 text-ink-2">
+          <Trash2 size={18} />
+          <span className="text-[10px] font-semibold">Supprimer</span>
         </button>
       </div>
     </div>
@@ -523,6 +725,69 @@ function MobileReplyModal({
           className="flex items-center gap-1.5 rounded-btn bg-red px-4 py-2.5 text-sm font-bold text-white shadow-btn-red disabled:opacity-60"
         >
           <Send size={14} /> {sending ? "Envoi…" : "Répondre"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MobileForwardModal({
+  accountId,
+  message,
+  onClose,
+}: {
+  accountId: string;
+  message: MessageDetail;
+  onClose: () => void;
+}) {
+  const [to, setTo] = useState("");
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      await forwardMyMessage(accountId, message.id, { to, body });
+      onClose();
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-card">
+      <div className="flex shrink-0 items-center justify-between border-b border-line px-4 py-3 pt-[calc(env(safe-area-inset-top)+12px)]">
+        <h3 className="truncate text-sm font-bold text-ink">Transférer « {message.subject} »</h3>
+        <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full text-ink-4">
+          <X size={18} />
+        </button>
+      </div>
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        <input
+          autoFocus
+          placeholder="À"
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+          className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
+        />
+        <textarea
+          placeholder="Ajouter un message (optionnel)"
+          rows={8}
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
+        />
+      </div>
+      <div className="flex shrink-0 justify-end gap-2 border-t border-line px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">
+        <button onClick={onClose} className="rounded-btn border border-line px-4 py-2.5 text-sm text-ink-2">
+          Annuler
+        </button>
+        <button
+          onClick={handleSend}
+          disabled={sending || !to}
+          className="flex items-center gap-1.5 rounded-btn bg-red px-4 py-2.5 text-sm font-bold text-white shadow-btn-red disabled:opacity-60"
+        >
+          <Forward size={14} /> {sending ? "Envoi…" : "Transférer"}
         </button>
       </div>
     </div>

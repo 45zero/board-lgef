@@ -242,6 +242,35 @@ export async function replyToMessage(account: ConnectedAccount, messageId: strin
   await gmail.users.messages.send({ userId: "me", requestBody: { raw, threadId: original.threadId } });
 }
 
+/** Transfert texte seul — les pièces jointes de l'original ne sont pas reprises (nécessiterait un MIME multipart). */
+export async function forwardMessage(
+  account: ConnectedAccount,
+  messageId: string,
+  params: { to: string; body: string }
+) {
+  const original = await getMessage(account, messageId);
+  const gmail = await gmailClient(account);
+  const subject = /^fwd?\s*:/i.test(original.subject) ? original.subject : `Fwd : ${original.subject}`;
+  const quoted = [
+    params.body,
+    "",
+    "---------- Message transféré ----------",
+    `De : ${original.from}`,
+    `Date : ${original.date}`,
+    `Objet : ${original.subject}`,
+    `À : ${original.to}`,
+    "",
+    original.bodyText || "",
+  ].join("\n");
+  const raw = buildRawMessage({ to: params.to, subject, body: quoted, from: account.email });
+  await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
+}
+
+/** Archiver = retirer le libellé INBOX (le message reste accessible, contrairement à la corbeille). */
+export async function archiveMessage(account: ConnectedAccount, messageId: string) {
+  await modifyMessageLabels(account, messageId, { removeLabelIds: ["INBOX"] });
+}
+
 // --- Brouillons ---
 
 export interface DraftListItem {

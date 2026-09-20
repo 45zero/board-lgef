@@ -9,12 +9,16 @@ import {
   X,
   Trash2,
   Reply,
+  Forward,
+  Archive,
   Paperclip,
   Download,
   Inbox as InboxIcon,
   AlertOctagon,
   FileEdit,
   Tag,
+  Search,
+  SlidersHorizontal,
 } from "lucide-react";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import {
@@ -22,6 +26,8 @@ import {
   getMyMessage,
   sendMyMessage,
   replyToMyMessage,
+  forwardMyMessage,
+  archiveMyMessage,
   trashMyMessage,
   getMyAttachment,
   listMyLabels,
@@ -33,6 +39,7 @@ import {
   sendMyDraft,
   deleteMyDraft,
 } from "@/app/actions/gmail";
+import { EmailBody } from "@/components/board/mail/EmailBody";
 
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
 type MessageListItem = Awaited<ReturnType<typeof listMyMessages>>["messages"][number];
@@ -64,6 +71,8 @@ export function MailsScreen() {
   const [labels, setLabels] = useState<LabelItem[]>([]);
   const [newLabelName, setNewLabelName] = useState("");
   const [addingLabel, setAddingLabel] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [activeQuery, setActiveQuery] = useState("");
 
   const [messages, setMessages] = useState<MessageListItem[]>([]);
   const [drafts, setDrafts] = useState<DraftListItem[]>([]);
@@ -71,6 +80,7 @@ export function MailsScreen() {
   const [loading, setLoading] = useState(false);
   const [composing, setComposing] = useState(false);
   const [replying, setReplying] = useState(false);
+  const [forwarding, setForwarding] = useState<MessageDetail | null>(null);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -115,7 +125,7 @@ export function MailsScreen() {
     }
     const systemFolder = SYSTEM_FOLDERS.find((f) => f.id === folder);
     const labelIds: string[] = systemFolder ? [...systemFolder.labelIds] : [folder];
-    listMyMessages(activeAccountId, { labelIds })
+    listMyMessages(activeAccountId, { labelIds, query: activeQuery.trim() || undefined })
       .then((res) => setMessages(res.messages))
       .finally(() => setLoading(false));
   };
@@ -124,7 +134,17 @@ export function MailsScreen() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-dep-change needs a loading flag reset before the request resolves
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeAccountId, folder]);
+  }, [activeAccountId, folder, activeQuery]);
+
+  const runSearch = () => setActiveQuery(searchInput);
+  const clearSearch = () => {
+    setSearchInput("");
+    setActiveQuery("");
+  };
+
+  const folderLabel =
+    SYSTEM_FOLDERS.find((f) => f.id === folder)?.name ?? labels.find((l) => l.id === folder)?.name ?? "Messages";
+  const unreadCount = messages.filter((m) => m.unread).length;
 
   const openMessage = async (id: string) => {
     if (!activeAccountId) return;
@@ -140,8 +160,21 @@ export function MailsScreen() {
   const handleTrash = async (id: string) => {
     if (!activeAccountId) return;
     await trashMyMessage(activeAccountId, id);
-    setSelected(null);
+    setSelected((s) => (s?.id === id ? null : s));
     refresh();
+  };
+
+  const handleArchive = async (id: string) => {
+    if (!activeAccountId) return;
+    await archiveMyMessage(activeAccountId, id);
+    setSelected((s) => (s?.id === id ? null : s));
+    refresh();
+  };
+
+  const handleForward = async (id: string) => {
+    if (!activeAccountId) return;
+    const detail = await getMyMessage(activeAccountId, id);
+    setForwarding(detail);
   };
 
   const handleDownload = async (messageId: string, attachmentId: string, filename: string, mimeType: string) => {
@@ -194,6 +227,54 @@ export function MailsScreen() {
         </div>
       )}
 
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="font-mono text-[10px] tracking-[0.12em] text-ink-4 uppercase">
+            Mails · Messagerie
+          </div>
+          <h1 className="mt-1 text-2xl font-extrabold text-ink">{folderLabel}</h1>
+          <p className="mt-1 text-sm text-ink-3">
+            {unreadCount} message{unreadCount === 1 ? "" : "s"} non lu{unreadCount === 1 ? "" : "s"} ·{" "}
+            {messages.length} conversation{messages.length === 1 ? "" : "s"} · {labels.length} dossier
+            {labels.length === 1 ? "" : "s"} partagé{labels.length === 1 ? "" : "s"}.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="flex min-w-[220px] items-center gap-2 rounded-btn border border-line bg-card px-3 py-2">
+            <Search size={14} className="shrink-0 text-ink-4" />
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && runSearch()}
+              placeholder="Rechercher un message..."
+              className="w-full bg-transparent text-sm outline-none"
+            />
+            {activeQuery && (
+              <button onClick={clearSearch} className="text-ink-4 hover:text-ink">
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          <button
+            className="flex h-9 w-9 items-center justify-center rounded-btn border border-line text-ink-3 hover:bg-hover"
+            aria-label="Filtres"
+            title="Filtres (à venir)"
+          >
+            <SlidersHorizontal size={15} />
+          </button>
+          <button
+            onClick={() => {
+              setEditingDraftId(null);
+              setComposing(true);
+            }}
+            className="flex items-center gap-1.5 rounded-btn bg-navy px-3.5 py-2 text-sm font-bold text-white hover:bg-navy-600"
+          >
+            <Plus size={15} /> Nouveau message
+          </button>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           {accounts.map((acc) => (
@@ -217,24 +298,13 @@ export function MailsScreen() {
           </a>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={refresh}
-            className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-3 hover:bg-hover"
-            aria-label="Actualiser"
-          >
-            <RefreshCw size={14} />
-          </button>
-          <button
-            onClick={() => {
-              setEditingDraftId(null);
-              setComposing(true);
-            }}
-            className="flex items-center gap-1.5 rounded-btn bg-navy px-3.5 py-2 text-sm font-bold text-white hover:bg-navy-600"
-          >
-            <Plus size={15} /> Nouveau message
-          </button>
-        </div>
+        <button
+          onClick={refresh}
+          className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-3 hover:bg-hover"
+          aria-label="Actualiser"
+        >
+          <RefreshCw size={14} />
+        </button>
       </div>
 
       <div className="grid flex-1 grid-cols-[180px_340px_1fr] gap-4 overflow-hidden">
@@ -320,22 +390,49 @@ export function MailsScreen() {
           {!loading &&
             folder !== "DRAFTS" &&
             messages.map((m) => (
-              <button
+              <div
                 key={m.id}
-                onClick={() => openMessage(m.id)}
-                className={`block w-full border-b border-line px-4 py-3 text-left hover:bg-hover ${
+                className={`group flex items-center gap-1 border-b border-line pr-1.5 hover:bg-hover ${
                   selected?.id === m.id ? "bg-sel-bg" : ""
                 }`}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`truncate text-sm ${m.unread ? "font-bold text-ink" : "font-medium text-ink-2"}`}>
-                    {m.from}
-                  </span>
-                  {m.hasAttachments && <Paperclip size={12} className="shrink-0 text-ink-4" />}
+                <button onClick={() => openMessage(m.id)} className="min-w-0 flex-1 px-4 py-3 text-left">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`truncate text-sm ${m.unread ? "font-bold text-ink" : "font-medium text-ink-2"}`}>
+                      {m.from}
+                    </span>
+                    {m.hasAttachments && <Paperclip size={12} className="shrink-0 text-ink-4" />}
+                  </div>
+                  <div className="truncate text-sm text-ink-2">{m.subject}</div>
+                  <div className="truncate text-xs text-ink-4">{m.snippet}</div>
+                </button>
+                <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                  <button
+                    onClick={() => handleArchive(m.id)}
+                    className="flex h-7 w-7 items-center justify-center rounded-btn text-ink-3 hover:bg-subtle"
+                    aria-label="Archiver"
+                    title="Archiver"
+                  >
+                    <Archive size={13} />
+                  </button>
+                  <button
+                    onClick={() => handleForward(m.id)}
+                    className="flex h-7 w-7 items-center justify-center rounded-btn text-ink-3 hover:bg-subtle"
+                    aria-label="Transférer"
+                    title="Transférer"
+                  >
+                    <Forward size={13} />
+                  </button>
+                  <button
+                    onClick={() => handleTrash(m.id)}
+                    className="flex h-7 w-7 items-center justify-center rounded-btn text-ink-3 hover:bg-subtle hover:text-red"
+                    aria-label="Supprimer"
+                    title="Supprimer"
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 </div>
-                <div className="truncate text-sm text-ink-2">{m.subject}</div>
-                <div className="truncate text-xs text-ink-4">{m.snippet}</div>
-              </button>
+              </div>
             ))}
         </div>
 
@@ -354,6 +451,18 @@ export function MailsScreen() {
                     className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"
                   >
                     <Reply size={13} /> Répondre
+                  </button>
+                  <button
+                    onClick={() => setForwarding(selected)}
+                    className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"
+                  >
+                    <Forward size={13} /> Transférer
+                  </button>
+                  <button
+                    onClick={() => handleArchive(selected.id)}
+                    className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"
+                  >
+                    <Archive size={13} /> Archiver
                   </button>
                   <button
                     onClick={() => handleTrash(selected.id)}
@@ -381,8 +490,8 @@ export function MailsScreen() {
                 </div>
               )}
 
-              <div className="mt-4 whitespace-pre-wrap text-sm text-ink-2">
-                {selected.bodyText || selected.bodyHtml || "(message vide)"}
+              <div className="mt-4">
+                <EmailBody bodyText={selected.bodyText} bodyHtml={selected.bodyHtml} />
               </div>
             </div>
           )}
@@ -406,6 +515,14 @@ export function MailsScreen() {
           accountId={activeAccountId}
           message={selected}
           onClose={() => setReplying(false)}
+        />
+      )}
+
+      {forwarding && activeAccountId && (
+        <ForwardModal
+          accountId={activeAccountId}
+          message={forwarding}
+          onClose={() => setForwarding(null)}
         />
       )}
     </div>
@@ -574,6 +691,71 @@ function ReplyModal({
             className="flex items-center gap-1.5 rounded-btn bg-red px-4 py-2 text-sm font-bold text-white shadow-btn-red disabled:opacity-60"
           >
             <Send size={14} /> {sending ? "Envoi…" : "Répondre"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ForwardModal({
+  accountId,
+  message,
+  onClose,
+}: {
+  accountId: string;
+  message: MessageDetail;
+  onClose: () => void;
+}) {
+  const [to, setTo] = useState("");
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      await forwardMyMessage(accountId, message.id, { to, body });
+      onClose();
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+      <div className="w-full max-w-lg rounded-modal border border-line bg-card p-6 shadow-modal">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-base font-bold text-ink">Transférer « {message.subject} »</h3>
+          <button onClick={onClose} className="text-ink-4 hover:text-ink">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="space-y-3">
+          <input
+            autoFocus
+            placeholder="À"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
+          />
+          <textarea
+            placeholder="Ajouter un message (optionnel)"
+            rows={6}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
+          />
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-btn border border-line px-4 py-2 text-sm text-ink-2">
+            Annuler
+          </button>
+          <button
+            onClick={handleSend}
+            disabled={sending || !to}
+            className="flex items-center gap-1.5 rounded-btn bg-red px-4 py-2 text-sm font-bold text-white shadow-btn-red disabled:opacity-60"
+          >
+            <Forward size={14} /> {sending ? "Envoi…" : "Transférer"}
           </button>
         </div>
       </div>
