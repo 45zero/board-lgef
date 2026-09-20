@@ -194,6 +194,8 @@ export async function deleteLabel(account: ConnectedAccount, labelId: string) {
 
 function buildRawMessage(params: {
   to: string;
+  cc?: string;
+  bcc?: string;
   subject: string;
   body: string;
   from: string;
@@ -203,6 +205,8 @@ function buildRawMessage(params: {
   const lines = [
     `From: ${params.from}`,
     `To: ${params.to}`,
+    ...(params.cc ? [`Cc: ${params.cc}`] : []),
+    ...(params.bcc ? [`Bcc: ${params.bcc}`] : []),
     `Subject: =?UTF-8?B?${Buffer.from(params.subject, "utf8").toString("base64")}?=`,
     ...(params.inReplyTo ? [`In-Reply-To: ${params.inReplyTo}`] : []),
     ...(params.references ? [`References: ${params.references}`] : []),
@@ -220,7 +224,7 @@ function buildRawMessage(params: {
 
 export async function sendMessage(
   account: ConnectedAccount,
-  params: { to: string; subject: string; body: string }
+  params: { to: string; cc?: string; bcc?: string; subject: string; body: string }
 ) {
   const gmail = await gmailClient(account);
   const raw = buildRawMessage({ ...params, from: account.email });
@@ -309,6 +313,7 @@ export async function getDraft(account: ConnectedAccount, draftId: string) {
   return {
     id: data.id!,
     to: headerValue(data.message?.payload?.headers, "To"),
+    cc: headerValue(data.message?.payload?.headers, "Cc"),
     subject: headerValue(data.message?.payload?.headers, "Subject") || "",
     bodyText: text,
   };
@@ -316,10 +321,17 @@ export async function getDraft(account: ConnectedAccount, draftId: string) {
 
 export async function saveDraft(
   account: ConnectedAccount,
-  params: { draftId?: string; to: string; subject: string; body: string }
+  params: { draftId?: string; to: string; cc?: string; bcc?: string; subject: string; body: string }
 ) {
   const gmail = await gmailClient(account);
-  const raw = buildRawMessage({ to: params.to, subject: params.subject, body: params.body, from: account.email });
+  const raw = buildRawMessage({
+    to: params.to,
+    cc: params.cc,
+    bcc: params.bcc,
+    subject: params.subject,
+    body: params.body,
+    from: account.email,
+  });
   if (params.draftId) {
     await gmail.users.drafts.update({ userId: "me", id: params.draftId, requestBody: { message: { raw } } });
     return params.draftId;

@@ -49,7 +49,7 @@ export async function getMyMessage(accountId: string, messageId: string) {
 
 export async function sendMyMessage(
   accountId: string,
-  params: { to: string; subject: string; body: string }
+  params: { to: string; cc?: string; bcc?: string; subject: string; body: string }
 ) {
   const userId = await requireUserId();
   const account = await getOwnedGoogleAccount(accountId, userId);
@@ -138,7 +138,7 @@ export async function getMyDraft(accountId: string, draftId: string) {
 
 export async function saveMyDraft(
   accountId: string,
-  params: { draftId?: string; to: string; subject: string; body: string }
+  params: { draftId?: string; to: string; cc?: string; bcc?: string; subject: string; body: string }
 ) {
   const userId = await requireUserId();
   const account = await getOwnedGoogleAccount(accountId, userId);

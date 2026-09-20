@@ -18,6 +18,7 @@ import {
   AlertOctagon,
   FileEdit,
   ChevronLeft,
+  ChevronDown,
   Check,
 } from "lucide-react";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
@@ -380,6 +381,7 @@ export function MobileMailsScreen() {
       {composing && activeAccountId && (
         <MobileComposeModal
           accountId={activeAccountId}
+          accountEmail={accounts.find((a) => a.id === activeAccountId)?.email ?? ""}
           draftId={editingDraftId}
           onClose={() => {
             setComposing(false);
@@ -636,14 +638,19 @@ function MobileMessageDetail({
 
 function MobileComposeModal({
   accountId,
+  accountEmail,
   draftId,
   onClose,
 }: {
   accountId: string;
+  accountEmail: string;
   draftId: string | null;
   onClose: () => void;
 }) {
   const [to, setTo] = useState("");
+  const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
+  const [ccOpen, setCcOpen] = useState(false);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(draftId);
@@ -654,6 +661,8 @@ function MobileComposeModal({
     if (!draftId) return;
     getMyDraft(accountId, draftId).then((d) => {
       setTo(d.to);
+      setCc(d.cc);
+      if (d.cc) setCcOpen(true);
       setSubject(d.subject);
       setBody(d.bodyText);
     });
@@ -663,10 +672,10 @@ function MobileComposeModal({
     setSending(true);
     try {
       if (currentDraftId) {
-        await saveMyDraft(accountId, { draftId: currentDraftId, to, subject, body });
+        await saveMyDraft(accountId, { draftId: currentDraftId, to, cc, bcc, subject, body });
         await sendMyDraft(accountId, currentDraftId);
       } else {
-        await sendMyMessage(accountId, { to, subject, body });
+        await sendMyMessage(accountId, { to, cc, bcc, subject, body });
       }
       onClose();
     } finally {
@@ -677,7 +686,7 @@ function MobileComposeModal({
   const handleSaveDraft = async () => {
     setSaving(true);
     try {
-      const id = await saveMyDraft(accountId, { draftId: currentDraftId ?? undefined, to, subject, body });
+      const id = await saveMyDraft(accountId, { draftId: currentDraftId ?? undefined, to, cc, bcc, subject, body });
       setCurrentDraftId(id);
       onClose();
     } finally {
@@ -697,9 +706,12 @@ function MobileComposeModal({
         <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full text-ink-4">
           <X size={18} />
         </button>
-        <h3 className="min-w-0 flex-1 truncate text-sm font-bold text-ink">
-          {currentDraftId ? "Modifier le brouillon" : "Nouveau message"}
-        </h3>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-sm font-bold text-ink">
+            {currentDraftId ? "Modifier le brouillon" : "Nouveau message"}
+          </h3>
+          {accountEmail && <div className="truncate text-xs text-ink-4">{accountEmail}</div>}
+        </div>
         <button
           onClick={handleSend}
           disabled={sending || !to || !subject}
@@ -710,25 +722,50 @@ function MobileComposeModal({
         </button>
       </div>
 
-      <div className="flex-1 space-y-3 overflow-y-auto p-4">
-        <input
-          placeholder="À"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
-        />
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex items-center border-b border-line py-2.5">
+          <input
+            placeholder="À"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="w-full text-sm outline-none"
+          />
+          <button
+            onClick={() => setCcOpen((o) => !o)}
+            className="ml-2 flex h-6 w-6 shrink-0 items-center justify-center text-ink-4"
+            aria-label="Afficher Cc/Cci"
+          >
+            <ChevronDown size={16} className={ccOpen ? "rotate-180" : ""} />
+          </button>
+        </div>
+        {ccOpen && (
+          <>
+            <input
+              placeholder="Cc"
+              value={cc}
+              onChange={(e) => setCc(e.target.value)}
+              className="w-full border-b border-line py-2.5 text-sm outline-none"
+            />
+            <input
+              placeholder="Cci"
+              value={bcc}
+              onChange={(e) => setBcc(e.target.value)}
+              className="w-full border-b border-line py-2.5 text-sm outline-none"
+            />
+          </>
+        )}
         <input
           placeholder="Objet"
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
-          className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
+          className="w-full border-b border-line py-2.5 text-sm outline-none"
         />
         <textarea
           placeholder="Votre message"
           rows={10}
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
+          className="mt-3 w-full text-sm outline-none"
         />
       </div>
 

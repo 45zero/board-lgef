@@ -585,6 +585,8 @@ function ComposeModal({
   onClose: () => void;
 }) {
   const [to, setTo] = useState("");
+  const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(draftId);
@@ -595,6 +597,7 @@ function ComposeModal({
     if (!draftId) return;
     getMyDraft(accountId, draftId).then((d) => {
       setTo(d.to);
+      setCc(d.cc);
       setSubject(d.subject);
       setBody(d.bodyText);
     });
@@ -604,10 +607,10 @@ function ComposeModal({
     setSending(true);
     try {
       if (currentDraftId) {
-        await saveMyDraft(accountId, { draftId: currentDraftId, to, subject, body });
+        await saveMyDraft(accountId, { draftId: currentDraftId, to, cc, bcc, subject, body });
         await sendMyDraft(accountId, currentDraftId);
       } else {
-        await sendMyMessage(accountId, { to, subject, body });
+        await sendMyMessage(accountId, { to, cc, bcc, subject, body });
       }
       onClose();
     } finally {
@@ -618,7 +621,7 @@ function ComposeModal({
   const handleSaveDraft = async () => {
     setSaving(true);
     try {
-      const id = await saveMyDraft(accountId, { draftId: currentDraftId ?? undefined, to, subject, body });
+      const id = await saveMyDraft(accountId, { draftId: currentDraftId ?? undefined, to, cc, bcc, subject, body });
       setCurrentDraftId(id);
       onClose();
     } finally {
@@ -648,6 +651,20 @@ function ComposeModal({
             onChange={(e) => setTo(e.target.value)}
             className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
           />
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              placeholder="Cc"
+              value={cc}
+              onChange={(e) => setCc(e.target.value)}
+              className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
+            />
+            <input
+              placeholder="Cci"
+              value={bcc}
+              onChange={(e) => setBcc(e.target.value)}
+              className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
+            />
+          </div>
           <input
             placeholder="Objet"
             value={subject}
