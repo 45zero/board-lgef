@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
-import { X, Trash2, MapPin, ChevronDown } from "lucide-react";
+import { X, Trash2, MapPin, ChevronDown, Camera, Check } from "lucide-react";
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
 import { CALENDAR_ORG_KEYS, type CalendarEvent } from "@/lib/board/calendar";
-import { useEventModalState } from "@/hooks/board/useEventModalState";
+import { useEventModalState, REMINDER_PRESETS } from "@/hooks/board/useEventModalState";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import {
   personName,
@@ -214,14 +214,35 @@ export function EventModal({
               </div>
 
               {!isEditing && (
-                <div className="rounded-btn border border-line p-3">
-                  <label className="flex items-center gap-2 text-sm font-semibold text-ink-2">
+                <div
+                  className="rounded-btn border-2 p-3 transition-colors"
+                  style={{
+                    borderColor: m.wantsCoverage ? "var(--red)" : "var(--line)",
+                    background: m.wantsCoverage ? "var(--bad-bg)" : "transparent",
+                  }}
+                >
+                  <label className="flex cursor-pointer items-start gap-3">
                     <input
                       type="checkbox"
                       checked={m.wantsCoverage}
                       onChange={(e) => m.setWantsCoverage(e.target.checked)}
+                      className="sr-only"
                     />
-                    Demander une couverture média
+                    <span
+                      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border-2 transition-colors ${
+                        m.wantsCoverage ? "border-red bg-red text-white" : "border-line-strong text-transparent"
+                      }`}
+                    >
+                      <Check size={13} strokeWidth={3} />
+                    </span>
+                    <span>
+                      <span className="flex items-center gap-1.5 text-sm font-bold text-ink">
+                        <Camera size={14} /> Demander une couverture média
+                      </span>
+                      <span className="mt-0.5 block text-xs text-ink-3">
+                        Photo ou vidéo — la demande part vers le réseau salarié et les admins.
+                      </span>
+                    </span>
                   </label>
 
                   {m.wantsCoverage && (
@@ -291,10 +312,44 @@ export function EventModal({
                   ) : (
                     <div className="space-y-2">
                       <DirectorAttendanceSection director={m.director} eventId={event!.id} />
-                      <label className="flex items-center gap-2 text-xs text-ink-2">
-                        <input type="checkbox" checked={m.reminderOn} onChange={m.toggleReminder} />
-                        Me rappeler — 30 minutes avant le début
-                      </label>
+                      <div>
+                        <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+                          Rappels
+                        </div>
+                        {m.reminders.length > 0 && (
+                          <div className="mb-1.5 flex flex-wrap gap-1.5">
+                            {m.reminders.map((r) => (
+                              <span
+                                key={r.id}
+                                className="flex items-center gap-1 rounded-full bg-subtle px-2.5 py-1 text-xs font-semibold text-ink-2"
+                              >
+                                {REMINDER_PRESETS.find((p) => p.value === r.reminder_offset)?.label ?? r.reminder_offset}
+                                <button
+                                  onClick={() => m.removeReminder(r.id)}
+                                  className="text-ink-4 hover:text-red"
+                                  aria-label="Retirer ce rappel"
+                                >
+                                  <X size={11} />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <select
+                          value=""
+                          onChange={(e) => e.target.value && m.addReminder(e.target.value)}
+                          className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs text-ink-3 outline-none"
+                        >
+                          <option value="">+ Ajouter un rappel</option>
+                          {REMINDER_PRESETS.filter(
+                            (p) => !m.reminders.some((r) => r.reminder_offset === p.value)
+                          ).map((p) => (
+                            <option key={p.value} value={p.value}>
+                              {p.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   )}
                 </div>

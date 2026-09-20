@@ -15,6 +15,28 @@ import { useUserRole } from "@/hooks/board/useUserRole";
 import { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
 import { useEventCoverage } from "@/hooks/board/useEventCoverage";
 
+/** Préréglages de rappel façon Google Agenda — doit rester synchro avec la
+ * contrainte CHECK sur event_reminders.reminder_offset. */
+export const REMINDER_PRESETS: { value: string; label: string }[] = [
+  { value: "0min", label: "À l'heure de l'événement" },
+  { value: "10min", label: "10 minutes avant" },
+  { value: "20min", label: "20 minutes avant" },
+  { value: "30min", label: "30 minutes avant" },
+  { value: "1h", label: "1 heure avant" },
+  { value: "2h", label: "2 heures avant" },
+  { value: "1d", label: "1 jour avant" },
+];
+
+const REMINDER_OFFSET_MINUTES: Record<string, number> = {
+  "0min": 0,
+  "10min": 10,
+  "20min": 20,
+  "30min": 30,
+  "1h": 60,
+  "2h": 120,
+  "1d": 1440,
+};
+
 /** État + logique partagés entre EventModal (bureau) et MobileEventModal. */
 export function useEventModalState({
   event,
@@ -44,7 +66,7 @@ export function useEventModalState({
   const [startTime, setStartTime] = useState(format(start, "HH:mm"));
   const [endTime, setEndTime] = useState(format(end, "HH:mm"));
   const [saving, setSaving] = useState(false);
-  const [reminderOn, setReminderOn] = useState(false);
+  const [reminders, setReminders] = useState<{ id: string; reminder_offset: string }[]>([]);
   const [wantsCoverage, setWantsCoverage] = useState(false);
   const [coverageDetails, setCoverageDetails] = useState("");
   const [coverageTechnicianId, setCoverageTechnicianId] = useState("");
@@ -63,30 +85,34 @@ export function useEventModalState({
     const supabase = createClient();
     supabase
       .from("event_reminders")
-      .select("id")
+      .select("id, reminder_offset")
       .eq("event_id", event.id)
       .eq("user_id", user?.id ?? "")
-      .maybeSingle()
-      .then(({ data }) => setReminderOn(!!data));
+      .then(({ data }) => setReminders(data ?? []));
   }, [event, user?.id]);
 
-  const toggleReminder = async () => {
-    if (!event || !user) return;
+  const addReminder = async (offset: string) => {
+    if (!event || !user || reminders.some((r) => r.reminder_offset === offset)) return;
     const supabase = createClient();
-    if (reminderOn) {
-      await supabase.from("event_reminders").delete().eq("event_id", event.id).eq("user_id", user.id);
-      setReminderOn(false);
-    } else {
-      const remindAt = new Date(parseISO(event.start).getTime() - 30 * 60_000);
-      await supabase.from("event_reminders").insert({
+    const remindAt = new Date(parseISO(event.start).getTime() - REMINDER_OFFSET_MINUTES[offset] * 60_000);
+    const { data } = await supabase
+      .from("event_reminders")
+      .insert({
         event_id: event.id,
         user_id: user.id,
         remind_at: remindAt.toISOString(),
-        reminder_offset: "30min",
+        reminder_offset: offset,
         channels: ["app"],
-      });
-      setReminderOn(true);
-    }
+      })
+      .select("id, reminder_offset")
+      .single();
+    if (data) setReminders((prev) => [...prev, data]);
+  };
+
+  const removeReminder = async (id: string) => {
+    const supabase = createClient();
+    await supabase.from("event_reminders").delete().eq("id", id);
+    setReminders((prev) => prev.filter((r) => r.id !== id));
   };
 
   const buildPayload = (): EventFormPayload => {
@@ -181,8 +207,9 @@ export function useEventModalState({
     endTime,
     setEndTime,
     saving,
-    reminderOn,
-    toggleReminder,
+    reminders,
+    addReminder,
+    removeReminder,
     wantsCoverage,
     setWantsCoverage,
     coverageDetails,

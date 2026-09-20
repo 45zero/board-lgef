@@ -111,6 +111,9 @@ export async function createEvent(account: ConnectedAccount, params: EventInput)
         ? { date: params.end }
         : { dateTime: params.end, timeZone: params.timeZone ?? "Europe/Paris" },
       attendees: params.attendees.map((email) => ({ email })),
+      // Sans ça, Google applique les rappels par défaut du calendrier de l'organisateur
+      // (notif surprise "à l'heure" même sans rappel réglé côté board).
+      reminders: { useDefault: false, overrides: [] },
     },
   });
   return mapEvent(calendarId, data);
@@ -134,6 +137,7 @@ export async function updateEvent(account: ConnectedAccount, eventId: string, pa
         ? { date: params.end }
         : { dateTime: params.end, timeZone: params.timeZone ?? "Europe/Paris" },
       attendees: params.attendees.map((email) => ({ email })),
+      reminders: { useDefault: false, overrides: [] },
     },
   });
   return mapEvent(calendarId, data);
