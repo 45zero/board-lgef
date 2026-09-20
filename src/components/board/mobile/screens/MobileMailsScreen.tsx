@@ -13,6 +13,7 @@ import {
   Archive,
   Paperclip,
   Download,
+  Eye,
   Inbox as InboxIcon,
   AlertOctagon,
   FileEdit,
@@ -159,6 +160,16 @@ export function MobileMailsScreen() {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  /** Ouvre l'aperçu natif du navigateur (image/PDF) plutôt que de forcer un téléchargement. */
+  const handlePreview = async (messageId: string, attachmentId: string, mimeType: string) => {
+    if (!activeAccountId) return;
+    const { data } = await getMyAttachment(activeAccountId, messageId, attachmentId);
+    const blob = base64UrlToBlob(data, mimeType);
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
   const enterSelectMode = (id: string) => {
@@ -362,6 +373,7 @@ export function MobileMailsScreen() {
           onArchive={() => handleArchive(selected.id)}
           onTrash={() => handleTrash(selected.id)}
           onDownload={handleDownload}
+          onPreview={handlePreview}
         />
       )}
 
@@ -464,9 +476,10 @@ function SwipeableMailRow({
       moved.current = true;
       clearLongPress();
     }
-    // Le swipe pour archiver ne s'engage que si le geste est clairement horizontal
-    // (sinon un scroll légèrement oblique fait glisser la ligne par erreur).
-    if (!selectMode && deltaX < 0 && Math.abs(deltaX) > Math.abs(deltaY)) {
+    // Le swipe pour archiver ne s'engage qu'une fois le seuil "moved" franchi et
+    // le geste clairement horizontal — sinon le jitter d'un simple tap (1-2px)
+    // faisait apparaître un flash du fond "Archiver".
+    if (!selectMode && moved.current && deltaX < 0 && Math.abs(deltaX) > Math.abs(deltaY)) {
       setDragX(Math.max(deltaX, -110));
     }
   };
@@ -527,6 +540,7 @@ function MobileMessageDetail({
   onArchive,
   onTrash,
   onDownload,
+  onPreview,
 }: {
   message: MessageDetail;
   onClose: () => void;
@@ -535,6 +549,7 @@ function MobileMessageDetail({
   onArchive: () => void;
   onTrash: () => void;
   onDownload: (messageId: string, attachmentId: string, filename: string, mimeType: string) => void;
+  onPreview: (messageId: string, attachmentId: string, mimeType: string) => void;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-card">
@@ -542,25 +557,55 @@ function MobileMessageDetail({
         <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full text-ink-3">
           <ChevronLeft size={20} />
         </button>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-bold text-ink">{message.subject}</div>
-          <div className="truncate text-xs text-ink-3">
-            De : {message.from} — {message.date}
-          </div>
-        </div>
+        <div className="min-w-0 flex-1 truncate text-sm font-bold text-ink">{message.subject}</div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
+        <div className="mb-3 flex items-start gap-2.5">
+          <SenderAvatar name={message.from} size={38} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-bold text-ink">{parseSenderName(message.from)}</div>
+            <div className="flex items-baseline justify-between gap-2">
+              <div className="min-w-0 flex-1 truncate text-xs text-ink-3">
+                À {message.to}
+                {message.cc ? ` · Cc ${message.cc}` : ""}
+              </div>
+              <span className="shrink-0 text-[11px] text-ink-4">{message.date}</span>
+            </div>
+          </div>
+        </div>
+
         {message.attachments.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">
             {message.attachments.map((a) => (
-              <button
+              <div
                 key={a.attachmentId}
-                onClick={() => onDownload(message.id, a.attachmentId, a.filename, a.mimeType)}
-                className="flex items-center gap-1.5 rounded-btn border border-line bg-subtle px-2.5 py-1.5 text-xs text-ink-2"
+                className="flex items-center gap-1 rounded-btn border border-line bg-subtle pl-2.5 pr-1 py-1 text-xs text-ink-2"
               >
-                <Download size={12} /> {a.filename}
-              </button>
+                <button
+                  onClick={() => onPreview(message.id, a.attachmentId, a.mimeType)}
+                  className="max-w-[140px] truncate"
+                  title="Aperçu"
+                >
+                  {a.filename}
+                </button>
+                <button
+                  onClick={() => onPreview(message.id, a.attachmentId, a.mimeType)}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-btn text-ink-3"
+                  aria-label="Aperçu"
+                  title="Aperçu"
+                >
+                  <Eye size={12} />
+                </button>
+                <button
+                  onClick={() => onDownload(message.id, a.attachmentId, a.filename, a.mimeType)}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-btn text-ink-3"
+                  aria-label="Télécharger"
+                  title="Télécharger"
+                >
+                  <Download size={12} />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -648,12 +693,20 @@ function MobileComposeModal({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-card">
-      <div className="flex shrink-0 items-center justify-between border-b border-line px-4 py-3 pt-[calc(env(safe-area-inset-top)+12px)]">
-        <h3 className="text-sm font-bold text-ink">
-          {currentDraftId ? "Modifier le brouillon" : "Nouveau message"}
-        </h3>
+      <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-3 pt-[calc(env(safe-area-inset-top)+12px)]">
         <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full text-ink-4">
           <X size={18} />
+        </button>
+        <h3 className="min-w-0 flex-1 truncate text-sm font-bold text-ink">
+          {currentDraftId ? "Modifier le brouillon" : "Nouveau message"}
+        </h3>
+        <button
+          onClick={handleSend}
+          disabled={sending || !to || !subject}
+          className="flex h-8 w-8 items-center justify-center rounded-full text-navy disabled:opacity-40"
+          aria-label="Envoyer"
+        >
+          <Send size={18} />
         </button>
       </div>
 
@@ -685,22 +738,13 @@ function MobileComposeModal({
             Supprimer le brouillon
           </button>
         )}
-        <div className="flex gap-2">
-          <button
-            onClick={handleSaveDraft}
-            disabled={saving}
-            className="flex-1 rounded-btn border border-line px-4 py-2.5 text-sm text-ink-2 disabled:opacity-60"
-          >
-            {saving ? "Enregistrement…" : "Brouillon"}
-          </button>
-          <button
-            onClick={handleSend}
-            disabled={sending || !to || !subject}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-btn bg-red px-4 py-2.5 text-sm font-bold text-white shadow-btn-red disabled:opacity-60"
-          >
-            <Send size={14} /> {sending ? "Envoi…" : "Envoyer"}
-          </button>
-        </div>
+        <button
+          onClick={handleSaveDraft}
+          disabled={saving || sending}
+          className="w-full rounded-btn border border-line px-4 py-2.5 text-sm text-ink-2 disabled:opacity-60"
+        >
+          {saving ? "Enregistrement…" : "Enregistrer comme brouillon"}
+        </button>
       </div>
     </div>
   );

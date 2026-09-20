@@ -13,6 +13,7 @@ import {
   Archive,
   Paperclip,
   Download,
+  Eye,
   Inbox as InboxIcon,
   AlertOctagon,
   FileEdit,
@@ -188,6 +189,16 @@ export function MailsScreen() {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  /** Ouvre l'aperçu natif du navigateur (image/PDF) plutôt que de forcer un téléchargement. */
+  const handlePreview = async (messageId: string, attachmentId: string, mimeType: string) => {
+    if (!activeAccountId) return;
+    const { data } = await getMyAttachment(activeAccountId, messageId, attachmentId);
+    const blob = base64UrlToBlob(data, mimeType);
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
   const handleCreateLabel = async () => {
@@ -479,20 +490,48 @@ export function MailsScreen() {
               <div className="mt-2 flex items-center gap-2.5">
                 <SenderAvatar name={selected.from} size={32} />
                 <div className="text-xs text-ink-3">
-                  De : {selected.from} — {selected.date}
+                  <div>
+                    De : {selected.from} — {selected.date}
+                  </div>
+                  {(selected.to || selected.cc) && (
+                    <div className="mt-0.5">
+                      À : {selected.to}
+                      {selected.cc ? ` · Cc : ${selected.cc}` : ""}
+                    </div>
+                  )}
                 </div>
               </div>
 
               {selected.attachments.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {selected.attachments.map((a) => (
-                    <button
+                    <div
                       key={a.attachmentId}
-                      onClick={() => handleDownload(selected.id, a.attachmentId, a.filename, a.mimeType)}
-                      className="flex items-center gap-1.5 rounded-btn border border-line bg-subtle px-2.5 py-1.5 text-xs text-ink-2 hover:bg-hover"
+                      className="flex items-center gap-1 rounded-btn border border-line bg-subtle py-1 pl-2.5 pr-1 text-xs text-ink-2"
                     >
-                      <Download size={12} /> {a.filename}
-                    </button>
+                      <button
+                        onClick={() => handlePreview(selected.id, a.attachmentId, a.mimeType)}
+                        className="max-w-[180px] truncate hover:underline"
+                      >
+                        {a.filename}
+                      </button>
+                      <button
+                        onClick={() => handlePreview(selected.id, a.attachmentId, a.mimeType)}
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-btn text-ink-3 hover:bg-hover"
+                        aria-label="Aperçu"
+                        title="Aperçu"
+                      >
+                        <Eye size={12} />
+                      </button>
+                      <button
+                        onClick={() => handleDownload(selected.id, a.attachmentId, a.filename, a.mimeType)}
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-btn text-ink-3 hover:bg-hover"
+                        aria-label="Télécharger"
+                        title="Télécharger"
+                      >
+                        <Download size={12} />
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}

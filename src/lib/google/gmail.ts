@@ -127,6 +127,7 @@ export async function getMessage(account: ConnectedAccount, messageId: string) {
     threadId: data.threadId!,
     from: headerValue(data.payload?.headers, "From"),
     to: headerValue(data.payload?.headers, "To"),
+    cc: headerValue(data.payload?.headers, "Cc"),
     subject: headerValue(data.payload?.headers, "Subject") || "(sans objet)",
     date: headerValue(data.payload?.headers, "Date"),
     messageIdHeader: headerValue(data.payload?.headers, "Message-ID"),
