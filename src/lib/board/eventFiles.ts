@@ -213,6 +213,14 @@ export async function createEventFileUrl(path: string, downloadAs?: string) {
   return data.signedUrl;
 }
 
+/** Lien de partage longue durée (7 jours) pour un fichier Supabase Storage — à copier/envoyer. */
+export async function createEventFileShareUrl(path: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 604800);
+  if (error || !data) return null;
+  return data.signedUrl;
+}
+
 /** Lecture-modification-écriture sûre : relit toujours publish_info avant de le patcher. */
 export async function updatePublishInfo(fileId: string, updater: (current: PublishInfo) => PublishInfo) {
   const supabase = createClient();

@@ -222,3 +222,9 @@ export async function trashFile(account: ConnectedAccount, fileId: string) {
   const drive = await driveClient(account);
   await drive.files.update({ fileId, requestBody: { trashed: true } });
 }
+
+/** Rend un fichier consultable par quiconque a le lien — nécessaire pour qu'un partage soit ouvrable hors du compte Drive du board. */
+export async function ensurePublicViewAccess(account: ConnectedAccount, fileId: string) {
+  const drive = await driveClient(account);
+  await drive.permissions.create({ fileId, requestBody: { role: "reader", type: "anyone" } });
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Send, Clock, CheckCircle2, Video, Image as ImageIcon, X, Calendar } from "lucide-react";
+import { Send, Clock, CheckCircle2, Video, Image as ImageIcon, X, Calendar, Play, Share2, ExternalLink } from "lucide-react";
 import {
   listMediaPublications,
   scheduleMediaPublication,
@@ -11,9 +11,11 @@ import {
   type PublicationStatus,
   type PublicationTargets,
 } from "@/lib/board/mediaPublications";
-import { getEventFileViewUrl, publishToYoutube, publishToFacebook } from "@/lib/board/eventFiles";
+import { getEventFileViewUrl, createEventFileShareUrl, publishToYoutube, publishToFacebook } from "@/lib/board/eventFiles";
+import { shareBoardDriveFile } from "@/app/actions/drive-share";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
+import { personName } from "@/components/board/calendar/EventTabs";
 import { YoutubeIcon, FacebookIcon, TiktokIcon, InstagramIcon } from "@/components/board/publication/BrandIcons";
 
 const TABS: { id: PublicationStatus; label: string; icon: typeof Send }[] = [
@@ -253,6 +255,104 @@ function Composer({
   );
 }
 
+function PublicationCard({
+  pub,
+  tab,
+  onOpenComposer,
+  onCancelSchedule,
+}: {
+  pub: MediaPublication;
+  tab: PublicationStatus;
+  onOpenComposer: () => void;
+  onCancelSchedule: () => void;
+}) {
+  const [sharing, setSharing] = useState(false);
+  const isDrive = pub.event_files.storage_provider === "drive";
+  const uploader = personName(pub.event_files.uploaded_by_profile);
+  const uploadedAt = new Date(pub.event_files.created_at).toLocaleDateString("fr-FR");
+
+  const openMedia = async () => {
+    const url = await getEventFileViewUrl(pub.event_files);
+    if (url) window.open(url, "_blank", "noreferrer");
+  };
+
+  const share = async () => {
+    setSharing(true);
+    try {
+      let url: string | null = null;
+      if (isDrive && pub.event_files.drive_file_id) {
+        await shareBoardDriveFile(pub.event_files.drive_file_id);
+        url = pub.event_files.drive_web_view_link;
+      } else if (pub.event_files.path) {
+        url = await createEventFileShareUrl(pub.event_files.path);
+      }
+      if (!url) throw new Error("Lien indisponible.");
+      await navigator.clipboard.writeText(url);
+      alert("Lien de partage copié dans le presse-papiers.");
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Échec du partage.");
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  return (
+    <div className="overflow-hidden rounded-panel border border-line bg-card shadow-card">
+      <MediaThumb pub={pub} />
+      <div className="p-3">
+        <div className="truncate text-sm font-bold text-ink">{pub.events?.title ?? "Événement"}</div>
+        <div className="truncate text-xs text-ink-4">{pub.event_files.filename}</div>
+        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-ink-4">
+          <span className="truncate">
+            {uploader} · {uploadedAt}
+          </span>
+          {isDrive && <span className="shrink-0 rounded-full bg-subtle px-1.5 py-0.5 font-semibold text-ink-3">Drive</span>}
+        </div>
+
+        {tab === "scheduled" && pub.scheduled_at && (
+          <div className="mt-1 text-xs font-semibold text-link">
+            {new Date(pub.scheduled_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
+          </div>
+        )}
+        {tab === "published" && <PublishedBadgeRow pub={pub} />}
+
+        <div className="mt-2 flex items-center gap-2">
+          <button onClick={openMedia} className="flex items-center gap-1 text-[11px] font-semibold text-ink-3 hover:text-ink">
+            {isDrive ? <ExternalLink size={12} /> : <Play size={12} />}
+            {isDrive ? "Voir sur Drive" : "Lire"}
+          </button>
+          <button
+            onClick={share}
+            disabled={sharing}
+            className="flex items-center gap-1 text-[11px] font-semibold text-ink-3 hover:text-ink disabled:opacity-50"
+          >
+            <Share2 size={12} /> {sharing ? "…" : "Partager"}
+          </button>
+        </div>
+
+        <div className="mt-3 flex gap-2">
+          {tab === "to_publish" && (
+            <button
+              onClick={onOpenComposer}
+              className="flex-1 rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white"
+            >
+              Publier / Programmer
+            </button>
+          )}
+          {tab === "scheduled" && (
+            <button
+              onClick={onCancelSchedule}
+              className="flex-1 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2"
+            >
+              Annuler la programmation
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function PublicationScreen() {
   const [tab, setTab] = useState<PublicationStatus>("to_publish");
   const [items, setItems] = useState<MediaPublication[]>([]);
@@ -302,41 +402,16 @@ export function PublicationScreen() {
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
             {items.map((pub) => (
-              <div key={pub.id} className="overflow-hidden rounded-panel border border-line bg-card shadow-card">
-                <MediaThumb pub={pub} />
-                <div className="p-3">
-                  <div className="truncate text-sm font-bold text-ink">{pub.events?.title ?? "Événement"}</div>
-                  <div className="truncate text-xs text-ink-4">{pub.event_files.filename}</div>
-                  {tab === "scheduled" && pub.scheduled_at && (
-                    <div className="mt-1 text-xs font-semibold text-link">
-                      {new Date(pub.scheduled_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
-                    </div>
-                  )}
-                  {tab === "published" && <PublishedBadgeRow pub={pub} />}
-
-                  <div className="mt-3 flex gap-2">
-                    {tab === "to_publish" && (
-                      <button
-                        onClick={() => setComposerFor(pub)}
-                        className="flex-1 rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white"
-                      >
-                        Publier / Programmer
-                      </button>
-                    )}
-                    {tab === "scheduled" && (
-                      <button
-                        onClick={async () => {
-                          await cancelScheduledPublication(pub.id);
-                          refetch();
-                        }}
-                        className="flex-1 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2"
-                      >
-                        Annuler la programmation
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <PublicationCard
+                key={pub.id}
+                pub={pub}
+                tab={tab}
+                onOpenComposer={() => setComposerFor(pub)}
+                onCancelSchedule={async () => {
+                  await cancelScheduledPublication(pub.id);
+                  refetch();
+                }}
+              />
             ))}
           </div>
         )}
