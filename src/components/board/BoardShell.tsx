@@ -30,15 +30,6 @@ export function BoardShell() {
 
   return (
     <div data-theme={theme} className="min-h-screen bg-shell relative overflow-hidden">
-      <div
-        className="pointer-events-none absolute -top-40 -left-40 h-[560px] w-[560px] rounded-full opacity-20 blur-3xl"
-        style={{ background: "var(--navy)" }}
-      />
-      <div
-        className="pointer-events-none absolute top-1/3 -right-40 h-[520px] w-[520px] rounded-full opacity-[0.14] blur-3xl"
-        style={{ background: "var(--red)" }}
-      />
-
       <div className="relative flex h-screen flex-col">
         <TopBar
           currentApp={currentApp}
@@ -65,7 +56,7 @@ export function BoardShell() {
             )}
           </main>
 
-          {app === "accueil" && <ContextPanel />}
+          {(app === "accueil" || app === "mails" || app === "calendrier") && <ContextPanel />}
         </div>
 
         <Dock activeApp={app} onSelectApp={setApp} />

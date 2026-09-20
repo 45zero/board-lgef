@@ -117,6 +117,14 @@ export function ContextPanel() {
           ))}
         </div>
       </div>
+
+      <div className="mt-auto rounded-btn bg-subtle p-3 text-center">
+        <div className="font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Migration</div>
+        <div className="mt-0.5 text-[11px] font-bold text-ink-2">7 / 14 apps</div>
+        <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-track">
+          <div className="h-full w-1/2 rounded-full bg-red" />
+        </div>
+      </div>
     </aside>
   );
 }
