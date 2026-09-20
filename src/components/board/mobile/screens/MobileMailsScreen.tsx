@@ -419,6 +419,7 @@ function SwipeableMailRow({
   const dragging = useRef(false);
   const moved = useRef(false);
   const startX = useRef(0);
+  const startY = useRef(0);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearLongPress = () => {
@@ -432,6 +433,7 @@ function SwipeableMailRow({
   // légèrement hors de la ligne (sans ça, le drag "décroche" en usage réel).
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     startX.current = e.clientX;
+    startY.current = e.clientY;
     dragging.current = true;
     moved.current = false;
     setIsDragging(true);
@@ -454,13 +456,19 @@ function SwipeableMailRow({
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragging.current) return;
-    const delta = e.clientX - startX.current;
-    if (Math.abs(delta) > 8) {
+    const deltaX = e.clientX - startX.current;
+    const deltaY = e.clientY - startY.current;
+    // Tout déplacement notable (vertical inclus) annule le tap — un scroll de la
+    // liste ne suivait que l'axe X avant, donc un scroll vertical pur ouvrait le mail.
+    if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
       moved.current = true;
       clearLongPress();
     }
-    // Pas de swipe pendant la sélection multiple — juste la détection de tap ci-dessous.
-    if (!selectMode && delta < 0) setDragX(Math.max(delta, -110));
+    // Le swipe pour archiver ne s'engage que si le geste est clairement horizontal
+    // (sinon un scroll légèrement oblique fait glisser la ligne par erreur).
+    if (!selectMode && deltaX < 0 && Math.abs(deltaX) > Math.abs(deltaY)) {
+      setDragX(Math.max(deltaX, -110));
+    }
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {

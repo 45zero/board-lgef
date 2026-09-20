@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -137,6 +137,31 @@ export function MobileCalendrierScreen() {
   const navPrev = () => setAnchor((a) => (view === "mois" ? subMonths(a, 1) : subWeeks(a, 1)));
   const navNext = () => setAnchor((a) => (view === "mois" ? addMonths(a, 1) : addWeeks(a, 1)));
 
+  // Swipe horizontal sur la grille pour changer de mois/semaine — ne se déclenche
+  // que si le geste est nettement horizontal, pour ne pas gêner le scroll vertical.
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const handleSwipeStart = (e: React.PointerEvent) => {
+    swipeStart.current = { x: e.clientX, y: e.clientY };
+  };
+  const handleSwipeEnd = (e: React.PointerEvent) => {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (!start) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0) navNext();
+      else navPrev();
+    }
+  };
+  const swipeHandlers = {
+    onPointerDown: handleSwipeStart,
+    onPointerUp: handleSwipeEnd,
+    onPointerCancel: () => {
+      swipeStart.current = null;
+    },
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-1.5">
@@ -225,7 +250,7 @@ export function MobileCalendrierScreen() {
       )}
 
       {view === "mois" ? (
-        <div className="flex flex-1 flex-col overflow-y-auto pb-1">
+        <div className="flex flex-1 flex-col overflow-y-auto pb-1" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
           <div className="grid grid-cols-7 pb-1">
             {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => (
               <div key={i} className="text-center font-mono text-[9px] uppercase text-ink-4">
@@ -303,7 +328,7 @@ export function MobileCalendrierScreen() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 space-y-1.5 overflow-y-auto px-3 pb-2">
+        <div className="flex-1 space-y-1.5 overflow-y-auto px-3 pb-2" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
           {days.map((day) => {
             const dayEvents = eventsForDay(day);
             const isToday = isSameDay(day, new Date());
