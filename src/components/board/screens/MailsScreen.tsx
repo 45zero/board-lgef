@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Mail,
   Menu,
@@ -117,20 +117,36 @@ export function MailsScreen() {
     listMyLabels(activeAccountId).then(setLabels);
   }, [activeAccountId]);
 
+  // Cache mémoire par dossier — un dossier déjà visité s'affiche instantanément
+  // pendant qu'on revalide en arrière-plan (stale-while-revalidate).
+  const messagesCache = useRef(new Map<string, MessageListItem[]>());
+  const messageDetailCache = useRef(new Map<string, MessageDetail>());
+
   const refresh = () => {
     if (!activeAccountId) return;
-    setLoading(true);
     setSelected(null);
     if (folder === "DRAFTS") {
+      setLoading(true);
       listMyDrafts(activeAccountId)
         .then((res) => setDrafts(res.drafts))
         .finally(() => setLoading(false));
       return;
     }
+    const cacheKey = `${activeAccountId}:${folder}:${activeQuery.trim()}`;
+    const cached = messagesCache.current.get(cacheKey);
+    if (cached) {
+      setMessages(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     const systemFolder = SYSTEM_FOLDERS.find((f) => f.id === folder);
     const labelIds: string[] = systemFolder ? [...systemFolder.labelIds] : [folder];
     listMyMessages(activeAccountId, { labelIds, query: activeQuery.trim() || undefined })
-      .then((res) => setMessages(res.messages))
+      .then((res) => {
+        messagesCache.current.set(cacheKey, res.messages);
+        setMessages(res.messages);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -148,7 +164,10 @@ export function MailsScreen() {
 
   const openMessage = async (id: string) => {
     if (!activeAccountId) return;
+    const cached = messageDetailCache.current.get(id);
+    if (cached) setSelected(cached);
     const detail = await getMyMessage(activeAccountId, id);
+    messageDetailCache.current.set(id, detail);
     setSelected(detail);
   };
 

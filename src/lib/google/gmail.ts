@@ -49,7 +49,7 @@ export async function listMessages(
 
   const list = await gmail.users.messages.list({
     userId: "me",
-    maxResults: 25,
+    maxResults: 15,
     pageToken: opts.pageToken,
     q: opts.query,
     labelIds: opts.labelIds,
