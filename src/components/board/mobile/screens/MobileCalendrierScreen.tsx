@@ -10,7 +10,6 @@ import {
   Video,
   Clock,
   Ban,
-  List,
   X,
   Plus,
 } from "lucide-react";
@@ -61,7 +60,6 @@ export function MobileCalendrierScreen() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [orgFilter, setOrgFilter] = useState<OrgKey | null>(null);
   const [mineOnly, setMineOnly] = useState(false);
-  const [coveredOnly, setCoveredOnly] = useState(false);
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [editing, setEditing] = useState<CalendarEvent | "new" | null>(null);
 
@@ -96,10 +94,9 @@ export function MobileCalendrierScreen() {
     return events.filter((e) => {
       if (orgFilter && e.org !== orgFilter) return false;
       if (mineOnly && e.createdBy !== user?.id) return false;
-      if (coveredOnly && !(e.coverage === "photo" || e.coverage === "video" || e.coverage === "both")) return false;
       return true;
     });
-  }, [events, orgFilter, mineOnly, coveredOnly, user?.id]);
+  }, [events, orgFilter, mineOnly, user?.id]);
 
   const eventsForDay = (day: Date) =>
     filtered.filter((e) => isSameDay(parseISO(e.start), day)).sort((a, b) => a.start.localeCompare(b.start));
@@ -140,16 +137,14 @@ export function MobileCalendrierScreen() {
   const navPrev = () => setAnchor((a) => (view === "mois" ? subMonths(a, 1) : subWeeks(a, 1)));
   const navNext = () => setAnchor((a) => (view === "mois" ? addMonths(a, 1) : addWeeks(a, 1)));
 
-  const anyFilterActive = !!orgFilter || mineOnly || coveredOnly;
-
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-4 py-2.5">
+      <div className="flex items-center justify-between px-3 py-1.5">
         <div className="flex items-center gap-1">
           <button onClick={navPrev} className="flex h-7 w-7 items-center justify-center rounded-btn text-ink-3">
             <ChevronLeft size={16} />
           </button>
-          <span className="whitespace-nowrap text-[13px] font-bold text-ink">
+          <span className="whitespace-nowrap text-[13px] font-extrabold uppercase text-navy-600">
             {format(anchor, view === "mois" ? "MMMM yyyy" : "'Sem.' I, MMMM", { locale: fr })}
           </span>
           <button onClick={navNext} className="flex h-7 w-7 items-center justify-center rounded-btn text-ink-3">
@@ -171,52 +166,33 @@ export function MobileCalendrierScreen() {
         </div>
       </div>
 
-      <div className="flex h-[30px] items-center gap-2 px-4">
+      <div className="flex h-[26px] items-center gap-2 px-3">
         <button
           onClick={() => setFiltersOpen((o) => !o)}
-          className="flex h-[30px] w-[30px] items-center justify-center rounded-full border-[1.5px] bg-card transition-transform"
+          className="flex h-[26px] w-[26px] items-center justify-center rounded-full border-[1.5px] bg-card transition-transform"
           style={{
             borderColor: filtersOpen ? "var(--red)" : "var(--navy-600)",
             color: filtersOpen ? "var(--red)" : "var(--navy-600)",
             transform: filtersOpen ? "rotate(180deg)" : undefined,
           }}
+          aria-label="Filtrer par organisation"
         >
-          <ChevronDown size={15} />
+          <ChevronDown size={14} />
         </button>
         <button
           onClick={() => setMineOnly((v) => !v)}
-          className={`flex h-[30px] w-[30px] items-center justify-center rounded-btn border ${
+          className={`flex h-[26px] w-[26px] items-center justify-center rounded-btn border ${
             mineOnly ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
           }`}
-          title="Mes événements"
+          title="Événements où je suis sollicité"
+          aria-label="Événements où je suis sollicité"
         >
-          <User size={15} />
-        </button>
-        <button
-          onClick={() => setCoveredOnly((v) => !v)}
-          className={`flex h-[30px] w-[30px] items-center justify-center rounded-btn border ${
-            coveredOnly ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
-          }`}
-          title="Couverts"
-        >
-          <Camera size={15} />
-        </button>
-        <div className="flex-1" />
-        <button
-          onClick={() => {
-            setOrgFilter(null);
-            setMineOnly(false);
-            setCoveredOnly(false);
-          }}
-          className="flex items-center gap-1.5 rounded-btn border border-line bg-card px-2.5 py-1.5 text-ink-2"
-        >
-          <List size={14} />
-          <span className="text-[11.5px] font-semibold">{anyFilterActive ? "Filtré" : "Tous"}</span>
+          <User size={14} />
         </button>
       </div>
 
       {filtersOpen && (
-        <div className="grid grid-cols-5 gap-1.5 px-4 pb-2 pt-1">
+        <div className="grid grid-cols-5 gap-1.5 px-3 pb-2 pt-1">
           {CALENDAR_ORG_KEYS.map((key) => {
             const active = orgFilter === key;
             const color = ORG_COLORS[key];
@@ -248,15 +224,15 @@ export function MobileCalendrierScreen() {
       )}
 
       {view === "mois" ? (
-        <div className="flex flex-1 flex-col overflow-y-auto px-2 pb-2">
-          <div className="grid grid-cols-7 px-1 pb-1">
+        <div className="flex flex-1 flex-col overflow-y-auto pb-1">
+          <div className="grid grid-cols-7 pb-1">
             {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => (
               <div key={i} className="text-center font-mono text-[9px] uppercase text-ink-4">
                 {d}
               </div>
             ))}
           </div>
-          <div className="flex flex-1 flex-col overflow-hidden rounded-panel border border-line bg-card">
+          <div className="flex flex-1 flex-col overflow-hidden border-t border-line bg-card">
             {weeks.map((week, weekIdx) => {
               const banners = bannersForWeek(week);
               return (
