@@ -25,7 +25,7 @@ import { useEventTeam } from "@/hooks/board/useEventTeam";
 import { useEventComments } from "@/hooks/board/useEventComments";
 import { useEventExpenses } from "@/hooks/board/useEventExpenses";
 import { useEventFiles } from "@/hooks/board/useEventFiles";
-import { createEventFileUrl, type EventFile } from "@/lib/board/eventFiles";
+import { getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
 import { REMINDER_PRESETS } from "@/hooks/board/useEventModalState";
 import type { useUserRole } from "@/hooks/board/useUserRole";
 import type { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
@@ -1028,10 +1028,11 @@ function AttachmentRow({
 }) {
   const isVideo = (file.content_type ?? "").startsWith("video");
   const isImage = (file.content_type ?? "").startsWith("image");
+  const isDrive = file.storage_provider === "drive";
   const uploader = personName(file.uploaded_by_profile);
 
   const open = async (download: boolean) => {
-    const url = await createEventFileUrl(file.path, download ? file.filename : undefined);
+    const url = await getEventFileViewUrl(file, download ? file.filename : undefined);
     if (url) window.open(url, "_blank", "noreferrer");
   };
 
@@ -1051,12 +1052,15 @@ function AttachmentRow({
             <span className="block text-[11px] text-ink-4">
               {formatFileSize(file.size_bytes)} · {uploader} ·{" "}
               {new Date(file.created_at).toLocaleDateString("fr-FR")}
+              {isDrive && (
+                <span className="ml-1.5 rounded-full bg-subtle px-1.5 py-0.5 font-semibold text-ink-3">Drive</span>
+              )}
             </span>
             <PublishBadges file={file} />
           </span>
         </button>
         <div className="flex shrink-0 items-center gap-2">
-          {isVideo && canPublish && (
+          {isVideo && canPublish && !isDrive && (
             <button type="button" onClick={onPublishClick} className="text-ink-4 hover:text-navy" title="Publier">
               <Upload size={13} />
             </button>

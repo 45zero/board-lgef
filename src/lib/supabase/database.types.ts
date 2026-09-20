@@ -956,35 +956,44 @@ export type Database = {
         Row: {
           id: string
           event_id: string
-          path: string
+          path: string | null
           filename: string
           content_type: string | null
           size_bytes: number | null
           created_at: string
           uploaded_by: string
           publish_info: Json | null
+          storage_provider: string
+          drive_file_id: string | null
+          drive_web_view_link: string | null
         }
         Insert: {
           id?: string
           event_id: string
-          path: string
+          path?: string | null
           filename: string
           content_type?: string | null
           size_bytes?: number | null
           created_at?: string
           uploaded_by?: string
           publish_info?: Json | null
+          storage_provider?: string
+          drive_file_id?: string | null
+          drive_web_view_link?: string | null
         }
         Update: {
           id?: string
           event_id?: string
-          path?: string
+          path?: string | null
           filename?: string
           content_type?: string | null
           size_bytes?: number | null
           created_at?: string
           uploaded_by?: string
           publish_info?: Json | null
+          storage_provider?: string
+          drive_file_id?: string | null
+          drive_web_view_link?: string | null
         }
         Relationships: []
       }

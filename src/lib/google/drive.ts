@@ -132,16 +132,28 @@ export async function createFolder(
   return mapFile(data);
 }
 
+/** Réutilise un dossier existant du même nom sous parentId, sinon en crée un — évite les doublons "Médias". */
+export async function findOrCreateFolder(
+  account: ConnectedAccount,
+  params: { name: string; parentId?: string }
+): Promise<DriveFileItem> {
+  const candidates = await listFiles(account, { folderId: params.parentId, query: params.name, type: "folder" });
+  const match = candidates.find((f) => f.name === params.name);
+  if (match) return match;
+  return createFolder(account, params);
+}
+
 export async function uploadFile(
   account: ConnectedAccount,
-  params: { name: string; parentId?: string; mimeType: string; data: string }
+  params: { name: string; parentId?: string; mimeType: string; data: string | Buffer; description?: string }
 ): Promise<DriveFileItem> {
   const drive = await driveClient(account);
-  const buffer = Buffer.from(params.data, "base64");
+  const buffer = Buffer.isBuffer(params.data) ? params.data : Buffer.from(params.data, "base64");
   const { data } = await drive.files.create({
     requestBody: {
       name: params.name,
       parents: [params.parentId ?? "root"],
+      description: params.description,
     },
     media: {
       mimeType: params.mimeType,

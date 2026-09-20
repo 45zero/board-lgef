@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import type { Json } from "@/lib/supabase/database.types";
+import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 
 const BUCKET = "event-files";
 
@@ -23,7 +24,7 @@ export interface PublishInfo {
 export interface EventFile {
   id: string;
   event_id: string;
-  path: string;
+  path: string | null;
   filename: string;
   content_type: string | null;
   size_bytes: number | null;
@@ -31,6 +32,9 @@ export interface EventFile {
   uploaded_by: string;
   publish_info: PublishInfo | null;
   uploaded_by_profile: { first_name: string | null; last_name: string | null; email: string | null } | null;
+  storage_provider: "supabase" | "drive";
+  drive_file_id: string | null;
+  drive_web_view_link: string | null;
 }
 
 function slugifyFilename(name: string) {
@@ -60,7 +64,7 @@ export async function listEventFiles(eventId: string): Promise<EventFile[]> {
   return (data as unknown as EventFile[]) ?? [];
 }
 
-export async function uploadEventFiles(eventId: string, files: File[]) {
+async function uploadEventFilesToSupabase(eventId: string, files: File[]) {
   const supabase = createClient();
   const results: { ok: boolean; name: string; error?: string }[] = [];
   for (const file of files) {
@@ -78,6 +82,7 @@ export async function uploadEventFiles(eventId: string, files: File[]) {
       filename: file.name,
       content_type: file.type || null,
       size_bytes: file.size,
+      storage_provider: "supabase",
     });
     if (insertError) {
       await supabase.storage.from(BUCKET).remove([objectPath]).catch(() => {});
@@ -89,10 +94,55 @@ export async function uploadEventFiles(eventId: string, files: File[]) {
   return results;
 }
 
-export async function deleteEventFile(file: { id: string; path: string }) {
+async function uploadEventFilesToDrive(eventId: string, files: File[]) {
+  const results: { ok: boolean; name: string; error?: string }[] = [];
+  for (const file of files) {
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const res = await fetch(`/api/events/${eventId}/attachments/drive`, { method: "POST", body: form });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        if (json.reason === "no_drive") {
+          const fallback = await uploadEventFilesToSupabase(eventId, [file]);
+          results.push(...fallback);
+          continue;
+        }
+        results.push({ ok: false, name: file.name, error: json.error ?? "Échec de l'upload vers Drive." });
+        continue;
+      }
+      results.push({ ok: true, name: file.name });
+    } catch (e) {
+      results.push({ ok: false, name: file.name, error: e instanceof Error ? e.message : "Erreur réseau." });
+    }
+  }
+  return results;
+}
+
+/**
+ * Si l'uploadeur a un compte Google connecté, le média part dans son Drive
+ * (dossier "Médias", avec description événement/date/auteur) pour ne pas
+ * charger le stockage Supabase — sinon repli sur le bucket event-files.
+ */
+export async function uploadEventFiles(eventId: string, files: File[]) {
+  const accounts = await getMyConnectedAccounts();
+  const hasGoogleDrive = accounts.some((a) => a.provider === "google");
+  return hasGoogleDrive ? uploadEventFilesToDrive(eventId, files) : uploadEventFilesToSupabase(eventId, files);
+}
+
+export async function deleteEventFile(file: { id: string; path: string | null }) {
   const supabase = createClient();
   await supabase.from("event_files").delete().eq("id", file.id);
-  await supabase.storage.from(BUCKET).remove([file.path]).catch(() => {});
+  if (file.path) {
+    await supabase.storage.from(BUCKET).remove([file.path]).catch(() => {});
+  }
+}
+
+/** Lien d'accès au fichier — URL signée pour Supabase Storage, lien Drive natif sinon. */
+export async function getEventFileViewUrl(file: EventFile, downloadAs?: string) {
+  if (file.storage_provider === "drive") return file.drive_web_view_link;
+  if (!file.path) return null;
+  return createEventFileUrl(file.path, downloadAs);
 }
 
 /** URL signée temporaire — `downloadAs` force le téléchargement sous ce nom au lieu d'un affichage inline. */
@@ -125,6 +175,9 @@ export async function publishToYoutube(
   { title, description }: { title: string; description?: string },
   by: { first_name: string | null; last_name: string | null } | null
 ) {
+  if (file.storage_provider !== "supabase" || !file.path) {
+    throw new Error("Publication indisponible pour un fichier stocké sur Drive pour l'instant.");
+  }
   const supabase = createClient();
   const videoUrl = await createEventFileUrl(file.path);
   if (!videoUrl) throw new Error("Impossible de générer l'URL de la vidéo.");
@@ -159,6 +212,9 @@ export async function publishToFacebook(
   selection: Partial<Record<keyof typeof FACEBOOK_PAGE_KEYS, { enabled: boolean; message: string }>>,
   by: { first_name: string | null; last_name: string | null } | null
 ) {
+  if (file.storage_provider !== "supabase" || !file.path) {
+    throw new Error("Publication indisponible pour un fichier stocké sur Drive pour l'instant.");
+  }
   const supabase = createClient();
   const videoUrl = await createEventFileUrl(file.path);
   if (!videoUrl) throw new Error("Impossible de générer l'URL de la vidéo.");
