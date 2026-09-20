@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { DbEventType } from "@/lib/board/calendar";
+import { syncEventToGoogle, removeEventFromGoogle } from "@/app/actions/calendar-sync";
 
 export interface EventFormPayload {
   title: string;
@@ -40,7 +41,10 @@ export function useEventActions() {
       console.error("[useEventActions.createEvent]", error);
       return null;
     }
-    return data.id as string;
+    const eventId = data.id as string;
+    // Miroir Google Calendar best-effort — ne bloque jamais la création board.
+    syncEventToGoogle(eventId).catch((err) => console.error("[useEventActions.createEvent] sync Google", err));
+    return eventId;
   };
 
   const updateEvent = async (id: string, payload: EventFormPayload) => {
@@ -56,12 +60,17 @@ export function useEventActions() {
         end_date: payload.endISO,
       })
       .eq("id", id);
+    if (!error) {
+      syncEventToGoogle(id).catch((err) => console.error("[useEventActions.updateEvent] sync Google", err));
+    }
     return !error;
   };
 
   /** Suppression en cascade — ces FK ne sont pas ON DELETE CASCADE côté base. */
   const deleteEventCascade = async (id: string) => {
     const supabase = createClient();
+    // Doit lire l'événement (google_event_id) avant sa suppression board ci-dessous.
+    await removeEventFromGoogle(id).catch((err) => console.error("[useEventActions.deleteEventCascade] sync Google", err));
     try {
       const { data: submissions } = await supabase
         .from("expense_submissions")

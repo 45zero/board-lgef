@@ -1147,6 +1147,9 @@ export type Database = {
           event_coordinates: Json | null
           organizer_message: string | null
           updated_by: string | null
+          google_event_id: string | null
+          google_calendar_id: string | null
+          google_connected_account_id: string | null
         }
         Insert: {
           id?: string
@@ -1171,6 +1174,9 @@ export type Database = {
           event_coordinates?: Json | null
           organizer_message?: string | null
           updated_by?: string | null
+          google_event_id?: string | null
+          google_calendar_id?: string | null
+          google_connected_account_id?: string | null
         }
         Update: {
           id?: string
@@ -1195,6 +1201,9 @@ export type Database = {
           event_coordinates?: Json | null
           organizer_message?: string | null
           updated_by?: string | null
+          google_event_id?: string | null
+          google_calendar_id?: string | null
+          google_connected_account_id?: string | null
         }
         Relationships: []
       }

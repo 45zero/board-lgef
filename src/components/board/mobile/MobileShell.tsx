@@ -4,6 +4,7 @@ import { useState } from "react";
 import { MobileHeader } from "@/components/board/mobile/MobileHeader";
 import { MobileBottomNav, type MobileTab } from "@/components/board/mobile/MobileBottomNav";
 import { MobileCalendrierScreen } from "@/components/board/mobile/screens/MobileCalendrierScreen";
+import { MobileMailsScreen } from "@/components/board/mobile/screens/MobileMailsScreen";
 
 const TITLES: Record<MobileTab, { title: string; kicker: string }> = {
   calendrier: { title: "Calendrier", kicker: "EVENEMENTS" },
@@ -33,6 +34,8 @@ export function MobileShell() {
       <main className="flex-1 overflow-hidden">
         {tab === "calendrier" ? (
           <MobileCalendrierScreen />
+        ) : tab === "mails" ? (
+          <MobileMailsScreen />
         ) : (
           <div className="flex h-full items-center justify-center p-6 text-center text-sm text-ink-3">
             Module « {title} » — bientôt sur mobile

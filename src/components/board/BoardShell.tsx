@@ -8,6 +8,7 @@ import { ContextPanel } from "./ContextPanel";
 import { AccueilScreen } from "./screens/AccueilScreen";
 import { MailsScreen } from "./screens/MailsScreen";
 import { CalendrierScreen } from "./screens/CalendrierScreen";
+import { GedScreen } from "./screens/GedScreen";
 import { MobileShell } from "./mobile/MobileShell";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { BOARD_APPS } from "@/lib/board/tokens";
@@ -55,6 +56,8 @@ export function BoardShell() {
               <MailsScreen />
             ) : app === "calendrier" ? (
               <CalendrierScreen />
+            ) : app === "ged" ? (
+              <GedScreen />
             ) : (
               <div className="flex h-full items-center justify-center rounded-panel border border-line bg-card/60 text-ink-3">
                 Module « {currentApp.label} » — à venir
