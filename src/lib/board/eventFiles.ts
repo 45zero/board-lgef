@@ -2,7 +2,6 @@
 
 import { createClient } from "@/lib/supabase/client";
 import type { Json } from "@/lib/supabase/database.types";
-import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 
 const BUCKET = "event-files";
 
@@ -155,14 +154,13 @@ async function uploadEventFilesToDrive(eventId: string, files: File[]) {
 }
 
 /**
- * Si l'uploadeur a un compte Google connecté, le média part dans son Drive
- * (dossier "Médias", avec description événement/date/auteur) pour ne pas
- * charger le stockage Supabase — sinon repli sur le bucket event-files.
+ * Le média part dans le Drive du board (dossier "Médias", description
+ * événement/date/auteur) quel que soit qui uploade — le serveur route vers le
+ * compte Google désigné en réglages (board_settings), pas celui de l'uploadeur.
+ * Repli automatique sur Supabase Storage tant qu'aucun Drive de board n'est connecté.
  */
 export async function uploadEventFiles(eventId: string, files: File[]) {
-  const accounts = await getMyConnectedAccounts();
-  const hasGoogleDrive = accounts.some((a) => a.provider === "google");
-  return hasGoogleDrive ? uploadEventFilesToDrive(eventId, files) : uploadEventFilesToSupabase(eventId, files);
+  return uploadEventFilesToDrive(eventId, files);
 }
 
 export async function deleteEventFile(file: { id: string; path: string | null }) {

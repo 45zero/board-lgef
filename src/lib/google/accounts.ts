@@ -81,6 +81,11 @@ export async function getOwnedGoogleAccount(accountId: string, userId: string) {
   return account;
 }
 
+/** Charge un compte Google par id, sans vérification de propriétaire — pour le Drive du board (désigné par un admin, utilisé par tous). */
+export async function getGoogleAccountById(accountId: string) {
+  return prisma.connectedAccount.findFirst({ where: { id: accountId, provider: "google" } });
+}
+
 /** Retourne un access_token Google valide, en le rafraîchissant si besoin. */
 export async function getValidGoogleAccessToken(account: ConnectedAccount): Promise<string> {
   const expiresInMs = account.token_expires_at.getTime() - Date.now();

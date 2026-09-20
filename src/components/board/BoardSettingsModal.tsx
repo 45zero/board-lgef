@@ -1,9 +1,75 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Sparkles, X, PanelLeft, LayoutGrid } from "lucide-react";
 import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
+import { useUserRole } from "@/hooks/board/useUserRole";
+import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
+import { getBoardDriveAccountId, setBoardDriveAccount } from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
+
+/** Réservé aux admins/super users : désigne quel compte Google connecté reçoit les médias d'événements de tout le monde. */
+function DriveSettingsSection() {
+  const role = useUserRole();
+  const canManage = role.isAdmin || role.isSuperUser;
+  const [accounts, setAccounts] = useState<Awaited<ReturnType<typeof getMyConnectedAccounts>>>([]);
+  const [boardAccountId, setBoardAccountIdState] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!canManage) return;
+    getMyConnectedAccounts().then(setAccounts);
+    getBoardDriveAccountId().then(setBoardAccountIdState);
+  }, [canManage]);
+
+  if (!canManage) return null;
+  const googleAccounts = accounts.filter((a) => a.provider === "google");
+
+  return (
+    <div className="mt-5">
+      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Drive du board</div>
+      <div className="space-y-2 rounded-btn border border-line p-3">
+        <p className="text-xs text-ink-4">
+          Les médias uploadés sur les événements — par n&rsquo;importe qui — partent dans ce compte Drive, dans un
+          dossier « Médias ».
+        </p>
+        {googleAccounts.length === 0 ? (
+          <a href="/api/oauth/google/start" className="text-xs font-semibold text-link hover:underline">
+            Connecter un compte Google
+          </a>
+        ) : (
+          googleAccounts.map((a) => (
+            <div key={a.id} className="flex items-center justify-between gap-2 rounded-btn bg-subtle px-2.5 py-2">
+              <span className="min-w-0 truncate text-sm text-ink-2">{a.email}</span>
+              {boardAccountId === a.id ? (
+                <span className="shrink-0 rounded-full bg-good-bg px-2 py-0.5 text-[10px] font-bold text-good">
+                  Actif
+                </span>
+              ) : (
+                <button
+                  disabled={saving}
+                  onClick={async () => {
+                    setSaving(true);
+                    try {
+                      await setBoardDriveAccount(a.id);
+                      setBoardAccountIdState(a.id);
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                  className="shrink-0 text-xs font-semibold text-link hover:underline disabled:opacity-50"
+                >
+                  Définir comme Drive du board
+                </button>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
 
 const WIDGET_ROWS: { key: keyof ContextPanelWidgets; title: string; subtitle: string }[] = [
   { key: "today", title: "Aujourd'hui", subtitle: "Vos réunions du jour" },
@@ -130,6 +196,8 @@ export function BoardSettingsModal({
             ))}
           </div>
         </div>
+
+        <DriveSettingsSection />
       </div>
     </>
   );

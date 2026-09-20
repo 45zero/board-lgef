@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { createClient } from "@/lib/supabase/server";
-import { listConnectedAccounts } from "@/lib/google/accounts";
+import { getGoogleAccountById } from "@/lib/google/accounts";
+import { getBoardDriveAccountId } from "@/app/actions/board-settings";
 import { findOrCreateFolder, createResumableUploadSession } from "@/lib/google/drive";
 
 const MEDIA_FOLDER_NAME = "Médias";
@@ -19,8 +20,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
     return NextResponse.json({ ok: false, error: "Non authentifié" }, { status: 401 });
   }
 
-  const accounts = await listConnectedAccounts(user.id);
-  const account = accounts.find((a) => a.provider === "google");
+  const boardDriveAccountId = await getBoardDriveAccountId();
+  const account = boardDriveAccountId ? await getGoogleAccountById(boardDriveAccountId) : null;
   if (!account) {
     return NextResponse.json({ ok: false, reason: "no_drive" }, { status: 200 });
   }

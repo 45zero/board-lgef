@@ -166,6 +166,27 @@ export type Database = {
         }
         Relationships: []
       }
+      board_settings: {
+        Row: {
+          id: boolean
+          drive_connected_account_id: string | null
+          updated_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: boolean
+          drive_connected_account_id?: string | null
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: boolean
+          drive_connected_account_id?: string | null
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       boards: {
         Row: {
           id: string
