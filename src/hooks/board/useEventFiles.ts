@@ -11,6 +11,10 @@ import {
   publishToFacebook,
   type EventFile,
 } from "@/lib/board/eventFiles";
+import { queueMediaForPublication } from "@/lib/board/mediaPublications";
+
+const isPublishableMedia = (f: EventFile) =>
+  (f.content_type ?? "").startsWith("image") || (f.content_type ?? "").startsWith("video");
 
 /** Pièces jointes d'un événement (photo/vidéo) + publication YouTube/Facebook. */
 export function useEventFiles(eventId: string | undefined, canManage: boolean) {
@@ -48,9 +52,19 @@ export function useEventFiles(eventId: string | undefined, canManage: boolean) {
     setUploading(true);
     try {
       const results = await uploadEventFiles(eventId, Array.from(fileList));
-      await refetch();
+      const successCount = results.filter((r) => r.ok).length;
+      const updated = await listEventFiles(eventId);
+      setFiles(updated);
+      // Les nouveaux fichiers arrivent en tête (created_at desc) — on met en file
+      // de publication les N derniers uploadés avec succès (photo/vidéo uniquement).
+      if (successCount > 0) {
+        updated
+          .slice(0, successCount)
+          .filter(isPublishableMedia)
+          .forEach((f) => queueMediaForPublication(f.id, eventId));
+      }
       return {
-        ok: results.filter((r) => r.ok).length,
+        ok: successCount,
         failed: results.filter((r) => !r.ok).map((r) => r.name),
       };
     } finally {

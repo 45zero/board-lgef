@@ -39,7 +39,7 @@ const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   administration: ShieldCheck,
 };
 
-const RUNNING_APPS = new Set(["accueil", "mails", "trello", "calendrier", "quiz", "pointage", "ged"]);
+const RUNNING_APPS = new Set(["accueil", "mails", "trello", "calendrier", "quiz", "pointage", "ged", "audiovisuel"]);
 
 export function AppRail({
   nav,

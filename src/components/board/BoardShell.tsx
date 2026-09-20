@@ -10,6 +10,7 @@ import { AccueilScreen } from "./screens/AccueilScreen";
 import { MailsScreen } from "./screens/MailsScreen";
 import { CalendrierScreen } from "./screens/CalendrierScreen";
 import { GedScreen } from "./screens/GedScreen";
+import { PublicationScreen } from "./screens/PublicationScreen";
 import { MobileShell } from "./mobile/MobileShell";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useBoardPreferences } from "@/hooks/board/useBoardPreferences";
@@ -59,6 +60,8 @@ export function BoardShell() {
               <CalendrierScreen />
             ) : app === "ged" ? (
               <GedScreen />
+            ) : app === "audiovisuel" ? (
+              <PublicationScreen />
             ) : (
               <div className="flex h-full items-center justify-center rounded-panel border border-line bg-card/60 text-ink-3">
                 Module « {currentApp.label} » — à venir

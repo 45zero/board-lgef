@@ -166,6 +166,45 @@ export type Database = {
         }
         Relationships: []
       }
+      media_publications: {
+        Row: {
+          id: string
+          event_file_id: string
+          event_id: string
+          status: string
+          scheduled_at: string | null
+          caption: string | null
+          targets: Json
+          created_by: string | null
+          created_at: string
+          published_at: string | null
+        }
+        Insert: {
+          id?: string
+          event_file_id: string
+          event_id: string
+          status?: string
+          scheduled_at?: string | null
+          caption?: string | null
+          targets?: Json
+          created_by?: string | null
+          created_at?: string
+          published_at?: string | null
+        }
+        Update: {
+          id?: string
+          event_file_id?: string
+          event_id?: string
+          status?: string
+          scheduled_at?: string | null
+          caption?: string | null
+          targets?: Json
+          created_by?: string | null
+          created_at?: string
+          published_at?: string | null
+        }
+        Relationships: []
+      }
       board_settings: {
         Row: {
           id: boolean
