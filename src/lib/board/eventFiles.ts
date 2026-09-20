@@ -93,11 +93,45 @@ async function uploadEventFilesToSupabase(eventId: string, files: File[]) {
   return results;
 }
 
+const CHUNK_SIZE = 3 * 1024 * 1024; // 3 Mio — multiple de 256 Kio (requis par Drive) et sous la limite de requête de l'hébergeur
+
 /**
- * Le fichier n'est JAMAIS envoyé à notre serveur (évite toute limite de taille
- * de requête côté hébergeur, cf. 413 sur de grosses vidéos) : le navigateur
- * PUT directement ses octets sur l'URL de session que Google nous renvoie.
+ * L'API Drive n'autorise pas le PUT direct navigateur→Google (CORS bloqué) et
+ * un fichier entier dépasserait la limite de taille de requête de l'hébergeur.
+ * On envoie donc le fichier par morceaux à notre propre route, qui relaie
+ * chaque morceau à la session resumable Drive côté serveur.
  */
+async function putFileToDriveViaRelay(
+  eventId: string,
+  uploadUrl: string,
+  file: File
+): Promise<{ id: string; webViewLink?: string }> {
+  let offset = 0;
+  while (offset < file.size) {
+    const end = Math.min(offset + CHUNK_SIZE, file.size);
+    const chunk = file.slice(offset, end);
+    const res = await fetch(`/api/events/${eventId}/attachments/drive/chunk`, {
+      method: "PUT",
+      headers: {
+        "X-Upload-Url": uploadUrl,
+        "X-File-Content-Type": file.type || "application/octet-stream",
+        "Content-Range": `bytes ${offset}-${end - 1}/${file.size}`,
+      },
+      body: chunk,
+    });
+    if (res.status === 308) {
+      offset = end;
+      continue;
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.error ?? `Échec de l'envoi vers Drive (${res.status}).`);
+    }
+    return res.json();
+  }
+  throw new Error("Échec de l'envoi vers Drive (fichier vide).");
+}
+
 async function uploadEventFilesToDrive(eventId: string, files: File[]) {
   const results: { ok: boolean; name: string; error?: string }[] = [];
   for (const file of files) {
@@ -118,16 +152,7 @@ async function uploadEventFilesToDrive(eventId: string, files: File[]) {
         continue;
       }
 
-      const putRes = await fetch(initJson.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-        body: file,
-      });
-      if (!putRes.ok) {
-        results.push({ ok: false, name: file.name, error: `Échec de l'envoi vers Drive (${putRes.status}).` });
-        continue;
-      }
-      const driveFile = await putRes.json();
+      const driveFile = await putFileToDriveViaRelay(eventId, initJson.uploadUrl, file);
 
       const confirmRes = await fetch(`/api/events/${eventId}/attachments/drive/confirm`, {
         method: "POST",
