@@ -53,5 +53,22 @@ export function useEventTeam(eventId: string, createdBy: string | null) {
     fetchTeam();
   };
 
-  return { team, addMember, removeMember, isCreator, isResponsable, canManageMembers };
+  /** Désigne userId comme unique responsable — rétrograde l'ancien sans dupliquer sa ligne. */
+  const setResponsable = async (userId: string) => {
+    if (!canManageMembers) return;
+    const supabase = createClient();
+    await supabase
+      .from("event_team_members")
+      .update({ role: "membre" })
+      .eq("event_id", eventId)
+      .eq("role", "responsable");
+    await supabase
+      .from("event_team_members")
+      .update({ role: "responsable" })
+      .eq("event_id", eventId)
+      .eq("user_id", userId);
+    fetchTeam();
+  };
+
+  return { team, addMember, removeMember, setResponsable, isCreator, isResponsable, canManageMembers };
 }

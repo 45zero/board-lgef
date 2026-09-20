@@ -9,6 +9,7 @@ export interface EventFormPayload {
   title: string;
   eventType: DbEventType;
   location: string;
+  onlineMeeting: boolean;
   message: string;
   startISO: string;
   endISO: string;
@@ -27,6 +28,7 @@ export function useEventActions() {
         title: payload.title,
         event_type: payload.eventType,
         location: payload.location || null,
+        online_meeting: payload.onlineMeeting,
         organizer_message: payload.message || null,
         start_date: payload.startISO,
         end_date: payload.endISO,
@@ -55,6 +57,7 @@ export function useEventActions() {
         title: payload.title,
         event_type: payload.eventType,
         location: payload.location || null,
+        online_meeting: payload.onlineMeeting,
         organizer_message: payload.message || null,
         start_date: payload.startISO,
         end_date: payload.endISO,

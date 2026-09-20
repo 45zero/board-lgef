@@ -29,10 +29,12 @@ export const EVENT_TYPE_TO_ORG: Record<DbEventType, OrgKey> = {
   communication: "amber",
   tirages_coupes: "tirages",
   match_du_week_end: "matchs",
-  kanban: "navy", // pas de sens calendrier ; jamais choisi par l'utilisateur
+  // "kanban" ne sert jamais aux cartes kanban (celles-ci ont event_type NULL,
+  // cf. contrainte events_type_eventtype_consistency) — réutilisé pour "Perso".
+  kanban: "perso",
 };
 
-export const ORG_TO_EVENT_TYPE: Record<Exclude<OrgKey, "perso">, DbEventType> = {
+export const ORG_TO_EVENT_TYPE: Record<OrgKey, DbEventType> = {
   navy: "institutionnel",
   clubs: "clubs",
   pem: "pem_pole_espoirs_mixte",
@@ -43,10 +45,11 @@ export const ORG_TO_EVENT_TYPE: Record<Exclude<OrgKey, "perso">, DbEventType> = 
   amber: "communication",
   tirages: "tirages_coupes",
   matchs: "match_du_week_end",
+  perso: "kanban",
 };
 
-/** Les 10 organisations réellement sélectionnables (design en a 11, "perso" est sans équivalent base). */
-export const CALENDAR_ORG_KEYS = Object.keys(ORG_TO_EVENT_TYPE) as Exclude<OrgKey, "perso">[];
+/** Les 11 organisations sélectionnables dans le calendrier, "Perso" inclus. */
+export const CALENDAR_ORG_KEYS = Object.keys(ORG_TO_EVENT_TYPE) as OrgKey[];
 
 export interface Person {
   id: string;
@@ -80,6 +83,7 @@ export interface EventRow {
   start_date: string;
   end_date: string;
   location: string | null;
+  online_meeting: boolean | null;
   organizer_message: string | null;
   requires_coverage: boolean | null;
   created_by: string | null;
@@ -128,7 +132,7 @@ export function mapEventRow(row: EventRow, coverageRequest?: CoverageRequestRow)
     start: row.start_date,
     end: row.end_date,
     location: row.location ?? "",
-    onlineMeeting: false,
+    onlineMeeting: row.online_meeting ?? false,
     message: row.organizer_message ?? "",
     requiresCoverage,
     coverage: deriveCoverageState(requiresCoverage, coverageRequest),

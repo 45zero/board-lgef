@@ -55,12 +55,15 @@ export function useEventModalState({
   const { user } = useAuth();
   const isEditing = !!event;
 
-  const [org, setOrg] = useState<Exclude<OrgKey, "perso">>(
-    (event?.org as Exclude<OrgKey, "perso">) ?? "navy"
-  );
+  const [org, setOrg] = useState<OrgKey>(event?.org ?? "navy");
   const [title, setTitle] = useState(event?.title ?? "");
   const [location, setLocation] = useState(event?.location ?? "");
+  const [onlineMeeting, setOnlineMeeting] = useState(event?.onlineMeeting ?? false);
   const [message, setMessage] = useState(event?.message ?? "");
+  const [pendingParticipants, setPendingParticipants] = useState<
+    { id: string; name: string; role: "responsable" | "membre" }[]
+  >([]);
+  const [pendingReminders, setPendingReminders] = useState<string[]>([]);
   const start = event ? parseISO(event.start) : defaultStart ?? new Date();
   const end = event ? parseISO(event.end) : defaultEnd ?? new Date(Date.now() + 3600_000);
   const [dateStr, setDateStr] = useState(format(start, "yyyy-MM-dd"));
@@ -124,7 +127,29 @@ export function useEventModalState({
   const buildPayload = (): EventFormPayload => {
     const startISO = new Date(`${dateStr}T${startTime}:00`).toISOString();
     const endISO = new Date(`${dateStr}T${endTime}:00`).toISOString();
-    return { title, eventType: ORG_TO_EVENT_TYPE[org], location, message, startISO, endISO };
+    return { title, eventType: ORG_TO_EVENT_TYPE[org], location, onlineMeeting, message, startISO, endISO };
+  };
+
+  const addPendingParticipant = (profile: { id: string; first_name: string | null; last_name: string | null; email: string | null }) => {
+    if (pendingParticipants.some((p) => p.id === profile.id)) return;
+    const name = [profile.first_name, profile.last_name].filter(Boolean).join(" ").trim() || profile.email || "—";
+    setPendingParticipants((prev) => [...prev, { id: profile.id, name, role: "membre" }]);
+  };
+
+  const removePendingParticipant = (id: string) => {
+    setPendingParticipants((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const setPendingResponsable = (id: string) => {
+    setPendingParticipants((prev) => prev.map((p) => ({ ...p, role: p.id === id ? "responsable" : "membre" })));
+  };
+
+  const addPendingReminder = (offset: string) => {
+    setPendingReminders((prev) => (prev.includes(offset) ? prev : [...prev, offset]));
+  };
+
+  const removePendingReminder = (offset: string) => {
+    setPendingReminders((prev) => prev.filter((o) => o !== offset));
   };
 
   const handleSave = async () => {
@@ -143,6 +168,32 @@ export function useEventModalState({
 
       const newId = await createEvent(payload);
       if (!newId) return;
+
+      if (pendingParticipants.length > 0) {
+        const supabase = createClient();
+        await supabase.from("event_team_members").insert(
+          pendingParticipants.map((p) => ({ event_id: newId, user_id: p.id, role: p.role }))
+        );
+      }
+
+      if (pendingReminders.length > 0 && user) {
+        const supabase = createClient();
+        const startMs = new Date(payload.startISO).getTime();
+        const channels = [
+          "app",
+          ...(notifPrefs.notifyEmail ? ["email"] : []),
+          ...(notifPrefs.notifyPush ? ["push"] : []),
+        ];
+        await supabase.from("event_reminders").insert(
+          pendingReminders.map((offset) => ({
+            event_id: newId,
+            user_id: user.id,
+            remind_at: new Date(startMs - REMINDER_OFFSET_MINUTES[offset] * 60_000).toISOString(),
+            reminder_offset: offset,
+            channels,
+          }))
+        );
+      }
 
       if (wantsCoverage && user) {
         // useEventCoverage est lié à event?.id (indéfini à la création) — on ne peut
@@ -203,8 +254,14 @@ export function useEventModalState({
     setTitle,
     location,
     setLocation,
+    onlineMeeting,
+    setOnlineMeeting,
     message,
     setMessage,
+    pendingParticipants,
+    addPendingParticipant,
+    removePendingParticipant,
+    setPendingResponsable,
     start,
     dateStr,
     setDateStr,
@@ -216,6 +273,9 @@ export function useEventModalState({
     reminders,
     addReminder,
     removeReminder,
+    pendingReminders,
+    addPendingReminder,
+    removePendingReminder,
     wantsCoverage,
     setWantsCoverage,
     coverageDetails,

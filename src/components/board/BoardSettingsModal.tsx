@@ -3,23 +3,7 @@
 import { Sparkles, X, PanelLeft, LayoutGrid } from "lucide-react";
 import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
-
-function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${on ? "bg-red" : "bg-track"}`}
-      role="switch"
-      aria-checked={on}
-    >
-      <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-card transition-transform ${
-          on ? "translate-x-[22px]" : "translate-x-0.5"
-        }`}
-      />
-    </button>
-  );
-}
+import { Toggle } from "@/components/board/Toggle";
 
 const WIDGET_ROWS: { key: keyof ContextPanelWidgets; title: string; subtitle: string }[] = [
   { key: "today", title: "Aujourd'hui", subtitle: "Vos réunions du jour" },

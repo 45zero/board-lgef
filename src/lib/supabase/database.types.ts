@@ -1150,6 +1150,7 @@ export type Database = {
           google_event_id: string | null
           google_calendar_id: string | null
           google_connected_account_id: string | null
+          online_meeting: boolean
         }
         Insert: {
           id?: string
@@ -1177,6 +1178,7 @@ export type Database = {
           google_event_id?: string | null
           google_calendar_id?: string | null
           google_connected_account_id?: string | null
+          online_meeting?: boolean
         }
         Update: {
           id?: string
@@ -1204,6 +1206,7 @@ export type Database = {
           google_event_id?: string | null
           google_calendar_id?: string | null
           google_connected_account_id?: string | null
+          online_meeting?: boolean
         }
         Relationships: []
       }

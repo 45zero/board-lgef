@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
-import { X, Trash2, MapPin, ChevronDown, Camera, Check } from "lucide-react";
+import { X, Trash2, MapPin, ChevronDown, Camera, Video } from "lucide-react";
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
 import { CALENDAR_ORG_KEYS, type CalendarEvent } from "@/lib/board/calendar";
-import { useEventModalState, REMINDER_PRESETS } from "@/hooks/board/useEventModalState";
+import { useEventModalState } from "@/hooks/board/useEventModalState";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
+import { Toggle } from "@/components/board/Toggle";
 import {
   personName,
   DiscussionTab,
@@ -17,6 +18,9 @@ import {
   CarteTab,
   CoverageActions,
   DirectorAttendanceSection,
+  ParticipantsField,
+  RemindersField,
+  AttachmentsField,
 } from "@/components/board/calendar/EventTabs";
 
 type Tab = "details" | "discussion" | "equipe" | "frais" | "gestion" | "carte";
@@ -122,7 +126,7 @@ export function MobileEventModal({
         })}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {tab === "details" && (
           <div className="space-y-4">
             <div className="relative">
@@ -160,22 +164,65 @@ export function MobileEventModal({
                 type="date"
                 value={m.dateStr}
                 onChange={(e) => m.setDateStr(e.target.value)}
-                className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
+                className="w-full rounded-btn border border-line px-2.5 py-2 text-xs outline-none"
               />
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <input
                   type="time"
                   value={m.startTime}
                   onChange={(e) => m.setStartTime(e.target.value)}
-                  className="w-full rounded-btn border border-line px-3 py-2.5 text-sm font-mono outline-none"
+                  className="w-full rounded-btn border border-line px-2 py-2 text-xs font-mono outline-none"
                 />
                 <input
                   type="time"
                   value={m.endTime}
                   onChange={(e) => m.setEndTime(e.target.value)}
-                  className="w-full rounded-btn border border-line px-3 py-2.5 text-sm font-mono outline-none"
+                  className="w-full rounded-btn border border-line px-2 py-2 text-xs font-mono outline-none"
+                />
+                <RemindersField
+                  offsets={isEditing ? m.reminders.map((r) => r.reminder_offset) : m.pendingReminders}
+                  onAdd={isEditing ? m.addReminder : m.addPendingReminder}
+                  onRemove={
+                    isEditing
+                      ? (offset) => {
+                          const r = m.reminders.find((r) => r.reminder_offset === offset);
+                          if (r) m.removeReminder(r.id);
+                        }
+                      : m.removePendingReminder
+                  }
                 />
               </div>
+            </div>
+
+            <div>
+              <div className="mb-1 flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+                <span>Participants</span>
+                {isEditing && (
+                  <button onClick={() => setTab("equipe")} className="text-link">
+                    Gérer
+                  </button>
+                )}
+              </div>
+              <ParticipantsField
+                members={
+                  isEditing
+                    ? m.team.team.map((tm) => ({ id: tm.user_id, name: personName(tm.profiles), role: tm.role }))
+                    : m.pendingParticipants
+                }
+                canManage={isEditing ? m.team.canManageMembers : true}
+                onAdd={(p) => (isEditing ? m.team.addMember(p.id, "membre") : m.addPendingParticipant(p))}
+                onRemove={(chip) => {
+                  if (isEditing) {
+                    const tm = m.team.team.find((t) => t.user_id === chip.id);
+                    if (tm) m.team.removeMember(tm);
+                  } else {
+                    m.removePendingParticipant(chip.id);
+                  }
+                }}
+                onSetResponsable={(chip) =>
+                  isEditing ? m.team.setResponsable(chip.id) : m.setPendingResponsable(chip.id)
+                }
+              />
             </div>
 
             <div className="flex items-center gap-2 rounded-btn border border-line px-3 py-2.5">
@@ -187,7 +234,65 @@ export function MobileEventModal({
                 placeholder="Lieu"
                 className="w-full text-sm outline-none"
               />
+              <button
+                type="button"
+                onClick={() => m.setOnlineMeeting(!m.onlineMeeting)}
+                className={`flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                  m.onlineMeeting ? "border-navy bg-navy text-white" : "border-line text-ink-3"
+                }`}
+              >
+                <Video size={12} /> En ligne
+              </button>
             </div>
+
+            {!isEditing && (
+              <div className="flex flex-wrap items-start gap-3">
+                <div className="w-[190px] shrink-0">
+                  <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Couverture</div>
+                  <div className="flex items-center justify-between rounded-btn border border-line px-3 py-2.5">
+                    <span className="flex items-center gap-1.5 text-sm font-bold text-ink">
+                      <Camera size={14} /> Média
+                    </span>
+                    <Toggle on={m.wantsCoverage} onClick={() => m.setWantsCoverage(!m.wantsCoverage)} />
+                  </div>
+                </div>
+
+                {m.wantsCoverage && (
+                  <div className="min-w-[160px] flex-1">
+                    <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+                      Message à l&rsquo;équipe média (optionnel)
+                    </label>
+                    <textarea
+                      value={m.coverageDetails}
+                      onChange={(e) => m.setCoverageDetails(e.target.value)}
+                      rows={2}
+                      placeholder="Précisions pour l'équipe média — photo, vidéo, angle souhaité…"
+                      className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!isEditing && m.wantsCoverage && m.role.canAssignCoverage && (
+              <div>
+                <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+                  Assigner directement un technicien (optionnel)
+                </label>
+                <select
+                  value={m.coverageTechnicianId}
+                  onChange={(e) => m.setCoverageTechnicianId(e.target.value)}
+                  className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
+                >
+                  <option value="">Laisser en attente — le réseau salarié assignera</option>
+                  {m.technicians.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <textarea
               value={m.message}
@@ -197,134 +302,23 @@ export function MobileEventModal({
               className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
             />
 
-            {!isEditing && (
-              <div
-                className="rounded-btn border-2 p-3 transition-colors"
-                style={{
-                  borderColor: m.wantsCoverage ? "var(--red)" : "var(--line)",
-                  background: m.wantsCoverage ? "var(--bad-bg)" : "transparent",
-                }}
-              >
-                <label className="flex cursor-pointer items-start gap-3">
-                  <input
-                    type="checkbox"
-                    checked={m.wantsCoverage}
-                    onChange={(e) => m.setWantsCoverage(e.target.checked)}
-                    className="sr-only"
-                  />
-                  <span
-                    className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] border-2 transition-colors ${
-                      m.wantsCoverage ? "border-red bg-red text-white" : "border-line-strong text-transparent"
-                    }`}
-                  >
-                    <Check size={13} strokeWidth={3} />
-                  </span>
-                  <span>
-                    <span className="flex items-center gap-1.5 text-sm font-bold text-ink">
-                      <Camera size={14} /> Demander une couverture média
-                    </span>
-                    <span className="mt-0.5 block text-xs text-ink-3">
-                      Photo ou vidéo — la demande part vers le réseau salarié et les admins.
-                    </span>
-                  </span>
-                </label>
-
-                {m.wantsCoverage && (
-                  <div className="mt-3 space-y-3">
-                    <textarea
-                      value={m.coverageDetails}
-                      onChange={(e) => m.setCoverageDetails(e.target.value)}
-                      rows={2}
-                      placeholder="Précisions pour l'équipe média (optionnel)"
-                      className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
-                    />
-
-                    {m.role.canAssignCoverage && (
-                      <div>
-                        <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
-                          Assigner directement un technicien (optionnel)
-                        </label>
-                        <select
-                          value={m.coverageTechnicianId}
-                          onChange={(e) => m.setCoverageTechnicianId(e.target.value)}
-                          className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
-                        >
-                          <option value="">Laisser en attente — le réseau salarié assignera</option>
-                          {m.technicians.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-                )}
+            {isEditing && (
+              <div>
+                <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Comité directeur</div>
+                <DirectorAttendanceSection director={m.director} eventId={event!.id} />
               </div>
             )}
 
             {isEditing && (
-              <>
-                <div>
-                  <div className="mb-1 flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
-                    <span>Équipe</span>
-                    <button onClick={() => setTab("equipe")} className="text-link">Gérer</button>
-                  </div>
-                  {m.team.team.length === 0 ? (
-                    <p className="text-xs italic text-ink-4">Aucun membre pour l&rsquo;instant.</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {m.team.team.map((tm) => (
-                        <span key={tm.id} className="rounded-full bg-subtle px-2 py-1 text-xs text-ink-2">
-                          {personName(tm.profiles)}
-                          {tm.role === "responsable" && " ⭐"}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Comité directeur</div>
-                  <DirectorAttendanceSection director={m.director} eventId={event!.id} />
-                  <div className="mt-2">
-                    <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Rappels</div>
-                    {m.reminders.length > 0 && (
-                      <div className="mb-1.5 flex flex-wrap gap-1.5">
-                        {m.reminders.map((r) => (
-                          <span
-                            key={r.id}
-                            className="flex items-center gap-1 rounded-full bg-subtle px-2.5 py-1 text-xs font-semibold text-ink-2"
-                          >
-                            {REMINDER_PRESETS.find((p) => p.value === r.reminder_offset)?.label ?? r.reminder_offset}
-                            <button
-                              onClick={() => m.removeReminder(r.id)}
-                              className="text-ink-4 hover:text-red"
-                              aria-label="Retirer ce rappel"
-                            >
-                              <X size={11} />
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <select
-                      value=""
-                      onChange={(e) => e.target.value && m.addReminder(e.target.value)}
-                      className="w-full rounded-btn border border-line px-2.5 py-2 text-xs text-ink-3 outline-none"
-                    >
-                      <option value="">+ Ajouter un rappel</option>
-                      {REMINDER_PRESETS.filter(
-                        (p) => !m.reminders.some((r) => r.reminder_offset === p.value)
-                      ).map((p) => (
-                        <option key={p.value} value={p.value}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </>
+              <div>
+                <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Pièces jointes</div>
+                <AttachmentsField
+                  eventId={event!.id}
+                  eventTitle={m.title}
+                  canManage={m.role.canAssignCoverage || m.team.canManageMembers}
+                  canPublish={m.role.canAssignCoverage}
+                />
+              </div>
             )}
           </div>
         )}
