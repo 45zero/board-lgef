@@ -139,8 +139,33 @@ export function MobileCalendrierScreen() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-3 py-1.5">
-        <div className="flex items-center gap-1">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-1.5">
+        <div className="flex items-center gap-2 justify-self-start">
+          <button
+            onClick={() => setFiltersOpen((o) => !o)}
+            className="flex h-[26px] w-[26px] items-center justify-center rounded-full border-[1.5px] bg-card transition-transform"
+            style={{
+              borderColor: filtersOpen ? "var(--red)" : "var(--navy-600)",
+              color: filtersOpen ? "var(--red)" : "var(--navy-600)",
+              transform: filtersOpen ? "rotate(180deg)" : undefined,
+            }}
+            aria-label="Filtrer par organisation"
+          >
+            <ChevronDown size={14} />
+          </button>
+          <button
+            onClick={() => setMineOnly((v) => !v)}
+            className={`flex h-[26px] w-[26px] items-center justify-center rounded-btn border ${
+              mineOnly ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
+            }`}
+            title="Événements où je suis sollicité"
+            aria-label="Événements où je suis sollicité"
+          >
+            <User size={14} />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1 justify-self-center">
           <button onClick={navPrev} className="flex h-7 w-7 items-center justify-center rounded-btn text-ink-3">
             <ChevronLeft size={16} />
           </button>
@@ -151,7 +176,8 @@ export function MobileCalendrierScreen() {
             <ChevronRight size={16} />
           </button>
         </div>
-        <div className="flex items-center gap-0.5 rounded-full border border-line bg-subtle p-0.5">
+
+        <div className="flex items-center gap-0.5 justify-self-end rounded-full border border-line bg-subtle p-0.5">
           {(["semaine", "mois"] as const).map((v) => (
             <button
               key={v}
@@ -164,31 +190,6 @@ export function MobileCalendrierScreen() {
             </button>
           ))}
         </div>
-      </div>
-
-      <div className="flex h-[26px] items-center gap-2 px-3">
-        <button
-          onClick={() => setFiltersOpen((o) => !o)}
-          className="flex h-[26px] w-[26px] items-center justify-center rounded-full border-[1.5px] bg-card transition-transform"
-          style={{
-            borderColor: filtersOpen ? "var(--red)" : "var(--navy-600)",
-            color: filtersOpen ? "var(--red)" : "var(--navy-600)",
-            transform: filtersOpen ? "rotate(180deg)" : undefined,
-          }}
-          aria-label="Filtrer par organisation"
-        >
-          <ChevronDown size={14} />
-        </button>
-        <button
-          onClick={() => setMineOnly((v) => !v)}
-          className={`flex h-[26px] w-[26px] items-center justify-center rounded-btn border ${
-            mineOnly ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
-          }`}
-          title="Événements où je suis sollicité"
-          aria-label="Événements où je suis sollicité"
-        >
-          <User size={14} />
-        </button>
       </div>
 
       {filtersOpen && (
