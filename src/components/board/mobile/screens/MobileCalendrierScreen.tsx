@@ -348,7 +348,8 @@ export function MobileCalendrierScreen() {
                     <div key={ev.id} className="flex items-center gap-1.5 text-xs">
                       <span className="h-2 w-2 rounded-full" style={{ background: ORG_COLORS[ev.org].base }} />
                       <span className="font-mono text-[10px] text-ink-4">{format(parseISO(ev.start), "HH:mm")}</span>
-                      <span className="truncate font-semibold text-ink-2">{ev.title}</span>
+                      <span className="min-w-0 flex-1 truncate font-semibold text-ink-2">{ev.title}</span>
+                      {ev.coverage && <CoverageIcon state={ev.coverage} size={11} />}
                     </div>
                   ))}
                 </div>

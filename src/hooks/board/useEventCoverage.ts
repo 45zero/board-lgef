@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { TechnicianOption } from "@/hooks/board/useAvailableTechnicians";
+import { notifyUsers, getEventOwners, getAdminIds, getActorName } from "@/lib/board/notify";
 
 export interface CoverageRequest {
   id: string;
@@ -50,6 +51,26 @@ export function useEventCoverage(eventId?: string) {
   useEffect(() => {
     fetchRequest();
   }, [fetchRequest]);
+
+  // Live : toute modification de la demande (par ex. le technicien qui répond
+  // depuis un autre appareil) rafraîchit ce modal sans rechargement.
+  const channelRef = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(null);
+  useEffect(() => {
+    if (!eventId) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`coverage-requests-${eventId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "coverage_requests", filter: `event_id=eq.${eventId}` },
+        () => fetchRequest()
+      )
+      .subscribe();
+    channelRef.current = channel;
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [eventId, fetchRequest]);
 
   const requestCoverage = async (details?: string) => {
     if (!eventId || !user || request) return false;
@@ -169,9 +190,14 @@ export function useEventCoverage(eventId?: string) {
     return true;
   };
 
-  /** Le technicien assigné répond lui-même — accepte ou refuse, avec un commentaire libre optionnel. */
+  /**
+   * Le technicien assigné répond lui-même — accepte ou refuse, avec un
+   * commentaire libre optionnel. Notifie le créateur + le(s) responsable(s)
+   * de l'équipe + les admins dans les deux cas ; notifie en plus le membre
+   * du comité directeur désigné, mais seulement en cas d'acceptation.
+   */
   const respondToCoverage = async (response: "accepted" | "rejected", notes?: string) => {
-    if (!request) return false;
+    if (!request || !eventId || !user) return false;
     const supabase = createClient();
     const { error } = await supabase
       .from("coverage_requests")
@@ -186,6 +212,39 @@ export function useEventCoverage(eventId?: string) {
       console.error("[useEventCoverage.respondToCoverage]", error);
       return false;
     }
+
+    try {
+      const [owners, adminIds, actorName, { data: ev }, { data: attendance }] = await Promise.all([
+        getEventOwners(eventId),
+        getAdminIds(),
+        getActorName(user.id),
+        supabase.from("events").select("title").eq("id", eventId).maybeSingle(),
+        supabase.from("director_attendance").select("director_id").eq("event_id", eventId).maybeSingle(),
+      ]);
+
+      const verb = response === "accepted" ? "a accepté" : "a refusé";
+      const notifType = response === "accepted" ? "coverage_accepted" : "coverage_rejected";
+      await notifyUsers([...owners, ...adminIds], {
+        type: notifType,
+        title: ev?.title ?? "Événement",
+        message: `${actorName} ${verb} la mission de couverture média.`,
+        actorName,
+        data: { event_id: eventId, response },
+      });
+
+      if (response === "accepted" && attendance?.director_id) {
+        await notifyUsers([attendance.director_id], {
+          type: "coverage_accepted",
+          title: ev?.title ?? "Événement",
+          message: `${actorName} a accepté la mission de couverture média.`,
+          actorName,
+          data: { event_id: eventId, response },
+        });
+      }
+    } catch (e) {
+      console.warn("[useEventCoverage.respondToCoverage] notification failed:", e);
+    }
+
     await fetchRequest();
     return true;
   };

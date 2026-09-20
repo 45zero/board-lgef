@@ -11,6 +11,7 @@ import { useEventExpenses } from "@/hooks/board/useEventExpenses";
 import type { useUserRole } from "@/hooks/board/useUserRole";
 import type { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
 import { type useEventCoverage, type CoverageRequest } from "@/hooks/board/useEventCoverage";
+import type { useDirectorAttendance } from "@/hooks/board/useDirectorAttendance";
 
 export function personName(
   p: { first_name: string | null; last_name: string | null; email: string | null } | null
@@ -472,6 +473,132 @@ function TechnicianPickerModal({
             </button>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Sélection + statut du comité directeur — remplace le <select> dupliqué entre EventModal et MobileEventModal. */
+export function DirectorAttendanceSection({
+  director,
+  eventId,
+}: {
+  director: ReturnType<typeof useDirectorAttendance>;
+  eventId: string;
+}) {
+  const { user } = useAuth();
+  const [responseOpen, setResponseOpen] = useState(false);
+  const att = director.attendance;
+  const isAssignedDirector = !!user && !!att && att.director_id === user.id;
+
+  const statusColor =
+    att?.status === "approved" ? COVERAGE_COLORS.photo : att?.status === "denied" ? COVERAGE_COLORS.no : COVERAGE_COLORS.wait;
+  const statusLabel = att?.status === "approved" ? "Confirmé" : att?.status === "denied" ? "Décliné" : "En attente";
+  const assignedProfile = director.directors.find((d) => d.id === att?.director_id) ?? null;
+
+  return (
+    <div className="space-y-2">
+      <select
+        value={att?.director_id ?? ""}
+        onChange={async (e) => {
+          const id = e.target.value || null;
+          if (!id) await director.deleteAttendance();
+          else await director.saveAttendance(eventId, { director_id: id, status: "pending" });
+        }}
+        className="w-full rounded-btn border border-line px-2 py-1.5 text-xs"
+      >
+        <option value="">Aucun membre désigné</option>
+        {director.directors.map((d) => (
+          <option key={d.id} value={d.id}>
+            {personName(d)}
+          </option>
+        ))}
+      </select>
+
+      {att?.director_id && (
+        <button
+          onClick={() => setResponseOpen(true)}
+          className="flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold"
+          style={{ background: statusColor.bg, color: statusColor.ink }}
+        >
+          {personName(assignedProfile)} — {statusLabel}
+        </button>
+      )}
+
+      {responseOpen && att && (
+        <DirectorResponseModal
+          canRespond={isAssignedDirector && att.status === "pending"}
+          status={att.status}
+          onClose={() => setResponseOpen(false)}
+          onRespond={async (r) => {
+            await director.respondToAttendance(r);
+            setResponseOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function DirectorResponseModal({
+  canRespond,
+  status,
+  onClose,
+  onRespond,
+}: {
+  canRespond: boolean;
+  status: string | null;
+  onClose: () => void;
+  onRespond: (response: "approved" | "denied") => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const submit = async (r: "approved" | "denied") => {
+    setSubmitting(true);
+    try {
+      await onRespond(r);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-sm rounded-modal border border-line bg-card p-4 shadow-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-ink">Comité directeur</h3>
+          <button onClick={onClose} className="text-ink-4 hover:text-ink">
+            ✕
+          </button>
+        </div>
+        {canRespond ? (
+          <>
+            <p className="mb-3 text-xs text-ink-3">Confirmez-vous votre présence à cet événement ?</p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => submit("denied")}
+                disabled={submitting}
+                className="rounded-btn border border-line px-3 py-2 text-sm font-semibold text-red disabled:opacity-60"
+              >
+                Décliner
+              </button>
+              <button
+                onClick={() => submit("approved")}
+                disabled={submitting}
+                className="rounded-btn bg-red px-3 py-2 text-sm font-bold text-white shadow-btn-red disabled:opacity-60"
+              >
+                Confirmer
+              </button>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-ink-2">
+            Statut :{" "}
+            <strong>{status === "approved" ? "Confirmé" : status === "denied" ? "Décliné" : "En attente de réponse"}</strong>
+          </p>
+        )}
       </div>
     </div>
   );

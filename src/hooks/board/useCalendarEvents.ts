@@ -91,5 +91,22 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
     fetchEvents();
   }, [fetchEvents]);
 
+  // Live : la grille (couleurs/icônes de couverture, statuts) se met à jour
+  // sans rechargement dès qu'un événement ou une demande de couverture change,
+  // même quand aucun modal n'est ouvert.
+  useEffect(() => {
+    if (!user) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel("calendar-events-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "events" }, () => fetchEvents())
+      .on("postgres_changes", { event: "*", schema: "public", table: "coverage_requests" }, () => fetchEvents())
+      .on("postgres_changes", { event: "*", schema: "public", table: "director_attendance" }, () => fetchEvents())
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, fetchEvents]);
+
   return { events, loading, refetch: fetchEvents };
 }

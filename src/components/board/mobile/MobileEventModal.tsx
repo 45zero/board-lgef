@@ -15,6 +15,7 @@ import {
   GestionFraisPlaceholder,
   CarteTab,
   CoverageActions,
+  DirectorAttendanceSection,
 } from "@/components/board/calendar/EventTabs";
 
 type Tab = "details" | "discussion" | "equipe" | "frais" | "gestion" | "carte";
@@ -201,22 +202,7 @@ export function MobileEventModal({
 
                 <div>
                   <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Comité directeur</div>
-                  <select
-                    value={m.director.attendance?.director_id ?? ""}
-                    onChange={async (e) => {
-                      const id = e.target.value || null;
-                      if (!id) await m.director.deleteAttendance();
-                      else await m.director.saveAttendance(event!.id, { director_id: id, status: "approved" });
-                    }}
-                    className="w-full rounded-btn border border-line px-2 py-2 text-xs"
-                  >
-                    <option value="">Aucun membre désigné</option>
-                    {m.director.directors.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {personName(d)}
-                      </option>
-                    ))}
-                  </select>
+                  <DirectorAttendanceSection director={m.director} eventId={event!.id} />
                   <label className="mt-2 flex items-center gap-2 text-xs text-ink-2">
                     <input type="checkbox" checked={m.reminderOn} onChange={m.toggleReminder} />
                     Me rappeler — 30 minutes avant le début

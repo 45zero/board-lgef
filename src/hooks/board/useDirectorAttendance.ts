@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { notifyUsers, getEventOwners, getActorName } from "@/lib/board/notify";
 
 export interface DirectorAttendance {
   id: string;
@@ -19,7 +20,7 @@ export interface DirectorProfile {
   email: string | null;
 }
 
-/** Porté de calendrier-lgef/src/hooks/useDirectorAttendance.ts. */
+/** Porté de calendrier-lgef/src/hooks/useDirectorAttendance.ts + notifications. */
 export function useDirectorAttendance(eventId?: string) {
   const [attendance, setAttendance] = useState<DirectorAttendance | null>(null);
   const [directors, setDirectors] = useState<DirectorProfile[]>([]);
@@ -45,6 +46,7 @@ export function useDirectorAttendance(eventId?: string) {
     setDirectors((data as DirectorProfile[] | null) ?? []);
   };
 
+  /** Désigne un membre du comité directeur — laissé "pending" pour qu'il confirme lui-même, et notifié. */
   const saveAttendance = async (
     id: string,
     payload: { director_id: string | null; status: "pending" | "approved" | "denied"; comments?: string | null }
@@ -54,9 +56,11 @@ export function useDirectorAttendance(eventId?: string) {
 
     const { data: existing } = await supabase
       .from("director_attendance")
-      .select("id")
+      .select("id, director_id")
       .eq("event_id", id)
       .maybeSingle();
+
+    const isNewAssignment = !!payload.director_id && payload.director_id !== existing?.director_id;
 
     const { data, error } = existing
       ? await supabase
@@ -73,6 +77,57 @@ export function useDirectorAttendance(eventId?: string) {
 
     if (error) return false;
     setAttendance(data as DirectorAttendance);
+
+    if (isNewAssignment && payload.director_id) {
+      try {
+        const [actorName, { data: ev }] = await Promise.all([
+          getActorName(user.id),
+          supabase.from("events").select("title").eq("id", id).maybeSingle(),
+        ]);
+        await notifyUsers([payload.director_id], {
+          type: "director_invitation",
+          title: ev?.title ?? "Événement",
+          message: `${actorName} vous a désigné(e) comme membre du comité directeur pour cet événement.`,
+          actorName,
+          data: { event_id: id },
+        });
+      } catch (e) {
+        console.warn("[useDirectorAttendance.saveAttendance] notification failed:", e);
+      }
+    }
+
+    return true;
+  };
+
+  /** Le membre du comité directeur désigné répond lui-même — notifie créateur + responsable(s). */
+  const respondToAttendance = async (response: "approved" | "denied") => {
+    if (!attendance || !user || !eventId) return false;
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("director_attendance")
+      .update({ status: response, updated_by: user.id })
+      .eq("id", attendance.id);
+    if (error) return false;
+
+    try {
+      const [owners, actorName, { data: ev }] = await Promise.all([
+        getEventOwners(eventId),
+        getActorName(user.id),
+        supabase.from("events").select("title").eq("id", eventId).maybeSingle(),
+      ]);
+      const verb = response === "approved" ? "a confirmé sa présence" : "ne pourra pas être présent(e)";
+      await notifyUsers(owners, {
+        type: response === "approved" ? "director_accepted" : "director_declined",
+        title: ev?.title ?? "Événement",
+        message: `${actorName} (comité directeur) ${verb}.`,
+        actorName,
+        data: { event_id: eventId, response },
+      });
+    } catch (e) {
+      console.warn("[useDirectorAttendance.respondToAttendance] notification failed:", e);
+    }
+
+    await fetchAttendance(eventId);
     return true;
   };
 
@@ -92,5 +147,23 @@ export function useDirectorAttendance(eventId?: string) {
     if (eventId) fetchAttendance(eventId);
   }, [eventId]);
 
-  return { attendance, directors, loading, saveAttendance, deleteAttendance };
+  // Live : réponse du comité directeur visible sans rechargement.
+  useEffect(() => {
+    if (!eventId) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`director-attendance-${eventId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "director_attendance", filter: `event_id=eq.${eventId}` },
+        () => fetchAttendance(eventId)
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId]);
+
+  return { attendance, directors, loading, saveAttendance, respondToAttendance, deleteAttendance };
 }
