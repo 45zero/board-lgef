@@ -6,6 +6,7 @@ import { getValidGoogleAccessToken } from "@/lib/google/accounts";
 import type { ConnectedAccount } from "@/generated/prisma";
 
 const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+const FILE_FIELDS = "id, name, mimeType, iconLink, webViewLink, size, modifiedTime, owners(displayName)";
 
 async function driveClient(account: ConnectedAccount) {
   const accessToken = await getValidGoogleAccessToken(account);
@@ -13,6 +14,16 @@ async function driveClient(account: ConnectedAccount) {
   auth.setCredentials({ access_token: accessToken });
   return google.drive({ version: "v3", auth });
 }
+
+export type DriveTypeFilter =
+  | "all"
+  | "folder"
+  | "document"
+  | "spreadsheet"
+  | "presentation"
+  | "pdf"
+  | "image"
+  | "video";
 
 export interface DriveFileItem {
   id: string;
@@ -23,6 +34,7 @@ export interface DriveFileItem {
   webViewLink: string;
   size: string | null;
   modifiedTime: string;
+  ownerName: string;
 }
 
 function mapFile(f: drive_v3.Schema$File): DriveFileItem {
@@ -35,21 +47,63 @@ function mapFile(f: drive_v3.Schema$File): DriveFileItem {
     webViewLink: f.webViewLink ?? "",
     size: f.size ?? null,
     modifiedTime: f.modifiedTime ?? "",
+    ownerName: f.owners?.[0]?.displayName ?? "",
   };
+}
+
+function mimeTypeClause(type: DriveTypeFilter | undefined): string | null {
+  switch (type) {
+    case "folder":
+      return `mimeType = '${FOLDER_MIME_TYPE}'`;
+    case "document":
+      return "mimeType = 'application/vnd.google-apps.document'";
+    case "spreadsheet":
+      return "mimeType = 'application/vnd.google-apps.spreadsheet'";
+    case "presentation":
+      return "mimeType = 'application/vnd.google-apps.presentation'";
+    case "pdf":
+      return "mimeType = 'application/pdf'";
+    case "image":
+      return "mimeType contains 'image/'";
+    case "video":
+      return "mimeType contains 'video/'";
+    default:
+      return null;
+  }
 }
 
 export async function listFiles(
   account: ConnectedAccount,
-  opts: { folderId?: string; query?: string }
+  opts: {
+    folderId?: string;
+    query?: string;
+    sharedWithMe?: boolean;
+    type?: DriveTypeFilter;
+    modifiedAfter?: string;
+  }
 ): Promise<DriveFileItem[]> {
   const drive = await driveClient(account);
-  const parent = opts.folderId ?? "root";
-  const q = opts.query
-    ? `'${parent}' in parents and trashed = false and name contains '${opts.query.replace(/'/g, "\\'")}'`
-    : `'${parent}' in parents and trashed = false`;
+  const clauses = ["trashed = false"];
+
+  // "Partagé avec moi" n'a pas de notion de dossier racine côté API — seule la
+  // racine de la vue utilise sharedWithMe ; une fois qu'on navigue dans un
+  // dossier (partagé ou non), c'est une relation parents classique.
+  if (opts.sharedWithMe && !opts.folderId) {
+    clauses.push("sharedWithMe = true");
+  } else {
+    clauses.push(`'${opts.folderId ?? "root"}' in parents`);
+  }
+
+  if (opts.query) {
+    clauses.push(`name contains '${opts.query.replace(/'/g, "\\'")}'`);
+  }
+  const typeClause = mimeTypeClause(opts.type);
+  if (typeClause) clauses.push(typeClause);
+  if (opts.modifiedAfter) clauses.push(`modifiedTime > '${opts.modifiedAfter}'`);
+
   const { data } = await drive.files.list({
-    q,
-    fields: "files(id, name, mimeType, iconLink, webViewLink, size, modifiedTime)",
+    q: clauses.join(" and "),
+    fields: `files(${FILE_FIELDS})`,
     orderBy: "folder,name",
     pageSize: 200,
   });
@@ -58,10 +112,7 @@ export async function listFiles(
 
 export async function getFile(account: ConnectedAccount, fileId: string): Promise<DriveFileItem> {
   const drive = await driveClient(account);
-  const { data } = await drive.files.get({
-    fileId,
-    fields: "id, name, mimeType, iconLink, webViewLink, size, modifiedTime",
-  });
+  const { data } = await drive.files.get({ fileId, fields: FILE_FIELDS });
   return mapFile(data);
 }
 
@@ -76,7 +127,7 @@ export async function createFolder(
       mimeType: FOLDER_MIME_TYPE,
       parents: [params.parentId ?? "root"],
     },
-    fields: "id, name, mimeType, iconLink, webViewLink, size, modifiedTime",
+    fields: FILE_FIELDS,
   });
   return mapFile(data);
 }
@@ -96,7 +147,7 @@ export async function uploadFile(
       mimeType: params.mimeType,
       body: Readable.from(buffer),
     },
-    fields: "id, name, mimeType, iconLink, webViewLink, size, modifiedTime",
+    fields: FILE_FIELDS,
   });
   return mapFile(data);
 }

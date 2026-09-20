@@ -9,6 +9,7 @@ import {
   uploadFile,
   downloadFile,
   trashFile,
+  type DriveTypeFilter,
 } from "@/lib/google/drive";
 
 async function requireUserId() {
@@ -20,7 +21,16 @@ async function requireUserId() {
   return user.id;
 }
 
-export async function listMyFiles(accountId: string, opts: { folderId?: string; query?: string } = {}) {
+export async function listMyFiles(
+  accountId: string,
+  opts: {
+    folderId?: string;
+    query?: string;
+    sharedWithMe?: boolean;
+    type?: DriveTypeFilter;
+    modifiedAfter?: string;
+  } = {}
+) {
   const userId = await requireUserId();
   const account = await getOwnedGoogleAccount(accountId, userId);
   return listFiles(account, opts);
