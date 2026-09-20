@@ -45,6 +45,9 @@ export function useEventModalState({
   const [endTime, setEndTime] = useState(format(end, "HH:mm"));
   const [saving, setSaving] = useState(false);
   const [reminderOn, setReminderOn] = useState(false);
+  const [wantsCoverage, setWantsCoverage] = useState(false);
+  const [coverageDetails, setCoverageDetails] = useState("");
+  const [coverageTechnicianId, setCoverageTechnicianId] = useState("");
 
   const { createEvent, updateEvent, deleteEventCascade } = useEventActions();
   const team = useEventTeam(event?.id ?? "", event?.createdBy ?? null);
@@ -97,11 +100,50 @@ export function useEventModalState({
     setSaving(true);
     try {
       const payload = buildPayload();
-      const ok = isEditing && event ? await updateEvent(event.id, payload) : await createEvent(payload);
-      if (ok) {
-        onSaved();
-        onClose();
+      if (isEditing && event) {
+        const ok = await updateEvent(event.id, payload);
+        if (ok) {
+          onSaved();
+          onClose();
+        }
+        return;
       }
+
+      const newId = await createEvent(payload);
+      if (!newId) return;
+
+      if (wantsCoverage && user) {
+        // useEventCoverage est lié à event?.id (indéfini à la création) — on ne peut
+        // pas le réutiliser ici, donc écriture directe avec le nouvel id.
+        const supabase = createClient();
+        const tech = role.canAssignCoverage ? technicians.find((t) => t.id === coverageTechnicianId) : undefined;
+        try {
+          if (tech) {
+            await supabase.from("coverage_requests").insert({
+              event_id: newId,
+              requester_id: user.id,
+              assigned_technician_id: tech.id,
+              assigned_technician_name: tech.name,
+              assigned_technician_email: tech.email,
+              technician_response: "accepted",
+              status: "approved",
+            });
+          } else {
+            await supabase.from("coverage_requests").insert({
+              event_id: newId,
+              requester_id: user.id,
+              status: "pending",
+              details: coverageDetails.trim() || null,
+            });
+          }
+          await supabase.from("events").update({ requires_coverage: true }).eq("id", newId);
+        } catch (e) {
+          console.warn("[useEventModalState] coverage request failed", e);
+        }
+      }
+
+      onSaved();
+      onClose();
     } finally {
       setSaving(false);
     }
@@ -141,6 +183,12 @@ export function useEventModalState({
     saving,
     reminderOn,
     toggleReminder,
+    wantsCoverage,
+    setWantsCoverage,
+    coverageDetails,
+    setCoverageDetails,
+    coverageTechnicianId,
+    setCoverageTechnicianId,
     team,
     director,
     comments,

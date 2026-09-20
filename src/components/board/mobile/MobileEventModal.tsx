@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
 import { X, Trash2, MapPin, ChevronDown } from "lucide-react";
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
 import { CALENDAR_ORG_KEYS, type CalendarEvent } from "@/lib/board/calendar";
 import { useEventModalState } from "@/hooks/board/useEventModalState";
+import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import {
   personName,
   DiscussionTab,
@@ -44,9 +45,25 @@ export function MobileEventModal({
 }) {
   const [tab, setTab] = useState<Tab>("details");
   const [orgPickerOpen, setOrgPickerOpen] = useState(false);
+  const locationInputRef = useRef<HTMLInputElement>(null);
+  const mapsLoaded = useGoogleMapsScript();
   const m = useEventModalState({ event, defaultStart, defaultEnd, onClose, onSaved });
   const { isEditing } = m;
   const orgColor = ORG_COLORS[m.org];
+
+  useEffect(() => {
+    if (!mapsLoaded || !locationInputRef.current) return;
+    const autocomplete = new google.maps.places.Autocomplete(locationInputRef.current, {
+      fields: ["formatted_address"],
+      componentRestrictions: { country: "fr" },
+    });
+    const listener = autocomplete.addListener("place_changed", () => {
+      const place = autocomplete.getPlace();
+      if (place.formatted_address) m.setLocation(place.formatted_address);
+    });
+    return () => listener.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- m.setLocation est stable (setter React), pas besoin de le lister
+  }, [mapsLoaded]);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-card">
@@ -164,6 +181,7 @@ export function MobileEventModal({
             <div className="flex items-center gap-2 rounded-btn border border-line px-3 py-2.5">
               <MapPin size={14} className="text-ink-4" />
               <input
+                ref={locationInputRef}
                 value={m.location}
                 onChange={(e) => m.setLocation(e.target.value)}
                 placeholder="Lieu"
@@ -178,6 +196,51 @@ export function MobileEventModal({
               placeholder="Message (optionnel)"
               className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
             />
+
+            {!isEditing && (
+              <div className="rounded-btn border border-line p-3">
+                <label className="flex items-center gap-2 text-sm font-semibold text-ink-2">
+                  <input
+                    type="checkbox"
+                    checked={m.wantsCoverage}
+                    onChange={(e) => m.setWantsCoverage(e.target.checked)}
+                  />
+                  Demander une couverture média
+                </label>
+
+                {m.wantsCoverage && (
+                  <div className="mt-3 space-y-3">
+                    <textarea
+                      value={m.coverageDetails}
+                      onChange={(e) => m.setCoverageDetails(e.target.value)}
+                      rows={2}
+                      placeholder="Précisions pour l'équipe média (optionnel)"
+                      className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
+                    />
+
+                    {m.role.canAssignCoverage && (
+                      <div>
+                        <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+                          Assigner directement un technicien (optionnel)
+                        </label>
+                        <select
+                          value={m.coverageTechnicianId}
+                          onChange={(e) => m.setCoverageTechnicianId(e.target.value)}
+                          className="w-full rounded-btn border border-line px-3 py-2.5 text-sm outline-none"
+                        >
+                          <option value="">Laisser en attente — le réseau salarié assignera</option>
+                          {m.technicians.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {isEditing && (
               <>
