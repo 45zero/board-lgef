@@ -37,6 +37,7 @@ import {
   deleteMyDraft,
 } from "@/app/actions/gmail";
 import { EmailBody } from "@/components/board/mail/EmailBody";
+import { SenderAvatar, parseSenderName } from "@/components/board/mail/SenderAvatar";
 
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
 type MessageListItem = Awaited<ReturnType<typeof listMyMessages>>["messages"][number];
@@ -299,10 +300,11 @@ export function MobileMailsScreen() {
               onTap={() => (selectMode ? toggleSelected(m.id) : openMessage(m.id))}
               onLongPress={() => enterSelectMode(m.id)}
               onArchive={() => handleArchive(m.id)}
+              avatar={<SenderAvatar name={m.from} size={38} />}
             >
               <div className="flex items-center justify-between gap-2">
                 <span className={`truncate text-sm ${m.unread ? "font-bold text-ink" : "font-medium text-ink-2"}`}>
-                  {m.from}
+                  {parseSenderName(m.from)}
                 </span>
                 {m.hasAttachments && <Paperclip size={12} className="shrink-0 text-ink-4" />}
               </div>
@@ -401,6 +403,7 @@ function SwipeableMailRow({
   onTap,
   onLongPress,
   onArchive,
+  avatar,
   children,
 }: {
   selectMode: boolean;
@@ -408,9 +411,11 @@ function SwipeableMailRow({
   onTap: () => void;
   onLongPress: () => void;
   onArchive: () => void;
+  avatar: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [dragX, setDragX] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
   const dragging = useRef(false);
   const moved = useRef(false);
   const startX = useRef(0);
@@ -423,37 +428,54 @@ function SwipeableMailRow({
     }
   };
 
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (selectMode) return;
+  // Capture le pointeur pour que le swipe reste fiable même si le doigt dérive
+  // légèrement hors de la ligne (sans ça, le drag "décroche" en usage réel).
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     startX.current = e.clientX;
     dragging.current = true;
     moved.current = false;
-    longPressTimer.current = setTimeout(() => {
-      if (!moved.current) {
-        onLongPress();
-        dragging.current = false;
-        setDragX(0);
-      }
-    }, LONG_PRESS_MS);
+    setIsDragging(true);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // pointerId déjà relâché — sans conséquence
+    }
+    if (!selectMode) {
+      longPressTimer.current = setTimeout(() => {
+        if (!moved.current) {
+          onLongPress();
+          dragging.current = false;
+          setDragX(0);
+          setIsDragging(false);
+        }
+      }, LONG_PRESS_MS);
+    }
   };
 
-  const handlePointerMove = (e: React.PointerEvent) => {
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragging.current) return;
     const delta = e.clientX - startX.current;
     if (Math.abs(delta) > 8) {
       moved.current = true;
       clearLongPress();
     }
-    if (delta < 0) setDragX(Math.max(delta, -110));
+    // Pas de swipe pendant la sélection multiple — juste la détection de tap ci-dessous.
+    if (!selectMode && delta < 0) setDragX(Math.max(delta, -110));
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     clearLongPress();
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // déjà relâché — sans conséquence
+    }
     if (dragging.current && !moved.current) {
       onTap();
-    } else if (dragX < SWIPE_THRESHOLD) {
+    } else if (!selectMode && dragX < SWIPE_THRESHOLD) {
       onArchive();
     }
+    setIsDragging(false);
     setDragX(0);
     dragging.current = false;
   };
@@ -469,9 +491,9 @@ function SwipeableMailRow({
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         style={{ transform: `translateX(${dragX}px)`, touchAction: "pan-y" }}
-        className={`relative flex items-center gap-2 bg-card px-4 py-3 transition-transform active:bg-hover ${
-          selected ? "bg-sel-bg" : ""
-        }`}
+        className={`relative flex items-center gap-3 bg-card px-4 py-3 active:bg-hover ${
+          isDragging ? "" : "transition-transform duration-200"
+        } ${selected ? "bg-sel-bg" : ""}`}
       >
         {selectMode && (
           <span
@@ -482,6 +504,7 @@ function SwipeableMailRow({
             {selected && <Check size={12} />}
           </span>
         )}
+        {avatar}
         <div className="min-w-0 flex-1">{children}</div>
       </div>
     </div>

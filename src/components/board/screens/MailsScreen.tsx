@@ -40,6 +40,7 @@ import {
   deleteMyDraft,
 } from "@/app/actions/gmail";
 import { EmailBody } from "@/components/board/mail/EmailBody";
+import { SenderAvatar, parseSenderName } from "@/components/board/mail/SenderAvatar";
 
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
 type MessageListItem = Awaited<ReturnType<typeof listMyMessages>>["messages"][number];
@@ -396,15 +397,18 @@ export function MailsScreen() {
                   selected?.id === m.id ? "bg-sel-bg" : ""
                 }`}
               >
-                <button onClick={() => openMessage(m.id)} className="min-w-0 flex-1 px-4 py-3 text-left">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={`truncate text-sm ${m.unread ? "font-bold text-ink" : "font-medium text-ink-2"}`}>
-                      {m.from}
-                    </span>
-                    {m.hasAttachments && <Paperclip size={12} className="shrink-0 text-ink-4" />}
+                <button onClick={() => openMessage(m.id)} className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left">
+                  <SenderAvatar name={m.from} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`truncate text-sm ${m.unread ? "font-bold text-ink" : "font-medium text-ink-2"}`}>
+                        {parseSenderName(m.from)}
+                      </span>
+                      {m.hasAttachments && <Paperclip size={12} className="shrink-0 text-ink-4" />}
+                    </div>
+                    <div className="truncate text-sm text-ink-2">{m.subject}</div>
+                    <div className="truncate text-xs text-ink-4">{m.snippet}</div>
                   </div>
-                  <div className="truncate text-sm text-ink-2">{m.subject}</div>
-                  <div className="truncate text-xs text-ink-4">{m.snippet}</div>
                 </button>
                 <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
                   <button
@@ -472,8 +476,11 @@ export function MailsScreen() {
                   </button>
                 </div>
               </div>
-              <div className="mt-1 text-xs text-ink-3">
-                De : {selected.from} — {selected.date}
+              <div className="mt-2 flex items-center gap-2.5">
+                <SenderAvatar name={selected.from} size={32} />
+                <div className="text-xs text-ink-3">
+                  De : {selected.from} — {selected.date}
+                </div>
               </div>
 
               {selected.attachments.length > 0 && (
