@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Kanban } from "lucide-react";
+import type { ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 
 const TODAY_ITEMS = [
   {
@@ -54,7 +55,7 @@ const ACTIVITY = [
   },
 ];
 
-export function ContextPanel() {
+export function ContextPanel({ widgets }: { widgets: ContextPanelWidgets }) {
   return (
     <aside className="hidden w-[280px] shrink-0 flex-col gap-4 overflow-y-auto rounded-panel border border-line bg-card/70 p-4 shadow-bar backdrop-blur xl:flex">
       <div className="flex items-center justify-between">
@@ -64,67 +65,85 @@ export function ContextPanel() {
         <ChevronRight size={14} className="text-ink-4" />
       </div>
 
-      <div>
-        <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">
-          Aujourd&rsquo;hui
-        </div>
-        <div className="flex flex-col gap-2">
-          {TODAY_ITEMS.map((item) => (
-            <div
-              key={item.title}
-              className="rounded-btn border-l-4 p-3"
-              style={{
-                borderLeftColor: item.tone === "bad" ? "var(--bad)" : "var(--navy)",
-                background: item.tone === "bad" ? "var(--bad-bg)" : "var(--sel-bg)",
-              }}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-xs font-bold text-ink">{item.time}</span>
-                <span className="rounded-full bg-card px-2 py-0.5 text-[10px] font-semibold text-ink-2">
-                  {item.tag}
-                </span>
-              </div>
-              <div className="mt-1 text-sm font-bold text-ink">{item.title}</div>
-              <div className="text-xs text-ink-3">{item.meta}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">
-          Activité du board
-        </div>
-        <div className="flex flex-col gap-3">
-          {ACTIVITY.map((item, i) => (
-            <div key={i} className="flex gap-2">
+      {widgets.today && (
+        <div>
+          <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">
+            Aujourd&rsquo;hui
+          </div>
+          <div className="flex flex-col gap-2">
+            {TODAY_ITEMS.map((item) => (
               <div
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
-                style={{ background: item.color }}
+                key={item.title}
+                className="rounded-btn border-l-4 p-3"
+                style={{
+                  borderLeftColor: item.tone === "bad" ? "var(--bad)" : "var(--navy)",
+                  background: item.tone === "bad" ? "var(--bad-bg)" : "var(--sel-bg)",
+                }}
               >
-                {item.initials}
-              </div>
-              <div className="text-xs text-ink-2">
-                <span className="font-bold text-ink">{item.name}</span> {item.text}
-                <div className="mt-1 flex items-center gap-2">
-                  <span className="rounded-full bg-subtle px-2 py-0.5 text-[10px] font-semibold text-ink-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold text-ink">{item.time}</span>
+                  <span className="rounded-full bg-card px-2 py-0.5 text-[10px] font-semibold text-ink-2">
                     {item.tag}
                   </span>
-                  <span className="text-[10px] text-ink-4">{item.time}</span>
+                </div>
+                <div className="mt-1 text-sm font-bold text-ink">{item.title}</div>
+                <div className="text-xs text-ink-3">{item.meta}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {widgets.trello && (
+        <div>
+          <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">
+            Mes cartes Trello
+          </div>
+          <div className="flex flex-col items-center gap-2 rounded-btn border border-dashed border-line p-4 text-center text-xs text-ink-4">
+            <Kanban size={18} />
+            Trello arrive bientôt dans le board.
+          </div>
+        </div>
+      )}
+
+      {widgets.activity && (
+        <div>
+          <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">
+            Activité du board
+          </div>
+          <div className="flex flex-col gap-3">
+            {ACTIVITY.map((item, i) => (
+              <div key={i} className="flex gap-2">
+                <div
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                  style={{ background: item.color }}
+                >
+                  {item.initials}
+                </div>
+                <div className="text-xs text-ink-2">
+                  <span className="font-bold text-ink">{item.name}</span> {item.text}
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="rounded-full bg-subtle px-2 py-0.5 text-[10px] font-semibold text-ink-3">
+                      {item.tag}
+                    </span>
+                    <span className="text-[10px] text-ink-4">{item.time}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="mt-auto rounded-btn bg-subtle p-3 text-center">
-        <div className="font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Migration</div>
-        <div className="mt-0.5 text-[11px] font-bold text-ink-2">7 / 14 apps</div>
-        <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-track">
-          <div className="h-full w-1/2 rounded-full bg-red" />
+      {widgets.migration && (
+        <div className="mt-auto rounded-btn bg-subtle p-3 text-center">
+          <div className="font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Migration</div>
+          <div className="mt-0.5 text-[11px] font-bold text-ink-2">7 / 14 apps</div>
+          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-track">
+            <div className="h-full w-1/2 rounded-full bg-red" />
+          </div>
         </div>
-      </div>
+      )}
     </aside>
   );
 }

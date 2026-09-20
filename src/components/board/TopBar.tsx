@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { Search, Bell, Moon, Sun, ChevronRight } from "lucide-react";
+import { Search, Bell, Moon, Sun, ChevronRight, Settings } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { BoardApp } from "@/lib/board/tokens";
@@ -41,10 +41,12 @@ export function TopBar({
   currentApp,
   theme,
   onToggleTheme,
+  onOpenSettings,
 }: {
   currentApp: BoardApp;
   theme: Theme;
   onToggleTheme: () => void;
+  onOpenSettings: () => void;
 }) {
   const { name, initials } = useCurrentProfile();
 
@@ -97,6 +99,15 @@ export function TopBar({
         aria-label="Changer de thème"
       >
         {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
+      </button>
+
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        className="flex h-9 w-9 items-center justify-center rounded-full border border-line text-ink-2 hover:bg-hover"
+        aria-label="Paramètres du board"
+      >
+        <Settings size={16} />
       </button>
 
       <div className="flex items-center gap-2">

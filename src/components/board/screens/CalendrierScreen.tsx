@@ -37,7 +37,8 @@ import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import { listMyCalendars, listMyEvents } from "@/app/actions/calendar";
 import { EventModal } from "@/components/board/calendar/EventModal";
 import { GoogleEventModal } from "@/components/board/calendar/GoogleEventModal";
-import { ORG_COLORS, COVERAGE_LABELS, COVERAGE_COLORS, type CoverageState } from "@/lib/board/tokens";
+import { ORG_COLORS, ORG_LABELS, COVERAGE_LABELS, COVERAGE_COLORS, type CoverageState, type OrgKey } from "@/lib/board/tokens";
+import { CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
 import type { CalendarEvent } from "@/lib/board/calendar";
 
 const HOUR_START = 8;
@@ -109,6 +110,16 @@ export function CalendrierScreen() {
   const [newSlot, setNewSlot] = useState<{ start: Date; end: Date } | null>(null);
   const [editingGoogle, setEditingGoogle] = useState<GoogleEventItem | "new" | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [hiddenOrgs, setHiddenOrgs] = useState<Set<OrgKey>>(() => new Set());
+
+  const toggleOrgVisibility = (key: OrgKey) => {
+    setHiddenOrgs((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const refetchGoogleEvents = () => {
     if (!googleAccountId) return;
@@ -145,22 +156,32 @@ export function CalendrierScreen() {
 
   const visibleEvents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return q ? events.filter((e) => e.title.toLowerCase().includes(q)) : events;
-  }, [events, searchQuery]);
+    return events.filter((e) => {
+      if (hiddenOrgs.has(e.org)) return false;
+      if (q && !e.title.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [events, searchQuery, hiddenOrgs]);
 
   const eventsForDay = (day: Date) => visibleEvents.filter((e) => isSameDay(parseISO(e.start), day));
   const googleEventsForDay = (day: Date) =>
     googleEvents.filter((e) => !e.allDay && isSameDay(parseISO(e.start), day));
 
+  const plannedMinutes = useMemo(
+    () =>
+      events.reduce(
+        (sum, e) => sum + Math.max(0, (parseISO(e.end).getTime() - parseISO(e.start).getTime()) / 60000),
+        0
+      ),
+    [events]
+  );
   const plannedLabel = useMemo(() => {
-    const totalMinutes = events.reduce(
-      (sum, e) => sum + Math.max(0, (parseISO(e.end).getTime() - parseISO(e.start).getTime()) / 60000),
-      0
-    );
-    const h = Math.floor(totalMinutes / 60);
-    const m = Math.round(totalMinutes % 60);
+    const h = Math.floor(plannedMinutes / 60);
+    const m = Math.round(plannedMinutes % 60);
     return `${h} h${m > 0 ? ` ${m.toString().padStart(2, "0")}` : ""}`;
-  }, [events]);
+  }, [plannedMinutes]);
+  // 35h/semaine posée comme capacité de référence — pas de vraie notion de disponibilité en base.
+  const availabilityPct = Math.max(0, Math.min(100, Math.round(100 - (plannedMinutes / 60 / 35) * 100)));
 
   const coverageCounts = useMemo(() => {
     const counts: Partial<Record<CoverageState, number>> = {};
@@ -214,18 +235,18 @@ export function CalendrierScreen() {
   };
 
   return (
-    <div className="flex h-full flex-col gap-3">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="font-mono text-[10px] tracking-[0.12em] text-ink-4 uppercase">
-            Calendrier · Agenda partagé
-          </div>
-          <h1 className="mt-1 text-2xl font-extrabold text-ink">Mon agenda</h1>
-          <p className="mt-1 text-sm text-ink-3">
-            {events.length} événement{events.length === 1 ? "" : "s"} cette {viewMode === "month" ? "période" : "semaine"} · {plannedLabel} planifiées.
-          </p>
-        </div>
+    <div className="flex h-full gap-3">
+      <CalendarSidebar
+        anchorDate={anchorDate}
+        onSelectDay={setAnchorDate}
+        hiddenOrgs={hiddenOrgs}
+        onToggleOrg={toggleOrgVisibility}
+        plannedLabel={plannedLabel}
+        availabilityPct={availabilityPct}
+      />
 
+      <div className="flex h-full min-w-0 flex-1 flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="flex items-center gap-2">
           <div className="flex min-w-[220px] items-center gap-2 rounded-btn border border-line bg-card px-3 py-2">
             <Search size={14} className="shrink-0 text-ink-4" />
@@ -526,6 +547,7 @@ export function CalendrierScreen() {
           </div>
         </div>
       )}
+      </div>
 
       {editingInternal && (
         <EventModal
@@ -552,5 +574,127 @@ export function CalendrierScreen() {
         />
       )}
     </div>
+  );
+}
+
+/** Mini-calendrier + liste des calendriers (organisations) + disponibilité — colonne gauche, comme calendrier.lgef.fr. */
+function CalendarSidebar({
+  anchorDate,
+  onSelectDay,
+  hiddenOrgs,
+  onToggleOrg,
+  plannedLabel,
+  availabilityPct,
+}: {
+  anchorDate: Date;
+  onSelectDay: (d: Date) => void;
+  hiddenOrgs: Set<OrgKey>;
+  onToggleOrg: (key: OrgKey) => void;
+  plannedLabel: string;
+  availabilityPct: number;
+}) {
+  const [miniMonth, setMiniMonth] = useState(anchorDate);
+
+  const miniDays = useMemo(() => {
+    const gridStart = startOfWeek(startOfMonth(miniMonth), { weekStartsOn: 1, locale: fr });
+    const gridEnd = endOfWeek(endOfMonth(miniMonth), { weekStartsOn: 1, locale: fr });
+    const days: Date[] = [];
+    for (let d = gridStart; d <= gridEnd; d = addDays(d, 1)) days.push(d);
+    return days;
+  }, [miniMonth]);
+
+  return (
+    <aside className="hidden w-[240px] shrink-0 flex-col gap-4 overflow-y-auto rounded-panel border border-line bg-card p-3 lg:flex">
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-sm font-bold capitalize text-ink">{format(miniMonth, "MMMM yyyy", { locale: fr })}</span>
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => setMiniMonth((m) => subMonths(m, 1))}
+              className="flex h-6 w-6 items-center justify-center rounded-btn text-ink-3 hover:bg-hover"
+            >
+              <ChevronLeft size={13} />
+            </button>
+            <button
+              onClick={() => setMiniMonth((m) => addMonths(m, 1))}
+              className="flex h-6 w-6 items-center justify-center rounded-btn text-ink-3 hover:bg-hover"
+            >
+              <ChevronRight size={13} />
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-7 gap-y-1 text-center">
+          {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => (
+            <div key={i} className="font-mono text-[9px] text-ink-4">
+              {d}
+            </div>
+          ))}
+          {miniDays.map((day) => {
+            const inMonth = isSameMonth(day, miniMonth);
+            const isSelected = isSameDay(day, anchorDate);
+            const isToday = isSameDay(day, new Date());
+            return (
+              <button
+                key={day.toISOString()}
+                onClick={() => {
+                  onSelectDay(day);
+                  setMiniMonth(day);
+                }}
+                className={`mx-auto flex h-6 w-6 items-center justify-center rounded-full text-[11px] ${
+                  isSelected
+                    ? "bg-navy font-bold text-white"
+                    : isToday
+                      ? "font-bold text-red"
+                      : inMonth
+                        ? "text-ink-2 hover:bg-hover"
+                        : "text-ink-4/50"
+                }`}
+              >
+                {format(day, "d")}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Mes calendriers</div>
+        <div className="flex flex-col gap-1.5">
+          {CALENDAR_ORG_KEYS.map((key) => {
+            const visible = !hiddenOrgs.has(key);
+            const color = ORG_COLORS[key];
+            return (
+              <button
+                key={key}
+                onClick={() => onToggleOrg(key)}
+                className="flex items-center gap-2 rounded-btn px-1.5 py-1 text-left hover:bg-hover"
+              >
+                <span
+                  className="h-3 w-3 shrink-0 rounded-[3px] border"
+                  style={{
+                    background: visible ? color.base : "transparent",
+                    borderColor: color.base,
+                  }}
+                />
+                <span className={`truncate text-xs ${visible ? "text-ink-2" : "text-ink-4 line-through"}`}>
+                  {ORG_LABELS[key]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-auto">
+        <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Disponibilité</div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-track">
+          <div className="h-full rounded-full bg-navy" style={{ width: `${availabilityPct}%` }} />
+        </div>
+        <div className="mt-1.5 flex items-center justify-between text-xs">
+          <span className="font-bold text-ink">{availabilityPct}%</span>
+          <span className="text-ink-4">{plannedLabel} planifiées cette semaine.</span>
+        </div>
+      </div>
+    </aside>
   );
 }

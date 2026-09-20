@@ -144,10 +144,6 @@ export function MailsScreen() {
     setActiveQuery("");
   };
 
-  const folderLabel =
-    SYSTEM_FOLDERS.find((f) => f.id === folder)?.name ?? labels.find((l) => l.id === folder)?.name ?? "Messages";
-  const unreadCount = messages.filter((m) => m.unread).length;
-
   const openMessage = async (id: string) => {
     if (!activeAccountId) return;
     const detail = await getMyMessage(activeAccountId, id);
@@ -239,19 +235,7 @@ export function MailsScreen() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="font-mono text-[10px] tracking-[0.12em] text-ink-4 uppercase">
-            Mails · Messagerie
-          </div>
-          <h1 className="mt-1 text-2xl font-extrabold text-ink">{folderLabel}</h1>
-          <p className="mt-1 text-sm text-ink-3">
-            {unreadCount} message{unreadCount === 1 ? "" : "s"} non lu{unreadCount === 1 ? "" : "s"} ·{" "}
-            {messages.length} conversation{messages.length === 1 ? "" : "s"} · {labels.length} dossier
-            {labels.length === 1 ? "" : "s"} partagé{labels.length === 1 ? "" : "s"}.
-          </p>
-        </div>
-
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="flex items-center gap-2">
           <div className="flex min-w-[220px] items-center gap-2 rounded-btn border border-line bg-card px-3 py-2">
             <Search size={14} className="shrink-0 text-ink-4" />
