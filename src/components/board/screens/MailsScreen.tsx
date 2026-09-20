@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Mail,
+  Menu,
   Plus,
   RefreshCw,
   Send,
@@ -75,6 +76,7 @@ export function MailsScreen() {
   const [addingLabel, setAddingLabel] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [activeQuery, setActiveQuery] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const [messages, setMessages] = useState<MessageListItem[]>([]);
   const [drafts, setDrafts] = useState<DraftListItem[]>([]);
@@ -225,7 +227,7 @@ export function MailsScreen() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2">
       {banner && (
         <div className="flex items-center justify-between rounded-btn border border-line bg-card px-4 py-2 text-sm text-ink-2">
           {banner}
@@ -235,129 +237,148 @@ export function MailsScreen() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-end gap-3">
-        <div className="flex items-center gap-2">
-          <div className="flex min-w-[220px] items-center gap-2 rounded-btn border border-line bg-card px-3 py-2">
-            <Search size={14} className="shrink-0 text-ink-4" />
-            <input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && runSearch()}
-              placeholder="Rechercher un message..."
-              className="w-full bg-transparent text-sm outline-none"
-            />
-            {activeQuery && (
-              <button onClick={clearSearch} className="text-ink-4 hover:text-ink">
-                <X size={13} />
-              </button>
-            )}
-          </div>
-          <button
-            className="flex h-9 w-9 items-center justify-center rounded-btn border border-line text-ink-3 hover:bg-hover"
-            aria-label="Filtres"
-            title="Filtres (à venir)"
-          >
-            <SlidersHorizontal size={15} />
-          </button>
-          <button
-            onClick={() => {
-              setEditingDraftId(null);
-              setComposing(true);
-            }}
-            className="flex items-center gap-1.5 rounded-btn bg-navy px-3.5 py-2 text-sm font-bold text-white hover:bg-navy-600"
-          >
-            <Plus size={15} /> Nouveau message
-          </button>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {accounts.map((acc) => (
-            <button
-              key={acc.id}
-              onClick={() => setActiveAccountId(acc.id)}
-              className={`rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-                activeAccountId === acc.id
-                  ? "border-navy bg-navy text-white"
-                  : "border-line bg-card text-ink-2 hover:bg-hover"
-              }`}
-            >
-              {acc.label || acc.email}
+      <div className="flex items-center justify-end gap-2">
+        <div className="flex min-w-[220px] items-center gap-2 rounded-btn border border-line bg-card px-3 py-2">
+          <Search size={14} className="shrink-0 text-ink-4" />
+          <input
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && runSearch()}
+            placeholder="Rechercher un message..."
+            className="w-full bg-transparent text-sm outline-none"
+          />
+          {activeQuery && (
+            <button onClick={clearSearch} className="text-ink-4 hover:text-ink">
+              <X size={13} />
             </button>
-          ))}
-          <a
-            href="/api/oauth/google/start"
-            className="flex items-center gap-1 rounded-full border border-dashed border-line px-3 py-1.5 text-xs font-semibold text-ink-3 hover:bg-hover"
-          >
-            <Plus size={12} /> Ajouter un compte
-          </a>
+          )}
         </div>
-
+        <button
+          className="flex h-9 w-9 items-center justify-center rounded-btn border border-line text-ink-3 hover:bg-hover"
+          aria-label="Filtres"
+          title="Filtres (à venir)"
+        >
+          <SlidersHorizontal size={15} />
+        </button>
         <button
           onClick={refresh}
-          className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-3 hover:bg-hover"
+          className="flex h-9 w-9 items-center justify-center rounded-btn border border-line text-ink-3 hover:bg-hover"
           aria-label="Actualiser"
         >
           <RefreshCw size={14} />
         </button>
+        <button
+          onClick={() => {
+            setEditingDraftId(null);
+            setComposing(true);
+          }}
+          className="flex h-9 w-9 items-center justify-center rounded-btn bg-navy text-white hover:bg-navy-600"
+          aria-label="Nouveau message"
+          title="Nouveau message"
+        >
+          <Plus size={17} />
+        </button>
       </div>
 
-      <div className="grid flex-1 grid-cols-[180px_340px_1fr] gap-4 overflow-hidden">
-        <div className="flex flex-col gap-1 overflow-y-auto rounded-panel border border-line bg-card p-2">
+      <div className="flex flex-1 gap-3 overflow-hidden">
+        <aside
+          className={`hidden shrink-0 flex-col gap-1 overflow-y-auto rounded-panel border border-line bg-card p-2 transition-all duration-300 ease-in-out md:flex ${
+            menuOpen ? "w-52" : "w-12 items-center"
+          }`}
+        >
+          <button
+            onClick={() => setMenuOpen((o) => !o)}
+            className="flex h-9 w-9 items-center justify-center self-start rounded-btn text-ink-3 hover:bg-hover"
+            aria-label="Déplier le menu"
+          >
+            <Menu size={17} />
+          </button>
+
           {SYSTEM_FOLDERS.map((f) => (
             <button
               key={f.id}
               onClick={() => setFolder(f.id)}
+              title={f.name}
               className={`flex items-center gap-2 rounded-btn px-3 py-2 text-left text-sm font-semibold ${
-                folder === f.id ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"
-              }`}
+                menuOpen ? "w-full" : "h-9 w-9 justify-center px-0"
+              } ${folder === f.id ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"}`}
             >
-              <f.icon size={14} /> {f.name}
+              <f.icon size={16} className="shrink-0" /> {menuOpen && f.name}
             </button>
           ))}
 
-          <div className="mt-3 flex items-center justify-between px-3 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
-            Libellés
-            <button onClick={() => setAddingLabel(true)} className="text-ink-3 hover:text-ink">
-              <Plus size={12} />
-            </button>
-          </div>
+          {menuOpen && (
+            <>
+              <div className="mt-2 flex items-center justify-between px-3 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+                Libellés
+                <button onClick={() => setAddingLabel(true)} className="text-ink-3 hover:text-ink">
+                  <Plus size={12} />
+                </button>
+              </div>
 
-          {addingLabel && (
-            <div className="flex items-center gap-1 px-2">
-              <input
-                autoFocus
-                value={newLabelName}
-                onChange={(e) => setNewLabelName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleCreateLabel()}
-                placeholder="Nom du libellé"
-                className="w-full rounded-btn border border-line px-2 py-1 text-xs outline-none"
-              />
-            </div>
+              {addingLabel && (
+                <div className="flex items-center gap-1 px-2 py-1">
+                  <input
+                    autoFocus
+                    value={newLabelName}
+                    onChange={(e) => setNewLabelName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleCreateLabel()}
+                    placeholder="Nom du libellé"
+                    className="w-full rounded-btn border border-line px-2 py-1 text-xs outline-none"
+                  />
+                </div>
+              )}
+
+              {labels.map((l) => (
+                <div
+                  key={l.id}
+                  className={`group flex w-full items-center justify-between gap-1 rounded-btn px-3 py-2 text-sm ${
+                    folder === l.id ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"
+                  }`}
+                >
+                  <button onClick={() => setFolder(l.id)} className="flex flex-1 items-center gap-2 truncate text-left">
+                    <Tag size={13} /> <span className="truncate">{l.name}</span>
+                  </button>
+                  <button
+                    onClick={() => handleDeleteLabel(l.id)}
+                    className="hidden text-ink-4 hover:text-red group-hover:block"
+                    aria-label="Supprimer le libellé"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </>
           )}
 
-          {labels.map((l) => (
-            <div
-              key={l.id}
-              className={`group flex items-center justify-between gap-1 rounded-btn px-3 py-2 text-sm ${
-                folder === l.id ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"
-              }`}
-            >
-              <button onClick={() => setFolder(l.id)} className="flex flex-1 items-center gap-2 truncate text-left">
-                <Tag size={13} /> <span className="truncate">{l.name}</span>
-              </button>
-              <button
-                onClick={() => handleDeleteLabel(l.id)}
-                className="hidden text-ink-4 hover:text-red group-hover:block"
-                aria-label="Supprimer le libellé"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          ))}
-        </div>
+          <div className={`my-1 h-px bg-line ${menuOpen ? "w-full" : "w-6"}`} />
 
+          {accounts.map((acc) => (
+            <button
+              key={acc.id}
+              onClick={() => setActiveAccountId(acc.id)}
+              title={acc.label || acc.email}
+              className={`flex items-center gap-2 rounded-btn px-3 py-2 text-left text-sm ${
+                menuOpen ? "w-full" : "h-9 w-9 justify-center px-0"
+              } ${activeAccountId === acc.id ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"}`}
+            >
+              <Mail size={16} className="shrink-0" />
+              {menuOpen && <span className="truncate">{acc.label || acc.email}</span>}
+            </button>
+          ))}
+          <a
+            href="/api/oauth/google/start"
+            title="Ajouter un compte"
+            className={`flex items-center gap-2 rounded-btn px-3 py-2 text-sm font-semibold text-ink-3 hover:bg-hover ${
+              menuOpen ? "w-full" : "h-9 w-9 justify-center px-0"
+            }`}
+          >
+            <Plus size={16} className="shrink-0" />
+            {menuOpen && "Ajouter un compte"}
+          </a>
+        </aside>
+
+        <div className="grid min-w-0 flex-1 grid-cols-[340px_1fr] gap-3 overflow-hidden">
         <div className="overflow-y-auto rounded-panel border border-line bg-card">
           {loading && (
             <div className="p-4 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">Chargement…</div>
@@ -525,6 +546,7 @@ export function MailsScreen() {
               </div>
             </div>
           )}
+        </div>
         </div>
       </div>
 

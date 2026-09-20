@@ -66,16 +66,26 @@ export function BoardShell() {
             )}
           </main>
 
-          {showContextPanel && <ContextPanel widgets={prefs.contextPanelWidgets} />}
+          {showContextPanel && (
+            <ContextPanel
+              widgets={prefs.contextPanelWidgets}
+              onClose={() => update({ contextPanelOpen: false })}
+            />
+          )}
         </div>
 
-        <Dock activeApp={app} onSelectApp={setApp} />
+        {prefs.navStyle === "dock" && (
+          <Dock
+            activeApp={app}
+            onSelectApp={setApp}
+            theme={theme}
+            onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+          />
+        )}
       </div>
 
       {settingsOpen && (
         <BoardSettingsModal
-          theme={theme}
-          onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
           prefs={prefs}
           onUpdate={update}
           onUpdateWidgets={updateWidgets}

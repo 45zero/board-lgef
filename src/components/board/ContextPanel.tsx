@@ -55,14 +55,16 @@ const ACTIVITY = [
   },
 ];
 
-export function ContextPanel({ widgets }: { widgets: ContextPanelWidgets }) {
+export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidgets; onClose: () => void }) {
   return (
     <aside className="hidden w-[280px] shrink-0 flex-col gap-4 overflow-y-auto rounded-panel border border-line bg-card/70 p-4 shadow-bar backdrop-blur xl:flex">
       <div className="flex items-center justify-between">
         <h3 className="font-mono text-[10px] tracking-[0.12em] text-ink-4 uppercase">
           Récapitulatif
         </h3>
-        <ChevronRight size={14} className="text-ink-4" />
+        <button onClick={onClose} className="text-ink-4 hover:text-ink" aria-label="Fermer le récapitulatif">
+          <ChevronRight size={14} />
+        </button>
       </div>
 
       {widgets.today && (

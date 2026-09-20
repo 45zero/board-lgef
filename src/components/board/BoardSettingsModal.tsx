@@ -1,7 +1,6 @@
 "use client";
 
-import { Sparkles, X, PanelLeft, LayoutGrid, Moon, Sun } from "lucide-react";
-import type { Theme } from "./BoardShell";
+import { Sparkles, X, PanelLeft, LayoutGrid } from "lucide-react";
 import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
@@ -29,15 +28,11 @@ const WIDGET_ROWS: { key: keyof ContextPanelWidgets; title: string; subtitle: st
 ];
 
 export function BoardSettingsModal({
-  theme,
-  onToggleTheme,
   prefs,
   onUpdate,
   onUpdateWidgets,
   onClose,
 }: {
-  theme: Theme;
-  onToggleTheme: () => void;
   prefs: BoardPreferences;
   onUpdate: (partial: Partial<BoardPreferences>) => void;
   onUpdateWidgets: (partial: Partial<ContextPanelWidgets>) => void;
@@ -62,28 +57,6 @@ export function BoardSettingsModal({
           <button onClick={onClose} className="text-ink-4 hover:text-ink">
             <X size={18} />
           </button>
-        </div>
-
-        <div className="mt-5">
-          <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Apparence</div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => theme !== "light" && onToggleTheme()}
-              className={`flex items-center justify-center gap-1.5 rounded-btn px-3 py-2.5 text-sm font-bold ${
-                theme === "light" ? "bg-navy text-white" : "border border-line text-ink-2 hover:bg-hover"
-              }`}
-            >
-              <Sun size={14} /> Clair
-            </button>
-            <button
-              onClick={() => theme !== "dark" && onToggleTheme()}
-              className={`flex items-center justify-center gap-1.5 rounded-btn px-3 py-2.5 text-sm font-bold ${
-                theme === "dark" ? "bg-navy text-white" : "border border-line text-ink-2 hover:bg-hover"
-              }`}
-            >
-              <Moon size={14} /> Sombre
-            </button>
-          </div>
         </div>
 
         <div className="mt-5">

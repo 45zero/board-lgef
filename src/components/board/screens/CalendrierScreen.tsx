@@ -5,14 +5,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
-  ChevronDown,
   Camera,
   Video,
   Clock,
   Ban,
   Search,
-  SlidersHorizontal,
   X,
+  PanelLeftOpen,
 } from "lucide-react";
 import {
   addDays,
@@ -37,8 +36,8 @@ import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import { listMyCalendars, listMyEvents } from "@/app/actions/calendar";
 import { EventModal } from "@/components/board/calendar/EventModal";
 import { GoogleEventModal } from "@/components/board/calendar/GoogleEventModal";
-import { ORG_COLORS, ORG_LABELS, COVERAGE_LABELS, COVERAGE_COLORS, type CoverageState, type OrgKey } from "@/lib/board/tokens";
-import { CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
+import { ORG_COLORS, COVERAGE_COLORS, type CoverageState, type OrgKey } from "@/lib/board/tokens";
+import { CalendarSidebar } from "@/components/board/calendar/CalendarSidebar";
 import type { CalendarEvent } from "@/lib/board/calendar";
 
 const HOUR_START = 8;
@@ -104,7 +103,28 @@ export function CalendrierScreen() {
   const [googleAccountId, setGoogleAccountId] = useState<string | null>(null);
   const [googleCalendarId] = useState("primary");
   const [googleEvents, setGoogleEvents] = useState<GoogleEventItem[]>([]);
-  const [legendOpen, setLegendOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time hydration from localStorage on mount
+      setSidebarCollapsed(window.localStorage.getItem("board-lgef:calendar-sidebar-collapsed") === "1");
+    } catch {
+      // localStorage indisponible — on reste déplié = false
+    }
+  }, []);
+
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem("board-lgef:calendar-sidebar-collapsed", next ? "1" : "0");
+      } catch {
+        // sans conséquence — la préférence vivra juste pour la session en cours
+      }
+      return next;
+    });
+  };
 
   const [editingInternal, setEditingInternal] = useState<CalendarEvent | "new" | null>(null);
   const [newSlot, setNewSlot] = useState<{ start: Date; end: Date } | null>(null);
@@ -183,15 +203,6 @@ export function CalendrierScreen() {
   // 35h/semaine posée comme capacité de référence — pas de vraie notion de disponibilité en base.
   const availabilityPct = Math.max(0, Math.min(100, Math.round(100 - (plannedMinutes / 60 / 35) * 100)));
 
-  const coverageCounts = useMemo(() => {
-    const counts: Partial<Record<CoverageState, number>> = {};
-    for (const e of events) {
-      if (!e.coverage) continue;
-      counts[e.coverage] = (counts[e.coverage] ?? 0) + 1;
-    }
-    return counts;
-  }, [events]);
-
   const now = new Date();
   const nowTop = (now.getHours() + now.getMinutes() / 60 - HOUR_START) * PX_PER_HOUR;
   const showNowLine = nowTop >= 0 && nowTop <= GRID_HEIGHT;
@@ -238,51 +249,50 @@ export function CalendrierScreen() {
     <div className="flex h-full gap-3">
       <CalendarSidebar
         anchorDate={anchorDate}
-        onSelectDay={setAnchorDate}
+        onSelectDay={(day) => {
+          setAnchorDate(day);
+          setViewMode("day");
+        }}
         hiddenOrgs={hiddenOrgs}
         onToggleOrg={toggleOrgVisibility}
         plannedLabel={plannedLabel}
         availabilityPct={availabilityPct}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={toggleSidebarCollapsed}
+        onCreateEvent={() => {
+          setNewSlot(null);
+          setEditingInternal("new");
+        }}
+        accounts={accounts}
+        googleAccountId={googleAccountId}
+        onGoogleAccountChange={setGoogleAccountId}
       />
 
-      <div className="flex h-full min-w-0 flex-1 flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-end gap-3">
-        <div className="flex items-center gap-2">
-          <div className="flex min-w-[220px] items-center gap-2 rounded-btn border border-line bg-card px-3 py-2">
-            <Search size={14} className="shrink-0 text-ink-4" />
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Rechercher un événement..."
-              className="w-full bg-transparent text-sm outline-none"
-            />
-            {searchQuery && (
-              <button onClick={() => setSearchQuery("")} className="text-ink-4 hover:text-ink">
-                <X size={13} />
-              </button>
-            )}
-          </div>
-          <button
-            className="flex h-9 w-9 items-center justify-center rounded-btn border border-line text-ink-3 hover:bg-hover"
-            aria-label="Filtres"
-            title="Filtres (à venir)"
-          >
-            <SlidersHorizontal size={15} />
-          </button>
-          <button
-            onClick={() => {
-              setNewSlot(null);
-              setEditingInternal("new");
-            }}
-            className="flex items-center gap-1.5 rounded-btn bg-navy px-3.5 py-2 text-sm font-bold text-white hover:bg-navy-600"
-          >
-            <Plus size={15} /> Nouvel événement
-          </button>
-        </div>
-      </div>
-
+      <div className="flex h-full min-w-0 flex-1 flex-col gap-3 pt-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
+          {sidebarCollapsed && (
+            <>
+              <button
+                onClick={toggleSidebarCollapsed}
+                className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-3 hover:bg-hover"
+                aria-label="Ouvrir la barre latérale"
+                title="Ouvrir la barre latérale"
+              >
+                <PanelLeftOpen size={15} />
+              </button>
+              <button
+                onClick={() => {
+                  setNewSlot(null);
+                  setEditingInternal("new");
+                }}
+                className="flex h-8 w-8 items-center justify-center rounded-btn bg-navy text-white hover:bg-navy-600"
+                aria-label="Nouvel événement"
+              >
+                <Plus size={15} />
+              </button>
+            </>
+          )}
           <button
             onClick={goPrev}
             className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-3 hover:bg-hover"
@@ -310,48 +320,20 @@ export function CalendrierScreen() {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="relative">
-            <button
-              onClick={() => setLegendOpen((o) => !o)}
-              className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"
-            >
-              Couverture média
-              <ChevronDown size={12} />
-            </button>
-            {legendOpen && (
-              <div className="absolute right-0 top-full z-10 mt-1 w-[268px] rounded-btn border border-line bg-card p-2 shadow-card">
-                {(Object.keys(COVERAGE_LABELS) as CoverageState[]).map((s) => {
-                  const Icon = COVERAGE_ICONS[s];
-                  return (
-                    <div key={s} className="flex items-center gap-2 rounded-btn px-2 py-1.5">
-                      <span
-                        className="flex h-6 w-6 items-center justify-center rounded-btn"
-                        style={{ background: COVERAGE_COLORS[s].bg, color: COVERAGE_COLORS[s].ink }}
-                      >
-                        <Icon size={12} />
-                      </span>
-                      <span className="flex-1 text-xs text-ink-2">{COVERAGE_LABELS[s].long}</span>
-                      <span className="font-mono text-xs text-ink-4">{coverageCounts[s] ?? 0}</span>
-                    </div>
-                  );
-                })}
-              </div>
+          <div className="flex min-w-[200px] items-center gap-2 rounded-btn border border-line bg-card px-3 py-1.5">
+            <Search size={13} className="shrink-0 text-ink-4" />
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Rechercher un événement..."
+              className="w-full bg-transparent text-sm outline-none"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery("")} className="text-ink-4 hover:text-ink">
+                <X size={13} />
+              </button>
             )}
           </div>
-
-          {accounts && accounts.length > 0 && (
-            <select
-              value={googleAccountId ?? ""}
-              onChange={(e) => setGoogleAccountId(e.target.value)}
-              className="rounded-btn border border-line bg-card px-2 py-1.5 text-xs font-semibold text-ink-2"
-            >
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.label || a.email}
-                </option>
-              ))}
-            </select>
-          )}
 
           <div className="flex items-center gap-0.5 rounded-btn border border-line bg-card p-0.5">
             {VIEW_MODES.map((m) => (
@@ -574,127 +556,5 @@ export function CalendrierScreen() {
         />
       )}
     </div>
-  );
-}
-
-/** Mini-calendrier + liste des calendriers (organisations) + disponibilité — colonne gauche, comme calendrier.lgef.fr. */
-function CalendarSidebar({
-  anchorDate,
-  onSelectDay,
-  hiddenOrgs,
-  onToggleOrg,
-  plannedLabel,
-  availabilityPct,
-}: {
-  anchorDate: Date;
-  onSelectDay: (d: Date) => void;
-  hiddenOrgs: Set<OrgKey>;
-  onToggleOrg: (key: OrgKey) => void;
-  plannedLabel: string;
-  availabilityPct: number;
-}) {
-  const [miniMonth, setMiniMonth] = useState(anchorDate);
-
-  const miniDays = useMemo(() => {
-    const gridStart = startOfWeek(startOfMonth(miniMonth), { weekStartsOn: 1, locale: fr });
-    const gridEnd = endOfWeek(endOfMonth(miniMonth), { weekStartsOn: 1, locale: fr });
-    const days: Date[] = [];
-    for (let d = gridStart; d <= gridEnd; d = addDays(d, 1)) days.push(d);
-    return days;
-  }, [miniMonth]);
-
-  return (
-    <aside className="hidden w-[240px] shrink-0 flex-col gap-4 overflow-y-auto rounded-panel border border-line bg-card p-3 lg:flex">
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-sm font-bold capitalize text-ink">{format(miniMonth, "MMMM yyyy", { locale: fr })}</span>
-          <div className="flex items-center gap-0.5">
-            <button
-              onClick={() => setMiniMonth((m) => subMonths(m, 1))}
-              className="flex h-6 w-6 items-center justify-center rounded-btn text-ink-3 hover:bg-hover"
-            >
-              <ChevronLeft size={13} />
-            </button>
-            <button
-              onClick={() => setMiniMonth((m) => addMonths(m, 1))}
-              className="flex h-6 w-6 items-center justify-center rounded-btn text-ink-3 hover:bg-hover"
-            >
-              <ChevronRight size={13} />
-            </button>
-          </div>
-        </div>
-        <div className="grid grid-cols-7 gap-y-1 text-center">
-          {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => (
-            <div key={i} className="font-mono text-[9px] text-ink-4">
-              {d}
-            </div>
-          ))}
-          {miniDays.map((day) => {
-            const inMonth = isSameMonth(day, miniMonth);
-            const isSelected = isSameDay(day, anchorDate);
-            const isToday = isSameDay(day, new Date());
-            return (
-              <button
-                key={day.toISOString()}
-                onClick={() => {
-                  onSelectDay(day);
-                  setMiniMonth(day);
-                }}
-                className={`mx-auto flex h-6 w-6 items-center justify-center rounded-full text-[11px] ${
-                  isSelected
-                    ? "bg-navy font-bold text-white"
-                    : isToday
-                      ? "font-bold text-red"
-                      : inMonth
-                        ? "text-ink-2 hover:bg-hover"
-                        : "text-ink-4/50"
-                }`}
-              >
-                {format(day, "d")}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div>
-        <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Mes calendriers</div>
-        <div className="flex flex-col gap-1.5">
-          {CALENDAR_ORG_KEYS.map((key) => {
-            const visible = !hiddenOrgs.has(key);
-            const color = ORG_COLORS[key];
-            return (
-              <button
-                key={key}
-                onClick={() => onToggleOrg(key)}
-                className="flex items-center gap-2 rounded-btn px-1.5 py-1 text-left hover:bg-hover"
-              >
-                <span
-                  className="h-3 w-3 shrink-0 rounded-[3px] border"
-                  style={{
-                    background: visible ? color.base : "transparent",
-                    borderColor: color.base,
-                  }}
-                />
-                <span className={`truncate text-xs ${visible ? "text-ink-2" : "text-ink-4 line-through"}`}>
-                  {ORG_LABELS[key]}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="mt-auto">
-        <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Disponibilité</div>
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-track">
-          <div className="h-full rounded-full bg-navy" style={{ width: `${availabilityPct}%` }} />
-        </div>
-        <div className="mt-1.5 flex items-center justify-between text-xs">
-          <span className="font-bold text-ink">{availabilityPct}%</span>
-          <span className="text-ink-4">{plannedLabel} planifiées cette semaine.</span>
-        </div>
-      </div>
-    </aside>
   );
 }
