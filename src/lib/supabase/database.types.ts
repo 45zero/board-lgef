@@ -1941,6 +1941,8 @@ export type Database = {
           has_company_car: boolean | null
           has_ged_access: boolean | null
           organisation_id: string | null
+          notify_email: boolean
+          notify_push: boolean
         }
         Insert: {
           id: string
@@ -1961,6 +1963,8 @@ export type Database = {
           has_company_car?: boolean | null
           has_ged_access?: boolean | null
           organisation_id?: string | null
+          notify_email?: boolean
+          notify_push?: boolean
         }
         Update: {
           id?: string
@@ -1981,6 +1985,8 @@ export type Database = {
           has_company_car?: boolean | null
           has_ged_access?: boolean | null
           organisation_id?: string | null
+          notify_email?: boolean
+          notify_push?: boolean
         }
         Relationships: []
       }

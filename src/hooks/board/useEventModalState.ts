@@ -12,6 +12,7 @@ import { useEventComments } from "@/hooks/board/useEventComments";
 import { useEventExpenses } from "@/hooks/board/useEventExpenses";
 import { useEventActions, type EventFormPayload } from "@/hooks/board/useEventActions";
 import { useUserRole } from "@/hooks/board/useUserRole";
+import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 import { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
 import { useEventCoverage } from "@/hooks/board/useEventCoverage";
 
@@ -79,6 +80,7 @@ export function useEventModalState({
   const role = useUserRole();
   const { technicians } = useAvailableTechnicians();
   const coverage = useEventCoverage(event?.id);
+  const notifPrefs = useNotificationPreferences();
 
   useEffect(() => {
     if (!event) return;
@@ -102,7 +104,11 @@ export function useEventModalState({
         user_id: user.id,
         remind_at: remindAt.toISOString(),
         reminder_offset: offset,
-        channels: ["app"],
+        channels: [
+          "app",
+          ...(notifPrefs.notifyEmail ? ["email"] : []),
+          ...(notifPrefs.notifyPush ? ["push"] : []),
+        ],
       })
       .select("id, reminder_offset")
       .single();

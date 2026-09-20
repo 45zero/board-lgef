@@ -2,6 +2,7 @@
 
 import { Sparkles, X, PanelLeft, LayoutGrid } from "lucide-react";
 import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
+import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   return (
@@ -39,6 +40,7 @@ export function BoardSettingsModal({
   onClose: () => void;
 }) {
   const setNavStyle = (v: NavStyle) => onUpdate({ navStyle: v });
+  const notif = useNotificationPreferences();
 
   return (
     <>
@@ -94,6 +96,28 @@ export function BoardSettingsModal({
               </span>
               {prefs.navStyle === "dock" && <span className="shrink-0 text-red">✓</span>}
             </button>
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Notifications</div>
+          <div className="space-y-3 rounded-btn border border-line p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-ink-2">Notifications par e-mail</div>
+                <div className="text-xs text-ink-4">Rappels et demandes envoyés aussi par e-mail</div>
+              </div>
+              <Toggle on={notif.notifyEmail} onClick={() => notif.setNotifyEmail(!notif.notifyEmail)} />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-ink-2">Notifications push</div>
+                <div className="text-xs text-ink-4">
+                  Bientôt disponible — préparé pour la future application mobile
+                </div>
+              </div>
+              <Toggle on={notif.notifyPush} onClick={() => notif.setNotifyPush(!notif.notifyPush)} />
+            </div>
           </div>
         </div>
 
