@@ -11,6 +11,7 @@ import { MailsScreen } from "./screens/MailsScreen";
 import { CalendrierScreen } from "./screens/CalendrierScreen";
 import { GedScreen } from "./screens/GedScreen";
 import { PublicationScreen } from "./screens/PublicationScreen";
+import { DriveScreen } from "./screens/DriveScreen";
 import { MobileShell } from "./mobile/MobileShell";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useBoardPreferences } from "@/hooks/board/useBoardPreferences";
@@ -62,6 +63,8 @@ export function BoardShell() {
               <GedScreen />
             ) : app === "audiovisuel" ? (
               <PublicationScreen />
+            ) : app === "drive" ? (
+              <DriveScreen />
             ) : (
               <div className="flex h-full items-center justify-center rounded-panel border border-line bg-card/60 text-ink-3">
                 Module « {currentApp.label} » — à venir

@@ -6,7 +6,12 @@ import { getGoogleAccountById } from "@/lib/google/accounts";
 import { getBoardDriveAccountId } from "@/app/actions/board-settings";
 import { findOrCreateFolder, createResumableUploadSession } from "@/lib/google/drive";
 
+const ROOT_FOLDER_NAME = "LGEF Drive";
 const MEDIA_FOLDER_NAME = "Médias";
+
+function capitalize(s: string) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 /** N'accepte que les métadonnées (nom, type) — le fichier lui-même part directement du navigateur vers Google. */
 export async function POST(request: Request, { params }: { params: Promise<{ eventId: string }> }) {
@@ -37,12 +42,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
   ]);
 
   const eventTitle = event?.title ?? "Événement";
-  const eventDate = event?.start_date ? format(new Date(event.start_date), "d MMMM yyyy", { locale: fr }) : "—";
+  const eventDateObj = event?.start_date ? new Date(event.start_date) : new Date();
+  const eventDate = format(eventDateObj, "d MMMM yyyy", { locale: fr });
   const uploaderName = [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || user.email || "—";
   const uploadDate = format(new Date(), "d MMMM yyyy 'à' HH:mm", { locale: fr });
 
   try {
-    const mediaFolder = await findOrCreateFolder(account, { name: MEDIA_FOLDER_NAME });
+    const rootFolder = await findOrCreateFolder(account, { name: ROOT_FOLDER_NAME });
+    const yearFolder = await findOrCreateFolder(account, {
+      name: format(eventDateObj, "yyyy"),
+      parentId: rootFolder.id,
+    });
+    const monthFolder = await findOrCreateFolder(account, {
+      name: `${format(eventDateObj, "MM")} - ${capitalize(format(eventDateObj, "MMMM", { locale: fr }))}`,
+      parentId: yearFolder.id,
+    });
+    const eventFolder = await findOrCreateFolder(account, {
+      name: `${format(eventDateObj, "dd")} - ${eventTitle}`,
+      parentId: monthFolder.id,
+    });
+    const mediaFolder = await findOrCreateFolder(account, { name: MEDIA_FOLDER_NAME, parentId: eventFolder.id });
+
     const description = [
       `Événement : ${eventTitle}`,
       `Date de l'événement : ${eventDate}`,
@@ -51,7 +71,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
     ].join("\n");
 
     const { uploadUrl } = await createResumableUploadSession(account, {
-      name: `${eventTitle} — ${filename}`,
+      name: filename,
       parentId: mediaFolder.id,
       mimeType: mimeType || "application/octet-stream",
       description,

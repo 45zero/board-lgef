@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   List,
   LayoutGrid,
+  HardDrive,
 } from "lucide-react";
 import { BOARD_APPS } from "@/lib/board/tokens";
 import type { NavLayout } from "./BoardShell";
@@ -33,13 +34,24 @@ const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   formations: GraduationCap,
   arbitrage: Shield,
   ged: FolderArchive,
+  drive: HardDrive,
   compta: Calculator,
   audiovisuel: Video,
   communication: Megaphone,
   administration: ShieldCheck,
 };
 
-const RUNNING_APPS = new Set(["accueil", "mails", "trello", "calendrier", "quiz", "pointage", "ged", "audiovisuel"]);
+const RUNNING_APPS = new Set([
+  "accueil",
+  "mails",
+  "trello",
+  "calendrier",
+  "quiz",
+  "pointage",
+  "ged",
+  "audiovisuel",
+  "drive",
+]);
 
 export function AppRail({
   nav,

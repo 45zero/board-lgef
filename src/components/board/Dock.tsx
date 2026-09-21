@@ -17,6 +17,7 @@ import {
   Volume2,
   Sun,
   Plus,
+  HardDrive,
 } from "lucide-react";
 
 const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>> = {
@@ -30,6 +31,7 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>
   formations: GraduationCap,
   arbitrage: Flag,
   ged: FolderArchive,
+  drive: HardDrive,
   compta: Calculator,
   audiovisuel: Video,
   communication: Volume2,
@@ -46,6 +48,7 @@ const PINNED = [
   "formations",
   "arbitrage",
   "ged",
+  "drive",
   "compta",
   "audiovisuel",
   "communication",
