@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Send, Clock, CheckCircle2, Video, Image as ImageIcon, X, Calendar, Play, Share2, ExternalLink } from "lucide-react";
 import {
   listMediaPublications,
+  countMediaPublications,
   scheduleMediaPublication,
   cancelScheduledPublication,
   markMediaPublished,
@@ -30,7 +31,7 @@ const FACEBOOK_REGIONS: { key: "lorraine" | "champagne_ardenne" | "alsace"; labe
   { key: "alsace", label: "Alsace" },
 ];
 
-function MediaThumb({ pub }: { pub: MediaPublication }) {
+function MediaThumb({ pub, className }: { pub: MediaPublication; className?: string }) {
   const [url, setUrl] = useState<string | null>(null);
   const isImage = (pub.event_files.content_type ?? "").startsWith("image");
   const isVideo = (pub.event_files.content_type ?? "").startsWith("video");
@@ -41,14 +42,18 @@ function MediaThumb({ pub }: { pub: MediaPublication }) {
   }, [pub.event_files, isImage]);
 
   return (
-    <div className="flex h-36 w-full items-center justify-center overflow-hidden rounded-t-panel bg-subtle">
+    <div
+      className={
+        className ?? "flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-btn bg-subtle"
+      }
+    >
       {isImage && url ? (
         // eslint-disable-next-line @next/next/no-img-element -- URL signée temporaire, pas un asset statique optimisable
         <img src={url} alt={pub.event_files.filename} className="h-full w-full object-cover" />
       ) : isVideo ? (
-        <Video size={32} className="text-ink-4" />
+        <Video size={20} className="text-ink-4" />
       ) : (
-        <ImageIcon size={32} className="text-ink-4" />
+        <ImageIcon size={20} className="text-ink-4" />
       )}
     </div>
   );
@@ -295,57 +300,59 @@ function PublicationCard({
   };
 
   return (
-    <div className="overflow-hidden rounded-panel border border-line bg-card shadow-card">
+    <div className="flex items-center gap-3 border-b border-line bg-card px-4 py-3 last:border-b-0 hover:bg-hover">
       <MediaThumb pub={pub} />
-      <div className="p-3">
-        <div className="truncate text-sm font-bold text-ink">{pub.events?.title ?? "Événement"}</div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-bold text-ink">{pub.events?.title ?? "Événement"}</span>
+          {isDrive && (
+            <span className="shrink-0 rounded-full bg-subtle px-1.5 py-0.5 text-[10px] font-semibold text-ink-3">
+              Drive
+            </span>
+          )}
+        </div>
         <div className="truncate text-xs text-ink-4">{pub.event_files.filename}</div>
-        <div className="mt-1 flex items-center gap-1.5 text-[11px] text-ink-4">
-          <span className="truncate">
-            {uploader} · {uploadedAt}
-          </span>
-          {isDrive && <span className="shrink-0 rounded-full bg-subtle px-1.5 py-0.5 font-semibold text-ink-3">Drive</span>}
+        <div className="mt-0.5 text-[11px] text-ink-4">
+          {uploader} · {uploadedAt}
+          {tab === "scheduled" && pub.scheduled_at && (
+            <span className="ml-2 font-semibold text-link">
+              {new Date(pub.scheduled_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
+            </span>
+          )}
         </div>
-
-        {tab === "scheduled" && pub.scheduled_at && (
-          <div className="mt-1 text-xs font-semibold text-link">
-            {new Date(pub.scheduled_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
-          </div>
-        )}
         {tab === "published" && <PublishedBadgeRow pub={pub} />}
+      </div>
 
-        <div className="mt-2 flex items-center gap-2">
-          <button onClick={openMedia} className="flex items-center gap-1 text-[11px] font-semibold text-ink-3 hover:text-ink">
-            {isDrive ? <ExternalLink size={12} /> : <Play size={12} />}
-            {isDrive ? "Voir sur Drive" : "Lire"}
-          </button>
+      <div className="flex shrink-0 items-center gap-3">
+        <button onClick={openMedia} className="flex items-center gap-1 text-[11px] font-semibold text-ink-3 hover:text-ink">
+          {isDrive ? <ExternalLink size={12} /> : <Play size={12} />}
+          {isDrive ? "Voir sur Drive" : "Lire"}
+        </button>
+        <button
+          onClick={share}
+          disabled={sharing}
+          className="flex items-center gap-1 text-[11px] font-semibold text-ink-3 hover:text-ink disabled:opacity-50"
+        >
+          <Share2 size={12} /> {sharing ? "…" : "Partager"}
+        </button>
+
+        {tab === "to_publish" && (
           <button
-            onClick={share}
-            disabled={sharing}
-            className="flex items-center gap-1 text-[11px] font-semibold text-ink-3 hover:text-ink disabled:opacity-50"
+            onClick={onOpenComposer}
+            className="rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white"
           >
-            <Share2 size={12} /> {sharing ? "…" : "Partager"}
+            Publier / Programmer
           </button>
-        </div>
-
-        <div className="mt-3 flex gap-2">
-          {tab === "to_publish" && (
-            <button
-              onClick={onOpenComposer}
-              className="flex-1 rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white"
-            >
-              Publier / Programmer
-            </button>
-          )}
-          {tab === "scheduled" && (
-            <button
-              onClick={onCancelSchedule}
-              className="flex-1 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2"
-            >
-              Annuler la programmation
-            </button>
-          )}
-        </div>
+        )}
+        {tab === "scheduled" && (
+          <button
+            onClick={onCancelSchedule}
+            className="rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2"
+          >
+            Annuler
+          </button>
+        )}
       </div>
     </div>
   );
@@ -354,12 +361,19 @@ function PublicationCard({
 export function PublicationScreen() {
   const [tab, setTab] = useState<PublicationStatus>("to_publish");
   const [items, setItems] = useState<MediaPublication[]>([]);
+  const [counts, setCounts] = useState<Record<PublicationStatus, number>>({
+    to_publish: 0,
+    scheduled: 0,
+    published: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [composerFor, setComposerFor] = useState<MediaPublication | null>(null);
 
   const refetch = async () => {
     setLoading(true);
-    setItems(await listMediaPublications(tab));
+    const [list, countRes] = await Promise.all([listMediaPublications(tab), countMediaPublications()]);
+    setItems(list);
+    setCounts(countRes);
     setLoading(false);
   };
 
@@ -379,11 +393,20 @@ export function PublicationScreen() {
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                className={`flex w-full items-center gap-2.5 rounded-btn px-3 py-2.5 text-left text-sm font-semibold transition-colors ${
+                className={`flex w-full items-center justify-between gap-2.5 rounded-btn px-3 py-2.5 text-left text-sm font-semibold transition-colors ${
                   tab === t.id ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"
                 }`}
               >
-                <Icon size={16} /> {t.label}
+                <span className="flex items-center gap-2.5">
+                  <Icon size={16} /> {t.label}
+                </span>
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                    tab === t.id ? "bg-white/20 text-white" : "bg-subtle text-ink-3"
+                  }`}
+                >
+                  {counts[t.id]}
+                </span>
               </button>
             );
           })}
@@ -398,7 +421,7 @@ export function PublicationScreen() {
             Rien ici pour l&rsquo;instant.
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+          <div className="overflow-hidden rounded-panel border border-line">
             {items.map((pub) => (
               <PublicationCard
                 key={pub.id}

@@ -38,6 +38,21 @@ export async function queueMediaForPublication(eventFileId: string, eventId: str
   });
 }
 
+export async function countMediaPublications(): Promise<Record<PublicationStatus, number>> {
+  const supabase = createClient();
+  const statuses: PublicationStatus[] = ["to_publish", "scheduled", "published"];
+  const results = await Promise.all(
+    statuses.map((status) =>
+      supabase.from("media_publications").select("id", { count: "exact", head: true }).eq("status", status)
+    )
+  );
+  return {
+    to_publish: results[0].count ?? 0,
+    scheduled: results[1].count ?? 0,
+    published: results[2].count ?? 0,
+  };
+}
+
 export async function listMediaPublications(status: PublicationStatus): Promise<MediaPublication[]> {
   const supabase = createClient();
   const { data, error } = await supabase
