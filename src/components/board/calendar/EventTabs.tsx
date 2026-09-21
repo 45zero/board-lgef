@@ -1060,7 +1060,7 @@ function AttachmentRow({
           </span>
         </button>
         <div className="flex shrink-0 items-center gap-2">
-          {isVideo && canPublish && !isDrive && (
+          {isVideo && canPublish && (
             <button type="button" onClick={onPublishClick} className="text-ink-4 hover:text-navy" title="Publier">
               <Upload size={13} />
             </button>

@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import type { Json } from "@/lib/supabase/database.types";
+import { getDriveStreamUrl } from "@/app/actions/media-stream";
 
 const BUCKET = "event-files";
 
@@ -236,16 +237,21 @@ export async function updatePublishInfo(fileId: string, updater: (current: Publi
  * les pages Facebook publiques de la fédération : ne jamais appeler sans
  * confirmation explicite de l'utilisateur.
  */
+async function getPublishableVideoUrl(file: EventFile): Promise<string | null> {
+  if (file.storage_provider === "drive" && file.drive_file_id) {
+    return getDriveStreamUrl(file.event_id, file.drive_file_id);
+  }
+  if (file.path) return createEventFileUrl(file.path);
+  return null;
+}
+
 export async function publishToYoutube(
   file: EventFile,
   { title, description }: { title: string; description?: string },
   by: { first_name: string | null; last_name: string | null } | null
 ) {
-  if (file.storage_provider !== "supabase" || !file.path) {
-    throw new Error("Publication indisponible pour un fichier stocké sur Drive pour l'instant.");
-  }
   const supabase = createClient();
-  const videoUrl = await createEventFileUrl(file.path);
+  const videoUrl = await getPublishableVideoUrl(file);
   if (!videoUrl) throw new Error("Impossible de générer l'URL de la vidéo.");
 
   const { data, error } = await supabase.functions.invoke("publish-youtube", {
@@ -278,11 +284,8 @@ export async function publishToFacebook(
   selection: Partial<Record<keyof typeof FACEBOOK_PAGE_KEYS, { enabled: boolean; message: string }>>,
   by: { first_name: string | null; last_name: string | null } | null
 ) {
-  if (file.storage_provider !== "supabase" || !file.path) {
-    throw new Error("Publication indisponible pour un fichier stocké sur Drive pour l'instant.");
-  }
   const supabase = createClient();
-  const videoUrl = await createEventFileUrl(file.path);
+  const videoUrl = await getPublishableVideoUrl(file);
   if (!videoUrl) throw new Error("Impossible de générer l'URL de la vidéo.");
 
   const pages: Record<string, boolean> = {};

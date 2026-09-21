@@ -105,7 +105,7 @@ function Composer({
   }, [user?.id]);
 
   const isVideo = (pub.event_files.content_type ?? "").startsWith("video");
-  const canRealPublish = isVideo && pub.event_files.storage_provider === "supabase";
+  const canRealPublish = isVideo;
   const anyTarget = youtube || fb.lorraine || fb.champagne_ardenne || fb.alsace;
 
   const targets: PublicationTargets = { youtube, facebook: fb };
@@ -212,9 +212,7 @@ function Composer({
 
           {!canRealPublish && (
             <p className="text-[11px] italic text-ink-4">
-              {isVideo
-                ? "Publication indisponible pour une vidéo stockée sur Drive pour l'instant."
-                : "Seules les vidéos peuvent être publiées automatiquement pour l'instant."}
+              Seules les vidéos peuvent être publiées automatiquement pour l&rsquo;instant.
             </p>
           )}
         </div>
