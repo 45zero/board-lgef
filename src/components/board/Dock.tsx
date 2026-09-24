@@ -18,6 +18,7 @@ import {
   Sun,
   Plus,
   HardDrive,
+  ClipboardCheck,
 } from "lucide-react";
 
 const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>> = {
@@ -35,6 +36,7 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>
   compta: Calculator,
   audiovisuel: Video,
   communication: Volume2,
+  inscription: ClipboardCheck,
 };
 
 const PINNED = [
@@ -49,6 +51,7 @@ const PINNED = [
   "arbitrage",
   "ged",
   "drive",
+  "inscription",
   "compta",
   "audiovisuel",
   "communication",

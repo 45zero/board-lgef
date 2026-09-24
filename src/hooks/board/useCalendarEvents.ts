@@ -23,7 +23,7 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
     const role = profile?.role;
 
     const baseSelect =
-      "id, title, event_type, start_date, end_date, location, online_meeting, organizer_message, requires_coverage, created_by, created_at, status";
+      "id, title, event_type, start_date, end_date, location, online_meeting, registration_enabled, organizer_message, requires_coverage, created_by, created_at, status";
 
     let rows: EventRow[] = [];
 

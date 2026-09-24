@@ -68,6 +68,7 @@ export interface CalendarEvent {
   end: string; // ISO
   location: string;
   onlineMeeting: boolean;
+  registrationEnabled: boolean;
   message: string;
   requiresCoverage: boolean;
   coverage: CoverageState | null;
@@ -84,6 +85,7 @@ export interface EventRow {
   end_date: string;
   location: string | null;
   online_meeting: boolean | null;
+  registration_enabled: boolean | null;
   organizer_message: string | null;
   requires_coverage: boolean | null;
   created_by: string | null;
@@ -133,6 +135,7 @@ export function mapEventRow(row: EventRow, coverageRequest?: CoverageRequestRow)
     end: row.end_date,
     location: row.location ?? "",
     onlineMeeting: row.online_meeting ?? false,
+    registrationEnabled: row.registration_enabled ?? false,
     message: row.organizer_message ?? "",
     requiresCoverage,
     coverage: deriveCoverageState(requiresCoverage, coverageRequest),

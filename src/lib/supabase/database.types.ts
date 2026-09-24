@@ -1192,6 +1192,96 @@ export type Database = {
         }
         Relationships: []
       }
+      event_registration_campaigns: {
+        Row: {
+          id: string
+          event_id: string
+          subject: string
+          message: string
+          image_url: string | null
+          video_url: string | null
+          links: Json
+          public_token: string
+          status: string
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          event_id: string
+          subject?: string
+          message?: string
+          image_url?: string | null
+          video_url?: string | null
+          links?: Json
+          public_token?: string
+          status?: string
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          event_id?: string
+          subject?: string
+          message?: string
+          image_url?: string | null
+          video_url?: string | null
+          links?: Json
+          public_token?: string
+          status?: string
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      event_registration_recipients: {
+        Row: {
+          id: string
+          campaign_id: string
+          token: string
+          contact_id: string | null
+          name: string
+          email: string | null
+          club: string | null
+          source: string
+          sent_at: string | null
+          response: string | null
+          responded_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          campaign_id: string
+          token?: string
+          contact_id?: string | null
+          name?: string
+          email?: string | null
+          club?: string | null
+          source?: string
+          sent_at?: string | null
+          response?: string | null
+          responded_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          campaign_id?: string
+          token?: string
+          contact_id?: string | null
+          name?: string
+          email?: string | null
+          club?: string | null
+          source?: string
+          sent_at?: string | null
+          response?: string | null
+          responded_at?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       events: {
         Row: {
           id: string
@@ -1220,6 +1310,7 @@ export type Database = {
           google_calendar_id: string | null
           google_connected_account_id: string | null
           online_meeting: boolean
+          registration_enabled: boolean
         }
         Insert: {
           id?: string
@@ -1248,6 +1339,7 @@ export type Database = {
           google_calendar_id?: string | null
           google_connected_account_id?: string | null
           online_meeting?: boolean
+          registration_enabled?: boolean
         }
         Update: {
           id?: string
@@ -1276,6 +1368,7 @@ export type Database = {
           google_calendar_id?: string | null
           google_connected_account_id?: string | null
           online_meeting?: boolean
+          registration_enabled?: boolean
         }
         Relationships: []
       }

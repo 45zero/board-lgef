@@ -19,6 +19,7 @@ import {
   List,
   LayoutGrid,
   HardDrive,
+  ClipboardCheck,
 } from "lucide-react";
 import { BOARD_APPS } from "@/lib/board/tokens";
 import type { NavLayout } from "./BoardShell";
@@ -39,6 +40,7 @@ const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   audiovisuel: Video,
   communication: Megaphone,
   administration: ShieldCheck,
+  inscription: ClipboardCheck,
 };
 
 const RUNNING_APPS = new Set([
@@ -51,6 +53,7 @@ const RUNNING_APPS = new Set([
   "ged",
   "audiovisuel",
   "drive",
+  "inscription",
 ]);
 
 export function AppRail({

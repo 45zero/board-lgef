@@ -12,6 +12,7 @@ import { CalendrierScreen } from "./screens/CalendrierScreen";
 import { GedScreen } from "./screens/GedScreen";
 import { PublicationScreen } from "./screens/PublicationScreen";
 import { DriveScreen } from "./screens/DriveScreen";
+import { InscriptionScreen } from "./screens/InscriptionScreen";
 import { MobileShell } from "./mobile/MobileShell";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useBoardPreferences } from "@/hooks/board/useBoardPreferences";
@@ -65,6 +66,8 @@ export function BoardShell() {
               <PublicationScreen />
             ) : app === "drive" ? (
               <DriveScreen />
+            ) : app === "inscription" ? (
+              <InscriptionScreen />
             ) : (
               <div className="flex h-full items-center justify-center rounded-panel border border-line bg-card/60 text-ink-3">
                 Module « {currentApp.label} » — à venir

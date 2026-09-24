@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
-import { X, Trash2, MapPin, ChevronDown, Camera, Video } from "lucide-react";
+import { X, Trash2, MapPin, ChevronDown, Camera, Video, ClipboardCheck } from "lucide-react";
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
 import { CALENDAR_ORG_KEYS, type CalendarEvent } from "@/lib/board/calendar";
 import { useEventModalState } from "@/hooks/board/useEventModalState";
@@ -258,6 +258,13 @@ export function EventModal({
                 >
                   <Video size={13} /> Réunion en ligne
                 </button>
+              </div>
+
+              <div className="flex items-center justify-between rounded-btn border border-line px-3 py-2">
+                <span className="flex items-center gap-1.5 text-sm font-bold text-ink">
+                  <ClipboardCheck size={14} /> Inscriptions
+                </span>
+                <Toggle on={m.registrationEnabled} onClick={() => m.setRegistrationEnabled(!m.registrationEnabled)} />
               </div>
 
               {!isEditing && (

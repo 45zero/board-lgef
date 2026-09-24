@@ -198,11 +198,12 @@ function buildRawMessage(params: {
   bcc?: string;
   subject: string;
   body: string;
+  html?: string;
   from: string;
   inReplyTo?: string;
   references?: string;
 }) {
-  const lines = [
+  const headerLines = [
     `From: ${params.from}`,
     `To: ${params.to}`,
     ...(params.cc ? [`Cc: ${params.cc}`] : []),
@@ -211,10 +212,31 @@ function buildRawMessage(params: {
     ...(params.inReplyTo ? [`In-Reply-To: ${params.inReplyTo}`] : []),
     ...(params.references ? [`References: ${params.references}`] : []),
     "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=UTF-8",
-    "",
-    params.body,
   ];
+
+  let lines: string[];
+  if (params.html) {
+    const boundary = `----=_Part_${Date.now()}`;
+    lines = [
+      ...headerLines,
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+      "",
+      `--${boundary}`,
+      "Content-Type: text/plain; charset=UTF-8",
+      "",
+      params.body,
+      "",
+      `--${boundary}`,
+      "Content-Type: text/html; charset=UTF-8",
+      "",
+      params.html,
+      "",
+      `--${boundary}--`,
+    ];
+  } else {
+    lines = [...headerLines, "Content-Type: text/plain; charset=UTF-8", "", params.body];
+  }
+
   return Buffer.from(lines.join("\r\n"), "utf8")
     .toString("base64")
     .replace(/\+/g, "-")
@@ -224,7 +246,7 @@ function buildRawMessage(params: {
 
 export async function sendMessage(
   account: ConnectedAccount,
-  params: { to: string; cc?: string; bcc?: string; subject: string; body: string }
+  params: { to: string; cc?: string; bcc?: string; subject: string; body: string; html?: string }
 ) {
   const gmail = await gmailClient(account);
   const raw = buildRawMessage({ ...params, from: account.email });

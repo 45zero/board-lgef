@@ -59,6 +59,7 @@ export function useEventModalState({
   const [title, setTitle] = useState(event?.title ?? "");
   const [location, setLocation] = useState(event?.location ?? "");
   const [onlineMeeting, setOnlineMeeting] = useState(event?.onlineMeeting ?? false);
+  const [registrationEnabled, setRegistrationEnabled] = useState(event?.registrationEnabled ?? false);
   const [message, setMessage] = useState(event?.message ?? "");
   const [pendingParticipants, setPendingParticipants] = useState<
     { id: string; name: string; role: "responsable" | "membre" }[]
@@ -127,7 +128,16 @@ export function useEventModalState({
   const buildPayload = (): EventFormPayload => {
     const startISO = new Date(`${dateStr}T${startTime}:00`).toISOString();
     const endISO = new Date(`${dateStr}T${endTime}:00`).toISOString();
-    return { title, eventType: ORG_TO_EVENT_TYPE[org], location, onlineMeeting, message, startISO, endISO };
+    return {
+      title,
+      eventType: ORG_TO_EVENT_TYPE[org],
+      location,
+      onlineMeeting,
+      registrationEnabled,
+      message,
+      startISO,
+      endISO,
+    };
   };
 
   const addPendingParticipant = (profile: { id: string; first_name: string | null; last_name: string | null; email: string | null }) => {
@@ -256,6 +266,8 @@ export function useEventModalState({
     setLocation,
     onlineMeeting,
     setOnlineMeeting,
+    registrationEnabled,
+    setRegistrationEnabled,
     message,
     setMessage,
     pendingParticipants,
