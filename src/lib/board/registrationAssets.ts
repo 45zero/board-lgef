@@ -1,17 +1,15 @@
 "use client";
 
-import {
-  initCampaignAssetUpload,
-  finalizeCampaignImageAsset,
-  finalizeCampaignVideoAsset,
-  finalizeCampaignPdfAsset,
-  type CampaignAssetField,
-} from "@/app/actions/registration";
+import { initCampaignAssetUpload, finalizeCampaignBlockAsset } from "@/app/actions/registration";
 
 const CHUNK_SIZE = 3 * 1024 * 1024;
 
 /** Upload direct-navigateur vers Drive (même relais par morceaux que les pièces jointes d'événement) — évite CORS et le 413. */
-async function putFileToDriveViaRelay(eventId: string, uploadUrl: string, file: File): Promise<{ id: string; webViewLink?: string }> {
+async function putFileToDriveViaRelay(
+  eventId: string,
+  uploadUrl: string,
+  file: File
+): Promise<{ id: string; webViewLink?: string }> {
   let offset = 0;
   while (offset < file.size) {
     const end = Math.min(offset + CHUNK_SIZE, file.size);
@@ -38,20 +36,17 @@ async function putFileToDriveViaRelay(eventId: string, uploadUrl: string, file: 
   throw new Error("Échec de l'envoi (fichier vide).");
 }
 
-export async function uploadCampaignImageAsset(campaignId: string, field: CampaignAssetField, file: File) {
+/** Upload un fichier vers Drive et met à jour le bloc `blockId` de la campagne avec l'URL exploitable dans le mail. */
+export async function uploadCampaignBlockAsset(
+  campaignId: string,
+  blockId: string,
+  kind: "image" | "banner" | "video" | "pdf" | "signature",
+  file: File
+) {
   const { uploadUrl, eventId } = await initCampaignAssetUpload(campaignId, file.name, file.type);
   const driveFile = await putFileToDriveViaRelay(eventId, uploadUrl, file);
-  return finalizeCampaignImageAsset(campaignId, field, driveFile.id);
-}
-
-export async function uploadCampaignVideoAsset(campaignId: string, file: File) {
-  const { uploadUrl, eventId } = await initCampaignAssetUpload(campaignId, file.name, file.type);
-  const driveFile = await putFileToDriveViaRelay(eventId, uploadUrl, file);
-  await finalizeCampaignVideoAsset(campaignId, driveFile.id, driveFile.webViewLink ?? "");
-}
-
-export async function uploadCampaignPdfAsset(campaignId: string, file: File) {
-  const { uploadUrl, eventId } = await initCampaignAssetUpload(campaignId, file.name, file.type);
-  const driveFile = await putFileToDriveViaRelay(eventId, uploadUrl, file);
-  await finalizeCampaignPdfAsset(campaignId, driveFile.id, file.name);
+  return finalizeCampaignBlockAsset(campaignId, blockId, kind, driveFile.id, {
+    webViewLink: driveFile.webViewLink,
+    filename: file.name,
+  });
 }

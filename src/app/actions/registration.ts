@@ -5,7 +5,8 @@ import { listConnectedAccounts, getGoogleAccountById } from "@/lib/google/accoun
 import { getBoardDriveAccountId } from "@/app/actions/board-settings";
 import { sendMessage } from "@/lib/google/gmail";
 import { findOrCreateFolder, createResumableUploadSession, ensurePublicViewAccess } from "@/lib/google/drive";
-import { buildRegistrationEmailHtml } from "@/lib/board/registrationEmail";
+import { buildRegistrationEmailHtml, type EmailBlock } from "@/lib/board/registrationEmail";
+import type { Json } from "@/lib/supabase/database.types";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 
@@ -92,31 +93,49 @@ export async function getOrCreateCampaign(eventId: string) {
   return created;
 }
 
-export async function updateCampaign(
-  campaignId: string,
-  patch: {
-    subject?: string;
-    message?: string;
-    image_url?: string | null;
-    video_url?: string | null;
-    links?: { label: string; url: string }[];
-    invitation_card_url?: string | null;
-    banner_url?: string | null;
-    pdf_url?: string | null;
-    pdf_filename?: string | null;
-    parking_label?: string | null;
-    parking_address?: string | null;
-    signatory_name?: string | null;
-    signatory_title?: string | null;
-    signature_image_url?: string | null;
-  }
-) {
+export async function updateCampaign(campaignId: string, patch: { subject?: string }) {
   const { supabase } = await requireStaff();
   const { error } = await supabase
     .from("event_registration_campaigns")
-    .update({ ...patch, links: patch.links as never, updated_at: new Date().toISOString() })
+    .update({ ...patch, updated_at: new Date().toISOString() })
     .eq("id", campaignId);
   if (error) throw new Error(error.message);
+}
+
+async function updateBlocks(campaignId: string, updater: (blocks: EmailBlock[]) => EmailBlock[]) {
+  const { supabase } = await requireStaff();
+  const { data: current } = await supabase.from("event_registration_campaigns").select("blocks").eq("id", campaignId).single();
+  const blocks = ((current?.blocks as unknown as EmailBlock[]) ?? []).slice();
+  const next = updater(blocks);
+  const { error } = await supabase
+    .from("event_registration_campaigns")
+    .update({ blocks: next as unknown as Json, updated_at: new Date().toISOString() })
+    .eq("id", campaignId);
+  if (error) throw new Error(error.message);
+  return next;
+}
+
+export async function addCampaignBlock(campaignId: string, block: EmailBlock) {
+  return updateBlocks(campaignId, (blocks) => [...blocks, block]);
+}
+
+export async function removeCampaignBlock(campaignId: string, blockId: string) {
+  return updateBlocks(campaignId, (blocks) => blocks.filter((b) => b.id !== blockId));
+}
+
+export async function moveCampaignBlock(campaignId: string, blockId: string, direction: "up" | "down") {
+  return updateBlocks(campaignId, (blocks) => {
+    const idx = blocks.findIndex((b) => b.id === blockId);
+    const swapWith = direction === "up" ? idx - 1 : idx + 1;
+    if (idx < 0 || swapWith < 0 || swapWith >= blocks.length) return blocks;
+    const next = [...blocks];
+    [next[idx], next[swapWith]] = [next[swapWith], next[idx]];
+    return next;
+  });
+}
+
+export async function updateCampaignBlockContent(campaignId: string, blockId: string, patch: Record<string, unknown>) {
+  return updateBlocks(campaignId, (blocks) => blocks.map((b) => (b.id === blockId ? ({ ...b, ...patch } as EmailBlock) : b)));
 }
 
 export async function listCampaignRecipients(campaignId: string) {
@@ -210,6 +229,10 @@ export async function sendCampaign(campaignId: string) {
     ? format(new Date(event.start_date), "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })
     : "";
 
+  const blocks = (campaign.blocks as unknown as EmailBlock[]) ?? [];
+  const firstText = blocks.find((b): b is Extract<EmailBlock, { type: "text" }> => b.type === "text");
+  const plainFallback = firstText?.content || "Vous êtes invité(e) à cet événement.";
+
   let sent = 0;
   for (const r of recipients) {
     if (!r.email) continue;
@@ -219,21 +242,9 @@ export async function sendCampaign(campaignId: string) {
       eventTitle,
       eventDateLabel,
       eventLocation: event?.location ?? null,
-      message: campaign.message || "Vous êtes invité(e) à cet événement.",
       logoUrl: `${siteUrl()}/lgef-logo.png`,
-      invitationCardUrl: campaign.invitation_card_url,
-      bannerUrl: campaign.banner_url,
-      imageUrl: campaign.image_url,
-      videoUrl: campaign.video_url,
-      pdfUrl: campaign.pdf_url,
-      pdfFilename: campaign.pdf_filename,
-      parkingLabel: campaign.parking_label,
-      parkingAddress: campaign.parking_address,
+      blocks,
       mapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null,
-      links: (campaign.links as unknown as { label: string; url: string }[]) ?? [],
-      signatoryName: campaign.signatory_name,
-      signatoryTitle: campaign.signatory_title,
-      signatureImageUrl: campaign.signature_image_url,
       yesUrl,
       noUrl,
     });
@@ -241,7 +252,7 @@ export async function sendCampaign(campaignId: string) {
       await sendMessage(account, {
         to: r.email,
         subject: campaign.subject || `Invitation — ${eventTitle}`,
-        body: `${campaign.message || "Vous êtes invité(e) à cet événement."}\n\nJe participe : ${yesUrl}\nJe n'y participerai pas : ${noUrl}`,
+        body: `${plainFallback}\n\nJe participe : ${yesUrl}\nJe n'y participerai pas : ${noUrl}`,
         html,
       });
       await supabase.from("event_registration_recipients").update({ sent_at: new Date().toISOString() }).eq("id", r.id);
@@ -283,48 +294,31 @@ export async function initCampaignAssetUpload(campaignId: string, filename: stri
   return { uploadUrl, eventId: campaign.event_id as string };
 }
 
-export type CampaignAssetField =
-  | "invitation_card_url"
-  | "banner_url"
-  | "image_url"
-  | "banner_ad_url"
-  | "signature_image_url";
-
-/** Rend le fichier public (lien) et enregistre l'URL directe sur le champ image demandé. */
-export async function finalizeCampaignImageAsset(campaignId: string, field: CampaignAssetField, driveFileId: string) {
-  const { supabase } = await requireStaff();
+/**
+ * Rend le fichier public (lien) puis met à jour le bloc correspondant dans
+ * `blocks` avec l'URL exploitable dans un email — image directe pour
+ * image/banner/signature, lien de lecture pour vidéo, lien de téléchargement
+ * + nom pour un PDF (aucun embarquement inline possible dans un email).
+ */
+export async function finalizeCampaignBlockAsset(
+  campaignId: string,
+  blockId: string,
+  kind: "image" | "banner" | "video" | "pdf" | "signature",
+  driveFileId: string,
+  extra?: { webViewLink?: string; filename?: string }
+) {
   const account = await requireBoardAccount();
   await ensurePublicViewAccess(account, driveFileId);
-  const directUrl = `https://drive.google.com/uc?export=view&id=${driveFileId}`;
-  const { error } = await supabase
-    .from("event_registration_campaigns")
-    .update({ [field]: directUrl } as never)
-    .eq("id", campaignId);
-  if (error) throw new Error(error.message);
-  return directUrl;
-}
 
-/** Vidéo : lien de lecture (webViewLink) plutôt qu'une image directe — pas d'embarquement inline possible dans un email. */
-export async function finalizeCampaignVideoAsset(campaignId: string, driveFileId: string, webViewLink: string) {
-  const { supabase } = await requireStaff();
-  const account = await requireBoardAccount();
-  await ensurePublicViewAccess(account, driveFileId);
-  const { error } = await supabase
-    .from("event_registration_campaigns")
-    .update({ video_url: webViewLink })
-    .eq("id", campaignId);
-  if (error) throw new Error(error.message);
-}
-
-/** PDF : lien de téléchargement direct + nom affiché. */
-export async function finalizeCampaignPdfAsset(campaignId: string, driveFileId: string, filename: string) {
-  const { supabase } = await requireStaff();
-  const account = await requireBoardAccount();
-  await ensurePublicViewAccess(account, driveFileId);
-  const directUrl = `https://drive.google.com/uc?export=download&id=${driveFileId}`;
-  const { error } = await supabase
-    .from("event_registration_campaigns")
-    .update({ pdf_url: directUrl, pdf_filename: filename })
-    .eq("id", campaignId);
-  if (error) throw new Error(error.message);
+  let patch: Record<string, unknown>;
+  if (kind === "video") {
+    patch = { url: extra?.webViewLink || `https://drive.google.com/file/d/${driveFileId}/view` };
+  } else if (kind === "pdf") {
+    patch = { url: `https://drive.google.com/uc?export=download&id=${driveFileId}`, filename: extra?.filename || "Document" };
+  } else if (kind === "signature") {
+    patch = { imageUrl: `https://drive.google.com/uc?export=view&id=${driveFileId}` };
+  } else {
+    patch = { url: `https://drive.google.com/uc?export=view&id=${driveFileId}` };
+  }
+  return updateCampaignBlockContent(campaignId, blockId, patch);
 }

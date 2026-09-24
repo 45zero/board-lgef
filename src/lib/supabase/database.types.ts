@@ -1215,6 +1215,7 @@ export type Database = {
           signatory_name: string | null
           signatory_title: string | null
           signature_image_url: string | null
+          blocks: Json
         }
         Insert: {
           id?: string
@@ -1238,6 +1239,7 @@ export type Database = {
           signatory_name?: string | null
           signatory_title?: string | null
           signature_image_url?: string | null
+          blocks?: Json
         }
         Update: {
           id?: string
@@ -1261,6 +1263,7 @@ export type Database = {
           signatory_name?: string | null
           signatory_title?: string | null
           signature_image_url?: string | null
+          blocks?: Json
         }
         Relationships: []
       }

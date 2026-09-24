@@ -19,34 +19,82 @@ import {
   FileText,
   MapPin,
   PenLine,
+  Type,
+  ImageIcon,
+  Calendar,
+  ArrowUp,
+  ArrowDown,
+  MousePointerClick,
 } from "lucide-react";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import {
   listRegistrationEvents,
   getOrCreateCampaign,
   updateCampaign,
+  addCampaignBlock,
+  removeCampaignBlock,
+  moveCampaignBlock,
+  updateCampaignBlockContent,
   listCampaignRecipients,
   searchClubContacts,
   addRecipientsFromContacts,
   addManualRecipient,
   removeRecipient,
   sendCampaign,
-  type CampaignAssetField,
 } from "@/app/actions/registration";
-import {
-  uploadCampaignImageAsset,
-  uploadCampaignVideoAsset,
-  uploadCampaignPdfAsset,
-} from "@/lib/board/registrationAssets";
+import { uploadCampaignBlockAsset } from "@/lib/board/registrationAssets";
+import type { EmailBlock } from "@/lib/board/registrationEmail";
 
-function ImageAssetField({
-  label,
+type RegistrationEvent = Awaited<ReturnType<typeof listRegistrationEvents>>[number];
+type Campaign = Awaited<ReturnType<typeof getOrCreateCampaign>>;
+type Recipient = Awaited<ReturnType<typeof listCampaignRecipients>>[number];
+
+function siteOrigin() {
+  return typeof window !== "undefined" ? window.location.origin : "";
+}
+
+const BLOCK_TYPES: { type: EmailBlock["type"]; label: string; icon: typeof Type }[] = [
+  { type: "text", label: "Texte", icon: Type },
+  { type: "image", label: "Image", icon: ImageIcon },
+  { type: "date", label: "Date de l'événement", icon: Calendar },
+  { type: "banner", label: "Bannière", icon: ImageIcon },
+  { type: "map", label: "Carte / stationnement", icon: MapPin },
+  { type: "video", label: "Vidéo", icon: Video },
+  { type: "pdf", label: "Document PDF", icon: FileText },
+  { type: "signature", label: "Signature", icon: PenLine },
+  { type: "buttons", label: "Boutons de réponse", icon: MousePointerClick },
+];
+
+function newBlock(type: EmailBlock["type"]): EmailBlock {
+  const id = crypto.randomUUID();
+  switch (type) {
+    case "text":
+      return { id, type, content: "" };
+    case "image":
+      return { id, type, url: "" };
+    case "date":
+      return { id, type };
+    case "banner":
+      return { id, type, url: "" };
+    case "map":
+      return { id, type, label: "", address: "" };
+    case "video":
+      return { id, type, url: "" };
+    case "pdf":
+      return { id, type, url: "", filename: "" };
+    case "signature":
+      return { id, type, name: "", title: "", imageUrl: null };
+    case "buttons":
+      return { id, type };
+  }
+}
+
+function ImageUploadBox({
   url,
   onUpload,
   onClear,
 }: {
-  label: string;
-  url: string;
+  url: string | null;
   onUpload: (file: File) => Promise<void>;
   onClear: () => void;
 }) {
@@ -55,11 +103,10 @@ function ImageAssetField({
 
   return (
     <div>
-      <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">{label}</div>
       {url ? (
         <div className="relative">
           {/* eslint-disable-next-line @next/next/no-img-element -- lien Drive externe, pas un asset statique */}
-          <img src={url} alt={label} className="h-24 w-full rounded-btn border border-line object-cover" />
+          <img src={url} alt="" className="h-28 w-full rounded-btn border border-line object-cover" />
           <button
             onClick={onClear}
             className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
@@ -72,7 +119,7 @@ function ImageAssetField({
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
-          className="flex h-24 w-full flex-col items-center justify-center gap-1 rounded-btn border border-dashed border-line text-xs font-semibold text-ink-3 hover:bg-hover disabled:opacity-50"
+          className="flex h-20 w-full flex-col items-center justify-center gap-1 rounded-btn border border-dashed border-line text-xs font-semibold text-ink-3 hover:bg-hover disabled:opacity-50"
         >
           <Upload size={14} /> {uploading ? "Envoi…" : "Importer une image"}
         </button>
@@ -98,31 +145,182 @@ function ImageAssetField({
   );
 }
 
-type RegistrationEvent = Awaited<ReturnType<typeof listRegistrationEvents>>[number];
-type Campaign = Awaited<ReturnType<typeof getOrCreateCampaign>>;
-type Recipient = Awaited<ReturnType<typeof listCampaignRecipients>>[number];
+function BlockEditor({
+  block,
+  campaignId,
+  index,
+  total,
+  onMove,
+  onRemove,
+  onPatch,
+  onRefetch,
+}: {
+  block: EmailBlock;
+  campaignId: string;
+  index: number;
+  total: number;
+  onMove: (direction: "up" | "down") => void;
+  onRemove: () => void;
+  onPatch: (patch: Record<string, unknown>) => void;
+  onRefetch: () => void;
+}) {
+  const info = BLOCK_TYPES.find((b) => b.type === block.type)!;
+  const Icon = info.icon;
+  const [text, setText] = useState(block.type === "text" ? block.content : "");
+  const [busy, setBusy] = useState(false);
 
-function siteOrigin() {
-  return typeof window !== "undefined" ? window.location.origin : "";
+  const uploadAsset = async (kind: "image" | "banner" | "video" | "pdf" | "signature", file: File) => {
+    setBusy(true);
+    try {
+      await uploadCampaignBlockAsset(campaignId, block.id, kind, file);
+      onRefetch();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-panel border border-line bg-card p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-xs font-bold text-ink-3">
+          <Icon size={13} /> {info.label}
+        </span>
+        <div className="flex items-center gap-1">
+          <button onClick={() => onMove("up")} disabled={index === 0} className="text-ink-4 hover:text-ink disabled:opacity-30">
+            <ArrowUp size={13} />
+          </button>
+          <button
+            onClick={() => onMove("down")}
+            disabled={index === total - 1}
+            className="text-ink-4 hover:text-ink disabled:opacity-30"
+          >
+            <ArrowDown size={13} />
+          </button>
+          <button onClick={onRemove} className="ml-1 text-ink-4 hover:text-red">
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+
+      {block.type === "text" && (
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={() => onPatch({ content: text })}
+          rows={3}
+          placeholder="Votre texte…"
+          className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
+        />
+      )}
+
+      {block.type === "date" && <p className="text-xs italic text-ink-4">Affiche automatiquement la date/heure de l&rsquo;événement, en gras.</p>}
+
+      {(block.type === "image" || block.type === "banner") && (
+        <ImageUploadBox
+          url={block.url || null}
+          onUpload={(file) => uploadAsset(block.type as "image" | "banner", file)}
+          onClear={() => onPatch({ url: "" })}
+        />
+      )}
+
+      {block.type === "map" && (
+        <div className="space-y-2">
+          <input
+            defaultValue={block.label}
+            onBlur={(e) => onPatch({ label: e.target.value })}
+            placeholder="Ex. Parking 3"
+            className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+          />
+          <input
+            defaultValue={block.address}
+            onBlur={(e) => onPatch({ address: e.target.value })}
+            placeholder="Adresse (pour la carte)"
+            className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+          />
+        </div>
+      )}
+
+      {block.type === "video" &&
+        (block.url ? (
+          <div className="flex items-center justify-between rounded-btn border border-line px-3 py-2">
+            <span className="flex items-center gap-1.5 text-xs text-ink-2">
+              <Video size={13} /> Vidéo importée
+            </span>
+            <button onClick={() => onPatch({ url: "" })} className="text-ink-4 hover:text-red">
+              <X size={12} />
+            </button>
+          </div>
+        ) : (
+          <label className="flex h-16 w-full cursor-pointer flex-col items-center justify-center gap-1 rounded-btn border border-dashed border-line text-xs font-semibold text-ink-3 hover:bg-hover">
+            <Upload size={14} /> {busy ? "Envoi…" : "Importer une vidéo"}
+            <input
+              type="file"
+              accept="video/*"
+              className="hidden"
+              onChange={(e) => e.target.files?.[0] && uploadAsset("video", e.target.files[0])}
+            />
+          </label>
+        ))}
+
+      {block.type === "pdf" &&
+        (block.url ? (
+          <div className="flex items-center justify-between rounded-btn border border-line px-3 py-2">
+            <span className="flex items-center gap-1.5 truncate text-xs text-ink-2">
+              <FileText size={13} /> {block.filename || "Document"}
+            </span>
+            <button onClick={() => onPatch({ url: "", filename: "" })} className="text-ink-4 hover:text-red">
+              <X size={12} />
+            </button>
+          </div>
+        ) : (
+          <label className="flex h-16 w-full cursor-pointer flex-col items-center justify-center gap-1 rounded-btn border border-dashed border-line text-xs font-semibold text-ink-3 hover:bg-hover">
+            <Upload size={14} /> {busy ? "Envoi…" : "Importer un PDF"}
+            <input
+              type="file"
+              accept="application/pdf"
+              className="hidden"
+              onChange={(e) => e.target.files?.[0] && uploadAsset("pdf", e.target.files[0])}
+            />
+          </label>
+        ))}
+
+      {block.type === "signature" && (
+        <div className="space-y-2">
+          <input
+            defaultValue={block.name}
+            onBlur={(e) => onPatch({ name: e.target.value })}
+            placeholder="Nom (ex. Jean Dupont)"
+            className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+          />
+          <input
+            defaultValue={block.title}
+            onBlur={(e) => onPatch({ title: e.target.value })}
+            placeholder="Fonction (ex. Président de la LGEF)"
+            className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+          />
+          <ImageUploadBox
+            url={block.imageUrl}
+            onUpload={(file) => uploadAsset("signature", file)}
+            onClear={() => onPatch({ imageUrl: null })}
+          />
+        </div>
+      )}
+
+      {block.type === "buttons" && (
+        <p className="text-xs italic text-ink-4">« ✓ Je participe » / « Je n&rsquo;y participerai pas ».</p>
+      )}
+    </div>
+  );
 }
 
 function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => void }) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [subject, setSubject] = useState("");
-  const [message, setMessage] = useState("");
-  const [parkingLabel, setParkingLabel] = useState("");
-  const [parkingAddress, setParkingAddress] = useState("");
-  const [signatoryName, setSignatoryName] = useState("");
-  const [signatoryTitle, setSignatoryTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<string | null>(null);
-  const [assetError, setAssetError] = useState<string | null>(null);
-  const [uploadingVideo, setUploadingVideo] = useState(false);
-  const [uploadingPdf, setUploadingPdf] = useState(false);
-  const videoInputRef = useRef<HTMLInputElement>(null);
-  const pdfInputRef = useRef<HTMLInputElement>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ id: string; name: string; email: string | null; club: string | null }[]>([]);
   const [manualName, setManualName] = useState("");
@@ -143,11 +341,6 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
       const c = await getOrCreateCampaign(ev.id);
       setCampaign(c);
       setSubject(c.subject || `Invitation — ${ev.title}`);
-      setMessage(c.message || "");
-      setParkingLabel(c.parking_label || "");
-      setParkingAddress(c.parking_address || "");
-      setSignatoryName(c.signatory_name || "");
-      setSignatoryTitle(c.signatory_title || "");
       await refetch(c);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -155,33 +348,21 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
 
   if (!campaign) return <div className="p-6 text-sm text-ink-4">Chargement…</div>;
 
-  const handleAssetUpload = async (fn: () => Promise<unknown>) => {
-    setAssetError(null);
-    try {
-      await fn();
-      await refetchCampaign();
-    } catch (e) {
-      setAssetError(e instanceof Error ? e.message : "Échec de l'envoi.");
-    }
-  };
+  const blocks = ((campaign.blocks as unknown as EmailBlock[]) ?? []);
 
-  const clearField = (field: CampaignAssetField | "video_url" | "pdf_url") =>
-    handleAssetUpload(() => updateCampaign(campaign.id, { [field]: null } as never));
-
-  const save = async () => {
+  const saveSubject = async () => {
     setSaving(true);
     try {
-      await updateCampaign(campaign.id, {
-        subject,
-        message,
-        parking_label: parkingLabel || null,
-        parking_address: parkingAddress || null,
-        signatory_name: signatoryName || null,
-        signatory_title: signatoryTitle || null,
-      });
+      await updateCampaign(campaign.id, { subject });
     } finally {
       setSaving(false);
     }
+  };
+
+  const addBlock = async (type: EmailBlock["type"]) => {
+    setAddMenuOpen(false);
+    await addCampaignBlock(campaign.id, newBlock(type));
+    await refetchCampaign();
   };
 
   const runSearch = async () => {
@@ -210,7 +391,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
     setSending(true);
     setSendResult(null);
     try {
-      await save();
+      await saveSubject();
       const { sent } = await sendCampaign(campaign.id);
       setSendResult(`${sent} email(s) envoyé(s).`);
       await refetch(campaign);
@@ -239,165 +420,71 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        {/* Colonne email */}
+        {/* Colonne email — bâti à la carte, dans l'ordre choisi */}
         <div className="space-y-3 rounded-panel border border-line bg-card p-4">
           <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Contenu du mail</div>
           <input
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
+            onBlur={saveSubject}
             placeholder="Objet"
             className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
           />
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            rows={5}
-            placeholder="Message d'invitation…"
-            className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
-          />
-          <button onClick={save} disabled={saving} className="text-xs font-semibold text-link hover:underline disabled:opacity-50">
-            {saving ? "Enregistrement…" : "Enregistrer le texte"}
-          </button>
+          {saving && <p className="text-[10px] text-ink-4">Enregistrement…</p>}
 
-          {assetError && <p className="text-xs font-semibold text-bad">{assetError}</p>}
-
-          <div className="grid grid-cols-2 gap-3">
-            <ImageAssetField
-              label="Carton d'invitation"
-              url={campaign.invitation_card_url ?? ""}
-              onUpload={(file) => handleAssetUpload(() => uploadCampaignImageAsset(campaign.id, "invitation_card_url", file))}
-              onClear={() => clearField("invitation_card_url")}
-            />
-            <ImageAssetField
-              label="Bannière"
-              url={campaign.banner_url ?? ""}
-              onUpload={(file) => handleAssetUpload(() => uploadCampaignImageAsset(campaign.id, "banner_url", file))}
-              onClear={() => clearField("banner_url")}
-            />
-            <ImageAssetField
-              label="Image"
-              url={campaign.image_url ?? ""}
-              onUpload={(file) => handleAssetUpload(() => uploadCampaignImageAsset(campaign.id, "image_url", file))}
-              onClear={() => clearField("image_url")}
-            />
-            <ImageAssetField
-              label="Signature (image)"
-              url={campaign.signature_image_url ?? ""}
-              onUpload={(file) => handleAssetUpload(() => uploadCampaignImageAsset(campaign.id, "signature_image_url", file))}
-              onClear={() => clearField("signature_image_url")}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Vidéo</div>
-              {campaign.video_url ? (
-                <div className="flex items-center justify-between rounded-btn border border-line px-3 py-2">
-                  <span className="flex items-center gap-1.5 truncate text-xs text-ink-2">
-                    <Video size={13} /> Vidéo importée
-                  </span>
-                  <button onClick={() => clearField("video_url")} className="text-ink-4 hover:text-red">
-                    <X size={12} />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => videoInputRef.current?.click()}
-                  disabled={uploadingVideo}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-btn border border-dashed border-line py-2 text-xs font-semibold text-ink-3 hover:bg-hover disabled:opacity-50"
-                >
-                  <Upload size={13} /> {uploadingVideo ? "Envoi…" : "Importer"}
-                </button>
-              )}
-              <input
-                ref={videoInputRef}
-                type="file"
-                accept="video/*"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  setUploadingVideo(true);
-                  await handleAssetUpload(() => uploadCampaignVideoAsset(campaign.id, file));
-                  setUploadingVideo(false);
-                  e.target.value = "";
+          <div className="space-y-2">
+            {blocks.length === 0 && (
+              <p className="rounded-btn border border-dashed border-line p-4 text-center text-xs italic text-ink-4">
+                Ajoute des blocs ci-dessous — texte, image, date, bannière, carte, vidéo… dans l&rsquo;ordre que tu veux.
+              </p>
+            )}
+            {blocks.map((b, i) => (
+              <BlockEditor
+                key={b.id}
+                block={b}
+                campaignId={campaign.id}
+                index={i}
+                total={blocks.length}
+                onMove={async (direction) => {
+                  await moveCampaignBlock(campaign.id, b.id, direction);
+                  await refetchCampaign();
                 }}
-              />
-            </div>
-
-            <div>
-              <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Document PDF</div>
-              {campaign.pdf_url ? (
-                <div className="flex items-center justify-between rounded-btn border border-line px-3 py-2">
-                  <span className="flex items-center gap-1.5 truncate text-xs text-ink-2">
-                    <FileText size={13} /> {campaign.pdf_filename || "Document"}
-                  </span>
-                  <button onClick={() => clearField("pdf_url")} className="text-ink-4 hover:text-red">
-                    <X size={12} />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => pdfInputRef.current?.click()}
-                  disabled={uploadingPdf}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-btn border border-dashed border-line py-2 text-xs font-semibold text-ink-3 hover:bg-hover disabled:opacity-50"
-                >
-                  <Upload size={13} /> {uploadingPdf ? "Envoi…" : "Importer"}
-                </button>
-              )}
-              <input
-                ref={pdfInputRef}
-                type="file"
-                accept="application/pdf"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  setUploadingPdf(true);
-                  await handleAssetUpload(() => uploadCampaignPdfAsset(campaign.id, file));
-                  setUploadingPdf(false);
-                  e.target.value = "";
+                onRemove={async () => {
+                  await removeCampaignBlock(campaign.id, b.id);
+                  await refetchCampaign();
                 }}
+                onPatch={async (patch) => {
+                  await updateCampaignBlockContent(campaign.id, b.id, patch);
+                  await refetchCampaign();
+                }}
+                onRefetch={refetchCampaign}
               />
-            </div>
+            ))}
           </div>
 
-          <div className="space-y-2 rounded-btn border border-line p-3">
-            <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
-              <MapPin size={12} /> Stationnement
-            </div>
-            <input
-              value={parkingLabel}
-              onChange={(e) => setParkingLabel(e.target.value)}
-              placeholder="Ex. Parking 3"
-              className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
-            />
-            <input
-              value={parkingAddress}
-              onChange={(e) => setParkingAddress(e.target.value)}
-              placeholder="Adresse du parking (pour la carte)"
-              className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
-            />
-          </div>
-
-          <div className="space-y-2 rounded-btn border border-line p-3">
-            <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
-              <PenLine size={12} /> Signature
-            </div>
-            <input
-              value={signatoryName}
-              onChange={(e) => setSignatoryName(e.target.value)}
-              placeholder="Nom (ex. Jean Dupont)"
-              className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
-            />
-            <input
-              value={signatoryTitle}
-              onChange={(e) => setSignatoryTitle(e.target.value)}
-              placeholder="Fonction (ex. Président de la LGEF)"
-              className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
-            />
+          <div className="relative">
+            <button
+              onClick={() => setAddMenuOpen((o) => !o)}
+              className="flex w-full items-center justify-center gap-1.5 rounded-btn border border-dashed border-line py-2 text-xs font-semibold text-ink-3 hover:bg-hover"
+            >
+              <Plus size={13} /> Ajouter un bloc
+            </button>
+            {addMenuOpen && (
+              <div className="absolute left-0 top-full z-10 mt-1 w-full rounded-btn border border-line bg-card p-1 shadow-card">
+                {BLOCK_TYPES.map((t) => {
+                  const Icon = t.icon;
+                  return (
+                    <button
+                      key={t.type}
+                      onClick={() => addBlock(t.type)}
+                      className="flex w-full items-center gap-2 rounded-btn px-2 py-1.5 text-left text-xs font-semibold text-ink-2 hover:bg-hover"
+                    >
+                      <Icon size={13} /> {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="border-t border-line pt-3">
