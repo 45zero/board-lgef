@@ -1206,6 +1206,15 @@ export type Database = {
           created_by: string | null
           created_at: string
           updated_at: string
+          invitation_card_url: string | null
+          banner_url: string | null
+          pdf_url: string | null
+          pdf_filename: string | null
+          parking_label: string | null
+          parking_address: string | null
+          signatory_name: string | null
+          signatory_title: string | null
+          signature_image_url: string | null
         }
         Insert: {
           id?: string
@@ -1220,6 +1229,15 @@ export type Database = {
           created_by?: string | null
           created_at?: string
           updated_at?: string
+          invitation_card_url?: string | null
+          banner_url?: string | null
+          pdf_url?: string | null
+          pdf_filename?: string | null
+          parking_label?: string | null
+          parking_address?: string | null
+          signatory_name?: string | null
+          signatory_title?: string | null
+          signature_image_url?: string | null
         }
         Update: {
           id?: string
@@ -1234,6 +1252,15 @@ export type Database = {
           created_by?: string | null
           created_at?: string
           updated_at?: string
+          invitation_card_url?: string | null
+          banner_url?: string | null
+          pdf_url?: string | null
+          pdf_filename?: string | null
+          parking_label?: string | null
+          parking_address?: string | null
+          signatory_name?: string | null
+          signatory_title?: string | null
+          signature_image_url?: string | null
         }
         Relationships: []
       }

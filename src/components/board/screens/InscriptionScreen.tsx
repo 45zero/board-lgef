@@ -1,9 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { ArrowLeft, Check, X, Send, Link as LinkIcon, QrCode, Plus, Search, Trash2, Mail } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  X,
+  Send,
+  Link as LinkIcon,
+  QrCode,
+  Plus,
+  Search,
+  Trash2,
+  Mail,
+  Upload,
+  Video,
+  FileText,
+  MapPin,
+  PenLine,
+} from "lucide-react";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import {
   listRegistrationEvents,
@@ -15,7 +31,72 @@ import {
   addManualRecipient,
   removeRecipient,
   sendCampaign,
+  type CampaignAssetField,
 } from "@/app/actions/registration";
+import {
+  uploadCampaignImageAsset,
+  uploadCampaignVideoAsset,
+  uploadCampaignPdfAsset,
+} from "@/lib/board/registrationAssets";
+
+function ImageAssetField({
+  label,
+  url,
+  onUpload,
+  onClear,
+}: {
+  label: string;
+  url: string;
+  onUpload: (file: File) => Promise<void>;
+  onClear: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  return (
+    <div>
+      <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">{label}</div>
+      {url ? (
+        <div className="relative">
+          {/* eslint-disable-next-line @next/next/no-img-element -- lien Drive externe, pas un asset statique */}
+          <img src={url} alt={label} className="h-24 w-full rounded-btn border border-line object-cover" />
+          <button
+            onClick={onClear}
+            className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          className="flex h-24 w-full flex-col items-center justify-center gap-1 rounded-btn border border-dashed border-line text-xs font-semibold text-ink-3 hover:bg-hover disabled:opacity-50"
+        >
+          <Upload size={14} /> {uploading ? "Envoi…" : "Importer une image"}
+        </button>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          setUploading(true);
+          try {
+            await onUpload(file);
+          } finally {
+            setUploading(false);
+            e.target.value = "";
+          }
+        }}
+      />
+    </div>
+  );
+}
 
 type RegistrationEvent = Awaited<ReturnType<typeof listRegistrationEvents>>[number];
 type Campaign = Awaited<ReturnType<typeof getOrCreateCampaign>>;
@@ -30,11 +111,18 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [videoUrl, setVideoUrl] = useState("");
+  const [parkingLabel, setParkingLabel] = useState("");
+  const [parkingAddress, setParkingAddress] = useState("");
+  const [signatoryName, setSignatoryName] = useState("");
+  const [signatoryTitle, setSignatoryTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<string | null>(null);
+  const [assetError, setAssetError] = useState<string | null>(null);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ id: string; name: string; email: string | null; club: string | null }[]>([]);
   const [manualName, setManualName] = useState("");
@@ -45,14 +133,21 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
     setRecipients(await listCampaignRecipients(c.id));
   };
 
+  const refetchCampaign = async () => {
+    const c = await getOrCreateCampaign(ev.id);
+    setCampaign(c);
+  };
+
   useEffect(() => {
     (async () => {
       const c = await getOrCreateCampaign(ev.id);
       setCampaign(c);
       setSubject(c.subject || `Invitation — ${ev.title}`);
       setMessage(c.message || "");
-      setImageUrl(c.image_url || "");
-      setVideoUrl(c.video_url || "");
+      setParkingLabel(c.parking_label || "");
+      setParkingAddress(c.parking_address || "");
+      setSignatoryName(c.signatory_name || "");
+      setSignatoryTitle(c.signatory_title || "");
       await refetch(c);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -60,10 +155,30 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
 
   if (!campaign) return <div className="p-6 text-sm text-ink-4">Chargement…</div>;
 
+  const handleAssetUpload = async (fn: () => Promise<unknown>) => {
+    setAssetError(null);
+    try {
+      await fn();
+      await refetchCampaign();
+    } catch (e) {
+      setAssetError(e instanceof Error ? e.message : "Échec de l'envoi.");
+    }
+  };
+
+  const clearField = (field: CampaignAssetField | "video_url" | "pdf_url") =>
+    handleAssetUpload(() => updateCampaign(campaign.id, { [field]: null } as never));
+
   const save = async () => {
     setSaving(true);
     try {
-      await updateCampaign(campaign.id, { subject, message, image_url: imageUrl || null, video_url: videoUrl || null });
+      await updateCampaign(campaign.id, {
+        subject,
+        message,
+        parking_label: parkingLabel || null,
+        parking_address: parkingAddress || null,
+        signatory_name: signatoryName || null,
+        signatory_title: signatoryTitle || null,
+      });
     } finally {
       setSaving(false);
     }
@@ -140,21 +255,150 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
             placeholder="Message d'invitation…"
             className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
           />
-          <input
-            value={imageUrl}
-            onChange={(e) => setImageUrl(e.target.value)}
-            placeholder="Lien d'une image (optionnel)"
-            className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
-          />
-          <input
-            value={videoUrl}
-            onChange={(e) => setVideoUrl(e.target.value)}
-            placeholder="Lien d'une vidéo (optionnel)"
-            className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
-          />
           <button onClick={save} disabled={saving} className="text-xs font-semibold text-link hover:underline disabled:opacity-50">
-            {saving ? "Enregistrement…" : "Enregistrer le contenu"}
+            {saving ? "Enregistrement…" : "Enregistrer le texte"}
           </button>
+
+          {assetError && <p className="text-xs font-semibold text-bad">{assetError}</p>}
+
+          <div className="grid grid-cols-2 gap-3">
+            <ImageAssetField
+              label="Carton d'invitation"
+              url={campaign.invitation_card_url ?? ""}
+              onUpload={(file) => handleAssetUpload(() => uploadCampaignImageAsset(campaign.id, "invitation_card_url", file))}
+              onClear={() => clearField("invitation_card_url")}
+            />
+            <ImageAssetField
+              label="Bannière"
+              url={campaign.banner_url ?? ""}
+              onUpload={(file) => handleAssetUpload(() => uploadCampaignImageAsset(campaign.id, "banner_url", file))}
+              onClear={() => clearField("banner_url")}
+            />
+            <ImageAssetField
+              label="Image"
+              url={campaign.image_url ?? ""}
+              onUpload={(file) => handleAssetUpload(() => uploadCampaignImageAsset(campaign.id, "image_url", file))}
+              onClear={() => clearField("image_url")}
+            />
+            <ImageAssetField
+              label="Signature (image)"
+              url={campaign.signature_image_url ?? ""}
+              onUpload={(file) => handleAssetUpload(() => uploadCampaignImageAsset(campaign.id, "signature_image_url", file))}
+              onClear={() => clearField("signature_image_url")}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Vidéo</div>
+              {campaign.video_url ? (
+                <div className="flex items-center justify-between rounded-btn border border-line px-3 py-2">
+                  <span className="flex items-center gap-1.5 truncate text-xs text-ink-2">
+                    <Video size={13} /> Vidéo importée
+                  </span>
+                  <button onClick={() => clearField("video_url")} className="text-ink-4 hover:text-red">
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => videoInputRef.current?.click()}
+                  disabled={uploadingVideo}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-btn border border-dashed border-line py-2 text-xs font-semibold text-ink-3 hover:bg-hover disabled:opacity-50"
+                >
+                  <Upload size={13} /> {uploadingVideo ? "Envoi…" : "Importer"}
+                </button>
+              )}
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/*"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setUploadingVideo(true);
+                  await handleAssetUpload(() => uploadCampaignVideoAsset(campaign.id, file));
+                  setUploadingVideo(false);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+
+            <div>
+              <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Document PDF</div>
+              {campaign.pdf_url ? (
+                <div className="flex items-center justify-between rounded-btn border border-line px-3 py-2">
+                  <span className="flex items-center gap-1.5 truncate text-xs text-ink-2">
+                    <FileText size={13} /> {campaign.pdf_filename || "Document"}
+                  </span>
+                  <button onClick={() => clearField("pdf_url")} className="text-ink-4 hover:text-red">
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => pdfInputRef.current?.click()}
+                  disabled={uploadingPdf}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-btn border border-dashed border-line py-2 text-xs font-semibold text-ink-3 hover:bg-hover disabled:opacity-50"
+                >
+                  <Upload size={13} /> {uploadingPdf ? "Envoi…" : "Importer"}
+                </button>
+              )}
+              <input
+                ref={pdfInputRef}
+                type="file"
+                accept="application/pdf"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setUploadingPdf(true);
+                  await handleAssetUpload(() => uploadCampaignPdfAsset(campaign.id, file));
+                  setUploadingPdf(false);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2 rounded-btn border border-line p-3">
+            <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+              <MapPin size={12} /> Stationnement
+            </div>
+            <input
+              value={parkingLabel}
+              onChange={(e) => setParkingLabel(e.target.value)}
+              placeholder="Ex. Parking 3"
+              className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+            />
+            <input
+              value={parkingAddress}
+              onChange={(e) => setParkingAddress(e.target.value)}
+              placeholder="Adresse du parking (pour la carte)"
+              className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+            />
+          </div>
+
+          <div className="space-y-2 rounded-btn border border-line p-3">
+            <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+              <PenLine size={12} /> Signature
+            </div>
+            <input
+              value={signatoryName}
+              onChange={(e) => setSignatoryName(e.target.value)}
+              placeholder="Nom (ex. Jean Dupont)"
+              className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+            />
+            <input
+              value={signatoryTitle}
+              onChange={(e) => setSignatoryTitle(e.target.value)}
+              placeholder="Fonction (ex. Président de la LGEF)"
+              className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+            />
+          </div>
 
           <div className="border-t border-line pt-3">
             <button
