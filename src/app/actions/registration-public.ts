@@ -1,15 +1,16 @@
 "use server";
 
 import { createServiceClient } from "@/lib/supabase/serviceClient";
-import { renderCampaignCardHtml, type EmailBlock } from "@/lib/board/registrationEmail";
-import { format } from "date-fns";
-import { fr } from "date-fns/locale";
+import { renderCampaignCardHtml, formatEventDateLabel, greetingFor, type EmailBlock } from "@/lib/board/registrationEmail";
+import { personName } from "@/lib/board/clubContacts";
 
 /** Rendu de la carte visuelle de la campagne — même forme que le mail, sans le bloc boutons (remplacé par les vrais boutons interactifs de la page). */
-function buildCardHtml(campaign: { blocks: unknown }, event: { title: string; start_date: string; location: string | null }) {
-  const eventDateLabel = event.start_date
-    ? format(new Date(event.start_date), "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })
-    : "";
+function buildCardHtml(
+  campaign: { blocks: unknown },
+  event: { title: string; start_date: string; location: string | null },
+  greeting?: string | null
+) {
+  const eventDateLabel = formatEventDateLabel(event.start_date);
   return renderCampaignCardHtml(
     {
       eventTitle: event.title,
@@ -20,6 +21,7 @@ function buildCardHtml(campaign: { blocks: unknown }, event: { title: string; st
       mapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null,
       yesUrl: "#",
       noUrl: "#",
+      greeting,
     },
     { includeButtons: false }
   );
@@ -51,7 +53,7 @@ export async function getRegistrationContext(eventId: string, token: string) {
     .maybeSingle();
   if (!event) return null;
 
-  return { campaign, recipient, event, cardHtml: buildCardHtml(campaign, event) };
+  return { campaign, recipient, event, cardHtml: buildCardHtml(campaign, event, greetingFor(personName(recipient))) };
 }
 
 /** Contexte pour le lien générique (QR code / copié-collé) — pas de destinataire connu à l'avance. */
@@ -78,12 +80,14 @@ export async function getPublicCampaignContext(eventId: string, publicToken: str
 /** Réponse via le lien générique — crée le destinataire à la volée à partir de ce qu'il renseigne. */
 export async function submitPublicResponse(
   campaignId: string,
-  params: { name: string; club?: string; email?: string; response: "yes" | "no" }
+  params: { firstName: string; lastName: string; club?: string; email?: string; response: "yes" | "no" }
 ) {
   const supabase = createServiceClient();
   const { error } = await supabase.from("event_registration_recipients").insert({
     campaign_id: campaignId,
-    name: params.name,
+    first_name: params.firstName || null,
+    last_name: params.lastName || null,
+    name: [params.firstName, params.lastName].filter(Boolean).join(" "),
     club: params.club || null,
     email: params.email || null,
     source: "public_link",

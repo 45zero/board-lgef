@@ -5,10 +5,17 @@ import { listConnectedAccounts, getGoogleAccountById } from "@/lib/google/accoun
 import { getBoardDriveAccountId } from "@/app/actions/board-settings";
 import { sendMessage } from "@/lib/google/gmail";
 import { findOrCreateFolder, createResumableUploadSession, ensurePublicViewAccess } from "@/lib/google/drive";
-import { buildRegistrationEmailHtml, renderCampaignCardHtml, type EmailBlock } from "@/lib/board/registrationEmail";
+import {
+  buildRegistrationEmailHtml,
+  renderCampaignCardHtml,
+  formatEventDateLabel,
+  greetingFor,
+  type EmailBlock,
+} from "@/lib/board/registrationEmail";
+import { personName, type ClubContact } from "@/lib/board/clubContacts";
+import { isResendConfigured, sendResendBatch } from "@/lib/email/resend";
+import { isWhatsAppConfigured, sendWhatsAppEventInvite } from "@/lib/whatsapp";
 import type { Json } from "@/lib/supabase/database.types";
-import { format } from "date-fns";
-import { fr } from "date-fns/locale";
 
 async function requireStaff() {
   const supabase = await createClient();
@@ -33,7 +40,7 @@ async function requireStaff() {
 }
 
 function siteUrl() {
-  return process.env.NEXT_PUBLIC_SITE_URL ?? "";
+  return (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/+$/, "");
 }
 
 export async function listRegistrationEvents() {
@@ -237,6 +244,7 @@ export async function listContactListMembers(listId: string) {
     .from("registration_contact_list_members")
     .select("*")
     .eq("list_id", listId)
+    .order("club", { ascending: true, nullsFirst: false })
     .order("name", { ascending: true });
   if (error) throw new Error(error.message);
   return data;
@@ -259,12 +267,58 @@ export async function removeContactListMember(memberId: string) {
   if (error) throw new Error(error.message);
 }
 
+/**
+ * Import de l'export clubs (Excel lu côté navigateur, envoyé par lots). Un club déjà présent dans l'annuaire
+ * (même numéro de club, à défaut même email) est remplacé par la ligne importée — réimporter l'export met à jour.
+ */
+export async function importClubContactsIntoList(listId: string, contacts: ClubContact[]) {
+  const { supabase } = await requireStaff();
+  if (contacts.length === 0) return { added: 0 };
+  if (contacts.length > 1000) throw new Error("Lot trop volumineux.");
+
+  const clubNumbers = contacts.map((c) => c.clubNumber).filter((n): n is string => !!n);
+  if (clubNumbers.length > 0) {
+    const { error } = await supabase
+      .from("registration_contact_list_members")
+      .delete()
+      .eq("list_id", listId)
+      .in("club_number", clubNumbers);
+    if (error) throw new Error(error.message);
+  }
+  const emailsWithoutNumber = contacts.filter((c) => !c.clubNumber).map((c) => c.email);
+  if (emailsWithoutNumber.length > 0) {
+    const { error } = await supabase
+      .from("registration_contact_list_members")
+      .delete()
+      .eq("list_id", listId)
+      .in("email", emailsWithoutNumber);
+    if (error) throw new Error(error.message);
+  }
+
+  const { error } = await supabase.from("registration_contact_list_members").insert(
+    contacts.map((c) => ({
+      list_id: listId,
+      name: personName({ first_name: c.firstName, last_name: c.lastName }) || c.club || c.email,
+      email: c.email,
+      email_secondary: c.emailSecondary,
+      club: c.club,
+      club_number: c.clubNumber,
+      civility: c.civility,
+      first_name: c.firstName,
+      last_name: c.lastName,
+      phone: c.phone,
+    }))
+  );
+  if (error) throw new Error(error.message);
+  return { added: contacts.length };
+}
+
 /** Importe tous les membres d'un annuaire comme destinataires de la campagne (copie ponctuelle, pas un lien synchronisé). */
 export async function importContactListIntoCampaign(campaignId: string, listId: string) {
   const { supabase } = await requireStaff();
   const { data: members, error: membersError } = await supabase
     .from("registration_contact_list_members")
-    .select("name, email, club")
+    .select("name, email, email_secondary, club, club_number, civility, first_name, last_name, phone")
     .eq("list_id", listId);
   if (membersError) throw new Error(membersError.message);
   if (!members || members.length === 0) return { added: 0 };
@@ -282,7 +336,13 @@ export async function importContactListIntoCampaign(campaignId: string, listId: 
       campaign_id: campaignId,
       name: m.name,
       email: m.email,
+      email_secondary: m.email_secondary,
       club: m.club,
+      club_number: m.club_number,
+      civility: m.civility,
+      first_name: m.first_name,
+      last_name: m.last_name,
+      phone: m.phone,
       source: "invited" as const,
     }))
   );
@@ -309,9 +369,7 @@ export async function previewCampaignHtml(campaignId: string) {
 
   const event = campaign.events as unknown as { title: string; start_date: string; location: string | null } | null;
   const eventTitle = event?.title ?? "Événement";
-  const eventDateLabel = event?.start_date
-    ? format(new Date(event.start_date), "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })
-    : "";
+  const eventDateLabel = formatEventDateLabel(event?.start_date);
 
   return buildRegistrationEmailHtml({
     eventTitle,
@@ -322,6 +380,7 @@ export async function previewCampaignHtml(campaignId: string) {
     mapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null,
     yesUrl: "#",
     noUrl: "#",
+    greeting: greetingFor("Prénom Nom"),
   });
 }
 
@@ -337,9 +396,7 @@ export async function getCampaignEmbedHtml(campaignId: string) {
 
   const event = campaign.events as unknown as { title: string; start_date: string; location: string | null } | null;
   const eventTitle = event?.title ?? "Événement";
-  const eventDateLabel = event?.start_date
-    ? format(new Date(event.start_date), "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })
-    : "";
+  const eventDateLabel = formatEventDateLabel(event?.start_date);
   const publicUrl = `${siteUrl()}/inscription/${campaign.event_id}/public/${campaign.public_token}`;
 
   return renderCampaignCardHtml({
@@ -371,29 +428,21 @@ export async function sendCampaign(campaignId: string) {
     .is("sent_at", null);
   if (!recipients || recipients.length === 0) return { sent: 0 };
 
-  const boardAccountId = await getBoardDriveAccountId();
-  let account = boardAccountId ? await getGoogleAccountById(boardAccountId) : null;
-  if (!account) {
-    const accounts = await listConnectedAccounts(userId);
-    account = accounts.find((a) => a.provider === "google") ?? null;
-  }
-  if (!account) throw new Error("Aucun compte Google connecté pour envoyer les emails (Paramètres du board → Drive du board).");
-
   const event = campaign.events as unknown as { title: string; start_date: string; location: string | null } | null;
   const eventTitle = event?.title ?? "Événement";
-  const eventDateLabel = event?.start_date
-    ? format(new Date(event.start_date), "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })
-    : "";
+  const eventDateLabel = formatEventDateLabel(event?.start_date);
 
   const blocks = (campaign.blocks as unknown as EmailBlock[]) ?? [];
   const firstText = blocks.find((b): b is Extract<EmailBlock, { type: "text" }> => b.type === "text");
   const plainFallback = firstText?.content || "Vous êtes invité(e) à cet événement.";
+  const subject = campaign.subject || `Invitation — ${eventTitle}`;
 
-  let sent = 0;
-  for (const r of recipients) {
-    if (!r.email) continue;
+  // Un mail personnalisé par destinataire : « Bonjour Prénom Nom, », liens de réponse propres, email club + email perso.
+  const withEmail = recipients.filter((r) => !!r.email);
+  const messages = withEmail.map((r) => {
     const yesUrl = `${siteUrl()}/inscription/${campaign.event_id}/${r.token}?r=yes`;
     const noUrl = `${siteUrl()}/inscription/${campaign.event_id}/${r.token}?r=no`;
+    const greeting = greetingFor(personName(r));
     const html = buildRegistrationEmailHtml({
       eventTitle,
       eventDateLabel,
@@ -403,23 +452,112 @@ export async function sendCampaign(campaignId: string) {
       mapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null,
       yesUrl,
       noUrl,
+      greeting,
     });
-    try {
-      await sendMessage(account, {
-        to: r.email,
-        subject: campaign.subject || `Invitation — ${eventTitle}`,
-        body: `${plainFallback}\n\nJe participe : ${yesUrl}\nJe n'y participerai pas : ${noUrl}`,
-        html,
-      });
-      await supabase.from("event_registration_recipients").update({ sent_at: new Date().toISOString() }).eq("id", r.id);
-      sent += 1;
-    } catch (e) {
-      console.error("[sendCampaign] échec envoi à", r.email, e);
+    return {
+      to: [r.email!, r.email_secondary].filter((e): e is string => !!e && e !== ""),
+      subject,
+      html,
+      text: `${greeting}\n\n${plainFallback}\n\nJe participe : ${yesUrl}\nJe n'y participerai pas : ${noUrl}`,
+    };
+  });
+
+  const markSent = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    await supabase
+      .from("event_registration_recipients")
+      .update({ sent_at: new Date().toISOString() })
+      .in("id", ids);
+  };
+
+  let sent = 0;
+  if (isResendConfigured()) {
+    // Resend (domaine lgef.fr) : envoi par lots, pas de quota Gmail — les réponses « Répondre » arrivent chez l'expéditeur du board.
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const result = await sendResendBatch(
+      messages.map((m) => ({ ...m, replyTo: user?.email ?? null })),
+      (indexes) => markSent(indexes.map((i) => withEmail[i].id))
+    );
+    sent = result.sent;
+    if (sent === 0 && result.errors.length > 0) throw new Error(`Échec de l'envoi : ${result.errors[0]}`);
+  } else {
+    const boardAccountId = await getBoardDriveAccountId();
+    let account = boardAccountId ? await getGoogleAccountById(boardAccountId) : null;
+    if (!account) {
+      const accounts = await listConnectedAccounts(userId);
+      account = accounts.find((a) => a.provider === "google") ?? null;
+    }
+    if (!account) throw new Error("Aucun compte Google connecté pour envoyer les emails (Paramètres du board → Drive du board).");
+
+    for (const [i, m] of messages.entries()) {
+      try {
+        await sendMessage(account, { to: m.to.join(", "), subject: m.subject, body: m.text, html: m.html });
+        await markSent([withEmail[i].id]);
+        sent += 1;
+      } catch (e) {
+        console.error("[sendCampaign] échec envoi à", m.to, e);
+      }
     }
   }
 
   await supabase.from("event_registration_campaigns").update({ status: "sent" }).eq("id", campaignId);
   return { sent };
+}
+
+/** Invitations WhatsApp (API Meta, modèle approuvé) à tous les destinataires avec un mobile, pas encore invités par WhatsApp. */
+export async function sendCampaignWhatsApp(campaignId: string) {
+  const { supabase } = await requireStaff();
+  if (!isWhatsAppConfigured()) {
+    throw new Error("WhatsApp non configuré : modèle d'invitation en attente (META_WHATSAPP_TEMPLATE_INVITATION).");
+  }
+
+  const { data: campaign } = await supabase
+    .from("event_registration_campaigns")
+    .select("event_id, events(title, start_date)")
+    .eq("id", campaignId)
+    .single();
+  if (!campaign) throw new Error("Campagne introuvable.");
+  const event = campaign.events as unknown as { title: string; start_date: string } | null;
+
+  const { data: recipients } = await supabase
+    .from("event_registration_recipients")
+    .select("id, token, first_name, last_name, name, phone")
+    .eq("campaign_id", campaignId)
+    .like("phone", "+%")
+    .is("whatsapp_sent_at", null);
+  if (!recipients || recipients.length === 0) return { sent: 0, failed: 0, firstError: null as string | null };
+
+  let sent = 0;
+  let failed = 0;
+  let firstError: string | null = null;
+  const CONCURRENCY = 10;
+  for (let i = 0; i < recipients.length; i += CONCURRENCY) {
+    await Promise.all(
+      recipients.slice(i, i + CONCURRENCY).map(async (r) => {
+        const result = await sendWhatsAppEventInvite({
+          to: r.phone!,
+          firstName: personName({ first_name: r.first_name }) || null,
+          lastName: personName({ last_name: r.last_name }) || (r.first_name ? null : r.name),
+          eventTitle: event?.title ?? "Événement",
+          eventDateLabel: formatEventDateLabel(event?.start_date),
+          linkSuffix: `${campaign.event_id}/${r.token}`,
+        });
+        if (result.ok) {
+          sent += 1;
+          await supabase
+            .from("event_registration_recipients")
+            .update({ whatsapp_sent_at: new Date().toISOString() })
+            .eq("id", r.id);
+        } else {
+          failed += 1;
+          firstError ??= result.error;
+        }
+      })
+    );
+  }
+  return { sent, failed, firstError };
 }
 
 /** Drive du board, sinon le compte Google de l'utilisateur (même repli que l'envoi) — le Drive du board est désaffecté quand son compte est déconnecté. */

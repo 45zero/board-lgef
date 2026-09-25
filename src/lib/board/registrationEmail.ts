@@ -24,6 +24,27 @@ export interface RegistrationEmailContent {
   mapsApiKey: string | null;
   yesUrl: string;
   noUrl: string;
+  /** « Bonjour Prénom Nom, » en tête du corps — personnalisé par destinataire. */
+  greeting?: string | null;
+}
+
+/** Date de l'événement à l'heure de Paris (le serveur tourne en UTC : format() seul décalait de 1–2 h). */
+export function formatEventDateLabel(startDate: string | null | undefined) {
+  if (!startDate) return "";
+  return new Intl.DateTimeFormat("fr-FR", {
+    timeZone: "Europe/Paris",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(startDate));
+}
+
+/** « Bonjour Jean Dupont, » — ou « Bonjour, » quand on ne connaît pas le nom. */
+export function greetingFor(name: string | null | undefined) {
+  return name?.trim() ? `Bonjour ${name.trim()},` : "Bonjour,";
 }
 
 /** Contenu (sans marge propre — la marge/l'alignement sont appliqués par le conteneur du bloc). */
@@ -156,6 +177,7 @@ export function renderCampaignCardHtml(c: RegistrationEmailContent, opts?: { inc
             </tr>
             <tr>
               <td style="padding:24px 28px;">
+                ${c.greeting ? `<p style="margin:0 0 16px;color:#27334c;font-size:15px;line-height:1.5;">${escapeHtml(c.greeting)}</p>` : ""}
                 ${renderBodyHtml(c, blocks)}
               </td>
             </tr>

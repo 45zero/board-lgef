@@ -1199,9 +1199,9 @@ export type Database = {
         Relationships: []
       }
       registration_contact_list_members: {
-        Row: { id: string; list_id: string; name: string; email: string; club: string | null; created_at: string }
-        Insert: { id?: string; list_id: string; name: string; email: string; club?: string | null; created_at?: string }
-        Update: { id?: string; list_id?: string; name?: string; email?: string; club?: string | null; created_at?: string }
+        Row: { id: string; list_id: string; name: string; email: string; club: string | null; created_at: string; first_name: string | null; last_name: string | null; civility: string | null; phone: string | null; club_number: string | null; email_secondary: string | null }
+        Insert: { id?: string; list_id: string; name: string; email: string; club?: string | null; created_at?: string; first_name?: string | null; last_name?: string | null; civility?: string | null; phone?: string | null; club_number?: string | null; email_secondary?: string | null }
+        Update: { id?: string; list_id?: string; name?: string; email?: string; club?: string | null; created_at?: string; first_name?: string | null; last_name?: string | null; civility?: string | null; phone?: string | null; club_number?: string | null; email_secondary?: string | null }
         Relationships: []
       }
       event_registration_campaigns: {
@@ -1293,6 +1293,13 @@ export type Database = {
           response: string | null
           responded_at: string | null
           created_at: string
+          first_name: string | null
+          last_name: string | null
+          civility: string | null
+          phone: string | null
+          club_number: string | null
+          email_secondary: string | null
+          whatsapp_sent_at: string | null
         }
         Insert: {
           id?: string
@@ -1307,6 +1314,13 @@ export type Database = {
           response?: string | null
           responded_at?: string | null
           created_at?: string
+          first_name?: string | null
+          last_name?: string | null
+          civility?: string | null
+          phone?: string | null
+          club_number?: string | null
+          email_secondary?: string | null
+          whatsapp_sent_at?: string | null
         }
         Update: {
           id?: string
@@ -1321,6 +1335,13 @@ export type Database = {
           response?: string | null
           responded_at?: string | null
           created_at?: string
+          first_name?: string | null
+          last_name?: string | null
+          civility?: string | null
+          phone?: string | null
+          club_number?: string | null
+          email_secondary?: string | null
+          whatsapp_sent_at?: string | null
         }
         Relationships: []
       }

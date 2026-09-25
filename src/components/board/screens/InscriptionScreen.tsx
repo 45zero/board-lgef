@@ -32,6 +32,8 @@ import {
   AlignCenter,
   AlignRight,
   Code2,
+  FileSpreadsheet,
+  MessageCircle,
 } from "lucide-react";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
@@ -49,6 +51,7 @@ import {
   addManualRecipient,
   removeRecipient,
   sendCampaign,
+  sendCampaignWhatsApp,
   previewCampaignHtml,
   getCampaignEmbedHtml,
   listContactLists,
@@ -58,9 +61,11 @@ import {
   addContactListMember,
   removeContactListMember,
   importContactListIntoCampaign,
+  importClubContactsIntoList,
 } from "@/app/actions/registration";
 import { uploadCampaignBlockAsset } from "@/lib/board/registrationAssets";
 import type { EmailBlock } from "@/lib/board/registrationEmail";
+import { parseClubExportRows, personName, formatFrPhone, whatsappUrl } from "@/lib/board/clubContacts";
 
 type RegistrationEvent = Awaited<ReturnType<typeof listRegistrationEvents>>[number];
 type Campaign = Awaited<ReturnType<typeof getOrCreateCampaign>>;
@@ -400,6 +405,8 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
   const [manualName, setManualName] = useState("");
   const [manualEmail, setManualEmail] = useState("");
   const [manualClub, setManualClub] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
 
   const refetchLists = async () => setLists(await listContactLists());
   const refetchMembers = async (list: ContactList) => setMembers(await listContactListMembers(list.id));
@@ -420,6 +427,29 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
   const runSearch = async () => {
     if (!query.trim()) return setResults([]);
     setResults(await searchClubContacts(query.trim()));
+  };
+
+  /** Export clubs (.xlsx) lu dans le navigateur, envoyé par lots de 500 (limite de taille des actions serveur). */
+  const importExcel = async (list: ContactList, file: File) => {
+    setImporting(true);
+    setImportMsg(null);
+    try {
+      const { readSheet } = await import("read-excel-file/browser");
+      const { contacts, skipped } = parseClubExportRows((await readSheet(file)) as unknown[][]);
+      for (let i = 0; i < contacts.length; i += 500) {
+        setImportMsg(`Import… ${i}/${contacts.length}`);
+        await importClubContactsIntoList(list.id, contacts.slice(i, i + 500));
+      }
+      setImportMsg(
+        `${contacts.length} contact(s) importé(s)${skipped ? ` — ${skipped} ligne(s) sans email ignorée(s)` : ""}.`
+      );
+      await refetchMembers(list);
+      await refetchLists();
+    } catch (e) {
+      setImportMsg(e instanceof Error ? e.message : "Échec de l'import.");
+    } finally {
+      setImporting(false);
+    }
   };
 
   return (
@@ -475,6 +505,24 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
             <>
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-bold text-ink">{selected.name}</h3>
+                <label
+                  title="Export clubs : Civilité, Nom, Prénom, Club(numéro), Club(nom), Mobile personnel, Email principal, Email officiel club"
+                  className={`ml-auto mr-3 flex cursor-pointer items-center gap-1 text-xs font-semibold text-link hover:underline ${
+                    importing ? "pointer-events-none opacity-50" : ""
+                  }`}
+                >
+                  <FileSpreadsheet size={12} /> {importing ? "Import…" : "Importer un export clubs (.xlsx)"}
+                  <input
+                    type="file"
+                    accept=".xlsx"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) importExcel(selected, file);
+                    }}
+                  />
+                </label>
                 <button
                   onClick={async () => {
                     if (!confirm(`Supprimer l'annuaire « ${selected.name} » ?`)) return;
@@ -487,6 +535,7 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
                   <Trash2 size={12} /> Supprimer l&rsquo;annuaire
                 </button>
               </div>
+              {importMsg && <p className="mb-3 text-xs font-semibold text-ink-2">{importMsg}</p>}
 
               <div className="mb-3 flex items-center gap-2">
                 <Search size={13} className="text-ink-4" />
@@ -549,9 +598,16 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
                 {members.length === 0 && <p className="p-3 text-xs italic text-ink-4">Aucun membre pour l&rsquo;instant.</p>}
                 {members.map((m) => (
                   <div key={m.id} className="flex items-center gap-2 px-3 py-1.5">
-                    <span className="min-w-0 flex-1 truncate text-xs text-ink-2">
-                      {m.name} {m.club ? `· ${m.club}` : ""} · {m.email}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs text-ink-2">
+                        <span className="font-semibold text-ink">{personName(m)}</span>
+                        {m.club ? ` · ${m.club}` : ""}
+                        {m.club_number ? <span className="text-ink-4"> ({m.club_number})</span> : null}
+                      </div>
+                      <div className="truncate text-[10px] text-ink-4">
+                        {[m.email, m.email_secondary, formatFrPhone(m.phone)].filter(Boolean).join(" · ")}
+                      </div>
+                    </div>
                     <button
                       onClick={async () => {
                         await removeContactListMember(m.id);
@@ -593,6 +649,8 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   const [importingListId, setImportingListId] = useState("");
   const [importResult, setImportResult] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [sendingWa, setSendingWa] = useState(false);
+  const [waResult, setWaResult] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
 
   const refetch = async (c: Campaign) => {
@@ -679,6 +737,23 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
       setSendResult(e instanceof Error ? e.message : "Échec de l'envoi.");
     } finally {
       setSending(false);
+    }
+  };
+
+  const waPending = recipients.filter((r) => r.phone?.startsWith("+") && !r.whatsapp_sent_at).length;
+
+  const sendWhatsApp = async () => {
+    if (!confirm(`Envoyer l'invitation par WhatsApp à ${waPending} destinataire(s) ?`)) return;
+    setSendingWa(true);
+    setWaResult(null);
+    try {
+      const { sent, failed, firstError } = await sendCampaignWhatsApp(campaign.id);
+      setWaResult(`${sent} WhatsApp envoyé(s)${failed ? ` — ${failed} échec(s) : ${firstError}` : ""}.`);
+      await refetch(campaign);
+    } catch (e) {
+      setWaResult(e instanceof Error ? e.message : "Échec de l'envoi WhatsApp.");
+    } finally {
+      setSendingWa(false);
     }
   };
 
@@ -847,6 +922,14 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
               <Send size={14} /> {sending ? "Envoi…" : `Envoyer aux clubs (${recipients.filter((r) => !r.sent_at).length})`}
             </button>
             {sendResult && <p className="mt-2 text-xs font-semibold text-ink-2">{sendResult}</p>}
+            <button
+              onClick={sendWhatsApp}
+              disabled={sendingWa || waPending === 0}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-btn border border-line px-4 py-2 text-sm font-bold text-good hover:bg-hover disabled:opacity-50"
+            >
+              <MessageCircle size={14} /> {sendingWa ? "Envoi WhatsApp…" : `Inviter par WhatsApp (${waPending})`}
+            </button>
+            {waResult && <p className="mt-2 text-xs font-semibold text-ink-2">{waResult}</p>}
           </div>
         </div>
 
@@ -929,9 +1012,32 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
             {recipients.map((r) => (
               <div key={r.id} className="flex items-center gap-3 px-3 py-2">
                 <Mail size={13} className="shrink-0 text-ink-4" />
-                <span className="min-w-0 flex-1 truncate text-xs text-ink-2">
-                  {r.name} {r.club ? `· ${r.club}` : ""} · {r.email}
-                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs text-ink-2">
+                    <span className="font-semibold text-ink">{personName(r) || "—"}</span>
+                    {r.club ? ` · ${r.club}` : ""}
+                  </div>
+                  <div className="truncate text-[10px] text-ink-4">
+                    {[r.email, r.email_secondary, formatFrPhone(r.phone)].filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+                {(() => {
+                  const wa = whatsappUrl(
+                    r.phone,
+                    `Bonjour ${personName(r)}, la LGEF vous invite à « ${ev.title} » le ${format(new Date(ev.start_date), "EEEE d MMMM 'à' HH:mm", { locale: fr })}. Merci de nous indiquer votre présence : ${siteOrigin()}/inscription/${ev.id}/${r.token}`
+                  );
+                  return wa ? (
+                    <a
+                      href={wa}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`Inviter par WhatsApp (${formatFrPhone(r.phone)})`}
+                      className="shrink-0 text-good hover:opacity-80"
+                    >
+                      <MessageCircle size={14} />
+                    </a>
+                  ) : null;
+                })()}
                 {r.response === "yes" && (
                   <span className="flex items-center gap-1 rounded-full bg-good-bg px-2 py-0.5 text-[10px] font-bold text-good">
                     <Check size={10} /> Participe
@@ -942,6 +1048,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
                     <X size={10} /> Ne participe pas
                   </span>
                 )}
+                {r.whatsapp_sent_at && <span className="shrink-0 text-[10px] font-semibold text-good">WhatsApp ✓</span>}
                 {!r.response && r.sent_at && <span className="text-[10px] text-ink-4">Envoyé, sans réponse</span>}
                 {!r.sent_at && <span className="text-[10px] text-ink-4">Pas encore envoyé</span>}
                 <button
