@@ -422,16 +422,21 @@ export async function sendCampaign(campaignId: string) {
   return { sent };
 }
 
-async function requireBoardAccount() {
+/** Drive du board, sinon le compte Google de l'utilisateur (même repli que l'envoi) — le Drive du board est désaffecté quand son compte est déconnecté. */
+async function requireBoardAccount(userId: string) {
   const boardAccountId = await getBoardDriveAccountId();
-  const account = boardAccountId ? await getGoogleAccountById(boardAccountId) : null;
-  if (!account) throw new Error("Aucun Drive de board configuré (Paramètres du board → Drive du board).");
+  let account = boardAccountId ? await getGoogleAccountById(boardAccountId) : null;
+  if (!account) {
+    const accounts = await listConnectedAccounts(userId);
+    account = accounts.find((a) => a.provider === "google") ?? null;
+  }
+  if (!account) throw new Error("Aucun compte Google connecté pour stocker le fichier (Paramètres du board → Drive du board).");
   return account;
 }
 
 /** Session d'upload direct-navigateur pour un asset de campagne (carton, bannière, PDF, vidéo, signature) — dossier LGEF Drive/Inscriptions. */
 export async function initCampaignAssetUpload(campaignId: string, filename: string, mimeType: string) {
-  const { supabase } = await requireStaff();
+  const { supabase, userId } = await requireStaff();
   const { data: campaign } = await supabase
     .from("event_registration_campaigns")
     .select("event_id")
@@ -439,7 +444,7 @@ export async function initCampaignAssetUpload(campaignId: string, filename: stri
     .single();
   if (!campaign) throw new Error("Campagne introuvable.");
 
-  const account = await requireBoardAccount();
+  const account = await requireBoardAccount(userId);
   const root = await findOrCreateFolder(account, { name: "LGEF Drive" });
   const folder = await findOrCreateFolder(account, { name: "Inscriptions", parentId: root.id });
   const { uploadUrl } = await createResumableUploadSession(account, {
@@ -463,7 +468,8 @@ export async function finalizeCampaignBlockAsset(
   driveFileId: string,
   extra?: { webViewLink?: string; filename?: string }
 ) {
-  const account = await requireBoardAccount();
+  const { userId } = await requireStaff();
+  const account = await requireBoardAccount(userId);
   await ensurePublicViewAccess(account, driveFileId);
 
   // thumbnail?id=...&sz=wNNNN est le lien le plus fiable pour un <img src> direct
