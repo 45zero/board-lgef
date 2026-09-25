@@ -1192,6 +1192,18 @@ export type Database = {
         }
         Relationships: []
       }
+      registration_contact_lists: {
+        Row: { id: string; name: string; created_by: string | null; created_at: string }
+        Insert: { id?: string; name: string; created_by?: string | null; created_at?: string }
+        Update: { id?: string; name?: string; created_by?: string | null; created_at?: string }
+        Relationships: []
+      }
+      registration_contact_list_members: {
+        Row: { id: string; list_id: string; name: string; email: string; club: string | null; created_at: string }
+        Insert: { id?: string; list_id: string; name: string; email: string; club?: string | null; created_at?: string }
+        Update: { id?: string; list_id?: string; name?: string; email?: string; club?: string | null; created_at?: string }
+        Relationships: []
+      }
       event_registration_campaigns: {
         Row: {
           id: string

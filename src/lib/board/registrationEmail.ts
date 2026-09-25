@@ -43,20 +43,25 @@ function renderBlock(block: EmailBlock, c: RegistrationEmailContent): string {
         ? `<img src="${escapeAttr(block.url)}" alt="" style="width:100%;max-width:504px;display:block;margin:0 0 20px;border-radius:8px;" />`
         : "";
 
-    case "map":
-      return block.address && c.mapsApiKey
-        ? `<div style="margin:0 0 20px;">
-            <p style="margin:0 0 8px;color:#27334c;font-size:14px;font-weight:bold;">📍 ${escapeHtml(block.label || "Emplacement")}</p>
-            <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(block.address)}" style="display:block;">
-              <img
-                src="https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(block.address)}&zoom=16&size=560x220&scale=2&markers=color:red%7C${encodeURIComponent(block.address)}&key=${c.mapsApiKey}"
-                alt="Carte — ${escapeHtml(block.address)}"
-                style="width:100%;max-width:504px;border-radius:12px;display:block;border:1px solid #eaeff7;"
-              />
-            </a>
-            <p style="margin:6px 0 0;color:#79859a;font-size:12px;">${escapeHtml(block.address)} — touchez la carte pour l&rsquo;itinéraire</p>
-          </div>`
-        : "";
+    case "map": {
+      if (!block.address) return "";
+      const mapsSearchUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(block.address)}`;
+      const staticMapImg = c.mapsApiKey
+        ? `<img
+            src="https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(block.address)}&zoom=16&size=560x220&scale=2&markers=color:red%7C${encodeURIComponent(block.address)}&key=${c.mapsApiKey}"
+            alt="Carte — ${escapeHtml(block.address)}"
+            style="width:100%;max-width:504px;border-radius:12px;display:block;border:1px solid #eaeff7;"
+          />`
+        : `<div style="width:100%;max-width:504px;border-radius:12px;border:1px solid #eaeff7;background:#f7f9fd;padding:28px 16px;text-align:center;">
+            <span style="font-size:22px;">📍</span>
+            <p style="margin:8px 0 0;color:#12305f;font-weight:bold;font-size:13px;">Ouvrir l&rsquo;itinéraire dans Google Maps</p>
+          </div>`;
+      return `<div style="margin:0 0 20px;">
+          <p style="margin:0 0 8px;color:#27334c;font-size:14px;font-weight:bold;">📍 ${escapeHtml(block.label || "Emplacement")}</p>
+          <a href="${mapsSearchUrl}" style="display:block;">${staticMapImg}</a>
+          <p style="margin:6px 0 0;color:#79859a;font-size:12px;">${escapeHtml(block.address)} — touchez la carte pour l&rsquo;itinéraire</p>
+        </div>`;
+    }
 
     case "video":
       return block.url

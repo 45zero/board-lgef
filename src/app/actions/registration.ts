@@ -191,6 +191,105 @@ export async function addManualRecipient(campaignId: string, params: { name: str
   if (error) throw new Error(error.message);
 }
 
+/** Annuaires réutilisables — créés une fois, réimportables dans n'importe quelle campagne. */
+export async function listContactLists() {
+  const { supabase } = await requireStaff();
+  const { data: lists, error } = await supabase
+    .from("registration_contact_lists")
+    .select("id, name, created_at")
+    .order("name", { ascending: true });
+  if (error) throw new Error(error.message);
+  if (!lists || lists.length === 0) return [];
+
+  const { data: members } = await supabase
+    .from("registration_contact_list_members")
+    .select("list_id")
+    .in(
+      "list_id",
+      lists.map((l) => l.id)
+    );
+  const counts = new Map<string, number>();
+  for (const m of members ?? []) counts.set(m.list_id, (counts.get(m.list_id) ?? 0) + 1);
+
+  return lists.map((l) => ({ ...l, memberCount: counts.get(l.id) ?? 0 }));
+}
+
+export async function createContactList(name: string) {
+  const { supabase, userId } = await requireStaff();
+  const { data, error } = await supabase
+    .from("registration_contact_lists")
+    .insert({ name, created_by: userId })
+    .select("id, name, created_at")
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteContactList(listId: string) {
+  const { supabase } = await requireStaff();
+  const { error } = await supabase.from("registration_contact_lists").delete().eq("id", listId);
+  if (error) throw new Error(error.message);
+}
+
+export async function listContactListMembers(listId: string) {
+  const { supabase } = await requireStaff();
+  const { data, error } = await supabase
+    .from("registration_contact_list_members")
+    .select("*")
+    .eq("list_id", listId)
+    .order("name", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function addContactListMember(listId: string, params: { name: string; email: string; club?: string }) {
+  const { supabase } = await requireStaff();
+  const { error } = await supabase.from("registration_contact_list_members").insert({
+    list_id: listId,
+    name: params.name,
+    email: params.email,
+    club: params.club || null,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function removeContactListMember(memberId: string) {
+  const { supabase } = await requireStaff();
+  const { error } = await supabase.from("registration_contact_list_members").delete().eq("id", memberId);
+  if (error) throw new Error(error.message);
+}
+
+/** Importe tous les membres d'un annuaire comme destinataires de la campagne (copie ponctuelle, pas un lien synchronisé). */
+export async function importContactListIntoCampaign(campaignId: string, listId: string) {
+  const { supabase } = await requireStaff();
+  const { data: members, error: membersError } = await supabase
+    .from("registration_contact_list_members")
+    .select("name, email, club")
+    .eq("list_id", listId);
+  if (membersError) throw new Error(membersError.message);
+  if (!members || members.length === 0) return { added: 0 };
+
+  const { data: existing } = await supabase
+    .from("event_registration_recipients")
+    .select("email")
+    .eq("campaign_id", campaignId);
+  const existingEmails = new Set((existing ?? []).map((e) => e.email));
+  const toInsert = members.filter((m) => !existingEmails.has(m.email));
+  if (toInsert.length === 0) return { added: 0 };
+
+  const { error } = await supabase.from("event_registration_recipients").insert(
+    toInsert.map((m) => ({
+      campaign_id: campaignId,
+      name: m.name,
+      email: m.email,
+      club: m.club,
+      source: "invited" as const,
+    }))
+  );
+  if (error) throw new Error(error.message);
+  return { added: toInsert.length };
+}
+
 export async function removeRecipient(recipientId: string) {
   const { supabase } = await requireStaff();
   const { error } = await supabase.from("event_registration_recipients").delete().eq("id", recipientId);
@@ -198,6 +297,34 @@ export async function removeRecipient(recipientId: string) {
 }
 
 /** Envoie l'email d'invitation (via le compte Google du board) à tous les destinataires pas encore envoyés. */
+/** Rendu HTML de la campagne — identique à ce qui part réellement, avec des liens de réponse factices (pour l'aperçu). */
+export async function previewCampaignHtml(campaignId: string) {
+  const { supabase } = await requireStaff();
+  const { data: campaign } = await supabase
+    .from("event_registration_campaigns")
+    .select("*, events(title, start_date, location)")
+    .eq("id", campaignId)
+    .single();
+  if (!campaign) throw new Error("Campagne introuvable.");
+
+  const event = campaign.events as unknown as { title: string; start_date: string; location: string | null } | null;
+  const eventTitle = event?.title ?? "Événement";
+  const eventDateLabel = event?.start_date
+    ? format(new Date(event.start_date), "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })
+    : "";
+
+  return buildRegistrationEmailHtml({
+    eventTitle,
+    eventDateLabel,
+    eventLocation: event?.location ?? null,
+    logoUrl: `${siteUrl()}/lgef-logo.png`,
+    blocks: (campaign.blocks as unknown as EmailBlock[]) ?? [],
+    mapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null,
+    yesUrl: "#",
+    noUrl: "#",
+  });
+}
+
 export async function sendCampaign(campaignId: string) {
   const { supabase, userId } = await requireStaff();
 

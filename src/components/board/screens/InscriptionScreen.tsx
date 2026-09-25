@@ -25,6 +25,9 @@ import {
   ArrowUp,
   ArrowDown,
   MousePointerClick,
+  Eye,
+  BookUser,
+  Download,
 } from "lucide-react";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
@@ -42,6 +45,14 @@ import {
   addManualRecipient,
   removeRecipient,
   sendCampaign,
+  previewCampaignHtml,
+  listContactLists,
+  createContactList,
+  deleteContactList,
+  listContactListMembers,
+  addContactListMember,
+  removeContactListMember,
+  importContactListIntoCampaign,
 } from "@/app/actions/registration";
 import { uploadCampaignBlockAsset } from "@/lib/board/registrationAssets";
 import type { EmailBlock } from "@/lib/board/registrationEmail";
@@ -334,6 +345,193 @@ function BlockEditor({
   );
 }
 
+type ContactList = Awaited<ReturnType<typeof listContactLists>>[number];
+type ContactListMember = Awaited<ReturnType<typeof listContactListMembers>>[number];
+
+/** Gestion des annuaires réutilisables — créer/supprimer une liste, gérer ses membres (recherche club ou saisie manuelle). */
+function ContactListsModal({ onClose }: { onClose: () => void }) {
+  const [lists, setLists] = useState<ContactList[]>([]);
+  const [selected, setSelected] = useState<ContactList | null>(null);
+  const [members, setMembers] = useState<ContactListMember[]>([]);
+  const [newListName, setNewListName] = useState("");
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<{ id: string; name: string; email: string | null; club: string | null }[]>([]);
+  const [manualName, setManualName] = useState("");
+  const [manualEmail, setManualEmail] = useState("");
+  const [manualClub, setManualClub] = useState("");
+
+  const refetchLists = async () => setLists(await listContactLists());
+  const refetchMembers = async (list: ContactList) => setMembers(await listContactListMembers(list.id));
+
+  useEffect(() => {
+    refetchLists();
+  }, []);
+
+  const createList = async () => {
+    if (!newListName.trim()) return;
+    const list = await createContactList(newListName.trim());
+    setNewListName("");
+    await refetchLists();
+    setSelected({ ...list, memberCount: 0 });
+    setMembers([]);
+  };
+
+  const runSearch = async () => {
+    if (!query.trim()) return setResults([]);
+    setResults(await searchClubContacts(query.trim()));
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="flex h-[70vh] w-full max-w-3xl overflow-hidden rounded-modal border border-line bg-card shadow-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex w-[220px] shrink-0 flex-col border-r border-line">
+          <div className="flex items-center justify-between border-b border-line px-3 py-2.5">
+            <span className="text-xs font-bold text-ink">Annuaires</span>
+            <button onClick={onClose} className="text-ink-4 hover:text-ink">
+              <X size={14} />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {lists.map((l) => (
+              <button
+                key={l.id}
+                onClick={() => {
+                  setSelected(l);
+                  refetchMembers(l);
+                }}
+                className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs font-semibold ${
+                  selected?.id === l.id ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"
+                }`}
+              >
+                <span className="truncate">{l.name}</span>
+                <span className={selected?.id === l.id ? "text-white/70" : "text-ink-4"}>{l.memberCount}</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 border-t border-line p-2">
+            <input
+              value={newListName}
+              onChange={(e) => setNewListName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && createList()}
+              placeholder="Nouvel annuaire…"
+              className="min-w-0 flex-1 rounded-btn border border-line px-2 py-1.5 text-xs outline-none"
+            />
+            <button onClick={createList} className="shrink-0 text-ink-3 hover:text-ink">
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-col p-4">
+          {!selected ? (
+            <div className="flex h-full items-center justify-center text-sm text-ink-4">
+              Choisis ou crée un annuaire à gauche.
+            </div>
+          ) : (
+            <>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-ink">{selected.name}</h3>
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Supprimer l'annuaire « ${selected.name} » ?`)) return;
+                    await deleteContactList(selected.id);
+                    setSelected(null);
+                    await refetchLists();
+                  }}
+                  className="flex items-center gap-1 text-xs font-semibold text-red hover:underline"
+                >
+                  <Trash2 size={12} /> Supprimer l&rsquo;annuaire
+                </button>
+              </div>
+
+              <div className="mb-3 flex items-center gap-2">
+                <Search size={13} className="text-ink-4" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                  placeholder="Rechercher un club dans l'annuaire fédéral…"
+                  className="flex-1 rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+                />
+                <button onClick={runSearch} className="rounded-btn border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-2">
+                  Chercher
+                </button>
+              </div>
+              {results.length > 0 && (
+                <div className="mb-3 max-h-28 space-y-1 overflow-y-auto rounded-btn border border-line p-1.5">
+                  {results.map((r) => (
+                    <div key={r.id} className="flex items-center justify-between gap-2 rounded-btn px-2 py-1 hover:bg-hover">
+                      <span className="text-xs text-ink-2">
+                        {r.name} {r.club ? `· ${r.club}` : ""} · {r.email}
+                      </span>
+                      <button
+                        onClick={async () => {
+                          if (!r.email) return;
+                          await addContactListMember(selected.id, { name: r.name, email: r.email, club: r.club ?? undefined });
+                          await refetchMembers(selected);
+                          await refetchLists();
+                          setResults((prev) => prev.filter((x) => x.id !== r.id));
+                        }}
+                        className="text-xs font-semibold text-link hover:underline"
+                      >
+                        Ajouter
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Nom" className="rounded-btn border border-line px-2 py-1.5 text-xs outline-none" />
+                <input value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} placeholder="Email" className="rounded-btn border border-line px-2 py-1.5 text-xs outline-none" />
+                <input value={manualClub} onChange={(e) => setManualClub(e.target.value)} placeholder="Club" className="rounded-btn border border-line px-2 py-1.5 text-xs outline-none" />
+                <button
+                  onClick={async () => {
+                    if (!manualName.trim() || !manualEmail.trim()) return;
+                    await addContactListMember(selected.id, { name: manualName.trim(), email: manualEmail.trim(), club: manualClub.trim() });
+                    await refetchMembers(selected);
+                    await refetchLists();
+                    setManualName("");
+                    setManualEmail("");
+                    setManualClub("");
+                  }}
+                  className="flex items-center gap-1 rounded-btn border border-dashed border-line px-2 py-1.5 text-xs font-semibold text-ink-3 hover:bg-hover"
+                >
+                  <Plus size={11} /> Ajouter
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 divide-y divide-line overflow-y-auto rounded-btn border border-line">
+                {members.length === 0 && <p className="p-3 text-xs italic text-ink-4">Aucun membre pour l&rsquo;instant.</p>}
+                {members.map((m) => (
+                  <div key={m.id} className="flex items-center gap-2 px-3 py-1.5">
+                    <span className="min-w-0 flex-1 truncate text-xs text-ink-2">
+                      {m.name} {m.club ? `· ${m.club}` : ""} · {m.email}
+                    </span>
+                    <button
+                      onClick={async () => {
+                        await removeContactListMember(m.id);
+                        await refetchMembers(selected);
+                        await refetchLists();
+                      }}
+                      className="text-ink-4 hover:text-red"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => void }) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [recipients, setRecipients] = useState<Recipient[]>([]);
@@ -347,6 +545,11 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   const [manualName, setManualName] = useState("");
   const [manualEmail, setManualEmail] = useState("");
   const [manualClub, setManualClub] = useState("");
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [listsModalOpen, setListsModalOpen] = useState(false);
+  const [contactLists, setContactLists] = useState<ContactList[]>([]);
+  const [importingListId, setImportingListId] = useState("");
+  const [importResult, setImportResult] = useState<string | null>(null);
 
   const refetch = async (c: Campaign) => {
     setRecipients(await listCampaignRecipients(c.id));
@@ -355,6 +558,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   const refetchCampaign = async () => {
     const c = await getOrCreateCampaign(ev.id);
     setCampaign(c);
+    setPreviewHtml(await previewCampaignHtml(c.id));
   };
 
   useEffect(() => {
@@ -363,6 +567,8 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
       setCampaign(c);
       setSubject(c.subject || `Invitation — ${ev.title}`);
       await refetch(c);
+      setPreviewHtml(await previewCampaignHtml(c.id));
+      setContactLists(await listContactLists());
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ev.id]);
@@ -370,6 +576,13 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   if (!campaign) return <div className="p-6 text-sm text-ink-4">Chargement…</div>;
 
   const blocks = ((campaign.blocks as unknown as EmailBlock[]) ?? []);
+
+  const importList = async () => {
+    if (!importingListId) return;
+    const { added } = await importContactListIntoCampaign(campaign.id, importingListId);
+    setImportResult(added > 0 ? `${added} destinataire(s) importé(s).` : "Tous les membres étaient déjà ajoutés.");
+    await refetch(campaign);
+  };
 
   const saveSubject = async () => {
     setSaving(true);
@@ -440,7 +653,20 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
         <p className="text-xs text-ink-4">{format(new Date(ev.start_date), "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })}</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-3 gap-4">
+        {/* Aperçu — rendu réel du mail, identique à ce qui part */}
+        <div className="flex flex-col overflow-hidden rounded-panel border border-line bg-card">
+          <div className="flex items-center gap-1.5 border-b border-line px-4 py-2.5 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+            <Eye size={12} /> Aperçu
+          </div>
+          <iframe
+            srcDoc={previewHtml}
+            title="Aperçu du mail"
+            className="h-[560px] w-full flex-1 bg-subtle"
+            sandbox=""
+          />
+        </div>
+
         {/* Colonne email — bâti à la carte, dans l'ordre choisi */}
         <div className="space-y-3 rounded-panel border border-line bg-card p-4">
           <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Contenu du mail</div>
@@ -557,7 +783,38 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
 
       {/* Destinataires */}
       <div className="rounded-panel border border-line bg-card p-4">
-        <div className="mb-2 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Destinataires</div>
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Destinataires</div>
+          <button
+            onClick={() => setListsModalOpen(true)}
+            className="flex items-center gap-1 text-xs font-semibold text-link hover:underline"
+          >
+            <BookUser size={12} /> Gérer les annuaires
+          </button>
+        </div>
+
+        <div className="mb-3 flex items-center gap-2 rounded-btn border border-dashed border-line p-2">
+          <select
+            value={importingListId}
+            onChange={(e) => setImportingListId(e.target.value)}
+            className="min-w-0 flex-1 rounded-btn border border-line px-2 py-1.5 text-xs outline-none"
+          >
+            <option value="">Importer depuis un annuaire…</option>
+            {contactLists.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name} ({l.memberCount})
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={importList}
+            disabled={!importingListId}
+            className="flex shrink-0 items-center gap-1 rounded-btn bg-navy px-2.5 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+          >
+            <Download size={12} /> Importer
+          </button>
+          {importResult && <span className="shrink-0 text-[10px] text-ink-4">{importResult}</span>}
+        </div>
 
         <div className="mb-3 flex items-center gap-2">
           <div className="flex flex-1 items-center gap-2 rounded-btn border border-line px-3 py-2">
@@ -631,6 +888,15 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
           ))}
         </div>
       </div>
+
+      {listsModalOpen && (
+        <ContactListsModal
+          onClose={async () => {
+            setListsModalOpen(false);
+            setContactLists(await listContactLists());
+          }}
+        />
+      )}
     </div>
   );
 }
