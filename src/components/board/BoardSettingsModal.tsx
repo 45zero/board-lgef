@@ -5,7 +5,7 @@ import { Sparkles, X, PanelLeft, LayoutGrid, LogOut } from "lucide-react";
 import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 import { useUserRole } from "@/hooks/board/useUserRole";
-import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
+import { getMyConnectedAccounts, disconnectMyAccount } from "@/app/actions/connected-accounts";
 import { getBoardDriveAccountId, setBoardDriveAccount } from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
 import { useAuth } from "@/contexts/AuthContext";
@@ -46,63 +46,110 @@ function AccountSection() {
   );
 }
 
-/** Réservé aux admins/super users : désigne quel compte Google connecté reçoit les médias d'événements de tout le monde. */
-function DriveSettingsSection() {
+/**
+ * Comptes Google connectés (Mails, Agenda, GED…) : déconnexion et ajout d'un autre compte.
+ * Les admins/super users y désignent aussi le compte qui reçoit les médias d'événements de tout le monde.
+ */
+function GoogleAccountsSection() {
   const role = useUserRole();
-  const canManage = role.isAdmin || role.isSuperUser;
+  const canManageDrive = role.isAdmin || role.isSuperUser;
   const [accounts, setAccounts] = useState<Awaited<ReturnType<typeof getMyConnectedAccounts>>>([]);
   const [boardAccountId, setBoardAccountIdState] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!canManage) return;
     getMyConnectedAccounts().then(setAccounts);
-    getBoardDriveAccountId().then(setBoardAccountIdState);
-  }, [canManage]);
+  }, []);
 
-  if (!canManage) return null;
+  useEffect(() => {
+    if (!canManageDrive) return;
+    getBoardDriveAccountId().then(setBoardAccountIdState);
+  }, [canManageDrive]);
+
   const googleAccounts = accounts.filter((a) => a.provider === "google");
+
+  const handleDisconnect = async (id: string, email: string) => {
+    const isBoardDrive = boardAccountId === id;
+    const message = isBoardDrive
+      ? `Déconnecter ${email} ? C'est le Drive du board : les médias d'événements ne pourront plus y être envoyés tant qu'un autre compte n'est pas désigné.`
+      : `Déconnecter ${email} du Board ?`;
+    if (!window.confirm(message)) return;
+    setBusyId(id);
+    setError("");
+    try {
+      if (isBoardDrive) {
+        await setBoardDriveAccount(null);
+        setBoardAccountIdState(null);
+      }
+      await disconnectMyAccount(id);
+      setAccounts((prev) => prev.filter((a) => a.id !== id));
+    } catch {
+      setError("La déconnexion a échoué. Réessayez.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleSetBoardDrive = async (id: string) => {
+    setBusyId(id);
+    setError("");
+    try {
+      await setBoardDriveAccount(id);
+      setBoardAccountIdState(id);
+    } catch {
+      setError("Impossible de définir ce compte comme Drive du board.");
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   return (
     <div className="mt-5">
-      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Drive du board</div>
+      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Comptes Google</div>
       <div className="space-y-2 rounded-btn border border-line p-3">
-        <p className="text-xs text-ink-4">
-          Les médias uploadés sur les événements — par n&rsquo;importe qui — partent dans ce compte Drive, dans un
-          dossier « Médias ».
-        </p>
-        {googleAccounts.length === 0 ? (
-          <a href="/api/oauth/google/start" className="text-xs font-semibold text-link hover:underline">
-            Connecter un compte Google
-          </a>
-        ) : (
-          googleAccounts.map((a) => (
-            <div key={a.id} className="flex items-center justify-between gap-2 rounded-btn bg-subtle px-2.5 py-2">
-              <span className="min-w-0 truncate text-sm text-ink-2">{a.email}</span>
-              {boardAccountId === a.id ? (
-                <span className="shrink-0 rounded-full bg-good-bg px-2 py-0.5 text-[10px] font-bold text-good">
-                  Actif
-                </span>
-              ) : (
-                <button
-                  disabled={saving}
-                  onClick={async () => {
-                    setSaving(true);
-                    try {
-                      await setBoardDriveAccount(a.id);
-                      setBoardAccountIdState(a.id);
-                    } finally {
-                      setSaving(false);
-                    }
-                  }}
-                  className="shrink-0 text-xs font-semibold text-link hover:underline disabled:opacity-50"
-                >
-                  Définir comme Drive du board
-                </button>
-              )}
-            </div>
-          ))
+        {canManageDrive && (
+          <p className="text-xs text-ink-4">
+            Les médias uploadés sur les événements — par n&rsquo;importe qui — partent dans le compte marqué « Drive
+            du board », dans un dossier « Médias ».
+          </p>
         )}
+        {googleAccounts.length === 0 && <p className="text-xs text-ink-4">Aucun compte Google connecté.</p>}
+        {googleAccounts.map((a) => (
+          <div key={a.id} className="rounded-btn bg-subtle px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-sm text-ink-2">{a.email}</span>
+              <button
+                disabled={busyId !== null}
+                onClick={() => handleDisconnect(a.id, a.email)}
+                className="shrink-0 text-xs font-semibold text-bad hover:underline disabled:opacity-50"
+              >
+                {busyId === a.id ? "…" : "Déconnecter"}
+              </button>
+            </div>
+            {canManageDrive && (
+              <div className="mt-1">
+                {boardAccountId === a.id ? (
+                  <span className="rounded-full bg-good-bg px-2 py-0.5 text-[10px] font-bold text-good">
+                    Drive du board
+                  </span>
+                ) : (
+                  <button
+                    disabled={busyId !== null}
+                    onClick={() => handleSetBoardDrive(a.id)}
+                    className="text-xs font-semibold text-link hover:underline disabled:opacity-50"
+                  >
+                    Définir comme Drive du board
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+        {error && <p className="text-xs font-semibold text-bad">{error}</p>}
+        <a href="/api/oauth/google/start" className="block text-xs font-semibold text-link hover:underline">
+          {googleAccounts.length === 0 ? "Connecter un compte Google" : "+ Connecter un autre compte Google"}
+        </a>
       </div>
     </div>
   );
@@ -234,7 +281,7 @@ export function BoardSettingsModal({
           </div>
         </div>
 
-        <DriveSettingsSection />
+        <GoogleAccountsSection />
 
         <AccountSection />
       </div>

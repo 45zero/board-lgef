@@ -26,7 +26,9 @@ export function buildGoogleAuthUrl(state: string) {
   const client = createOAuth2Client();
   return client.generateAuthUrl({
     access_type: "offline",
-    prompt: "consent", // garantit un refresh_token à chaque connexion
+    // select_account : Google propose toujours de choisir le compte (sinon il reprend celui déjà ouvert).
+    // consent : garantit un refresh_token à chaque connexion.
+    prompt: "select_account consent",
     scope: GOOGLE_SCOPES,
     state,
   });
