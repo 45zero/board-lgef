@@ -7,11 +7,13 @@ export function PublicRsvpForm({
   eventTitle,
   eventStartDate,
   eventLocation,
+  cardHtml,
   onSubmit,
 }: {
   eventTitle: string;
   eventStartDate: string;
   eventLocation: string | null;
+  cardHtml?: string;
   onSubmit: (data: { name: string; club: string; email: string; response: "yes" | "no" }) => Promise<void>;
 }) {
   const [name, setName] = useState("");
@@ -23,6 +25,7 @@ export function PublicRsvpForm({
       eventTitle={eventTitle}
       eventStartDate={eventStartDate}
       eventLocation={eventLocation}
+      cardHtml={cardHtml}
       extraFields={
         <div className="mt-4 space-y-2">
           <input

@@ -11,7 +11,7 @@ export default async function PublicRsvpPage({
   const context = await getPublicCampaignContext(eventId, publicToken);
   if (!context) notFound();
 
-  const { campaign, event } = context;
+  const { campaign, event, cardHtml } = context;
 
   async function respond(data: { name: string; club: string; email: string; response: "yes" | "no" }) {
     "use server";
@@ -24,6 +24,7 @@ export default async function PublicRsvpPage({
         eventTitle={event.title}
         eventStartDate={event.start_date}
         eventLocation={event.location}
+        cardHtml={cardHtml}
         onSubmit={respond}
       />
     </div>

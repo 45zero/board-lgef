@@ -124,25 +124,29 @@ function buttonsHtml(c: RegistrationEmailContent): string {
   </table>`;
 }
 
-/** Email HTML "design" (table-based, compatible clients mail) — blocs rendus dans l'ordre choisi, chacun avec son propre alignement. */
-export function buildRegistrationEmailHtml(c: RegistrationEmailContent): string {
-  const hasButtons = c.blocks.some((b) => b.type === "buttons");
-  const blocks = hasButtons ? c.blocks : [...c.blocks, { id: "auto-buttons", type: "buttons" as const }];
-  const bodyHtml = blocks
+function renderBodyHtml(c: RegistrationEmailContent, blocks: EmailBlock[]): string {
+  return blocks
     .map((b) => {
       const inner = renderBlock(b, c);
       if (!inner) return "";
       return `<div style="text-align:${b.align ?? "left"};margin:0 0 20px;">${inner}</div>`;
     })
     .join("");
+}
 
-  return `<!doctype html>
-<html>
-  <body style="margin:0;padding:0;background:#f2f5fb;font-family:Arial,Helvetica,sans-serif;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5fb;padding:24px 0;">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;">
+/**
+ * Carte "table" seule (sans doctype/html/body) — même rendu pour le mail ET pour les pages web
+ * publiques (lien copié / QR code), afin qu'elles aient toujours la même forme que le mail.
+ * `includeButtons: false` retire le bloc boutons statique (la page web affiche ses propres boutons interactifs à la place).
+ */
+export function renderCampaignCardHtml(c: RegistrationEmailContent, opts?: { includeButtons?: boolean }): string {
+  const includeButtons = opts?.includeButtons ?? true;
+  const hasButtons = c.blocks.some((b) => b.type === "buttons");
+  let blocks = c.blocks;
+  if (includeButtons && !hasButtons) blocks = [...blocks, { id: "auto-buttons", type: "buttons" as const }];
+  if (!includeButtons) blocks = blocks.filter((b) => b.type !== "buttons");
+
+  return `<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;width:100%;max-width:560px;">
             <tr>
               <td style="background:#0b1d3c;padding:20px 28px;">
                 <img src="${escapeAttr(c.logoUrl)}" alt="LGEF" style="height:40px;display:block;margin:0 0 14px;" />
@@ -152,7 +156,7 @@ export function buildRegistrationEmailHtml(c: RegistrationEmailContent): string 
             </tr>
             <tr>
               <td style="padding:24px 28px;">
-                ${bodyHtml}
+                ${renderBodyHtml(c, blocks)}
               </td>
             </tr>
             <tr>
@@ -160,7 +164,18 @@ export function buildRegistrationEmailHtml(c: RegistrationEmailContent): string 
                 <p style="margin:0;color:#79859a;font-size:11px;">Board LGEF — réponse en un clic, aucune connexion requise.</p>
               </td>
             </tr>
-          </table>
+          </table>`;
+}
+
+/** Email HTML "design" (table-based, compatible clients mail) — blocs rendus dans l'ordre choisi, chacun avec son propre alignement. */
+export function buildRegistrationEmailHtml(c: RegistrationEmailContent): string {
+  return `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f2f5fb;font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5fb;padding:24px 0;">
+      <tr>
+        <td align="center">
+          ${renderCampaignCardHtml(c)}
         </td>
       </tr>
     </table>

@@ -31,6 +31,7 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
+  Code2,
 } from "lucide-react";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
@@ -659,6 +660,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
 
   const publicUrl = `${siteOrigin()}/inscription/${ev.id}/public/${campaign.public_token}`;
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(publicUrl)}`;
+  const embedSnippet = `<a href="${publicUrl}" style="display:inline-block;background:#0b1d3c;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-weight:bold;font-size:14px;padding:14px 28px;border-radius:10px;text-decoration:none;">Je m'inscris — ${ev.title}</a>`;
 
   const yesCount = recipients.filter((r) => r.response === "yes").length;
   const noCount = recipients.filter((r) => r.response === "no").length;
@@ -787,6 +789,22 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
             <QrCode size={14} className="text-ink-4" />
             {/* eslint-disable-next-line @next/next/no-img-element -- image externe générée à la volée, pas un asset statique */}
             <img src={qrSrc} alt="QR code d'inscription" className="h-[140px] w-[140px]" />
+          </div>
+
+          <div className="space-y-1.5 border-t border-line pt-3">
+            <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+              <Code2 size={12} /> Balise HTML à coller
+            </div>
+            <p className="text-xs text-ink-4">Pour intégrer un bouton d&rsquo;inscription dans un mail composé ailleurs (Outlook, Mailchimp…).</p>
+            <div className="flex items-center gap-2 rounded-btn border border-line px-3 py-2">
+              <input readOnly value={embedSnippet} className="w-full truncate text-xs text-ink-3 outline-none" />
+              <button
+                onClick={() => navigator.clipboard.writeText(embedSnippet)}
+                className="shrink-0 text-xs font-semibold text-link hover:underline"
+              >
+                Copier
+              </button>
+            </div>
           </div>
 
           <div className="mt-2 grid grid-cols-2 gap-2 rounded-btn bg-subtle p-3 text-center">

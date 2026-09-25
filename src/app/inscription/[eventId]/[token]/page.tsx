@@ -14,7 +14,7 @@ export default async function RsvpPage({
   const context = await getRegistrationContext(eventId, token);
   if (!context) notFound();
 
-  const { recipient, event } = context;
+  const { recipient, event, cardHtml } = context;
   const initialChoice = r === "yes" || r === "no" ? r : null;
 
   async function respond(response: "yes" | "no") {
@@ -28,6 +28,7 @@ export default async function RsvpPage({
         eventTitle={event.title}
         eventStartDate={event.start_date}
         eventLocation={event.location}
+        cardHtml={cardHtml}
         initialChoice={initialChoice}
         alreadyResponded={recipient.response as "yes" | "no" | null}
         onSubmit={respond}

@@ -1,6 +1,29 @@
 "use server";
 
 import { createServiceClient } from "@/lib/supabase/serviceClient";
+import { renderCampaignCardHtml, type EmailBlock } from "@/lib/board/registrationEmail";
+import { format } from "date-fns";
+import { fr } from "date-fns/locale";
+
+/** Rendu de la carte visuelle de la campagne — même forme que le mail, sans le bloc boutons (remplacé par les vrais boutons interactifs de la page). */
+function buildCardHtml(campaign: { blocks: unknown }, event: { title: string; start_date: string; location: string | null }) {
+  const eventDateLabel = event.start_date
+    ? format(new Date(event.start_date), "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })
+    : "";
+  return renderCampaignCardHtml(
+    {
+      eventTitle: event.title,
+      eventDateLabel,
+      eventLocation: event.location,
+      logoUrl: "/lgef-logo.png",
+      blocks: (campaign.blocks as unknown as EmailBlock[]) ?? [],
+      mapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null,
+      yesUrl: "#",
+      noUrl: "#",
+    },
+    { includeButtons: false }
+  );
+}
 
 /** Contexte public (aucune session requise) pour la page de réponse — accès par jeton uniquement. */
 export async function getRegistrationContext(eventId: string, token: string) {
@@ -28,7 +51,7 @@ export async function getRegistrationContext(eventId: string, token: string) {
     .maybeSingle();
   if (!event) return null;
 
-  return { campaign, recipient, event };
+  return { campaign, recipient, event, cardHtml: buildCardHtml(campaign, event) };
 }
 
 /** Contexte pour le lien générique (QR code / copié-collé) — pas de destinataire connu à l'avance. */
@@ -49,7 +72,7 @@ export async function getPublicCampaignContext(eventId: string, publicToken: str
     .maybeSingle();
   if (!event) return null;
 
-  return { campaign, event };
+  return { campaign, event, cardHtml: buildCardHtml(campaign, event) };
 }
 
 /** Réponse via le lien générique — crée le destinataire à la volée à partir de ce qu'il renseigne. */
