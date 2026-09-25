@@ -50,6 +50,7 @@ import {
   removeRecipient,
   sendCampaign,
   previewCampaignHtml,
+  getCampaignEmbedHtml,
   listContactLists,
   createContactList,
   deleteContactList,
@@ -568,6 +569,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   const [manualEmail, setManualEmail] = useState("");
   const [manualClub, setManualClub] = useState("");
   const [previewHtml, setPreviewHtml] = useState("");
+  const [embedHtml, setEmbedHtml] = useState("");
   const [listsModalOpen, setListsModalOpen] = useState(false);
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
   const [importingListId, setImportingListId] = useState("");
@@ -583,6 +585,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
     const c = await getOrCreateCampaign(ev.id);
     setCampaign(c);
     setPreviewHtml(await previewCampaignHtml(c.id));
+    setEmbedHtml(await getCampaignEmbedHtml(c.id));
   };
 
   useEffect(() => {
@@ -592,6 +595,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
       setSubject(c.subject || `Invitation — ${ev.title}`);
       await refetch(c);
       setPreviewHtml(await previewCampaignHtml(c.id));
+      setEmbedHtml(await getCampaignEmbedHtml(c.id));
       setContactLists(await listContactLists());
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -662,18 +666,17 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
 
   const publicUrl = `${siteOrigin()}/inscription/${ev.id}/public/${campaign.public_token}`;
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(publicUrl)}`;
-  const embedSnippet = `<a href="${publicUrl}" style="display:inline-block;background:#0b1d3c;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-weight:bold;font-size:14px;padding:14px 28px;border-radius:10px;text-decoration:none;">Je m'inscris — ${ev.title}</a>`;
-
   const copyEmbedButton = async () => {
+    if (!embedHtml) return;
     try {
       await navigator.clipboard.write([
         new ClipboardItem({
-          "text/html": new Blob([embedSnippet], { type: "text/html" }),
-          "text/plain": new Blob([embedSnippet], { type: "text/plain" }),
+          "text/html": new Blob([embedHtml], { type: "text/html" }),
+          "text/plain": new Blob([embedHtml], { type: "text/plain" }),
         }),
       ]);
     } catch {
-      await navigator.clipboard.writeText(embedSnippet);
+      await navigator.clipboard.writeText(embedHtml);
     }
   };
 
@@ -723,10 +726,11 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
 
           <button
             onClick={copyEmbedButton}
-            title="Copie le bouton d'inscription — collé tel quel (Outlook, Gmail…) ou en code source dans un éditeur HTML (Mailchimp…)"
-            className="flex h-[34px] items-center gap-1.5 rounded-btn border border-line bg-card px-2.5 text-xs font-semibold text-ink-3 hover:bg-hover hover:text-ink"
+            disabled={!embedHtml}
+            title="Copie le mail complet (mêmes blocs que l'aperçu) — collé tel quel dans Outlook/Gmail, ou en code source dans un éditeur HTML (Mailchimp…)"
+            className="flex h-[34px] items-center gap-1.5 rounded-btn border border-line bg-card px-2.5 text-xs font-semibold text-ink-3 hover:bg-hover hover:text-ink disabled:opacity-50"
           >
-            <Code2 size={14} /> Balise HTML
+            <Code2 size={14} /> Copier le mail
           </button>
 
           <div className="flex h-[34px] items-center gap-3 rounded-btn bg-subtle px-3 text-xs">

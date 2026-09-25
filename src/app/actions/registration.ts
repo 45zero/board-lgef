@@ -5,7 +5,7 @@ import { listConnectedAccounts, getGoogleAccountById } from "@/lib/google/accoun
 import { getBoardDriveAccountId } from "@/app/actions/board-settings";
 import { sendMessage } from "@/lib/google/gmail";
 import { findOrCreateFolder, createResumableUploadSession, ensurePublicViewAccess } from "@/lib/google/drive";
-import { buildRegistrationEmailHtml, type EmailBlock } from "@/lib/board/registrationEmail";
+import { buildRegistrationEmailHtml, renderCampaignCardHtml, type EmailBlock } from "@/lib/board/registrationEmail";
 import type { Json } from "@/lib/supabase/database.types";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -322,6 +322,35 @@ export async function previewCampaignHtml(campaignId: string) {
     mapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null,
     yesUrl: "#",
     noUrl: "#",
+  });
+}
+
+/** Rendu HTML de la carte de campagne seule (mêmes blocs, même mise en forme que l'aperçu), boutons pointant vers le lien générique — pour la balise à coller dans un autre outil de mail. */
+export async function getCampaignEmbedHtml(campaignId: string) {
+  const { supabase } = await requireStaff();
+  const { data: campaign } = await supabase
+    .from("event_registration_campaigns")
+    .select("*, events(title, start_date, location)")
+    .eq("id", campaignId)
+    .single();
+  if (!campaign) throw new Error("Campagne introuvable.");
+
+  const event = campaign.events as unknown as { title: string; start_date: string; location: string | null } | null;
+  const eventTitle = event?.title ?? "Événement";
+  const eventDateLabel = event?.start_date
+    ? format(new Date(event.start_date), "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })
+    : "";
+  const publicUrl = `${siteUrl()}/inscription/${campaign.event_id}/public/${campaign.public_token}`;
+
+  return renderCampaignCardHtml({
+    eventTitle,
+    eventDateLabel,
+    eventLocation: event?.location ?? null,
+    logoUrl: `${siteUrl()}/lgef-logo.png`,
+    blocks: (campaign.blocks as unknown as EmailBlock[]) ?? [],
+    mapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null,
+    yesUrl: `${publicUrl}?r=yes`,
+    noUrl: `${publicUrl}?r=no`,
   });
 }
 
