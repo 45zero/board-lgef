@@ -572,6 +572,8 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
   const [importingListId, setImportingListId] = useState("");
   const [importResult, setImportResult] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
 
   const refetch = async (c: Campaign) => {
     setRecipients(await listCampaignRecipients(c.id));
@@ -671,26 +673,70 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
         <ArrowLeft size={13} /> Retour aux événements
       </button>
 
-      <div>
-        <h2 className="text-lg font-extrabold text-ink">{ev.title}</h2>
-        <p className="text-xs text-ink-4">{format(new Date(ev.start_date), "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })}</p>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4">
-        {/* Aperçu — rendu réel du mail, identique à ce qui part */}
-        <div className="flex flex-col overflow-hidden rounded-panel border border-line bg-card">
-          <div className="flex items-center gap-1.5 border-b border-line px-4 py-2.5 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
-            <Eye size={12} /> Aperçu
-          </div>
-          <iframe
-            srcDoc={previewHtml}
-            title="Aperçu du mail"
-            className="h-[560px] w-full flex-1 bg-subtle"
-            sandbox="allow-popups"
-          />
+      {/* En-tête : titre à gauche, lien / QR / balise / compteurs / aperçu à droite */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg font-extrabold text-ink">{ev.title}</h2>
+          <p className="text-xs text-ink-4">{format(new Date(ev.start_date), "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })}</p>
         </div>
 
-        {/* Colonne email — bâti à la carte, dans l'ordre choisi */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-[300px] items-center gap-2 rounded-btn border border-line bg-card px-3 py-2" title="Lien générique à copier-coller — n'importe qui peut répondre en s'identifiant lui-même">
+            <LinkIcon size={13} className="shrink-0 text-ink-4" />
+            <input readOnly value={publicUrl} className="w-full truncate bg-transparent text-xs text-ink-3 outline-none" />
+            <button
+              onClick={() => navigator.clipboard.writeText(publicUrl)}
+              className="shrink-0 text-xs font-semibold text-link hover:underline"
+            >
+              Copier
+            </button>
+          </div>
+
+          <div className="relative">
+            <button
+              onClick={() => setQrOpen((o) => !o)}
+              title="QR code d'inscription"
+              className="flex h-[34px] w-[34px] items-center justify-center rounded-btn border border-line bg-card text-ink-3 hover:bg-hover hover:text-ink"
+            >
+              <QrCode size={15} />
+            </button>
+            {qrOpen && (
+              <div className="absolute right-0 top-full z-20 mt-1 rounded-btn border border-line bg-card p-3 shadow-card">
+                {/* eslint-disable-next-line @next/next/no-img-element -- image externe générée à la volée, pas un asset statique */}
+                <img src={qrSrc} alt="QR code d'inscription" className="h-[160px] w-[160px]" />
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => navigator.clipboard.writeText(embedSnippet)}
+            title="Copier la balise HTML d'un bouton d'inscription (Outlook, Mailchimp…)"
+            className="flex h-[34px] items-center gap-1.5 rounded-btn border border-line bg-card px-2.5 text-xs font-semibold text-ink-3 hover:bg-hover hover:text-ink"
+          >
+            <Code2 size={14} /> Balise HTML
+          </button>
+
+          <div className="flex h-[34px] items-center gap-3 rounded-btn bg-subtle px-3 text-xs">
+            <span title="Participent" className="flex items-center gap-1 font-extrabold text-good">
+              <Check size={12} /> {yesCount}
+            </span>
+            <span title="Ne participent pas" className="flex items-center gap-1 font-extrabold text-ink-3">
+              <X size={12} /> {noCount}
+            </span>
+          </div>
+
+          <button
+            onClick={() => setPreviewOpen(true)}
+            title="Aperçu du mail"
+            className="flex h-[34px] w-[34px] items-center justify-center rounded-btn bg-navy text-white hover:opacity-90"
+          >
+            <Eye size={15} />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 items-start gap-4">
+        {/* Gauche — contenu du mail, bâti à la carte, dans l'ordre choisi */}
         <div className="space-y-3 rounded-panel border border-line bg-card p-4">
           <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Contenu du mail</div>
           <input
@@ -769,164 +815,134 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
           </div>
         </div>
 
-        {/* Colonne lien générique */}
-        <div className="space-y-3 rounded-panel border border-line bg-card p-4">
-          <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Lien / QR code générique</div>
-          <p className="text-xs text-ink-4">
-            À copier-coller ou afficher en QR code — n&rsquo;importe qui peut répondre en s&rsquo;identifiant lui-même.
-          </p>
-          <div className="flex items-center gap-2 rounded-btn border border-line px-3 py-2">
-            <LinkIcon size={13} className="shrink-0 text-ink-4" />
-            <input readOnly value={publicUrl} className="w-full truncate text-xs text-ink-3 outline-none" />
+        {/* Droite — destinataires et annuaires */}
+        <div className="rounded-panel border border-line bg-card p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Destinataires</div>
             <button
-              onClick={() => navigator.clipboard.writeText(publicUrl)}
-              className="shrink-0 text-xs font-semibold text-link hover:underline"
+              onClick={() => setListsModalOpen(true)}
+              className="flex items-center gap-1 text-xs font-semibold text-link hover:underline"
             >
-              Copier
+              <BookUser size={12} /> Gérer les annuaires
             </button>
           </div>
-          <div className="flex flex-col items-center gap-2 rounded-btn border border-dashed border-line p-4">
-            <QrCode size={14} className="text-ink-4" />
-            {/* eslint-disable-next-line @next/next/no-img-element -- image externe générée à la volée, pas un asset statique */}
-            <img src={qrSrc} alt="QR code d'inscription" className="h-[140px] w-[140px]" />
+
+          <div className="mb-3 flex items-center gap-2 rounded-btn border border-dashed border-line p-2">
+            <select
+              value={importingListId}
+              onChange={(e) => setImportingListId(e.target.value)}
+              className="min-w-0 flex-1 rounded-btn border border-line px-2 py-1.5 text-xs outline-none"
+            >
+              <option value="">Importer depuis un annuaire…</option>
+              {contactLists.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name} ({l.memberCount})
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={importList}
+              disabled={!importingListId}
+              className="flex shrink-0 items-center gap-1 rounded-btn bg-navy px-2.5 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+            >
+              <Download size={12} /> Importer
+            </button>
+            {importResult && <span className="shrink-0 text-[10px] text-ink-4">{importResult}</span>}
           </div>
 
-          <div className="space-y-1.5 border-t border-line pt-3">
-            <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
-              <Code2 size={12} /> Balise HTML à coller
+          <div className="mb-3 flex items-center gap-2">
+            <div className="flex flex-1 items-center gap-2 rounded-btn border border-line px-3 py-2">
+              <Search size={13} className="text-ink-4" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                placeholder="Rechercher un club dans l'annuaire…"
+                className="w-full text-sm outline-none"
+              />
             </div>
-            <p className="text-xs text-ink-4">Pour intégrer un bouton d&rsquo;inscription dans un mail composé ailleurs (Outlook, Mailchimp…).</p>
-            <div className="flex items-center gap-2 rounded-btn border border-line px-3 py-2">
-              <input readOnly value={embedSnippet} className="w-full truncate text-xs text-ink-3 outline-none" />
-              <button
-                onClick={() => navigator.clipboard.writeText(embedSnippet)}
-                className="shrink-0 text-xs font-semibold text-link hover:underline"
-              >
-                Copier
-              </button>
+            <button onClick={runSearch} className="rounded-btn border border-line px-3 py-2 text-xs font-semibold text-ink-2">
+              Chercher
+            </button>
+          </div>
+          {results.length > 0 && (
+            <div className="mb-3 max-h-40 space-y-1 overflow-y-auto rounded-btn border border-line p-2">
+              {results.map((r) => (
+                <div key={r.id} className="flex items-center justify-between gap-2 rounded-btn px-2 py-1.5 hover:bg-hover">
+                  <span className="text-xs text-ink-2">
+                    {r.name} {r.club ? `· ${r.club}` : ""} · {r.email}
+                  </span>
+                  <button onClick={() => addContact(r)} className="text-xs font-semibold text-link hover:underline">
+                    Ajouter
+                  </button>
+                </div>
+              ))}
             </div>
+          )}
+
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Nom" className="rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none" />
+            <input value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} placeholder="Email" className="rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none" />
+            <input value={manualClub} onChange={(e) => setManualClub(e.target.value)} placeholder="Club (optionnel)" className="rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none" />
+            <button onClick={addManual} className="flex items-center gap-1 rounded-btn border border-dashed border-line px-2.5 py-1.5 text-xs font-semibold text-ink-3 hover:bg-hover">
+              <Plus size={12} /> Ajouter manuellement
+            </button>
           </div>
 
-          <div className="mt-2 grid grid-cols-2 gap-2 rounded-btn bg-subtle p-3 text-center">
-            <div>
-              <div className="text-lg font-extrabold text-good">{yesCount}</div>
-              <div className="text-[10px] text-ink-4">Participent</div>
-            </div>
-            <div>
-              <div className="text-lg font-extrabold text-ink-3">{noCount}</div>
-              <div className="text-[10px] text-ink-4">Ne participent pas</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Destinataires */}
-      <div className="rounded-panel border border-line bg-card p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Destinataires</div>
-          <button
-            onClick={() => setListsModalOpen(true)}
-            className="flex items-center gap-1 text-xs font-semibold text-link hover:underline"
-          >
-            <BookUser size={12} /> Gérer les annuaires
-          </button>
-        </div>
-
-        <div className="mb-3 flex items-center gap-2 rounded-btn border border-dashed border-line p-2">
-          <select
-            value={importingListId}
-            onChange={(e) => setImportingListId(e.target.value)}
-            className="min-w-0 flex-1 rounded-btn border border-line px-2 py-1.5 text-xs outline-none"
-          >
-            <option value="">Importer depuis un annuaire…</option>
-            {contactLists.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name} ({l.memberCount})
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={importList}
-            disabled={!importingListId}
-            className="flex shrink-0 items-center gap-1 rounded-btn bg-navy px-2.5 py-1.5 text-xs font-bold text-white disabled:opacity-50"
-          >
-            <Download size={12} /> Importer
-          </button>
-          {importResult && <span className="shrink-0 text-[10px] text-ink-4">{importResult}</span>}
-        </div>
-
-        <div className="mb-3 flex items-center gap-2">
-          <div className="flex flex-1 items-center gap-2 rounded-btn border border-line px-3 py-2">
-            <Search size={13} className="text-ink-4" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && runSearch()}
-              placeholder="Rechercher un club dans l'annuaire…"
-              className="w-full text-sm outline-none"
-            />
-          </div>
-          <button onClick={runSearch} className="rounded-btn border border-line px-3 py-2 text-xs font-semibold text-ink-2">
-            Chercher
-          </button>
-        </div>
-        {results.length > 0 && (
-          <div className="mb-3 max-h-40 space-y-1 overflow-y-auto rounded-btn border border-line p-2">
-            {results.map((r) => (
-              <div key={r.id} className="flex items-center justify-between gap-2 rounded-btn px-2 py-1.5 hover:bg-hover">
-                <span className="text-xs text-ink-2">
+          <div className="divide-y divide-line rounded-btn border border-line">
+            {recipients.length === 0 && <p className="p-3 text-xs italic text-ink-4">Aucun destinataire pour l&rsquo;instant.</p>}
+            {recipients.map((r) => (
+              <div key={r.id} className="flex items-center gap-3 px-3 py-2">
+                <Mail size={13} className="shrink-0 text-ink-4" />
+                <span className="min-w-0 flex-1 truncate text-xs text-ink-2">
                   {r.name} {r.club ? `· ${r.club}` : ""} · {r.email}
                 </span>
-                <button onClick={() => addContact(r)} className="text-xs font-semibold text-link hover:underline">
-                  Ajouter
+                {r.response === "yes" && (
+                  <span className="flex items-center gap-1 rounded-full bg-good-bg px-2 py-0.5 text-[10px] font-bold text-good">
+                    <Check size={10} /> Participe
+                  </span>
+                )}
+                {r.response === "no" && (
+                  <span className="flex items-center gap-1 rounded-full bg-subtle px-2 py-0.5 text-[10px] font-bold text-ink-3">
+                    <X size={10} /> Ne participe pas
+                  </span>
+                )}
+                {!r.response && r.sent_at && <span className="text-[10px] text-ink-4">Envoyé, sans réponse</span>}
+                {!r.sent_at && <span className="text-[10px] text-ink-4">Pas encore envoyé</span>}
+                <button
+                  onClick={async () => {
+                    await removeRecipient(r.id);
+                    await refetch(campaign);
+                  }}
+                  className="shrink-0 text-ink-4 hover:text-red"
+                >
+                  <Trash2 size={12} />
                 </button>
               </div>
             ))}
           </div>
-        )}
-
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Nom" className="rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none" />
-          <input value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} placeholder="Email" className="rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none" />
-          <input value={manualClub} onChange={(e) => setManualClub(e.target.value)} placeholder="Club (optionnel)" className="rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none" />
-          <button onClick={addManual} className="flex items-center gap-1 rounded-btn border border-dashed border-line px-2.5 py-1.5 text-xs font-semibold text-ink-3 hover:bg-hover">
-            <Plus size={12} /> Ajouter manuellement
-          </button>
-        </div>
-
-        <div className="divide-y divide-line rounded-btn border border-line">
-          {recipients.length === 0 && <p className="p-3 text-xs italic text-ink-4">Aucun destinataire pour l&rsquo;instant.</p>}
-          {recipients.map((r) => (
-            <div key={r.id} className="flex items-center gap-3 px-3 py-2">
-              <Mail size={13} className="shrink-0 text-ink-4" />
-              <span className="min-w-0 flex-1 truncate text-xs text-ink-2">
-                {r.name} {r.club ? `· ${r.club}` : ""} · {r.email}
-              </span>
-              {r.response === "yes" && (
-                <span className="flex items-center gap-1 rounded-full bg-good-bg px-2 py-0.5 text-[10px] font-bold text-good">
-                  <Check size={10} /> Participe
-                </span>
-              )}
-              {r.response === "no" && (
-                <span className="flex items-center gap-1 rounded-full bg-subtle px-2 py-0.5 text-[10px] font-bold text-ink-3">
-                  <X size={10} /> Ne participe pas
-                </span>
-              )}
-              {!r.response && r.sent_at && <span className="text-[10px] text-ink-4">Envoyé, sans réponse</span>}
-              {!r.sent_at && <span className="text-[10px] text-ink-4">Pas encore envoyé</span>}
-              <button
-                onClick={async () => {
-                  await removeRecipient(r.id);
-                  await refetch(campaign);
-                }}
-                className="shrink-0 text-ink-4 hover:text-red"
-              >
-                <Trash2 size={12} />
-              </button>
-            </div>
-          ))}
         </div>
       </div>
+
+      {/* Aperçu — rendu réel du mail, identique à ce qui part */}
+      {previewOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setPreviewOpen(false)}>
+          <div
+            className="flex h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-modal border border-line bg-card shadow-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+              <span className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+                <Eye size={12} /> Aperçu du mail
+              </span>
+              <button onClick={() => setPreviewOpen(false)} className="text-ink-4 hover:text-ink">
+                <X size={14} />
+              </button>
+            </div>
+            <iframe srcDoc={previewHtml} title="Aperçu du mail" className="w-full flex-1 bg-subtle" sandbox="allow-popups" />
+          </div>
+        </div>
+      )}
 
       {listsModalOpen && (
         <ContactListsModal
