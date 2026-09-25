@@ -12,7 +12,7 @@ import {
   greetingFor,
   type EmailBlock,
 } from "@/lib/board/registrationEmail";
-import { personName, type ClubContact } from "@/lib/board/clubContacts";
+import { personName, normalizeFrPhone, type ClubContact } from "@/lib/board/clubContacts";
 import { isResendConfigured, sendResendBatch } from "@/lib/email/resend";
 import { isWhatsAppConfigured, sendWhatsAppEventInvite } from "@/lib/whatsapp";
 import type { Json } from "@/lib/supabase/database.types";
@@ -186,13 +186,18 @@ export async function addRecipientsFromContacts(
   if (error) throw new Error(error.message);
 }
 
-export async function addManualRecipient(campaignId: string, params: { name: string; email: string; club?: string }) {
+/** Ajout manuel : un email ou un mobile suffit (mobile seul = invitation WhatsApp uniquement). */
+export async function addManualRecipient(
+  campaignId: string,
+  params: { name: string; email?: string; phone?: string; club?: string }
+) {
   const { supabase } = await requireStaff();
   const { error } = await supabase.from("event_registration_recipients").insert({
     campaign_id: campaignId,
     name: params.name,
-    email: params.email,
-    club: params.club ?? null,
+    email: params.email?.toLowerCase() || null,
+    phone: normalizeFrPhone(params.phone),
+    club: params.club || null,
     source: "invited",
   });
   if (error) throw new Error(error.message);
@@ -250,12 +255,16 @@ export async function listContactListMembers(listId: string) {
   return data;
 }
 
-export async function addContactListMember(listId: string, params: { name: string; email: string; club?: string }) {
+export async function addContactListMember(
+  listId: string,
+  params: { name: string; email?: string | null; phone?: string; club?: string }
+) {
   const { supabase } = await requireStaff();
   const { error } = await supabase.from("registration_contact_list_members").insert({
     list_id: listId,
     name: params.name,
-    email: params.email,
+    email: params.email?.toLowerCase() || null,
+    phone: normalizeFrPhone(params.phone),
     club: params.club || null,
   });
   if (error) throw new Error(error.message);
@@ -325,10 +334,14 @@ export async function importContactListIntoCampaign(campaignId: string, listId: 
 
   const { data: existing } = await supabase
     .from("event_registration_recipients")
-    .select("email")
+    .select("email, phone")
     .eq("campaign_id", campaignId);
-  const existingEmails = new Set((existing ?? []).map((e) => e.email));
-  const toInsert = members.filter((m) => !existingEmails.has(m.email));
+  const existingEmails = new Set((existing ?? []).map((e) => e.email).filter(Boolean));
+  const existingPhones = new Set((existing ?? []).map((e) => e.phone).filter(Boolean));
+  // Membre déjà destinataire = même email, ou même mobile pour un contact sans email.
+  const toInsert = members.filter((m) =>
+    m.email ? !existingEmails.has(m.email) : !(m.phone && existingPhones.has(m.phone))
+  );
   if (toInsert.length === 0) return { added: 0 };
 
   const { error } = await supabase.from("event_registration_recipients").insert(

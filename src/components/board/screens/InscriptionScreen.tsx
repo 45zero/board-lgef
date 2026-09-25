@@ -405,6 +405,7 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
   const [manualName, setManualName] = useState("");
   const [manualEmail, setManualEmail] = useState("");
   const [manualClub, setManualClub] = useState("");
+  const [manualPhone, setManualPhone] = useState("");
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
 
@@ -578,15 +579,22 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
                 <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Nom" className="rounded-btn border border-line px-2 py-1.5 text-xs outline-none" />
                 <input value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} placeholder="Email" className="rounded-btn border border-line px-2 py-1.5 text-xs outline-none" />
                 <input value={manualClub} onChange={(e) => setManualClub(e.target.value)} placeholder="Club" className="rounded-btn border border-line px-2 py-1.5 text-xs outline-none" />
+                <input value={manualPhone} onChange={(e) => setManualPhone(e.target.value)} type="tel" placeholder="Mobile (WhatsApp)" className="rounded-btn border border-line px-2 py-1.5 text-xs outline-none" />
                 <button
                   onClick={async () => {
-                    if (!manualName.trim() || !manualEmail.trim()) return;
-                    await addContactListMember(selected.id, { name: manualName.trim(), email: manualEmail.trim(), club: manualClub.trim() });
+                    if (!manualName.trim() || (!manualEmail.trim() && !manualPhone.trim())) return;
+                    await addContactListMember(selected.id, {
+                      name: manualName.trim(),
+                      email: manualEmail.trim(),
+                      phone: manualPhone.trim(),
+                      club: manualClub.trim(),
+                    });
                     await refetchMembers(selected);
                     await refetchLists();
                     setManualName("");
                     setManualEmail("");
                     setManualClub("");
+                    setManualPhone("");
                   }}
                   className="flex items-center gap-1 rounded-btn border border-dashed border-line px-2 py-1.5 text-xs font-semibold text-ink-3 hover:bg-hover"
                 >
@@ -642,6 +650,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   const [manualName, setManualName] = useState("");
   const [manualEmail, setManualEmail] = useState("");
   const [manualClub, setManualClub] = useState("");
+  const [manualPhone, setManualPhone] = useState("");
   const [previewHtml, setPreviewHtml] = useState("");
   const [embedHtml, setEmbedHtml] = useState("");
   const [listsModalOpen, setListsModalOpen] = useState(false);
@@ -716,16 +725,22 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   };
 
   const addManual = async () => {
-    if (!manualName.trim() || !manualEmail.trim()) return;
-    await addManualRecipient(campaign.id, { name: manualName.trim(), email: manualEmail.trim(), club: manualClub.trim() });
+    if (!manualName.trim() || (!manualEmail.trim() && !manualPhone.trim())) return;
+    await addManualRecipient(campaign.id, {
+      name: manualName.trim(),
+      email: manualEmail.trim(),
+      phone: manualPhone.trim(),
+      club: manualClub.trim(),
+    });
     await refetch(campaign);
     setManualName("");
     setManualEmail("");
     setManualClub("");
+    setManualPhone("");
   };
 
   const send = async () => {
-    if (!confirm(`Envoyer l'invitation par email à ${recipients.filter((r) => !r.sent_at).length} destinataire(s) ?`)) return;
+    if (!confirm(`Envoyer l'invitation par email à ${recipients.filter((r) => r.email && !r.sent_at).length} destinataire(s) ?`)) return;
     setSending(true);
     setSendResult(null);
     try {
@@ -916,10 +931,10 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
           <div className="border-t border-line pt-3">
             <button
               onClick={send}
-              disabled={sending || recipients.filter((r) => !r.sent_at).length === 0}
+              disabled={sending || recipients.filter((r) => r.email && !r.sent_at).length === 0}
               className="flex w-full items-center justify-center gap-2 rounded-btn bg-navy px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
             >
-              <Send size={14} /> {sending ? "Envoi…" : `Envoyer aux clubs (${recipients.filter((r) => !r.sent_at).length})`}
+              <Send size={14} /> {sending ? "Envoi…" : `Envoyer aux clubs (${recipients.filter((r) => r.email && !r.sent_at).length})`}
             </button>
             {sendResult && <p className="mt-2 text-xs font-semibold text-ink-2">{sendResult}</p>}
             <button
@@ -1000,8 +1015,9 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
 
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Nom" className="rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none" />
-            <input value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} placeholder="Email" className="rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none" />
+            <input value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} placeholder="Email (ou mobile)" className="rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none" />
             <input value={manualClub} onChange={(e) => setManualClub(e.target.value)} placeholder="Club (optionnel)" className="rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none" />
+            <input value={manualPhone} onChange={(e) => setManualPhone(e.target.value)} type="tel" placeholder="Mobile (WhatsApp)" className="rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none" />
             <button onClick={addManual} className="flex items-center gap-1 rounded-btn border border-dashed border-line px-2.5 py-1.5 text-xs font-semibold text-ink-3 hover:bg-hover">
               <Plus size={12} /> Ajouter manuellement
             </button>
@@ -1050,7 +1066,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
                 )}
                 {r.whatsapp_sent_at && <span className="shrink-0 text-[10px] font-semibold text-good">WhatsApp ✓</span>}
                 {!r.response && r.sent_at && <span className="text-[10px] text-ink-4">Envoyé, sans réponse</span>}
-                {!r.sent_at && <span className="text-[10px] text-ink-4">Pas encore envoyé</span>}
+                {r.email && !r.sent_at && <span className="text-[10px] text-ink-4">Pas encore envoyé</span>}
                 <button
                   onClick={async () => {
                     await removeRecipient(r.id);

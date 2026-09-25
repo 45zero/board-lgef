@@ -1199,9 +1199,9 @@ export type Database = {
         Relationships: []
       }
       registration_contact_list_members: {
-        Row: { id: string; list_id: string; name: string; email: string; club: string | null; created_at: string; first_name: string | null; last_name: string | null; civility: string | null; phone: string | null; club_number: string | null; email_secondary: string | null }
-        Insert: { id?: string; list_id: string; name: string; email: string; club?: string | null; created_at?: string; first_name?: string | null; last_name?: string | null; civility?: string | null; phone?: string | null; club_number?: string | null; email_secondary?: string | null }
-        Update: { id?: string; list_id?: string; name?: string; email?: string; club?: string | null; created_at?: string; first_name?: string | null; last_name?: string | null; civility?: string | null; phone?: string | null; club_number?: string | null; email_secondary?: string | null }
+        Row: { id: string; list_id: string; name: string; email: string | null; club: string | null; created_at: string; first_name: string | null; last_name: string | null; civility: string | null; phone: string | null; club_number: string | null; email_secondary: string | null }
+        Insert: { id?: string; list_id: string; name: string; email?: string | null; club?: string | null; created_at?: string; first_name?: string | null; last_name?: string | null; civility?: string | null; phone?: string | null; club_number?: string | null; email_secondary?: string | null }
+        Update: { id?: string; list_id?: string; name?: string; email?: string | null; club?: string | null; created_at?: string; first_name?: string | null; last_name?: string | null; civility?: string | null; phone?: string | null; club_number?: string | null; email_secondary?: string | null }
         Relationships: []
       }
       event_registration_campaigns: {
