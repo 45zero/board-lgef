@@ -664,6 +664,19 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(publicUrl)}`;
   const embedSnippet = `<a href="${publicUrl}" style="display:inline-block;background:#0b1d3c;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-weight:bold;font-size:14px;padding:14px 28px;border-radius:10px;text-decoration:none;">Je m'inscris — ${ev.title}</a>`;
 
+  const copyEmbedButton = async () => {
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([embedSnippet], { type: "text/html" }),
+          "text/plain": new Blob([embedSnippet], { type: "text/plain" }),
+        }),
+      ]);
+    } catch {
+      await navigator.clipboard.writeText(embedSnippet);
+    }
+  };
+
   const yesCount = recipients.filter((r) => r.response === "yes").length;
   const noCount = recipients.filter((r) => r.response === "no").length;
 
@@ -709,8 +722,8 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
           </div>
 
           <button
-            onClick={() => navigator.clipboard.writeText(embedSnippet)}
-            title="Copier la balise HTML d'un bouton d'inscription (Outlook, Mailchimp…)"
+            onClick={copyEmbedButton}
+            title="Copie le bouton d'inscription — collé tel quel (Outlook, Gmail…) ou en code source dans un éditeur HTML (Mailchimp…)"
             className="flex h-[34px] items-center gap-1.5 rounded-btn border border-line bg-card px-2.5 text-xs font-semibold text-ink-3 hover:bg-hover hover:text-ink"
           >
             <Code2 size={14} /> Balise HTML
