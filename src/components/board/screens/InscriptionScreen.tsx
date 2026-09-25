@@ -27,6 +27,7 @@ import {
   MousePointerClick,
 } from "lucide-react";
 import { useUserRole } from "@/hooks/board/useUserRole";
+import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import {
   listRegistrationEvents,
   getOrCreateCampaign,
@@ -168,6 +169,8 @@ function BlockEditor({
   const Icon = info.icon;
   const [text, setText] = useState(block.type === "text" ? block.content : "");
   const [busy, setBusy] = useState(false);
+  const addressInputRef = useRef<HTMLInputElement>(null);
+  const mapsLoaded = useGoogleMapsScript();
 
   const uploadAsset = async (kind: "image" | "banner" | "video" | "pdf" | "signature", file: File) => {
     setBusy(true);
@@ -178,6 +181,23 @@ function BlockEditor({
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (block.type !== "map" || !mapsLoaded || !addressInputRef.current) return;
+    const autocomplete = new google.maps.places.Autocomplete(addressInputRef.current, {
+      fields: ["formatted_address"],
+      componentRestrictions: { country: "fr" },
+    });
+    const listener = autocomplete.addListener("place_changed", () => {
+      const place = autocomplete.getPlace();
+      if (place.formatted_address && addressInputRef.current) {
+        addressInputRef.current.value = place.formatted_address;
+        onPatch({ address: place.formatted_address });
+      }
+    });
+    return () => listener.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onPatch est stable (closure de callback), pas besoin de le lister
+  }, [mapsLoaded, block.type]);
 
   return (
     <div className="rounded-panel border border-line bg-card p-3">
@@ -232,6 +252,7 @@ function BlockEditor({
             className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
           />
           <input
+            ref={addressInputRef}
             defaultValue={block.address}
             onBlur={(e) => onPatch({ address: e.target.value })}
             placeholder="Adresse (pour la carte)"
