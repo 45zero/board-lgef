@@ -28,6 +28,9 @@ import {
   Eye,
   BookUser,
   Download,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from "lucide-react";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
@@ -217,6 +220,24 @@ function BlockEditor({
           <Icon size={13} /> {info.label}
         </span>
         <div className="flex items-center gap-1">
+          <div className="mr-1.5 flex items-center gap-0.5 rounded-btn border border-line p-0.5">
+            {(["left", "center", "right"] as const).map((a) => {
+              const AlignIcon = a === "left" ? AlignLeft : a === "center" ? AlignCenter : AlignRight;
+              const active = (block.align ?? "left") === a;
+              return (
+                <button
+                  key={a}
+                  onClick={() => onPatch({ align: a })}
+                  title={a === "left" ? "Aligner à gauche" : a === "center" ? "Centrer" : "Aligner à droite"}
+                  className={`flex h-5 w-5 items-center justify-center rounded-[5px] ${
+                    active ? "bg-navy text-white" : "text-ink-4 hover:bg-hover"
+                  }`}
+                >
+                  <AlignIcon size={11} />
+                </button>
+              );
+            })}
+          </div>
           <button onClick={() => onMove("up")} disabled={index === 0} className="text-ink-4 hover:text-ink disabled:opacity-30">
             <ArrowUp size={13} />
           </button>
@@ -663,7 +684,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
             srcDoc={previewHtml}
             title="Aperçu du mail"
             className="h-[560px] w-full flex-1 bg-subtle"
-            sandbox=""
+            sandbox="allow-popups"
           />
         </div>
 

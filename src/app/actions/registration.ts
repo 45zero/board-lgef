@@ -437,15 +437,20 @@ export async function finalizeCampaignBlockAsset(
   const account = await requireBoardAccount();
   await ensurePublicViewAccess(account, driveFileId);
 
+  // thumbnail?id=...&sz=wNNNN est le lien le plus fiable pour un <img src> direct
+  // (uc?export=view renvoie souvent une page d'interstice plutôt que l'image brute
+  // selon le contexte — c'est ce qui cassait l'aperçu en iframe).
+  const directImageUrl = `https://drive.google.com/thumbnail?id=${driveFileId}&sz=w1000`;
+
   let patch: Record<string, unknown>;
   if (kind === "video") {
     patch = { url: extra?.webViewLink || `https://drive.google.com/file/d/${driveFileId}/view` };
   } else if (kind === "pdf") {
     patch = { url: `https://drive.google.com/uc?export=download&id=${driveFileId}`, filename: extra?.filename || "Document" };
   } else if (kind === "signature") {
-    patch = { imageUrl: `https://drive.google.com/uc?export=view&id=${driveFileId}` };
+    patch = { imageUrl: directImageUrl };
   } else {
-    patch = { url: `https://drive.google.com/uc?export=view&id=${driveFileId}` };
+    patch = { url: directImageUrl };
   }
   return updateCampaignBlockContent(campaignId, blockId, patch);
 }
