@@ -76,7 +76,7 @@ const VIEW_MODES: { id: ViewMode; label: string }[] = [
 ];
 
 export function CalendrierScreen() {
-  const [viewMode, setViewMode] = useState<ViewMode>("week");
+  const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [anchorDate, setAnchorDate] = useState(() => new Date());
 
   const weekStart = useMemo(() => startOfWeek(anchorDate, WEEK_OPTS), [anchorDate]);
@@ -485,6 +485,7 @@ export function CalendrierScreen() {
                   <div className="flex flex-col gap-0.5 overflow-hidden">
                     {visible.map((ev) => {
                       const color = ORG_COLORS[ev.org];
+                      const CoverageIcon = ev.coverage ? COVERAGE_ICONS[ev.coverage] : null;
                       return (
                         <button
                           key={ev.id}
@@ -492,10 +493,13 @@ export function CalendrierScreen() {
                             e.stopPropagation();
                             setEditingInternal(ev);
                           }}
-                          className="truncate rounded-[4px] border-l-2 px-1 py-0.5 text-left text-[10px] font-semibold"
+                          className="flex items-center gap-1 rounded-[4px] border-l-2 px-1 py-0.5 text-left text-[10px] font-semibold"
                           style={{ background: color.bg, borderLeftColor: color.base, color: color.ink }}
                         >
-                          {ev.title}
+                          <span className="min-w-0 flex-1 truncate">{ev.title}</span>
+                          {CoverageIcon && ev.coverage && (
+                            <CoverageIcon size={10} className="shrink-0" style={{ color: COVERAGE_COLORS[ev.coverage].ink }} />
+                          )}
                         </button>
                       );
                     })}
