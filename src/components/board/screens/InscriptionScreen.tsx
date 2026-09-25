@@ -185,7 +185,7 @@ function BlockEditor({
   const Icon = info.icon;
   const [text, setText] = useState(block.type === "text" ? block.content : "");
   const [busy, setBusy] = useState(false);
-  const addressInputRef = useRef<HTMLInputElement>(null);
+  const addressContainerRef = useRef<HTMLDivElement>(null);
   const mapsLoaded = useGoogleMapsScript();
 
   const uploadAsset = async (kind: "image" | "banner" | "video" | "pdf" | "signature", file: File) => {
@@ -198,20 +198,35 @@ function BlockEditor({
     }
   };
 
+  // PlaceAutocompleteElement : l'ancien places.Autocomplete n'est plus servi aux nouveaux projets Google Cloud.
   useEffect(() => {
-    if (block.type !== "map" || !mapsLoaded || !addressInputRef.current) return;
-    const autocomplete = new google.maps.places.Autocomplete(addressInputRef.current, {
-      fields: ["formatted_address"],
-      componentRestrictions: { country: "fr" },
-    });
-    const listener = autocomplete.addListener("place_changed", () => {
-      const place = autocomplete.getPlace();
-      if (place.formatted_address && addressInputRef.current) {
-        addressInputRef.current.value = place.formatted_address;
-        onPatch({ address: place.formatted_address });
+    const container = addressContainerRef.current;
+    if (block.type !== "map" || !mapsLoaded || !container) return;
+    const el = new google.maps.places.PlaceAutocompleteElement({ includedRegionCodes: ["fr"] });
+    el.placeholder = "Adresse (pour la carte)";
+    el.value = block.address ?? "";
+    el.style.width = "100%";
+    el.style.colorScheme = "light";
+    const onSelect = async (e: google.maps.places.PlacePredictionSelectEvent) => {
+      const place = e.placePrediction.toPlace();
+      await place.fetchFields({ fields: ["formattedAddress"] });
+      if (place.formattedAddress) {
+        el.value = place.formattedAddress;
+        onPatch({ address: place.formattedAddress });
       }
-    });
-    return () => listener.remove();
+    };
+    // Adresse tapée à la main sans choisir de suggestion : on la garde telle quelle.
+    const onFocusOut = () => {
+      if (el.value !== (block.address ?? "")) onPatch({ address: el.value });
+    };
+    el.addEventListener("gmp-select", onSelect as unknown as EventListener);
+    el.addEventListener("focusout", onFocusOut);
+    container.replaceChildren(el);
+    return () => {
+      el.removeEventListener("gmp-select", onSelect as unknown as EventListener);
+      el.removeEventListener("focusout", onFocusOut);
+      el.remove();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onPatch est stable (closure de callback), pas besoin de le lister
   }, [mapsLoaded, block.type]);
 
@@ -285,13 +300,16 @@ function BlockEditor({
             placeholder="Ex. Parking 3"
             className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
           />
-          <input
-            ref={addressInputRef}
-            defaultValue={block.address}
-            onBlur={(e) => onPatch({ address: e.target.value })}
-            placeholder="Adresse (pour la carte)"
-            className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
-          />
+          {mapsLoaded ? (
+            <div ref={addressContainerRef} />
+          ) : (
+            <input
+              defaultValue={block.address}
+              onBlur={(e) => onPatch({ address: e.target.value })}
+              placeholder="Adresse (pour la carte)"
+              className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+            />
+          )}
         </div>
       )}
 
