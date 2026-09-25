@@ -1,13 +1,50 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Sparkles, X, PanelLeft, LayoutGrid } from "lucide-react";
+import { Sparkles, X, PanelLeft, LayoutGrid, LogOut } from "lucide-react";
 import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import { getBoardDriveAccountId, setBoardDriveAccount } from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
+import { useAuth } from "@/contexts/AuthContext";
+
+/** Compte connecté : déconnexion puis retour à la page de connexion pour se connecter avec un autre compte. */
+function AccountSection() {
+  const { user, logout } = useAuth();
+  const [leaving, setLeaving] = useState(false);
+
+  const handleLogout = async () => {
+    setLeaving(true);
+    try {
+      await logout();
+    } finally {
+      // Rechargement complet : aucune donnée de l'ancien compte ne reste en mémoire.
+      window.location.assign("/login");
+    }
+  };
+
+  return (
+    <div className="mt-5">
+      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Compte</div>
+      <div className="flex items-center justify-between gap-3 rounded-btn border border-line p-3">
+        <div className="min-w-0">
+          <div className="text-xs text-ink-4">Connecté en tant que</div>
+          <div className="truncate text-sm font-semibold text-ink-2">{user?.email ?? "—"}</div>
+        </div>
+        <button
+          onClick={handleLogout}
+          disabled={leaving}
+          className="flex shrink-0 items-center gap-1.5 rounded-btn border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover disabled:opacity-50"
+        >
+          <LogOut size={13} />
+          {leaving ? "Déconnexion…" : "Changer de compte"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /** Réservé aux admins/super users : désigne quel compte Google connecté reçoit les médias d'événements de tout le monde. */
 function DriveSettingsSection() {
@@ -95,7 +132,7 @@ export function BoardSettingsModal({
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="fixed right-4 top-[76px] z-50 w-[380px] max-w-[calc(100vw-32px)] rounded-panel border border-line bg-card p-5 shadow-modal">
+      <div className="fixed right-4 top-[76px] z-50 max-h-[calc(100vh-92px)] w-[380px] max-w-[calc(100vw-32px)] overflow-y-auto overscroll-contain rounded-panel border border-line bg-card p-5 shadow-modal">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-btn bg-gradient-to-br from-navy to-red text-white">
@@ -198,6 +235,8 @@ export function BoardSettingsModal({
         </div>
 
         <DriveSettingsSection />
+
+        <AccountSection />
       </div>
     </>
   );
