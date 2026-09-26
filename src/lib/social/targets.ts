@@ -100,7 +100,8 @@ export function withFacebookMentions(message: string, mentions: FacebookMention[
   return message.trim() ? `${message}\n\n${tags}` : tags;
 }
 
-export type SocialComment = { id: string; author: string; text: string; createdAt: string };
+/** `parentId` : présent pour une réponse à un autre commentaire. */
+export type SocialComment = { id: string; author: string; text: string; createdAt: string; parentId?: string };
 
 /** `warning` : publié, mais avec une réserve (ex. identifications Instagram ignorées). */
 export type SocialPublishResult = { key: NetworkKey; ok: boolean; error?: string; warning?: string };

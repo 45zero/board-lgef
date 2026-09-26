@@ -312,22 +312,58 @@ export async function findFacebookVideoNear(pageId: string, accessToken: string,
 
 /* ---------- Commentaires ---------- */
 
-/** Commentaires lus en direct (jamais stockés) — `objectId` = id de vidéo ou de post Facebook. */
-export async function getFacebookComments(objectId: string, accessToken: string): Promise<SocialComment[]> {
-  const body = await graphFetch(`/${objectId}/comments`, {
-    fields: "id,message,from{name},created_time",
-    limit: "50",
-    order: "reverse_chronological",
-    access_token: accessToken,
-  });
-  const data = (body.data as { id: string; message?: string; from?: { name?: string }; created_time?: string }[] | undefined) ?? [];
-  return data.map((c) => ({ id: c.id, author: c.from?.name ?? "Anonyme", text: c.message ?? "", createdAt: c.created_time ?? "" }));
+/** Plafond de sécurité par post (pages de 100) — largement au-dessus du volume d'un post de la Ligue. */
+const MAX_COMMENT_PAGES = 20;
+
+/** Suit la pagination Graph (`paging.next`, URL complète déjà signée avec le token). */
+async function graphFetchAllPages<T>(path: string, params: Record<string, string>): Promise<T[]> {
+  const items: T[] = [];
+  let body = await graphFetch(path, params);
+  for (let page = 0; page < MAX_COMMENT_PAGES; page++) {
+    items.push(...((body.data as T[] | undefined) ?? []));
+    const next = (body.paging as { next?: string } | undefined)?.next;
+    if (!next) break;
+    const res = await fetch(next, { cache: "no-store" });
+    body = (await res.json()) as Record<string, unknown>;
+    if (!res.ok || body.error) break;
+  }
+  return items;
 }
 
+/**
+ * Tous les commentaires d'un post ou d'une vidéo Facebook, réponses comprises (`filter=stream` :
+ * liste à plat, les réponses portent un `parent`) — lus en direct, jamais stockés tels quels.
+ */
+export async function getFacebookComments(objectId: string, accessToken: string): Promise<SocialComment[]> {
+  const data = await graphFetchAllPages<{ id: string; message?: string; from?: { name?: string }; created_time?: string; parent?: { id: string } }>(
+    `/${objectId}/comments`,
+    { fields: "id,message,from{name},created_time,parent{id}", filter: "stream", order: "reverse_chronological", limit: "100", access_token: accessToken }
+  );
+  return data.map((c) => ({
+    id: c.id,
+    author: c.from?.name ?? "Anonyme",
+    text: c.message ?? "",
+    createdAt: c.created_time ?? "",
+    parentId: c.parent?.id,
+  }));
+}
+
+/** Tous les commentaires d'un média Instagram, réponses comprises (champ `replies` de chaque commentaire). */
 export async function getInstagramComments(mediaId: string, accessToken: string): Promise<SocialComment[]> {
-  const body = await graphFetch(`/${mediaId}/comments`, { fields: "id,text,username,timestamp", limit: "50", access_token: accessToken });
-  const data = (body.data as { id: string; text?: string; username?: string; timestamp?: string }[] | undefined) ?? [];
-  return data.map((c) => ({ id: c.id, author: c.username ?? "Anonyme", text: c.text ?? "", createdAt: c.timestamp ?? "" }));
+  type IgComment = { id: string; text?: string; username?: string; timestamp?: string; replies?: { data?: IgComment[] } };
+  const data = await graphFetchAllPages<IgComment>(`/${mediaId}/comments`, {
+    fields: "id,text,username,timestamp,replies{id,text,username,timestamp}",
+    limit: "100",
+    access_token: accessToken,
+  });
+  const toComment = (c: IgComment, parentId?: string): SocialComment => ({
+    id: c.id,
+    author: c.username ?? "Anonyme",
+    text: c.text ?? "",
+    createdAt: c.timestamp ?? "",
+    parentId,
+  });
+  return data.flatMap((c) => [toComment(c), ...(c.replies?.data ?? []).map((r) => toComment(r, c.id))]);
 }
 
 /**

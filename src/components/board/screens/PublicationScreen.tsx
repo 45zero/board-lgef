@@ -195,6 +195,12 @@ function StatTile({ icon: Icon, label, value }: { icon: typeof Eye; label: strin
   );
 }
 
+/** Remet chaque réponse juste sous son commentaire parent (les plateformes renvoient une liste à plat). */
+function threaded(comments: SocialComment[]): SocialComment[] {
+  const tops = comments.filter((c) => !c.parentId || !comments.some((p) => p.id === c.parentId));
+  return tops.flatMap((t) => [t, ...comments.filter((c) => c.parentId === t.id)]);
+}
+
 /** Commentaires lus en direct sur la plateforme à l'ouverture (jamais stockés), supprimables depuis le board. */
 function CommentsSection({ publicationId, networkKey, count }: { publicationId: string; networkKey: NetworkKey; count?: number }) {
   const [open, setOpen] = useState(false);
@@ -231,9 +237,13 @@ function CommentsSection({ publicationId, networkKey, count }: { publicationId: 
           {loading && <p className="text-[11px] text-ink-4">Chargement…</p>}
           {error && <p className="text-[11px] text-bad">{error}</p>}
           {comments && comments.length === 0 && !loading && <p className="text-[11px] text-ink-4">Aucun commentaire.</p>}
-          {comments?.map((c) => (
-            <div key={c.id} className="flex items-start justify-between gap-2 rounded-btn bg-subtle px-2.5 py-1.5 text-[11px]">
+          {threaded(comments ?? []).map((c) => (
+            <div
+              key={c.id}
+              className={`flex items-start justify-between gap-2 rounded-btn bg-subtle px-2.5 py-1.5 text-[11px] ${c.parentId ? "ml-5" : ""}`}
+            >
               <span className="min-w-0 text-ink-2">
+                {c.parentId && <span className="text-ink-4">↳ réponse · </span>}
                 <strong className="text-ink">{c.author}</strong>
                 {c.createdAt && <span className="text-ink-4"> · {new Date(c.createdAt).toLocaleDateString("fr-FR")}</span>}
                 <br />

@@ -8,9 +8,12 @@ import { getNetworkEntry, publishedNetworks, type NetworkKey, type PublishInfo, 
 
 type Client = SupabaseClient<Database>;
 
-/** Publications surveillées : celles publiées ces 30 derniers jours (les commentaires arrivent surtout au début). */
-const WATCH_DAYS = 30;
-const MAX_PUBLICATIONS = 30;
+/**
+ * Toutes les publications du board sont surveillées : les récentes (moins de 30 jours, là où
+ * arrivent presque tous les commentaires) à chaque passage, les plus anciennes une fois par heure
+ * (au passage de la minute 0) pour ne pas solliciter inutilement les API Meta/YouTube.
+ */
+const RECENT_DAYS = 30;
 /** Plafond de commentaires analysés par passage (le cron repasse chaque minute, le reste suit au prochain). */
 const MAX_COMMENTS_PER_RUN = 100;
 
@@ -35,15 +38,16 @@ export type ModerationReport = { scanned: number; analysed: number; hateful: num
  */
 export async function runCommentModeration(client: Client): Promise<ModerationReport> {
   const report: ModerationReport = { scanned: 0, analysed: 0, hateful: 0, review: 0, notified: 0, errors: [] };
-  const since = new Date(Date.now() - WATCH_DAYS * 86_400_000).toISOString();
+  const since = new Date(Date.now() - RECENT_DAYS * 86_400_000).toISOString();
+  const includeOlder = new Date().getUTCMinutes() === 0;
 
-  const { data: pubs } = await client
+  let query = client
     .from("media_publications")
     .select("id, title, caption, publish_info, published_by, created_by, events(title)")
     .eq("status", "published")
-    .gte("published_at", since)
-    .order("published_at", { ascending: false })
-    .limit(MAX_PUBLICATIONS);
+    .order("published_at", { ascending: false });
+  if (!includeOlder) query = query.gte("published_at", since);
+  const { data: pubs } = await query;
 
   const found: Found[] = [];
   await Promise.all(
