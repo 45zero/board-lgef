@@ -57,6 +57,7 @@ import {
   getSocialComments,
   deleteSocialComment,
   deleteSocialPosts,
+  resolveFacebookMention,
 } from "@/app/actions/social";
 import {
   FACEBOOK_REGIONS,
@@ -66,6 +67,7 @@ import {
   competitionTag,
   describeFailures,
   describeWarnings,
+  type FacebookMention,
   normalizeInstagramUsernames,
   getNetworkEntry,
   isInstagramCompatible,
@@ -576,6 +578,21 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
   const [instagram, setInstagram] = useState(!!pub.targets.instagram);
   const [igTagsInput, setIgTagsInput] = useState((pub.targets.igTags ?? []).map((u) => `@${u}`).join(" "));
   const igTags = normalizeInstagramUsernames(igTagsInput);
+  const [fbMentions, setFbMentions] = useState<FacebookMention[]>(pub.targets.fbMentions ?? []);
+  const [mentionRef, setMentionRef] = useState("");
+  const [mentionState, setMentionState] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
+
+  const addMention = async () => {
+    if (!mentionRef.trim()) return;
+    setMentionState({ loading: true, error: null });
+    const res = await resolveFacebookMention(mentionRef);
+    if (res.page) {
+      const page = res.page;
+      setFbMentions((prev) => (prev.some((m) => m.id === page.id) ? prev : [...prev, page]));
+      setMentionRef("");
+    }
+    setMentionState({ loading: false, error: res.error });
+  };
   const [scheduledAt, setScheduledAt] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -599,6 +616,7 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
     facebook: canFacebook ? fb : {},
     instagram: canInstagram && instagram,
     igTags: canInstagram && instagram ? igTags : [],
+    fbMentions: canFacebook ? fbMentions : [],
   };
 
   const persistFiles = async () => {
@@ -629,7 +647,7 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
       ];
       if (socialTargets.length > 0) {
         try {
-          const results = await publishSocial(pub.id, socialTargets, me, { igUserTags: targets.igTags });
+          const results = await publishSocial(pub.id, socialTargets, me, { igUserTags: targets.igTags, fbMentions: targets.fbMentions });
           anyOk ||= results.some((r) => r.ok);
           const socialFailures = describeFailures(results);
           if (socialFailures) failures.push(socialFailures);
@@ -737,6 +755,46 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
                 {r.label}
               </label>
             ))}
+            {canFacebook && (fb.lorraine || fb.champagne_ardenne || fb.alsace) && (
+              <div className="space-y-1.5 border-t border-dashed border-line pt-2">
+                <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Mentionner des Pages Facebook</div>
+                <div className="flex gap-1.5">
+                  <input
+                    value={mentionRef}
+                    onChange={(e) => setMentionRef(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addMention();
+                      }
+                    }}
+                    placeholder="Lien de la Page (facebook.com/…) ou identifiant"
+                    className="min-w-0 flex-1 rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+                  />
+                  <button
+                    onClick={addMention}
+                    disabled={mentionState.loading || !mentionRef.trim()}
+                    className="rounded-btn border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-2 disabled:opacity-50"
+                  >
+                    {mentionState.loading ? "…" : "Ajouter"}
+                  </button>
+                </div>
+                {mentionState.error && <p className="text-[11px] text-bad">{mentionState.error}</p>}
+                {fbMentions.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {fbMentions.map((m) => (
+                      <span key={m.id} className="flex items-center gap-1 rounded-full bg-sel-bg px-2 py-0.5 text-[11px] font-semibold text-link">
+                        @{m.name}
+                        <button onClick={() => setFbMentions((prev) => prev.filter((x) => x.id !== m.id))} className="hover:text-bad">
+                          <X size={10} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[10px] text-ink-4">Les Pages sont mentionnées à la fin du texte et reçoivent une notification.</p>
+              </div>
+            )}
           </div>
 
           {networkRow(

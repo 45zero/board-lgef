@@ -77,6 +77,21 @@ export async function publishFacebookGallery(pageId: string, accessToken: string
   return { postId: String(body.id) };
 }
 
+/**
+ * Retrouve une Page Facebook à mentionner à partir de ce que l'utilisateur colle : lien
+ * (facebook.com/NomDeLaPage, facebook.com/profile.php?id=…), @nom ou identifiant numérique.
+ */
+export async function resolveFacebookPage(ref: string, accessToken: string): Promise<{ id: string; name: string }> {
+  let key = ref.trim().replace(/^@/, "");
+  const url = /facebook\.com|fb\.com/i.test(key) ? new URL(key.startsWith("http") ? key : `https://${key}`) : null;
+  if (url) {
+    key = url.searchParams.get("id") ?? url.pathname.split("/").filter(Boolean).filter((p) => p !== "pg" && p !== "pages")[0] ?? "";
+  }
+  if (!/^[\w.-]+$/.test(key)) throw new Error("Lien ou identifiant de Page invalide.");
+  const body = await graphFetch(`/${encodeURIComponent(key)}`, { fields: "id,name", access_token: accessToken });
+  return { id: String(body.id), name: String(body.name ?? key) };
+}
+
 /** Supprime un post, une vidéo ou un média (Facebook comme Instagram — même appel Graph). */
 export async function deleteGraphObject(objectId: string, accessToken: string): Promise<void> {
   await graphFetch(`/${objectId}`, { access_token: accessToken }, "DELETE");

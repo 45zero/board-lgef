@@ -8,8 +8,12 @@ import {
   deletePublicationComment,
   deletePublicationPosts,
 } from "@/lib/social/publisher";
+import { getSocialAccountById } from "@/lib/social/accounts";
+import { resolveFacebookPage } from "@/lib/social/graph";
 import {
+  FACEBOOK_REGIONS,
   publishedNetworks,
+  type FacebookMention,
   type NetworkKey,
   type PublishInfo,
   type SocialComment,
@@ -36,11 +40,23 @@ export async function publishSocial(
   publicationId: string,
   targets: { key: SocialTargetKey; caption: string }[],
   by: By,
-  options: { igUserTags?: string[] } = {}
+  options: { igUserTags?: string[]; fbMentions?: FacebookMention[] } = {}
 ): Promise<SocialPublishResult[]> {
   const supabase = await requireUser();
   if (targets.length === 0) return [];
   return publishPublicationToSocial(supabase, publicationId, targets, by, options);
+}
+
+/** Retrouve une Page Facebook à mentionner (lien, @nom ou id) — lue avec le token d'une des pages LGEF. */
+export async function resolveFacebookMention(ref: string): Promise<{ error: string | null; page: FacebookMention | null }> {
+  try {
+    await requireUser();
+    const account = FACEBOOK_REGIONS.map((r) => getSocialAccountById(r.accountId)).find(Boolean);
+    if (!account) throw new Error("Compte Facebook non configuré.");
+    return { error: null, page: await resolveFacebookPage(ref, account.accessToken) };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Page introuvable.", page: null };
+  }
 }
 
 /** Relit les stats (Facebook, Instagram, YouTube) et les fige dans publish_info. */

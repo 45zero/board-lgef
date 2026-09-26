@@ -7,6 +7,7 @@ import { getDriveStreamUrl } from "@/app/actions/media-stream";
 import type { DbEventType } from "@/lib/board/calendar";
 import {
   kindFromContentTypes,
+  type FacebookMention,
   type PublicationKind,
   type PublishInfo,
   type StandaloneMedia,
@@ -21,6 +22,8 @@ export interface PublicationTargets {
   instagram?: boolean;
   /** Comptes Instagram identifiés sur les photos (sans @). */
   igTags?: string[];
+  /** Pages Facebook mentionnées (ajoutées en @[id] à la fin du message). */
+  fbMentions?: FacebookMention[];
 }
 
 /**

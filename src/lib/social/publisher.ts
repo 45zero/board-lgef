@@ -28,6 +28,8 @@ import {
   withNetworkEntry,
   kindFromContentTypes,
   normalizeInstagramUsernames,
+  withFacebookMentions,
+  type FacebookMention,
   type NetworkKey,
   type PublicationKind,
   type PublishInfo,
@@ -156,10 +158,11 @@ export async function publishPublicationToSocial(
   publicationId: string,
   targets: { key: SocialTargetKey; caption: string }[],
   by: By,
-  options: { igUserTags?: string[] } = {}
+  options: { igUserTags?: string[]; fbMentions?: FacebookMention[] } = {}
 ): Promise<SocialPublishResult[]> {
   const pub = await loadPublication(client, publicationId);
   const igTags = normalizeInstagramUsernames(options.igUserTags ?? []);
+  const fbMessage = (caption: string) => withFacebookMentions(caption, options.fbMentions);
   const items = await resolveMediaItems(client, pub);
   const kind: PublicationKind = pub.kind ?? kindFromContentTypes(items.map((i) => i.contentType));
   const at = new Date().toISOString();
@@ -202,19 +205,19 @@ export async function publishPublicationToSocial(
 
         if (items.length === 0) {
           if (!caption.trim()) throw new Error("Le texte de la publication est vide.");
-          const { postId } = await publishFacebookText(account.externalId, account.accessToken, { message: caption });
+          const { postId } = await publishFacebookText(account.externalId, account.accessToken, { message: fbMessage(caption) });
           return { key, entry: { published: true, at, by, postId, mediaType: "text" } };
         }
         if (items.length > 1) {
           if (items.some((i) => i.kind === "video")) throw new Error("Une galerie Facebook ne peut contenir que des photos.");
-          const { postId } = await publishFacebookGallery(account.externalId, account.accessToken, { urls: items.map((i) => i.url), message: caption });
+          const { postId } = await publishFacebookGallery(account.externalId, account.accessToken, { urls: items.map((i) => i.url), message: fbMessage(caption) });
           return { key, entry: { published: true, at, by, postId, mediaType: "gallery" } };
         }
         if (items[0].kind === "video") {
-          const { videoId } = await publishFacebookVideo(account.externalId, account.accessToken, { fileUrl: items[0].url, description: caption });
+          const { videoId } = await publishFacebookVideo(account.externalId, account.accessToken, { fileUrl: items[0].url, description: fbMessage(caption) });
           return { key, entry: { published: true, at, by, videoId, mediaType: "video" } };
         }
-        const { postId } = await publishFacebookPhoto(account.externalId, account.accessToken, { url: items[0].url, caption });
+        const { postId } = await publishFacebookPhoto(account.externalId, account.accessToken, { url: items[0].url, caption: fbMessage(caption) });
         return { key, entry: { published: true, at, by, postId, mediaType: "image" } };
       } catch (e) {
         return { key, error: e instanceof Error ? e.message : "Erreur inattendue." };

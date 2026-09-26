@@ -62,7 +62,7 @@ export async function GET(request: Request) {
     const results: SocialPublishResult[] = [];
     try {
       if (social.length > 0) {
-        results.push(...(await publishPublicationToSocial(client, pub.id, social, author, { igUserTags: targets.igTags })));
+        results.push(...(await publishPublicationToSocial(client, pub.id, social, author, { igUserTags: targets.igTags, fbMentions: targets.fbMentions })));
       }
       if (targets.youtube) results.push(await publishPublicationToYoutubeServer(client, pub.id, author));
     } catch (e) {

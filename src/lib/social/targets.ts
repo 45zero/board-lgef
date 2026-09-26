@@ -85,6 +85,16 @@ export function withNetworkEntry(info: PublishInfo, key: NetworkKey, value: Soci
 
 export const NETWORK_KEYS: NetworkKey[] = ["youtube", ...SOCIAL_TARGETS.map((t) => t.key)];
 
+/** Page Facebook mentionnée dans une publication — écrite @[id] dans le message (fonctionnalité Meta « Page Mentions »). */
+export type FacebookMention = { id: string; name: string };
+
+/** Message Facebook final : le texte suivi des mentions de Pages. */
+export function withFacebookMentions(message: string, mentions: FacebookMention[] | undefined): string {
+  if (!mentions?.length) return message;
+  const tags = mentions.map((m) => `@[${m.id}]`).join(" ");
+  return message.trim() ? `${message}\n\n${tags}` : tags;
+}
+
 export type SocialComment = { id: string; author: string; text: string; createdAt: string };
 
 /** `warning` : publié, mais avec une réserve (ex. identifications Instagram ignorées). */
