@@ -17,7 +17,9 @@ import {
   Download,
   Trash2,
   Upload,
+  Share2,
 } from "lucide-react";
+import { YoutubeIcon, FacebookIcon, InstagramIcon } from "@/components/board/publication/BrandIcons";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { COVERAGE_COLORS } from "@/lib/board/tokens";
@@ -27,7 +29,7 @@ import { useEventExpenses } from "@/hooks/board/useEventExpenses";
 import { useEventFiles } from "@/hooks/board/useEventFiles";
 import { getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
 import { getPublishedForFile, detachFileFromPublications } from "@/app/actions/social";
-import { describeFailures, networkLabel, type NetworkKey } from "@/lib/social/targets";
+import { describeFailures, getNetworkEntry, networkLabel, networkUrl, NETWORK_KEYS, type NetworkKey } from "@/lib/social/targets";
 import { REMINDER_PRESETS } from "@/hooks/board/useEventModalState";
 import type { useUserRole } from "@/hooks/board/useUserRole";
 import type { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
@@ -991,43 +993,71 @@ function formatDateTime(iso: string | null | undefined) {
   return `${d.toLocaleDateString("fr-FR")} à ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
+/** Partage le lien public d'une publication : feuille de partage native (mobile), sinon copie du lien. */
+async function shareLink(url: string, title: string) {
+  try {
+    if (navigator.share) {
+      await navigator.share({ title, url });
+      return;
+    }
+  } catch {
+    return; // partage annulé par l'utilisateur
+  }
+  await navigator.clipboard.writeText(url);
+  alert("Lien de la publication copié.");
+}
+
+/**
+ * Réseaux où le média est publié : cliquer sur le logo (ou la ligne) ouvre la publication sur le
+ * réseau, l'icône de partage donne directement son lien.
+ */
 function PublishBadges({ file }: { file: EventFile }) {
-  const yt = file.publish_info?.youtube;
-  const fb = file.publish_info?.facebook;
-  const ig = file.publish_info?.instagram;
-  const fbEntries = FACEBOOK_REGIONS.map((r) => ({ ...r, info: fb?.[r.key] })).filter((e) => e.info?.published);
-  if (!yt?.published && fbEntries.length === 0 && !ig?.published) return null;
+  const info = file.publish_info;
+  const rows = NETWORK_KEYS.map((key) => ({ key, entry: getNetworkEntry(info, key) })).filter((r) => r.entry?.published);
+  if (rows.length === 0) return null;
 
   const byName = (by?: { first_name: string | null; last_name: string | null } | null) =>
     [by?.first_name, by?.last_name].filter(Boolean).join(" ") || "—";
 
   return (
     <div className="mt-1 space-y-0.5">
-      {yt?.published && (
-        <a
-          href={yt.videoId ? `https://www.youtube.com/watch?v=${yt.videoId}` : undefined}
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center gap-1.5 text-[11px] font-semibold text-red hover:underline"
-        >
-          <YoutubeBadge size={13} /> YouTube · publié par {byName(yt.by)} le {formatDateTime(yt.at)}
-        </a>
-      )}
-      {fbEntries.map((e) => (
-        <div key={e.key} className="flex items-center gap-1.5 text-[11px] font-semibold text-link">
-          <FacebookBadge size={11} /> Facebook · {e.label} · publié par {byName(e.info!.by)} le {formatDateTime(e.info!.at)}
-        </div>
-      ))}
-      {ig?.published && (
-        <a
-          href={ig.permalink}
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-2 hover:underline"
-        >
-          Instagram · @lgefofficiel · publié par {byName(ig.by)} le {formatDateTime(ig.at)}
-        </a>
-      )}
+      {rows.map(({ key, entry }) => {
+        const url = networkUrl(key, entry);
+        const color = key === "youtube" ? "text-red" : key === "instagram" ? "text-ink-2" : "text-link";
+        const label =
+          key === "youtube" ? "YouTube" : key === "instagram" ? "Instagram · @lgefofficiel" : `Facebook · ${FACEBOOK_REGIONS.find((r) => r.key === key)?.label ?? ""}`;
+        const Logo = key === "youtube" ? YoutubeIcon : key === "instagram" ? InstagramIcon : FacebookIcon;
+        return (
+          <div key={key} className={`flex items-center gap-1.5 text-[11px] font-semibold ${color}`}>
+            <a
+              href={url ?? undefined}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              title={url ? "Ouvrir la publication" : "Lien pas encore disponible — rafraîchissez les stats"}
+              className={`flex min-w-0 items-center gap-1.5 ${url ? "hover:underline" : "cursor-default"}`}
+            >
+              <Logo size={key === "youtube" ? 13 : 12} />
+              <span className="truncate">
+                {label} · publié par {byName(entry!.by)} le {formatDateTime(entry!.at)}
+              </span>
+            </a>
+            {url && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void shareLink(url, file.filename);
+                }}
+                title="Lien de partage"
+                className="shrink-0 rounded-full p-0.5 text-ink-4 hover:bg-hover hover:text-ink"
+              >
+                <Share2 size={12} />
+              </button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

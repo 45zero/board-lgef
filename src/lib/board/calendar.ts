@@ -77,8 +77,12 @@ export interface CalendarEvent {
   /** Dernière modification (trigger set_event_updated_by côté base). Absent pour les événements Google. */
   updatedBy?: string | null;
   updatedAt?: string | null;
+  /** Médias de l'événement déjà publiés sur les réseaux (vidéo, photo ou les deux) — sigle entouré dans le calendrier. */
+  published?: PublishedMedia | null;
   status: "pending" | "approved" | "rejected" | "completed" | null;
 }
+
+export type PublishedMedia = "video" | "photo" | "both";
 
 export interface EventRow {
   id: string;

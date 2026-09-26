@@ -1,6 +1,8 @@
 "use client";
 
 import { Calendar, Home, Mail, Kanban, Camera } from "lucide-react";
+import { useAppBadges, type AppBadge } from "@/hooks/board/useAppBadges";
+import { AppBadgePills } from "@/components/board/AppBadgePills";
 
 export type MobileTab = "calendrier" | "accueil" | "mails" | "trello";
 
@@ -22,6 +24,7 @@ export function MobileBottomNav({
   onSelect: (tab: MobileTab) => void;
   onCenterPress: () => void;
 }) {
+  const badges = useAppBadges();
   return (
     <div
       className="relative border-t border-line bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
@@ -29,7 +32,7 @@ export function MobileBottomNav({
     >
       <div className="grid h-16 grid-cols-[1fr_1fr_1.1fr_1fr_1fr] items-center px-1">
         {SLOTS.map((slot) => (
-          <NavSlot key={slot.id} slot={slot} active={active === slot.id} onClick={() => onSelect(slot.id)} />
+          <NavSlot key={slot.id} slot={slot} badges={badges[slot.id]} active={active === slot.id} onClick={() => onSelect(slot.id)} />
         ))}
 
         <div className="flex items-center justify-center">
@@ -44,7 +47,7 @@ export function MobileBottomNav({
         </div>
 
         {SLOTS_RIGHT.map((slot) => (
-          <NavSlot key={slot.id} slot={slot} active={active === slot.id} onClick={() => onSelect(slot.id)} />
+          <NavSlot key={slot.id} slot={slot} badges={badges[slot.id]} active={active === slot.id} onClick={() => onSelect(slot.id)} />
         ))}
       </div>
       <div className="mx-auto mb-1.5 h-1 w-[120px] rounded-full bg-ink-4/30" />
@@ -55,16 +58,21 @@ export function MobileBottomNav({
 function NavSlot({
   slot,
   active,
+  badges,
   onClick,
 }: {
   slot: { id: MobileTab; label: string; icon: typeof Calendar };
   active: boolean;
+  badges?: AppBadge[];
   onClick: () => void;
 }) {
   const Icon = slot.icon;
   return (
     <button onClick={onClick} className="flex flex-col items-center justify-center gap-0.5">
-      <Icon size={20} strokeWidth={active ? 2.2 : 1.7} className={active ? "text-navy" : "text-ink-4"} />
+      <span className="relative">
+        <Icon size={20} strokeWidth={active ? 2.2 : 1.7} className={active ? "text-navy" : "text-ink-4"} />
+        <AppBadgePills badges={badges} className="absolute -right-3 -top-2" />
+      </span>
       <span className={`text-[10px] font-bold ${active ? "text-navy" : "text-ink-4"}`}>{slot.label}</span>
     </button>
   );

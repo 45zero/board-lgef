@@ -1,5 +1,7 @@
 "use client";
 
+import { useAppBadges, type AppBadge } from "@/hooks/board/useAppBadges";
+import { AppBadgePills } from "@/components/board/AppBadgePills";
 import type { ComponentType } from "react";
 import {
   Home,
@@ -57,24 +59,17 @@ const PINNED = [
   "communication",
 ];
 
-/** Aucun système de comptage de notifications réel n'existe encore par app — valeurs de démo, cohérentes avec le reste de la maquette (ContextPanel). */
-const BADGES: Partial<Record<string, number>> = {
-  mails: 12,
-  trello: 5,
-  calendrier: 7,
-  quiz: 1,
-};
 
 function DockTile({
   icon: Icon,
   active,
-  badge,
+  badges,
   onClick,
   label,
 }: {
   icon: ComponentType<{ size?: number; className?: string }>;
   active: boolean;
-  badge?: number;
+  badges?: AppBadge[];
   onClick: () => void;
   label: string;
 }) {
@@ -90,11 +85,7 @@ function DockTile({
         }`}
       >
         <Icon size={20} className={active ? "text-white" : "text-ink-2"} />
-        {badge !== undefined && badge > 0 && (
-          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red px-1 text-[10px] font-bold text-white ring-2 ring-shell">
-            {badge > 9 ? "9+" : badge}
-          </span>
-        )}
+        <AppBadgePills badges={badges} className="absolute -right-1.5 -top-1.5" />
       </button>
       <span className="h-1 w-1 rounded-full bg-ink-4/40" />
     </div>
@@ -112,6 +103,7 @@ export function Dock({
   theme?: "light" | "dark";
   onToggleTheme?: () => void;
 }) {
+  const badges = useAppBadges();
   return (
     <div className="mx-auto mb-4 flex w-fit items-end gap-2">
       {PINNED.map((id) => (
@@ -119,7 +111,7 @@ export function Dock({
           key={id}
           icon={ICONS[id] ?? Home}
           active={id === activeApp}
-          badge={BADGES[id]}
+          badges={badges[id]}
           onClick={() => onSelectApp(id)}
           label={id}
         />

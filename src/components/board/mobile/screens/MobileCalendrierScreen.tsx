@@ -6,10 +6,6 @@ import {
   ChevronRight,
   ChevronDown,
   User,
-  Camera,
-  Video,
-  Clock,
-  Ban,
   X,
   Plus,
 } from "lucide-react";
@@ -32,24 +28,12 @@ import {
 } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useCalendarEvents } from "@/hooks/board/useCalendarEvents";
+import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
 import { CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
-import { ORG_COLORS, ORG_LABELS, COVERAGE_COLORS, type CoverageState, type OrgKey } from "@/lib/board/tokens";
+import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
 import type { CalendarEvent } from "@/lib/board/calendar";
 import { MobileEventModal } from "@/components/board/mobile/MobileEventModal";
 import { useAuth } from "@/contexts/AuthContext";
-
-const COVERAGE_ICONS: Record<CoverageState, typeof Camera> = {
-  photo: Camera,
-  video: Video,
-  both: Camera,
-  wait: Clock,
-  no: Ban,
-};
-
-function CoverageIcon({ state, size = 9 }: { state: CoverageState; size?: number }) {
-  const Icon = COVERAGE_ICONS[state];
-  return <Icon size={size} className="shrink-0" style={{ color: COVERAGE_COLORS[state].ink }} />;
-}
 
 type View = "mois" | "semaine";
 
@@ -299,7 +283,7 @@ export function MobileCalendrierScreen() {
                             >
                               {ev.title}
                             </span>
-                            {ev.coverage && <CoverageIcon state={ev.coverage} />}
+                            <CoverageGlyph coverage={ev.coverage} published={ev.published} size={9} />
                           </span>
                         ))}
                       </button>
@@ -319,7 +303,7 @@ export function MobileCalendrierScreen() {
                     >
                       <span className="h-1 w-1 shrink-0 rounded-full" style={{ background: ORG_COLORS[ev.org].base }} />
                       <span className="min-w-0 flex-1 truncate text-left text-[10.5px] font-bold">{ev.title}</span>
-                      {ev.coverage && <CoverageIcon state={ev.coverage} size={10} />}
+                      <CoverageGlyph coverage={ev.coverage} published={ev.published} size={10} />
                     </button>
                   ))}
                 </div>
@@ -351,7 +335,7 @@ export function MobileCalendrierScreen() {
                       <span className="h-2 w-2 rounded-full" style={{ background: ORG_COLORS[ev.org].base }} />
                       <span className="font-mono text-[10px] text-ink-4">{format(parseISO(ev.start), "HH:mm")}</span>
                       <span className="min-w-0 flex-1 truncate font-semibold text-ink-2">{ev.title}</span>
-                      {ev.coverage && <CoverageIcon state={ev.coverage} size={11} />}
+                      <CoverageGlyph coverage={ev.coverage} published={ev.published} size={11} />
                     </div>
                   ))}
                 </div>
@@ -440,7 +424,7 @@ function DayPanel({
                 <span className="font-mono text-[10px]" style={{ color: ORG_COLORS[ev.org].ink }}>
                   {format(parseISO(ev.start), "HH:mm")}
                 </span>
-                {ev.coverage && <CoverageIcon state={ev.coverage} size={13} />}
+                <CoverageGlyph coverage={ev.coverage} published={ev.published} size={13} />
               </div>
               <div className="text-sm font-bold" style={{ color: ORG_COLORS[ev.org].ink }}>
                 {ev.title}

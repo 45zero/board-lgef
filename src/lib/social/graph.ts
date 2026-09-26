@@ -194,6 +194,12 @@ export async function publishInstagramCarousel(
   return { mediaId: String(published.id) };
 }
 
+/** Permalien public d'un média Instagram (non reconstructible à partir de son id). */
+export async function getInstagramPermalink(mediaId: string, accessToken: string): Promise<string | undefined> {
+  const body = await graphFetch(`/${mediaId}`, { fields: "permalink", access_token: accessToken });
+  return typeof body.permalink === "string" ? body.permalink : undefined;
+}
+
 /* ---------- Statistiques ---------- */
 
 export type StatsResult = { stats: SocialStats; permalink?: string };

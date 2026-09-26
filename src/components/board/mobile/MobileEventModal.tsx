@@ -7,6 +7,7 @@ import { X, Trash2, MapPin, ChevronDown, Camera, Video, ClipboardCheck } from "l
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
 import { CALENDAR_ORG_KEYS, type CalendarEvent } from "@/lib/board/calendar";
 import { useEventModalState } from "@/hooks/board/useEventModalState";
+import { PersonName } from "@/components/board/calendar/PersonName";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { Toggle } from "@/components/board/Toggle";
 import {
@@ -71,9 +72,11 @@ export function MobileEventModal({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-card">
-      <div className="mx-auto mt-1.5 h-1 w-10 shrink-0 rounded-full bg-ink-4/30" />
-
-      <div className="shrink-0 px-4 pb-3 pt-2">
+      {/* Bandeau bleu, comme la fiche événement sur ordinateur. */}
+      <div
+        className="shrink-0 px-4 pb-3 pt-[calc(env(safe-area-inset-top)+12px)] text-white"
+        style={{ background: "linear-gradient(160deg, var(--navy) 0%, var(--navy-500) 100%)" }}
+      >
         <div className="flex items-start justify-between gap-2">
           <span
             className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold"
@@ -82,7 +85,7 @@ export function MobileEventModal({
             <span className="h-1.5 w-1.5 rounded-full" style={{ background: orgColor.base }} />
             {ORG_LABELS[m.org]}
           </span>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full text-ink-4">
+          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full text-white/80 hover:bg-white/10">
             <X size={18} />
           </button>
         </div>
@@ -90,11 +93,25 @@ export function MobileEventModal({
           value={m.title}
           onChange={(e) => m.setTitle(e.target.value)}
           placeholder="Titre de l'événement"
-          className="mt-2 w-full border-b-2 border-line bg-transparent pb-1.5 text-lg font-extrabold text-ink outline-none focus:border-navy"
+          className="mt-2 w-full border-b-2 border-white/25 bg-transparent pb-1.5 text-lg font-extrabold text-white outline-none placeholder:text-white/50 focus:border-white"
         />
-        <div className="mt-1 text-xs text-ink-3">
+        <div className="mt-1 text-xs text-white/80">
           {format(m.start, "EEEE d MMMM", { locale: fr })} — de {m.startTime} à {m.endTime}
         </div>
+        {isEditing && event?.createdAt && (
+          <div className="mt-1 text-[11px] text-white/60">
+            Créé le {format(parseISO(event.createdAt), "d MMM yyyy 'à' HH:mm", { locale: fr })}
+            <PersonName userId={event.createdBy} />
+          </div>
+        )}
+        {isEditing &&
+          event?.updatedAt &&
+          (!event.createdAt || Date.parse(event.updatedAt) - Date.parse(event.createdAt) > 60_000) && (
+            <div className="text-[11px] text-white/60">
+              Modifié le {format(parseISO(event.updatedAt), "d MMM yyyy 'à' HH:mm", { locale: fr })}
+              <PersonName userId={event.updatedBy} />
+            </div>
+          )}
       </div>
 
       <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-3 pb-2">

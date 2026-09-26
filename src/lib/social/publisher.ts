@@ -20,6 +20,7 @@ import {
   deleteComment,
   deleteGraphObject,
   setCommentHidden,
+  getInstagramPermalink,
   type StatsResult,
 } from "@/lib/social/graph";
 import {
@@ -201,7 +202,9 @@ export async function publishPublicationToSocial(
             warning = `identifications ignorées (${e instanceof Error ? e.message : "compte introuvable"})`;
           }
           const mediaType = items.length === 0 ? "text" : igItems.length > 1 ? "gallery" : igItems[0].kind;
-          return { key, warning, entry: { published: true, at, by, postId: mediaId, mediaType } };
+          // Lien public tout de suite (pour ouvrir/partager la publication depuis le board).
+          const permalink = await getInstagramPermalink(mediaId, account.accessToken).catch(() => undefined);
+          return { key, warning, entry: { published: true, at, by, postId: mediaId, mediaType, permalink } };
         }
 
         if (items.length === 0) {

@@ -173,6 +173,13 @@ export interface LabelItem {
   name: string;
 }
 
+/** Nombre de mails non lus dans la boîte de réception (compteur du rail/dock). */
+export async function getInboxUnreadCount(account: ConnectedAccount): Promise<number> {
+  const gmail = await gmailClient(account);
+  const { data } = await gmail.users.labels.get({ userId: "me", id: "INBOX" });
+  return data.messagesUnread ?? 0;
+}
+
 export async function listLabels(account: ConnectedAccount): Promise<LabelItem[]> {
   const gmail = await gmailClient(account);
   const { data } = await gmail.users.labels.list({ userId: "me" });

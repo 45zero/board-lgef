@@ -5,10 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
-  Camera,
-  Video,
-  Clock,
-  Ban,
   Search,
   X,
   PanelLeftOpen,
@@ -32,11 +28,12 @@ import {
 } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useCalendarEvents } from "@/hooks/board/useCalendarEvents";
+import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import { listMyCalendars, listMyEvents } from "@/app/actions/calendar";
 import { EventModal } from "@/components/board/calendar/EventModal";
 import { GoogleEventModal } from "@/components/board/calendar/GoogleEventModal";
-import { ORG_COLORS, COVERAGE_COLORS, type CoverageState, type OrgKey } from "@/lib/board/tokens";
+import { ORG_COLORS, type OrgKey } from "@/lib/board/tokens";
 import { CalendarSidebar } from "@/components/board/calendar/CalendarSidebar";
 import type { CalendarEvent } from "@/lib/board/calendar";
 
@@ -60,14 +57,6 @@ function blockStyle(startISO: string, endISO: string) {
   const height = Math.max(40, (hourFloat(endISO) - hourFloat(startISO)) * PX_PER_HOUR - 4);
   return { top, height: Math.min(height, GRID_HEIGHT - top) };
 }
-
-const COVERAGE_ICONS: Record<CoverageState, typeof Camera> = {
-  photo: Camera,
-  video: Video,
-  both: Camera,
-  wait: Clock,
-  no: Ban,
-};
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: "day", label: "Jour" },
@@ -393,7 +382,6 @@ export function CalendrierScreen() {
                     {eventsForDay(day).map((ev) => {
                       const { top, height } = blockStyle(ev.start, ev.end);
                       const color = ORG_COLORS[ev.org];
-                      const CoverageIcon = ev.coverage ? COVERAGE_ICONS[ev.coverage] : null;
                       return (
                         <button
                           key={ev.id}
@@ -405,9 +393,7 @@ export function CalendrierScreen() {
                             <span className="truncate text-[11.5px] font-bold" style={{ color: color.ink }}>
                               {ev.title}
                             </span>
-                            {CoverageIcon && ev.coverage && (
-                              <CoverageIcon size={10} style={{ color: COVERAGE_COLORS[ev.coverage].ink }} />
-                            )}
+                            <CoverageGlyph coverage={ev.coverage} published={ev.published} size={10} />
                           </div>
                           <div className="font-mono text-[10px]" style={{ color: color.ink }}>
                             {format(parseISO(ev.start), "HH:mm")}
@@ -485,7 +471,6 @@ export function CalendrierScreen() {
                   <div className="flex flex-col gap-0.5 overflow-hidden">
                     {visible.map((ev) => {
                       const color = ORG_COLORS[ev.org];
-                      const CoverageIcon = ev.coverage ? COVERAGE_ICONS[ev.coverage] : null;
                       return (
                         <button
                           key={ev.id}
@@ -497,9 +482,7 @@ export function CalendrierScreen() {
                           style={{ background: color.bg, borderLeftColor: color.base, color: color.ink }}
                         >
                           <span className="min-w-0 flex-1 truncate">{ev.title}</span>
-                          {CoverageIcon && ev.coverage && (
-                            <CoverageIcon size={10} className="shrink-0" style={{ color: COVERAGE_COLORS[ev.coverage].ink }} />
-                          )}
+                          <CoverageGlyph coverage={ev.coverage} published={ev.published} size={10} />
                         </button>
                       );
                     })}

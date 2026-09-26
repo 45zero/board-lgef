@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { mapEventRow, type CalendarEvent, type EventRow, type CoverageRequestRow } from "@/lib/board/calendar";
+import { mapEventRow, type CalendarEvent, type EventRow, type CoverageRequestRow, type PublishedMedia } from "@/lib/board/calendar";
 import { readCache, writeCache } from "@/lib/board/localCache";
 
 /** Rôle de l'utilisateur, lu une fois par session (il ne change pas d'un changement de semaine à l'autre). */
@@ -86,13 +86,24 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
     }
 
     let coverageByEvent = new Map<string, CoverageRequestRow>();
+    const publishedByEvent = new Map<string, PublishedMedia>();
     const eventIds = rows.map((r) => r.id);
     if (eventIds.length > 0) {
-      const { data: coverageRows } = await supabase
-        .from("coverage_requests")
-        .select("event_id, status, coverage_symbol, technician_response")
-        .in("event_id", eventIds)
-        .order("created_at", { ascending: false });
+      const [{ data: coverageRows }, { data: publishedRows }] = await Promise.all([
+        supabase
+          .from("coverage_requests")
+          .select("event_id, status, coverage_symbol, technician_response")
+          .in("event_id", eventIds)
+          .order("created_at", { ascending: false }),
+        // Médias de l'événement publiés sur les réseaux → sigle entouré dans le calendrier.
+        supabase.from("media_publications").select("event_id, kind").eq("status", "published").in("event_id", eventIds),
+      ]);
+      for (const p of publishedRows ?? []) {
+        if (!p.event_id) continue;
+        const kind: PublishedMedia = p.kind === "video" ? "video" : "photo";
+        const prev = publishedByEvent.get(p.event_id);
+        publishedByEvent.set(p.event_id, prev && prev !== kind ? "both" : kind);
+      }
       coverageByEvent = new Map(
         ((coverageRows as CoverageRequestRow[] | null) ?? [])
           .filter((r) => r.event_id)
@@ -100,7 +111,7 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       );
     }
 
-    const mapped = rows.map((row) => mapEventRow(row, coverageByEvent.get(row.id)));
+    const mapped = rows.map((row) => ({ ...mapEventRow(row, coverageByEvent.get(row.id)), published: publishedByEvent.get(row.id) ?? null }));
     setEvents(mapped);
     writeCache(cacheKey, mapped);
     setLoading(false);

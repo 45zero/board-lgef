@@ -1,5 +1,7 @@
 "use client";
 
+import { useAppBadges } from "@/hooks/board/useAppBadges";
+import { AppBadgePills } from "@/components/board/AppBadgePills";
 import type { ComponentType } from "react";
 import {
   Home,
@@ -43,18 +45,6 @@ const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   inscription: ClipboardCheck,
 };
 
-const RUNNING_APPS = new Set([
-  "accueil",
-  "mails",
-  "trello",
-  "calendrier",
-  "quiz",
-  "pointage",
-  "ged",
-  "audiovisuel",
-  "drive",
-  "inscription",
-]);
 
 export function AppRail({
   nav,
@@ -67,6 +57,8 @@ export function AppRail({
   onSelectApp: (id: string) => void;
   onToggleNav: (nav: NavLayout) => void;
 }) {
+  // Compteurs réels (mails non lus, à publier, inscriptions…) — voir /api/badges.
+  const badges = useAppBadges();
   return (
     <aside
       className={`flex shrink-0 flex-col justify-between rounded-panel border border-line bg-card/70 py-3 shadow-bar backdrop-blur ${
@@ -86,12 +78,12 @@ export function AppRail({
         {BOARD_APPS.map((item) => {
           const Icon = APP_ICONS[item.id] ?? Home;
           const isActive = item.id === activeApp;
-          const isRunning = RUNNING_APPS.has(item.id);
+          const itemBadges = badges[item.id];
           return (
             <button
               key={item.id}
               type="button"
-              title={item.label}
+              title={[item.label, ...(itemBadges ?? []).map((b) => b.title)].join(" — ")}
               onClick={() => onSelectApp(item.id)}
               className={`group relative flex items-center rounded-btn transition-colors ${
                 nav === "rail" ? "h-[50px] w-[50px] justify-center" : "gap-3 px-3 py-2.5"
@@ -103,13 +95,10 @@ export function AppRail({
             >
               <Icon size={18} />
               {nav === "list" && <span className="text-sm font-semibold">{item.label}</span>}
-              {isRunning && (
-                <span
-                  className={`absolute h-1.5 w-1.5 rounded-full bg-good ${
-                    nav === "rail" ? "top-1.5 right-1.5" : "right-3 top-1/2 -translate-y-1/2"
-                  }`}
-                />
-              )}
+              <AppBadgePills
+                badges={itemBadges}
+                className={`absolute ${nav === "rail" ? "-right-1 -top-1" : "right-2 top-1/2 -translate-y-1/2"}`}
+              />
             </button>
           );
         })}

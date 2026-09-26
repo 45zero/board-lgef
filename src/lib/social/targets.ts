@@ -83,6 +83,24 @@ export function withNetworkEntry(info: PublishInfo, key: NetworkKey, value: Soci
   return { ...info, facebook: { ...info.facebook, [key]: value } };
 }
 
+/**
+ * Adresse publique d'une publication sur son réseau : le permalien lu sur la plateforme s'il est
+ * connu, sinon reconstruit à partir des ids (vidéo/post Facebook, vidéo YouTube). Instagram n'a pas
+ * d'URL reconstructible : son permalien est lu au moment de la publication ou du rafraîchissement.
+ */
+export function networkUrl(key: NetworkKey, entry: SocialPublishTarget | undefined): string | null {
+  if (!entry) return null;
+  if (entry.permalink) return entry.permalink;
+  if (key === "youtube") return entry.videoId ? `https://www.youtube.com/watch?v=${entry.videoId}` : null;
+  if (key === "instagram") return null;
+  if (entry.videoId) return `https://www.facebook.com/${entry.videoId}`;
+  if (entry.postId) {
+    const [pageId, postId] = entry.postId.split("_");
+    return postId ? `https://www.facebook.com/${pageId}/posts/${postId}` : `https://www.facebook.com/${entry.postId}`;
+  }
+  return null;
+}
+
 export const NETWORK_KEYS: NetworkKey[] = ["youtube", ...SOCIAL_TARGETS.map((t) => t.key)];
 
 /**

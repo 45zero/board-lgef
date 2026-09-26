@@ -61,12 +61,12 @@ function renderBlock(block: EmailBlock, c: RegistrationEmailContent): string {
 
     case "image":
       return block.url
-        ? `<img src="${escapeAttr(block.url)}" alt="" style="max-width:504px;border-radius:12px;display:inline-block;" />`
+        ? fluidImg(block.url, "border-radius:12px;")
         : "";
 
     case "banner":
       return block.url
-        ? `<img src="${escapeAttr(block.url)}" alt="" style="max-width:504px;display:inline-block;border-radius:8px;" />`
+        ? fluidImg(block.url, "border-radius:8px;")
         : "";
 
     case "map": {
@@ -76,7 +76,8 @@ function renderBlock(block: EmailBlock, c: RegistrationEmailContent): string {
         ? `<img
             src="https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(block.address)}&zoom=16&size=560x220&scale=2&markers=color:red%7C${encodeURIComponent(block.address)}&key=${c.mapsApiKey}"
             alt="Carte — ${escapeHtml(block.address)}"
-            style="max-width:504px;border-radius:12px;display:inline-block;border:1px solid #eaeff7;"
+            width="${CONTENT_WIDTH}"
+            style="display:block;width:100%;max-width:${CONTENT_WIDTH}px;height:auto;border:0;border-radius:12px;"
           />`
         : `<div style="max-width:504px;border-radius:12px;border:1px solid #eaeff7;background:#f7f9fd;padding:28px 16px;text-align:center;display:inline-block;">
             <span style="font-size:22px;">📍</span>
@@ -92,7 +93,7 @@ function renderBlock(block: EmailBlock, c: RegistrationEmailContent): string {
     case "video":
       return block.url
         ? `<a href="${escapeAttr(block.url)}" style="text-decoration:none;">
-            <table role="presentation" cellpadding="0" cellspacing="0" style="width:320px;max-width:504px;background:#0b1d3c;border-radius:12px;display:inline-table;">
+            <table role="presentation" cellpadding="0" cellspacing="0" style="width:320px;max-width:100%;background:#0b1d3c;border-radius:12px;display:inline-table;">
               <tr>
                 <td align="center" style="padding:36px 20px;">
                   <span style="display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:999px;background:#ffffff;color:#0b1d3c;font-size:20px;">▶</span>
@@ -114,7 +115,7 @@ function renderBlock(block: EmailBlock, c: RegistrationEmailContent): string {
       return block.name || block.imageUrl
         ? `<table role="presentation" cellpadding="0" cellspacing="0" style="display:inline-table;">
             <tr>
-              ${block.imageUrl ? `<td style="padding-right:14px;"><img src="${escapeAttr(block.imageUrl)}" alt="Signature" style="height:54px;display:block;" /></td>` : ""}
+              ${block.imageUrl ? `<td style="padding-right:14px;"><img src="${escapeAttr(block.imageUrl)}" alt="Signature" height="54" style="height:54px;width:auto;max-width:180px;display:block;border:0;" /></td>` : ""}
               <td>
                 ${block.name ? `<p style="margin:0;color:#0b1d3c;font-weight:bold;font-size:14px;">${escapeHtml(block.name)}</p>` : ""}
                 ${block.title ? `<p style="margin:2px 0 0;color:#79859a;font-size:12px;">${escapeHtml(block.title)}</p>` : ""}
@@ -128,15 +129,26 @@ function renderBlock(block: EmailBlock, c: RegistrationEmailContent): string {
   }
 }
 
+/**
+ * Largeur utile du corps (560 − 2×28). Outlook Windows ignore max-width et affiche
+ * une image à sa taille réelle (1000 px pour les miniatures Drive) : l'attribut
+ * width le borne, et width:100% + height:auto la rendent fluide ailleurs (mobile).
+ */
+const CONTENT_WIDTH = 504;
+
+function fluidImg(url: string, extraStyle = ""): string {
+  return `<img src="${escapeAttr(url)}" alt="" width="${CONTENT_WIDTH}" style="display:block;width:100%;max-width:${CONTENT_WIDTH}px;height:auto;border:0;outline:none;${extraStyle}" />`;
+}
+
 function buttonsHtml(c: RegistrationEmailContent): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0" style="display:inline-table;">
     <tr>
-      <td style="padding-right:10px;">
+      <td class="lgef-btn" style="padding:0 10px 10px 0;">
         <a href="${escapeAttr(c.yesUrl)}" style="display:inline-block;background:#146447;color:#ffffff;font-weight:bold;font-size:14px;padding:12px 22px;border-radius:10px;text-decoration:none;">
           ✓ Je participe
         </a>
       </td>
-      <td>
+      <td class="lgef-btn" style="padding:0 0 10px;">
         <a href="${escapeAttr(c.noUrl)}" style="display:inline-block;background:#eaeff7;color:#27334c;font-weight:bold;font-size:14px;padding:12px 22px;border-radius:10px;text-decoration:none;">
           Je n&rsquo;y participerai pas
         </a>
@@ -167,22 +179,22 @@ export function renderCampaignCardHtml(c: RegistrationEmailContent, opts?: { inc
   if (includeButtons && !hasButtons) blocks = [...blocks, { id: "auto-buttons", type: "buttons" as const }];
   if (!includeButtons) blocks = blocks.filter((b) => b.type !== "buttons");
 
-  return `<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;width:100%;max-width:560px;">
+  return `<table role="presentation" class="lgef-card" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;width:100%;max-width:560px;">
             <tr>
-              <td style="background:#0b1d3c;padding:20px 28px;">
-                <img src="${escapeAttr(c.logoUrl)}" alt="LGEF" style="height:40px;display:block;margin:0 0 14px;" />
+              <td class="lgef-pad" style="background:#0b1d3c;padding:20px 28px;">
+                <img src="${escapeAttr(c.logoUrl)}" alt="LGEF" width="33" height="40" style="width:33px;height:40px;display:block;border:0;margin:0 0 14px;" />
                 <p style="margin:0;color:#ffffff;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;opacity:0.7;">Invitation</p>
                 <h1 style="margin:6px 0 0;color:#ffffff;font-size:22px;">${escapeHtml(c.eventTitle)}</h1>
               </td>
             </tr>
             <tr>
-              <td style="padding:24px 28px;">
+              <td class="lgef-pad" style="padding:24px 28px;">
                 ${c.greeting ? `<p style="margin:0 0 16px;color:#27334c;font-size:15px;line-height:1.5;">${escapeHtml(c.greeting)}</p>` : ""}
                 ${renderBodyHtml(c, blocks)}
               </td>
             </tr>
             <tr>
-              <td style="padding:16px 28px;background:#f7f9fd;">
+              <td class="lgef-pad" style="padding:16px 28px;background:#f7f9fd;">
                 <p style="margin:0;color:#79859a;font-size:11px;">Board LGEF — réponse en un clic, aucune connexion requise.</p>
               </td>
             </tr>
@@ -192,11 +204,27 @@ export function renderCampaignCardHtml(c: RegistrationEmailContent, opts?: { inc
 /** Email HTML "design" (table-based, compatible clients mail) — blocs rendus dans l'ordre choisi, chacun avec son propre alignement. */
 export function buildRegistrationEmailHtml(c: RegistrationEmailContent): string {
   return `<!doctype html>
-<html>
-  <body style="margin:0;padding:0;background:#f2f5fb;font-family:Arial,Helvetica,sans-serif;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5fb;padding:24px 0;">
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="x-apple-disable-message-reformatting" />
+    <!--[if mso]><style>table,td{border-collapse:collapse;}img{-ms-interpolation-mode:bicubic;}</style><![endif]-->
+    <style>
+      img { -ms-interpolation-mode: bicubic; }
+      @media only screen and (max-width: 600px) {
+        .lgef-outer { padding: 0 !important; }
+        .lgef-card { border-radius: 0 !important; }
+        .lgef-pad { padding-left: 18px !important; padding-right: 18px !important; }
+        .lgef-btn { display: block !important; padding: 0 0 10px !important; }
+        .lgef-btn a { display: block !important; text-align: center !important; }
+      }
+    </style>
+  </head>
+  <body style="margin:0;padding:0;background:#f2f5fb;font-family:Arial,Helvetica,sans-serif;-webkit-text-size-adjust:100%;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5fb;">
       <tr>
-        <td align="center">
+        <td align="center" class="lgef-outer" style="padding:24px 12px;">
           ${renderCampaignCardHtml(c)}
         </td>
       </tr>
