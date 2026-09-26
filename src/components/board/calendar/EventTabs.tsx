@@ -985,8 +985,9 @@ function PublishPanel({
 function PublishBadges({ file }: { file: EventFile }) {
   const yt = file.publish_info?.youtube;
   const fb = file.publish_info?.facebook;
+  const ig = file.publish_info?.instagram;
   const fbEntries = FACEBOOK_REGIONS.map((r) => ({ ...r, info: fb?.[r.key] })).filter((e) => e.info?.published);
-  if (!yt?.published && fbEntries.length === 0) return null;
+  if (!yt?.published && fbEntries.length === 0 && !ig?.published) return null;
 
   const byName = (by?: { first_name: string | null; last_name: string | null } | null) =>
     [by?.first_name, by?.last_name].filter(Boolean).join(" ") || "—";
@@ -1009,6 +1010,16 @@ function PublishBadges({ file }: { file: EventFile }) {
           {new Date(e.info!.at ?? "").toLocaleDateString("fr-FR")}
         </div>
       ))}
+      {ig?.published && (
+        <a
+          href={ig.permalink}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-2 hover:underline"
+        >
+          Instagram · @lgefofficiel · {byName(ig.by)} · {new Date(ig.at ?? "").toLocaleDateString("fr-FR")}
+        </a>
+      )}
     </div>
   );
 }

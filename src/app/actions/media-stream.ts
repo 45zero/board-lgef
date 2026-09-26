@@ -6,6 +6,6 @@ import { signMediaStreamToken } from "@/lib/board/mediaStreamToken";
 export async function getDriveStreamUrl(eventId: string, fileId: string) {
   const expiresAt = Date.now() + 30 * 60_000;
   const sig = signMediaStreamToken(fileId, expiresAt);
-  const base = process.env.NEXT_PUBLIC_SITE_URL;
+  const base = (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/+$/, "");
   return `${base}/api/events/${eventId}/attachments/${fileId}/stream?expires=${expiresAt}&sig=${sig}`;
 }

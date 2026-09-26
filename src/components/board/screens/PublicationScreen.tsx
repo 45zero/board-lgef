@@ -1,7 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Send, Clock, CheckCircle2, Video, Image as ImageIcon, X, Calendar, Play, Share2, ExternalLink } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Send,
+  Clock,
+  CheckCircle2,
+  Video,
+  Image as ImageIcon,
+  X,
+  Calendar,
+  Play,
+  Share2,
+  ExternalLink,
+  Eye,
+  Heart,
+  MessageCircle,
+  Repeat2,
+  Users,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import {
   listMediaPublications,
   countMediaPublications,
@@ -12,8 +30,24 @@ import {
   type PublicationStatus,
   type PublicationTargets,
 } from "@/lib/board/mediaPublications";
-import { getEventFileViewUrl, createEventFileShareUrl, publishToYoutube, publishToFacebook } from "@/lib/board/eventFiles";
+import {
+  getEventFileViewUrl,
+  createEventFileShareUrl,
+  publishToYoutube,
+  publishToSocial,
+  describeSocialFailures,
+  type PublishInfo,
+  type SocialPublishTarget,
+} from "@/lib/board/eventFiles";
 import { shareBoardDriveFile } from "@/app/actions/drive-share";
+import { refreshSocialStats, getSocialComments, deleteSocialComment } from "@/app/actions/social";
+import {
+  SOCIAL_TARGETS,
+  FACEBOOK_REGIONS,
+  isInstagramCompatible,
+  type SocialComment,
+  type SocialTargetKey,
+} from "@/lib/social/targets";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import { personName } from "@/components/board/calendar/EventTabs";
@@ -25,11 +59,37 @@ const TABS: { id: PublicationStatus; label: string; icon: typeof Send }[] = [
   { id: "published", label: "Publiés", icon: CheckCircle2 },
 ];
 
-const FACEBOOK_REGIONS: { key: "lorraine" | "champagne_ardenne" | "alsace"; label: string }[] = [
-  { key: "lorraine", label: "Lorraine" },
-  { key: "champagne_ardenne", label: "Champagne-Ardenne" },
-  { key: "alsace", label: "Alsace" },
-];
+const compactFormatter = new Intl.NumberFormat("fr-FR", { notation: "compact", maximumFractionDigits: 1 });
+const numberFormatter = new Intl.NumberFormat("fr-FR");
+
+/** Au-delà de ce délai, les stats d'une publication sont rafraîchies automatiquement à l'ouverture de l'onglet « Publiés ». */
+const STATS_STALE_MS = 60 * 60_000;
+const AUTO_REFRESH_LIMIT = 20;
+
+function getSocialEntry(info: PublishInfo | null | undefined, key: SocialTargetKey): SocialPublishTarget | undefined {
+  if (!info) return undefined;
+  return key === "instagram" ? info.instagram : info.facebook?.[key];
+}
+
+function publishedSocialEntries(pub: MediaPublication) {
+  return SOCIAL_TARGETS.map((t) => ({ ...t, info: getSocialEntry(pub.event_files.publish_info, t.key) })).filter(
+    (e): e is typeof e & { info: SocialPublishTarget } => !!e.info?.published
+  );
+}
+
+function isStale(entry: SocialPublishTarget) {
+  const fetchedAt = entry.stats?.fetchedAt ? Date.parse(entry.stats.fetchedAt) : 0;
+  return Date.now() - fetchedAt > STATS_STALE_MS;
+}
+
+function timeAgo(iso: string) {
+  const minutes = Math.round((Date.now() - Date.parse(iso)) / 60_000);
+  if (minutes < 1) return "à l'instant";
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  return `le ${new Date(iso).toLocaleDateString("fr-FR")}`;
+}
 
 function MediaThumb({ pub, className }: { pub: MediaPublication; className?: string }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -59,25 +119,206 @@ function MediaThumb({ pub, className }: { pub: MediaPublication; className?: str
   );
 }
 
-function PublishedBadgeRow({ pub }: { pub: MediaPublication }) {
-  const yt = pub.event_files.publish_info?.youtube;
-  const fb = pub.event_files.publish_info?.facebook;
-  const fbEntries = FACEBOOK_REGIONS.map((r) => ({ ...r, info: fb?.[r.key] })).filter((e) => e.info?.published);
+function StatTile({ icon: Icon, label, value }: { icon: typeof Eye; label: string; value: number | undefined }) {
   return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
-      {yt?.published && (
-        <span className="flex items-center gap-1 rounded-full bg-bad-bg px-2 py-0.5 text-[10px] font-bold text-bad">
-          <YoutubeIcon size={11} /> YouTube
-        </span>
+    <div className="min-w-[78px] rounded-btn bg-subtle px-2.5 py-1.5">
+      <div className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-[0.08em] text-ink-4">
+        <Icon size={10} /> {label}
+      </div>
+      <div className="text-sm font-bold text-ink">{value === undefined ? "—" : numberFormatter.format(value)}</div>
+    </div>
+  );
+}
+
+/** Commentaires lus en direct sur Facebook/Instagram à l'ouverture (jamais stockés), supprimables depuis le board. */
+function CommentsSection({ fileId, targetKey, count }: { fileId: string; targetKey: SocialTargetKey; count?: number }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [comments, setComments] = useState<SocialComment[] | null>(null);
+
+  const toggle = async () => {
+    if (open) return setOpen(false);
+    setOpen(true);
+    if (comments) return;
+    setLoading(true);
+    const res = await getSocialComments(fileId, targetKey);
+    setError(res.error);
+    setComments(res.comments);
+    setLoading(false);
+  };
+
+  const remove = async (commentId: string) => {
+    if (!confirm("Supprimer ce commentaire sur le réseau ? Action irréversible.")) return;
+    const res = await deleteSocialComment(fileId, targetKey, commentId);
+    if (res.error) setError(res.error);
+    else setComments((prev) => prev?.filter((c) => c.id !== commentId) ?? null);
+  };
+
+  return (
+    <div>
+      <button onClick={toggle} className="flex items-center gap-1 text-[11px] font-semibold text-link hover:underline">
+        <MessageCircle size={12} />
+        {open ? "Masquer les commentaires" : `Voir les commentaires${count ? ` (${count})` : ""}`}
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1">
+          {loading && <p className="text-[11px] text-ink-4">Chargement…</p>}
+          {error && <p className="text-[11px] text-bad">{error}</p>}
+          {comments && comments.length === 0 && !loading && <p className="text-[11px] text-ink-4">Aucun commentaire.</p>}
+          {comments?.map((c) => (
+            <div key={c.id} className="flex items-start justify-between gap-2 rounded-btn bg-subtle px-2.5 py-1.5 text-[11px]">
+              <span className="min-w-0 text-ink-2">
+                <strong className="text-ink">{c.author}</strong>
+                {c.createdAt && <span className="text-ink-4"> · {new Date(c.createdAt).toLocaleDateString("fr-FR")}</span>}
+                <br />
+                {c.text}
+              </span>
+              <button onClick={() => remove(c.id)} title="Supprimer" className="shrink-0 text-ink-4 hover:text-bad">
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
       )}
-      {fbEntries.map((e) => (
-        <span
-          key={e.key}
-          className="flex items-center gap-1 rounded-full bg-sel-bg px-2 py-0.5 text-[10px] font-bold text-link"
-        >
-          <FacebookIcon size={11} /> {e.label}
+    </div>
+  );
+}
+
+function SocialDetail({ pub, entry }: { pub: MediaPublication; entry: ReturnType<typeof publishedSocialEntries>[number] }) {
+  const { info } = entry;
+  const stats = info.stats;
+  const isInstagram = entry.plateforme === "INSTAGRAM";
+  const by = info.by ? personName({ ...info.by, email: null }) : null;
+
+  return (
+    <div className="mt-2 space-y-2 border-t border-dashed border-line pt-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-3">
+        <span className="font-semibold text-ink-2">
+          {isInstagram ? "Instagram" : "Facebook"} · {entry.label}
         </span>
-      ))}
+        {info.at && (
+          <span>
+            publié le {new Date(info.at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
+            {by && by !== "—" ? ` par ${by}` : ""}
+          </span>
+        )}
+        {info.permalink && (
+          <a href={info.permalink} target="_blank" rel="noreferrer" className="ml-auto flex items-center gap-1 font-semibold text-link hover:underline">
+            <ExternalLink size={11} /> Voir la publication
+          </a>
+        )}
+      </div>
+
+      {stats ? (
+        <>
+          <div className="flex flex-wrap gap-1.5">
+            <StatTile icon={Eye} label="Vues" value={stats.views} />
+            {isInstagram && <StatTile icon={Users} label="Portée" value={stats.reach} />}
+            <StatTile icon={Heart} label={isInstagram ? "J'aime" : "Réactions"} value={stats.likes} />
+            <StatTile icon={MessageCircle} label="Comm." value={stats.comments} />
+            {!isInstagram && <StatTile icon={Repeat2} label="Partages" value={stats.shares} />}
+          </div>
+          <p className="text-[10px] text-ink-4">Stats mises à jour {timeAgo(stats.fetchedAt)}</p>
+        </>
+      ) : (
+        <p className="text-[11px] italic text-ink-4">Stats pas encore récupérées — cliquez sur « Rafraîchir les stats ».</p>
+      )}
+
+      {(info.videoId || info.postId) && <CommentsSection fileId={pub.event_files.id} targetKey={entry.key} count={stats?.comments} />}
+    </div>
+  );
+}
+
+/** Une pastille par réseau/page publié, avec la stat principale visible sans clic — cliquer ouvre le détail (toutes les stats, lien, commentaires). */
+function PublishedStatsRow({ pub }: { pub: MediaPublication }) {
+  const [openKey, setOpenKey] = useState<SocialTargetKey | null>(null);
+  const yt = pub.event_files.publish_info?.youtube;
+  const entries = publishedSocialEntries(pub);
+  const openEntry = entries.find((e) => e.key === openKey);
+
+  return (
+    <div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {yt?.published && (
+          <a
+            href={yt.videoId ? `https://www.youtube.com/watch?v=${yt.videoId}` : undefined}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 rounded-full bg-bad-bg px-2 py-0.5 text-[10px] font-bold text-bad"
+          >
+            <YoutubeIcon size={11} /> YouTube
+          </a>
+        )}
+        {entries.map((e) => {
+          const Icon = e.plateforme === "INSTAGRAM" ? InstagramIcon : FacebookIcon;
+          const stats = e.info.stats;
+          const headline = stats?.views !== undefined ? { icon: Eye, value: stats.views } : stats ? { icon: Heart, value: stats.likes } : null;
+          const HeadlineIcon = headline?.icon;
+          return (
+            <button
+              key={e.key}
+              onClick={() => setOpenKey((prev) => (prev === e.key ? null : e.key))}
+              className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 transition-colors ${
+                e.plateforme === "INSTAGRAM" ? "bg-subtle text-ink-2" : "bg-sel-bg text-link"
+              } ${openKey === e.key ? "ring-current" : "ring-transparent"}`}
+            >
+              <Icon size={11} /> {e.label}
+              {headline && HeadlineIcon && (
+                <span className="ml-0.5 flex items-center gap-0.5 font-semibold opacity-80">
+                  · <HeadlineIcon size={10} /> {compactFormatter.format(headline.value)}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      {openEntry && <SocialDetail pub={pub} entry={openEntry} />}
+    </div>
+  );
+}
+
+/** Totaux de l'onglet « Publiés » + rafraîchissement manuel des stats Meta. */
+function StatsToolbar({ items, refreshing, onRefresh }: { items: MediaPublication[]; refreshing: boolean; onRefresh: () => void }) {
+  const totals = useMemo(() => {
+    const t = { views: 0, likes: 0, comments: 0, shares: 0, posts: 0, lastFetch: null as string | null };
+    for (const pub of items) {
+      for (const e of publishedSocialEntries(pub)) {
+        t.posts += 1;
+        const s = e.info.stats;
+        if (!s) continue;
+        t.views += s.views ?? 0;
+        t.likes += s.likes;
+        t.comments += s.comments;
+        t.shares += s.shares ?? 0;
+        if (!t.lastFetch || s.fetchedAt > t.lastFetch) t.lastFetch = s.fetchedAt;
+      }
+    }
+    return t;
+  }, [items]);
+
+  if (totals.posts === 0) return null;
+
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-panel border border-line bg-card p-3">
+      <StatTile icon={Eye} label="Vues" value={totals.views} />
+      <StatTile icon={Heart} label="Réactions" value={totals.likes} />
+      <StatTile icon={MessageCircle} label="Comm." value={totals.comments} />
+      <StatTile icon={Repeat2} label="Partages" value={totals.shares} />
+      <div className="ml-auto flex flex-col items-end gap-1">
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover disabled:opacity-50"
+        >
+          <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
+          {refreshing ? "Actualisation…" : "Rafraîchir les stats"}
+        </button>
+        <span className="text-[10px] text-ink-4">
+          {totals.posts} publication{totals.posts > 1 ? "s" : ""} Facebook/Instagram
+          {totals.lastFetch ? ` · maj ${timeAgo(totals.lastFetch)}` : ""}
+        </span>
+      </div>
     </div>
   );
 }
@@ -99,6 +340,7 @@ function Composer({
     champagne_ardenne: !!pub.targets.facebook?.champagne_ardenne,
     alsace: !!pub.targets.facebook?.alsace,
   });
+  const [instagram, setInstagram] = useState(!!pub.targets.instagram);
   const [scheduledAt, setScheduledAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [me, setMe] = useState<{ first_name: string | null; last_name: string | null } | null>(null);
@@ -109,34 +351,50 @@ function Composer({
     supabase.from("profiles").select("first_name, last_name").eq("id", user.id).single().then(({ data }) => setMe(data ?? null));
   }, [user?.id]);
 
-  const isVideo = (pub.event_files.content_type ?? "").startsWith("video");
-  const canRealPublish = isVideo;
-  const anyTarget = youtube || fb.lorraine || fb.champagne_ardenne || fb.alsace;
+  const contentType = pub.event_files.content_type ?? "";
+  const isVideo = contentType.startsWith("video");
+  const isImage = contentType.startsWith("image");
+  // YouTube : vidéos uniquement. Facebook : photos et vidéos. Instagram : vidéos et photos JPEG.
+  const canYoutube = isVideo;
+  const canFacebook = isVideo || isImage;
+  const canInstagram = isInstagramCompatible(contentType);
+  const anyTarget = (canYoutube && youtube) || (canFacebook && (fb.lorraine || fb.champagne_ardenne || fb.alsace)) || (canInstagram && instagram);
 
-  const targets: PublicationTargets = { youtube, facebook: fb };
+  const targets: PublicationTargets = { youtube, facebook: fb, instagram };
 
   const publishNow = async () => {
     if (!confirm("Publier maintenant sur les réseaux sélectionnés ? Action publique et non réversible.")) return;
     setBusy(true);
+    const failures: string[] = [];
+    let anyOk = false;
     try {
-      if (youtube) {
-        await publishToYoutube(pub.event_files, { title: pub.events?.title ?? pub.event_files.filename, description: caption }, me);
+      if (canYoutube && youtube) {
+        try {
+          await publishToYoutube(pub.event_files, { title: pub.events?.title ?? pub.event_files.filename, description: caption }, me);
+          anyOk = true;
+        } catch (e) {
+          failures.push(`YouTube : ${e instanceof Error ? e.message : "échec"}`);
+        }
       }
-      if (fb.lorraine || fb.champagne_ardenne || fb.alsace) {
-        await publishToFacebook(
-          pub.event_files,
-          {
-            lorraine: fb.lorraine ? { enabled: true, message: caption } : undefined,
-            champagne_ardenne: fb.champagne_ardenne ? { enabled: true, message: caption } : undefined,
-            alsace: fb.alsace ? { enabled: true, message: caption } : undefined,
-          },
-          me
-        );
+
+      const socialTargets = [
+        ...(canFacebook ? FACEBOOK_REGIONS.filter((r) => fb[r.key]).map((r) => ({ key: r.key as SocialTargetKey, caption })) : []),
+        ...(canInstagram && instagram ? [{ key: "instagram" as SocialTargetKey, caption }] : []),
+      ];
+      if (socialTargets.length > 0) {
+        try {
+          const results = await publishToSocial(pub.event_files, socialTargets, me);
+          anyOk ||= results.some((r) => r.ok);
+          const socialFailures = describeSocialFailures(results);
+          if (socialFailures) failures.push(socialFailures);
+        } catch (e) {
+          failures.push(e instanceof Error ? e.message : "Échec de la publication Facebook/Instagram.");
+        }
       }
-      await markMediaPublished(pub.id);
-      onDone();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Échec de la publication.");
+
+      if (anyOk) await markMediaPublished(pub.id);
+      if (failures.length > 0) alert(`${anyOk ? "Publié partiellement." : "Échec de la publication."}\n\n${failures.join("\n")}`);
+      if (anyOk) onDone();
     } finally {
       setBusy(false);
     }
@@ -184,22 +442,23 @@ function Composer({
 
           <label
             className={`flex items-center gap-2 rounded-btn border border-line px-3 py-2 text-sm font-semibold ${
-              canRealPublish ? "text-ink cursor-pointer" : "cursor-not-allowed text-ink-4 opacity-50"
+              canYoutube ? "text-ink cursor-pointer" : "cursor-not-allowed text-ink-4 opacity-50"
             }`}
           >
-            <input type="checkbox" disabled={!canRealPublish} checked={youtube} onChange={(e) => setYoutube(e.target.checked)} />
+            <input type="checkbox" disabled={!canYoutube} checked={youtube} onChange={(e) => setYoutube(e.target.checked)} />
             <YoutubeIcon size={16} /> YouTube
+            {!canYoutube && <span className="ml-auto text-[10px] font-normal">Vidéos uniquement</span>}
           </label>
 
-          <div className={`space-y-1.5 rounded-btn border border-line px-3 py-2 ${canRealPublish ? "" : "opacity-50"}`}>
+          <div className={`space-y-1.5 rounded-btn border border-line px-3 py-2 ${canFacebook ? "" : "opacity-50"}`}>
             <div className="flex items-center gap-2 text-sm font-semibold text-ink">
               <FacebookIcon size={16} /> Facebook
             </div>
             {FACEBOOK_REGIONS.map((r) => (
-              <label key={r.key} className={`flex items-center gap-2 pl-1 text-xs ${canRealPublish ? "cursor-pointer text-ink-2" : "cursor-not-allowed text-ink-4"}`}>
+              <label key={r.key} className={`flex items-center gap-2 pl-1 text-xs ${canFacebook ? "cursor-pointer text-ink-2" : "cursor-not-allowed text-ink-4"}`}>
                 <input
                   type="checkbox"
-                  disabled={!canRealPublish}
+                  disabled={!canFacebook}
                   checked={fb[r.key]}
                   onChange={(e) => setFb((prev) => ({ ...prev, [r.key]: e.target.checked }))}
                 />
@@ -208,16 +467,28 @@ function Composer({
             ))}
           </div>
 
+          <label
+            className={`flex items-center gap-2 rounded-btn border border-line px-3 py-2 text-sm font-semibold ${
+              canInstagram ? "text-ink cursor-pointer" : "cursor-not-allowed text-ink-4 opacity-50"
+            }`}
+          >
+            <input type="checkbox" disabled={!canInstagram} checked={instagram} onChange={(e) => setInstagram(e.target.checked)} />
+            <InstagramIcon size={16} /> Instagram <span className="text-xs font-normal text-ink-3">@lgefofficiel</span>
+            {!canInstagram && <span className="ml-auto text-[10px] font-normal">Vidéo ou photo JPEG</span>}
+          </label>
+
           <div className="flex items-center gap-2 rounded-btn border border-dashed border-line px-3 py-2 text-sm font-semibold text-ink-4 opacity-60">
             <TiktokIcon size={16} /> TikTok <span className="ml-auto text-[10px] font-normal">Bientôt disponible</span>
           </div>
-          <div className="flex items-center gap-2 rounded-btn border border-dashed border-line px-3 py-2 text-sm font-semibold text-ink-4 opacity-60">
-            <InstagramIcon size={16} /> Instagram <span className="ml-auto text-[10px] font-normal">Bientôt disponible</span>
-          </div>
 
-          {!canRealPublish && (
+          {!canFacebook && (
             <p className="text-[11px] italic text-ink-4">
-              Seules les vidéos peuvent être publiées automatiquement pour l&rsquo;instant.
+              Seules les photos et les vidéos peuvent être publiées automatiquement.
+            </p>
+          )}
+          {canInstagram && instagram && isVideo && (
+            <p className="text-[11px] italic text-ink-4">
+              Instagram publie la vidéo en Reel : le traitement côté Meta peut prendre jusqu&rsquo;à une minute.
             </p>
           )}
         </div>
@@ -321,7 +592,7 @@ function PublicationCard({
             </span>
           )}
         </div>
-        {tab === "published" && <PublishedBadgeRow pub={pub} />}
+        {tab === "published" && <PublishedStatsRow pub={pub} />}
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
@@ -368,6 +639,11 @@ export function PublicationScreen() {
   });
   const [loading, setLoading] = useState(true);
   const [composerFor, setComposerFor] = useState<MediaPublication | null>(null);
+  const [refreshingStats, setRefreshingStats] = useState(false);
+  const tabRef = useRef(tab);
+  useEffect(() => {
+    tabRef.current = tab;
+  }, [tab]);
 
   const refetch = async () => {
     setLoading(true);
@@ -375,10 +651,31 @@ export function PublicationScreen() {
     setItems(list);
     setCounts(countRes);
     setLoading(false);
+    return list;
+  };
+
+  /** Relit les stats sur Meta puis recharge la liste sans repasser par l'écran de chargement. */
+  const refreshStats = async (fileIds: string[]) => {
+    if (fileIds.length === 0) return;
+    setRefreshingStats(true);
+    try {
+      await refreshSocialStats(fileIds);
+      const list = await listMediaPublications("published");
+      // L'utilisateur a pu changer d'onglet pendant l'appel à Meta : ne pas écraser l'autre liste.
+      if (tabRef.current === "published") setItems(list);
+    } catch (e) {
+      console.error("[PublicationScreen.refreshStats]", e);
+    } finally {
+      setRefreshingStats(false);
+    }
   };
 
   useEffect(() => {
-    refetch();
+    refetch().then((list) => {
+      if (tab !== "published") return;
+      const stale = list.filter((p) => publishedSocialEntries(p).some((e) => isStale(e.info))).slice(0, AUTO_REFRESH_LIMIT);
+      refreshStats(stale.map((p) => p.event_files.id));
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -421,6 +718,14 @@ export function PublicationScreen() {
             Rien ici pour l&rsquo;instant.
           </div>
         ) : (
+          <>
+          {tab === "published" && (
+            <StatsToolbar
+              items={items}
+              refreshing={refreshingStats}
+              onRefresh={() => refreshStats(items.filter((p) => publishedSocialEntries(p).length > 0).map((p) => p.event_files.id))}
+            />
+          )}
           <div className="overflow-hidden rounded-panel border border-line">
             {items.map((pub) => (
               <PublicationCard
@@ -435,6 +740,7 @@ export function PublicationScreen() {
               />
             ))}
           </div>
+          </>
         )}
       </div>
 

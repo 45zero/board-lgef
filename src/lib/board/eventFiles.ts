@@ -3,6 +3,8 @@
 import { createClient } from "@/lib/supabase/client";
 import type { Json } from "@/lib/supabase/database.types";
 import { getDriveStreamUrl } from "@/app/actions/media-stream";
+import { publishSocial, type SocialPublishResult } from "@/app/actions/social";
+import { SOCIAL_TARGETS, type FacebookRegion, type SocialStats, type SocialTargetKey } from "@/lib/social/targets";
 
 const BUCKET = "event-files";
 
@@ -12,13 +14,23 @@ export interface PublishTarget {
   by?: { first_name: string | null; last_name: string | null } | null;
 }
 
+/**
+ * Publication Facebook/Instagram : ids Meta (vidéo pour une vidéo Facebook, post/média sinon) et
+ * dernières stats connues. Les publications faites par l'ancienne Edge Function n'ont que
+ * `published`/`at` — leur id est retrouvé au premier rafraîchissement des stats.
+ */
+export interface SocialPublishTarget extends PublishTarget {
+  videoId?: string;
+  postId?: string;
+  permalink?: string;
+  mediaType?: "video" | "image";
+  stats?: SocialStats;
+}
+
 export interface PublishInfo {
   youtube?: PublishTarget & { videoId?: string; title?: string };
-  facebook?: {
-    lorraine?: PublishTarget;
-    champagne_ardenne?: PublishTarget;
-    alsace?: PublishTarget;
-  };
+  facebook?: Partial<Record<FacebookRegion, SocialPublishTarget>>;
+  instagram?: SocialPublishTarget;
 }
 
 export interface EventFile {
@@ -273,45 +285,44 @@ export async function publishToYoutube(
   }));
 }
 
-const FACEBOOK_PAGE_KEYS = {
-  lorraine: "pageA",
-  champagne_ardenne: "pageB",
-  alsace: "pageC",
-} as const;
+/**
+ * Publication Facebook/Instagram via la Graph API côté serveur (src/app/actions/social.ts) — plus
+ * via l'Edge Function publish-facebook, qui ne renvoyait pas les ids nécessaires aux stats.
+ * Renvoie un résultat par cible : un échec sur une page n'annule pas les autres.
+ */
+export async function publishToSocial(
+  file: EventFile,
+  targets: { key: SocialTargetKey; caption: string }[],
+  by: { first_name: string | null; last_name: string | null } | null
+): Promise<SocialPublishResult[]> {
+  if (targets.length === 0) return [];
+  return publishSocial(file.id, targets, by);
+}
+
+/** Libellé lisible des échecs d'une publication multi-cibles (null si tout est passé). */
+export function describeSocialFailures(results: SocialPublishResult[]): string | null {
+  const failed = results.filter((r) => !r.ok);
+  if (failed.length === 0) return null;
+  return failed
+    .map((r) => {
+      const t = SOCIAL_TARGETS.find((x) => x.key === r.key);
+      const name = t ? `${t.plateforme === "INSTAGRAM" ? "Instagram" : "Facebook"} ${t.label}` : r.key;
+      return `${name} : ${r.error ?? "échec"}`;
+    })
+    .join("\n");
+}
 
 export async function publishToFacebook(
   file: EventFile,
-  selection: Partial<Record<keyof typeof FACEBOOK_PAGE_KEYS, { enabled: boolean; message: string }>>,
+  selection: Partial<Record<FacebookRegion, { enabled: boolean; message: string }>>,
   by: { first_name: string | null; last_name: string | null } | null
 ) {
-  const supabase = createClient();
-  const videoUrl = await getPublishableVideoUrl(file);
-  if (!videoUrl) throw new Error("Impossible de générer l'URL de la vidéo.");
+  const targets = (Object.entries(selection) as [FacebookRegion, { enabled: boolean; message: string } | undefined][])
+    .filter(([, sel]) => sel?.enabled)
+    .map(([key, sel]) => ({ key, caption: sel!.message }));
 
-  const pages: Record<string, boolean> = {};
-  const messages: Record<string, string> = {};
-  for (const [region, key] of Object.entries(FACEBOOK_PAGE_KEYS) as [keyof typeof FACEBOOK_PAGE_KEYS, string][]) {
-    const sel = selection[region];
-    if (sel?.enabled) {
-      pages[key] = true;
-      messages[key] = sel.message;
-    }
-  }
-
-  const { data, error } = await supabase.functions.invoke("publish-facebook", {
-    body: { videoUrl, pages, messages },
-  });
-  if (error || !data?.success) {
-    throw new Error(data?.error ?? error?.message ?? "Échec de la publication Facebook.");
-  }
-
-  const publishedNames: string[] = data.publishedPages ?? [];
-  const at = new Date().toISOString();
-  return updatePublishInfo(file.id, (current) => {
-    const next: PublishInfo = { ...current, facebook: { ...current.facebook } };
-    if (publishedNames.includes("Lorraine")) next.facebook!.lorraine = { published: true, at, by };
-    if (publishedNames.includes("Champagne-Ardenne")) next.facebook!.champagne_ardenne = { published: true, at, by };
-    if (publishedNames.includes("Alsace")) next.facebook!.alsace = { published: true, at, by };
-    return next;
-  });
+  const results = await publishToSocial(file, targets, by);
+  const failures = describeSocialFailures(results);
+  if (failures && !results.some((r) => r.ok)) throw new Error(failures);
+  if (failures) alert(`Publié partiellement :\n${failures}`);
 }
