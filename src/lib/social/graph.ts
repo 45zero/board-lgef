@@ -88,8 +88,20 @@ export async function resolveFacebookPage(ref: string, accessToken: string): Pro
     key = url.searchParams.get("id") ?? url.pathname.split("/").filter(Boolean).filter((p) => p !== "pg" && p !== "pages")[0] ?? "";
   }
   if (!/^[\w.-]+$/.test(key)) throw new Error("Lien ou identifiant de Page invalide.");
-  const body = await graphFetch(`/${encodeURIComponent(key)}`, { fields: "id,name", access_token: accessToken });
-  return { id: String(body.id), name: String(body.name ?? key) };
+  try {
+    const body = await graphFetch(`/${encodeURIComponent(key)}`, { fields: "id,name", access_token: accessToken });
+    return { id: String(body.id), name: String(body.name ?? key) };
+  } catch (e) {
+    // Lire une Page tierce exige « Page Public Metadata Access » (non accordé) : seules nos propres
+    // Pages se résolvent par leur nom. Un identifiant numérique suffit pour mentionner (@[id]) —
+    // on l'accepte sans pouvoir afficher le nom.
+    if (/^\d{6,}$/.test(key)) return { id: key, name: `Page ${key}` };
+    throw new Error(
+      /permission|feature/i.test(e instanceof Error ? e.message : "")
+        ? "Meta ne permet pas de retrouver cette Page par son nom : collez son identifiant numérique (sur la Page : À propos → Transparence de la Page → ID de la Page)."
+        : e instanceof Error ? e.message : "Page introuvable."
+    );
+  }
 }
 
 /** Supprime un post, une vidéo ou un média (Facebook comme Instagram — même appel Graph). */
