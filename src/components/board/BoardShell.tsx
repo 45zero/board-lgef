@@ -13,6 +13,7 @@ import { GedScreen } from "./screens/GedScreen";
 import { PublicationScreen } from "./screens/PublicationScreen";
 import { DriveScreen } from "./screens/DriveScreen";
 import { InscriptionScreen } from "./screens/InscriptionScreen";
+import { FraisScreen } from "./screens/FraisScreen";
 import { MobileShell } from "./mobile/MobileShell";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useBoardPreferences } from "@/hooks/board/useBoardPreferences";
@@ -23,14 +24,14 @@ export type NavLayout = "rail" | "list";
 export type Theme = "light" | "dark";
 
 /** Modules gardés en mémoire une fois ouverts (les autres n'existent pas encore). */
-const KEEP_ALIVE_APPS = ["accueil", "mails", "calendrier", "ged", "audiovisuel", "drive", "inscription"];
+const KEEP_ALIVE_APPS = ["accueil", "mails", "calendrier", "ged", "audiovisuel", "drive", "inscription", "frais"];
 /** Préchargés en arrière-plan juste après l'ouverture du board : les plus consultés. */
 const PRELOAD_APPS = ["mails", "calendrier"];
 
-function renderScreen(id: string, props: { punchedIn: boolean; onTogglePunch: () => void }) {
+function renderScreen(id: string, props: { punchedIn: boolean; onTogglePunch: () => void; onNavigate: (app: string) => void }) {
   switch (id) {
     case "accueil":
-      return <AccueilScreen punchedIn={props.punchedIn} onTogglePunch={props.onTogglePunch} />;
+      return <AccueilScreen punchedIn={props.punchedIn} onTogglePunch={props.onTogglePunch} onNavigate={props.onNavigate} />;
     case "mails":
       return <MailsScreen />;
     case "calendrier":
@@ -43,6 +44,8 @@ function renderScreen(id: string, props: { punchedIn: boolean; onTogglePunch: ()
       return <DriveScreen />;
     case "inscription":
       return <InscriptionScreen />;
+    case "frais":
+      return <FraisScreen />;
     default:
       return null;
   }
@@ -107,7 +110,7 @@ export function BoardShell() {
           <main className="relative flex-1 overflow-hidden rounded-panel">
             {KEEP_ALIVE_APPS.filter((id) => mounted.has(id)).map((id) => (
               <div key={id} className={app === id ? "h-full overflow-y-auto" : "hidden"}>
-                {renderScreen(id, { punchedIn, onTogglePunch: () => setPunchedIn((p) => !p) })}
+                {renderScreen(id, { punchedIn, onTogglePunch: () => setPunchedIn((p) => !p), onNavigate: selectApp })}
               </div>
             ))}
             {!KEEP_ALIVE_APPS.includes(app) && (

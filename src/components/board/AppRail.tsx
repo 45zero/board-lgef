@@ -22,11 +22,13 @@ import {
   LayoutGrid,
   HardDrive,
   ClipboardCheck,
+  Receipt,
 } from "lucide-react";
 import { BOARD_APPS } from "@/lib/board/tokens";
 import type { NavLayout } from "./BoardShell";
 
 const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
+  frais: Receipt,
   accueil: Home,
   mails: Mail,
   trello: Kanban,
@@ -61,11 +63,16 @@ export function AppRail({
   const badges = useAppBadges();
   return (
     <aside
-      className={`flex shrink-0 flex-col justify-between rounded-panel border border-line bg-card/70 py-3 shadow-bar backdrop-blur ${
+      className={`flex min-h-0 shrink-0 flex-col justify-between gap-2 rounded-panel border border-line bg-card/70 py-3 shadow-bar backdrop-blur ${
         nav === "rail" ? "w-[74px] items-center" : "w-[220px]"
       }`}
     >
-      <div className={`flex flex-col gap-1 ${nav === "rail" ? "items-center" : "px-2"}`}>
+      {/* Liste des applications défilante : le rail reste utilisable quel que soit le nombre d'applis. */}
+      <div
+        className={`flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain pt-1.5 [scrollbar-width:thin] ${
+          nav === "rail" ? "w-full items-center" : "px-2"
+        }`}
+      >
         <button
           type="button"
           onClick={() => onToggleNav(nav === "rail" ? "list" : "rail")}

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { getInboxUnreadCount } from "@/lib/google/gmail";
+import { getMyExpenses, getMyValidatorScope } from "@/app/actions/expenses";
 
 export type AppBadges = {
   /** Mails non lus (boîtes de réception de tous les comptes connectés). */
@@ -12,6 +13,8 @@ export type AppBadges = {
   inscription: { sent: number; pending: number };
   /** Centre de publication : publications à publier. */
   audiovisuel: number;
+  /** Frais : mes événements à déclarer / déclarations de mon équipe à valider (N+1). */
+  frais: { toDeclare: number; toValidate: number };
 };
 
 /**
@@ -72,6 +75,11 @@ export async function GET() {
     }, 0),
   ]);
 
-  const body: AppBadges = { mails, calendrier, inscription, audiovisuel };
+  const frais = await safe(async () => {
+    const [mine, scope] = await Promise.all([getMyExpenses(), getMyValidatorScope()]);
+    return { toDeclare: mine.filter((m) => m.status === "a_declarer" || m.status === "rejected").length, toValidate: scope.pending };
+  }, { toDeclare: 0, toValidate: 0 });
+
+  const body: AppBadges = { mails, calendrier, inscription, audiovisuel, frais };
   return NextResponse.json(body, { headers: { "Cache-Control": "private, no-store" } });
 }

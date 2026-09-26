@@ -20,6 +20,7 @@ import {
   Share2,
 } from "lucide-react";
 import { YoutubeIcon, FacebookIcon, InstagramIcon } from "@/components/board/publication/BrandIcons";
+import { DeclarationBar } from "@/components/board/expenses/ExpenseStatus";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { COVERAGE_COLORS } from "@/lib/board/tokens";
@@ -371,7 +372,7 @@ export function EquipeTab({ hook }: { hook: ReturnType<typeof useEventTeam> }) {
   );
 }
 
-export function FraisTab({ hook }: { hook: ReturnType<typeof useEventExpenses> }) {
+export function FraisTab({ hook, eventId, onDeclared }: { hook: ReturnType<typeof useEventExpenses>; eventId?: string; onDeclared?: () => void }) {
   const [toll, setToll] = useState(0);
   const [meal, setMeal] = useState(0);
   const [other, setOther] = useState(0);
@@ -420,6 +421,8 @@ export function FraisTab({ hook }: { hook: ReturnType<typeof useEventExpenses> }
           Ajouter la ligne de frais
         </button>
       </div>
+
+      {eventId && <DeclarationBar key={hook.expenses.length} eventId={eventId} total={total} lineCount={hook.expenses.length} onDone={onDeclared} />}
     </div>
   );
 }

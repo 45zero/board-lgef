@@ -44,6 +44,10 @@ export function useAppBadges(): Record<string, AppBadge[]> {
       { count: data.inscription.pending, tone: "orange", title: `${data.inscription.pending} invitation(s) en attente d'envoi` },
     ],
     audiovisuel: [{ count: data.audiovisuel, tone: "red", title: `${data.audiovisuel} publication(s) à publier` }],
+    frais: [
+      { count: data.frais?.toValidate ?? 0, tone: "red", title: `${data.frais?.toValidate ?? 0} note(s) de frais à valider` },
+      { count: data.frais?.toDeclare ?? 0, tone: "orange", title: `${data.frais?.toDeclare ?? 0} note(s) de frais à déclarer` },
+    ],
   };
   for (const key of Object.keys(badges)) badges[key] = badges[key].filter((b) => b.count > 0);
   return badges;

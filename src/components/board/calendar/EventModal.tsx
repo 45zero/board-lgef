@@ -74,7 +74,7 @@ export function EventModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-[900px] flex-col overflow-hidden rounded-modal bg-card shadow-modal">
+      <div className="flex h-[min(860px,calc(100vh-2rem))] w-full max-w-[900px] flex-col overflow-hidden rounded-modal bg-card shadow-modal">
         {/* Bandeau */}
         <div className="flex shrink-0 items-start justify-between gap-4 bg-navy px-6 py-4 text-white">
           <div>
@@ -364,7 +364,7 @@ export function EventModal({
 
           {tab === "discussion" && isEditing && <DiscussionTab hook={m.comments} />}
           {tab === "equipe" && isEditing && <EquipeTab hook={m.team} />}
-          {tab === "frais" && isEditing && <FraisTab hook={m.expenses} />}
+          {tab === "frais" && isEditing && event && <FraisTab hook={m.expenses} eventId={event.id} />}
           {tab === "gestion" && <GestionFraisPlaceholder />}
           {tab === "carte" && <CarteTab location={m.location} />}
         </div>
