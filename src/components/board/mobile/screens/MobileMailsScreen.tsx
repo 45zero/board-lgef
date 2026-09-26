@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { readCache, writeCache } from "@/lib/board/localCache";
+import { getCachedMail, loadMail, loadMailList, prefetchMails } from "@/lib/board/mailClient";
 import {
   Mail,
   Plus,
@@ -72,9 +73,6 @@ function base64UrlToBlob(base64url: string, mimeType: string) {
 // démonté) ; les listes sont aussi gardées dans le navigateur pour un affichage instantané à la
 // prochaine ouverture de l'appli (voir localCache).
 const messagesCache = new Map<string, MessageListItem[]>();
-const messageDetailCache = new Map<string, MessageDetail>();
-/** Nombre de messages dont le contenu est préchargé en tête de liste, pour une ouverture instantanée. */
-const PREFETCH_DETAILS = 10;
 
 export function MobileMailsScreen({
   menuOpen = false,
@@ -98,6 +96,7 @@ export function MobileMailsScreen({
   const [messages, setMessages] = useState<MessageListItem[]>([]);
   const [drafts, setDrafts] = useState<DraftListItem[]>([]);
   const [selected, setSelected] = useState<MessageDetail | null>(null);
+  const [selectedLoading, setSelectedLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [composing, setComposing] = useState(false);
   const [replying, setReplying] = useState(false);
@@ -130,22 +129,6 @@ export function MobileMailsScreen({
     onContextChange?.(account ? `${folderName} · ${account.label || account.email}` : folderName);
   }, [folder, labels, accounts, activeAccountId, onContextChange]);
 
-  /** Précharge le contenu des premiers messages (3 à la fois) pour qu'ils s'ouvrent sans attente. */
-  const prefetchDetails = (accountId: string, list: MessageListItem[]) => {
-    const ids = list.slice(0, PREFETCH_DETAILS).map((m) => m.id).filter((id) => !messageDetailCache.has(id));
-    let next = 0;
-    const worker = async () => {
-      while (next < ids.length) {
-        const id = ids[next++];
-        try {
-          messageDetailCache.set(id, await getMyMessage(accountId, id));
-        } catch {
-          // préchargement best-effort
-        }
-      }
-    };
-    void Promise.all([worker(), worker(), worker()]);
-  };
 
   const refresh = () => {
     if (!activeAccountId) return;
@@ -167,12 +150,12 @@ export function MobileMailsScreen({
     }
     const systemFolder = SYSTEM_FOLDERS.find((f) => f.id === folder);
     const labelIds: string[] = systemFolder ? [...systemFolder.labelIds] : [folder];
-    listMyMessages(activeAccountId, { labelIds })
+    loadMailList(activeAccountId, { labelIds })
       .then((res) => {
         messagesCache.set(cacheKey, res.messages);
         writeCache(`mail:list:${cacheKey}`, res.messages);
         setMessages(res.messages);
-        prefetchDetails(activeAccountId, res.messages);
+        prefetchMails(activeAccountId, res.messages.map((m) => m.id));
       })
       .finally(() => setLoading(false));
   };
@@ -185,15 +168,39 @@ export function MobileMailsScreen({
 
   const openMessage = async (id: string) => {
     if (!activeAccountId) return;
-    const cached = messageDetailCache.get(id);
+    const cached = getCachedMail(activeAccountId, id);
     if (cached) {
-      // Déjà préchargé : ouverture instantanée, sans nouvel aller-retour réseau.
+      // Déjà préchargé : ouverture instantanée, sans aller-retour réseau.
       setSelected(cached);
+      setSelectedLoading(false);
       return;
     }
-    const detail = await getMyMessage(activeAccountId, id);
-    messageDetailCache.set(id, detail);
-    setSelected(detail);
+    // Ouverture immédiate avec ce que la liste connaît déjà (expéditeur, objet, aperçu), corps ensuite.
+    const item = messages.find((m) => m.id === id);
+    if (item) {
+      setSelected({
+        id: item.id,
+        threadId: "",
+        from: item.from,
+        to: "",
+        cc: "",
+        subject: item.subject,
+        date: item.date,
+        messageIdHeader: "",
+        referencesHeader: "",
+        bodyText: item.snippet,
+        bodyHtml: "",
+        labelIds: [],
+        attachments: [],
+      });
+      setSelectedLoading(true);
+    }
+    try {
+      const detail = await loadMail(activeAccountId, id);
+      setSelected((current) => (current && current.id !== id ? current : detail));
+    } finally {
+      setSelectedLoading(false);
+    }
   };
 
   const openDraft = (id: string) => {
@@ -217,8 +224,7 @@ export function MobileMailsScreen({
 
   const handleForward = async (id: string) => {
     if (!activeAccountId) return;
-    const detail = await getMyMessage(activeAccountId, id);
-    setForwarding(detail);
+    setForwarding(await loadMail(activeAccountId, id));
   };
 
   const handleDownload = async (messageId: string, attachmentId: string, filename: string, mimeType: string) => {
@@ -467,6 +473,7 @@ export function MobileMailsScreen({
       {selected && (
         <MobileMessageDetail
           message={selected}
+          loading={selectedLoading}
           onClose={() => setSelected(null)}
           onReply={() => setReplying(true)}
           onForward={() => handleForward(selected.id)}
@@ -635,6 +642,7 @@ function SwipeableMailRow({
 
 function MobileMessageDetail({
   message,
+  loading = false,
   onClose,
   onReply,
   onForward,
@@ -644,6 +652,8 @@ function MobileMessageDetail({
   onPreview,
 }: {
   message: MessageDetail;
+  /** Corps en cours de chargement : l'aperçu de la liste est affiché en attendant. */
+  loading?: boolean;
   onClose: () => void;
   onReply: () => void;
   onForward: () => void;
@@ -710,7 +720,8 @@ function MobileMessageDetail({
             ))}
           </div>
         )}
-        <EmailBody bodyText={message.bodyText} bodyHtml={message.bodyHtml} className="h-[55vh]" />
+        {loading && <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">Chargement du message…</div>}
+        <EmailBody bodyText={message.bodyText} bodyHtml={message.bodyHtml} />
       </div>
 
       <div className="flex shrink-0 items-center justify-around border-t border-line py-2 pb-[calc(env(safe-area-inset-bottom)+8px)]">
