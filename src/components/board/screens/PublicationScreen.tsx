@@ -82,6 +82,7 @@ import {
 import { EVENT_TYPE_TO_ORG, ORG_TO_EVENT_TYPE, CALENDAR_ORG_KEYS, type DbEventType } from "@/lib/board/calendar";
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
 import { useAuth } from "@/contexts/AuthContext";
+import { useBackgroundTasks } from "@/contexts/BackgroundTasksContext";
 import { pdfToJpegFiles } from "@/lib/board/pdfToImages";
 import { createClient } from "@/lib/supabase/client";
 import { personName } from "@/components/board/calendar/EventTabs";
@@ -240,6 +241,40 @@ function CommentsSection({ publicationId, networkKey, count }: { publicationId: 
   );
 }
 
+/**
+ * Solution de secours tant que Meta n'a pas accordé « Page Mentions » en accès avancé (sans lui,
+ * Facebook retire les mentions @[id] en silence) : copie les noms des Pages et ouvre le post pour
+ * les ajouter à la main (« Modifier la publication », puis @Nom → Facebook propose la Page).
+ */
+function ManualMentions({ mentions, info }: { mentions: FacebookMention[]; info: SocialPublishTarget }) {
+  const [copied, setCopied] = useState(false);
+  const url = info.permalink ?? (info.postId || info.videoId ? `https://www.facebook.com/${info.postId ?? info.videoId}` : null);
+
+  const open = async () => {
+    try {
+      await navigator.clipboard.writeText(mentions.map((m) => `@${m.name}`).join(" "));
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+    if (url) window.open(url, "_blank", "noreferrer");
+  };
+
+  return (
+    <div className="space-y-1 rounded-btn bg-subtle px-2.5 py-2">
+      <button onClick={open} className="flex items-center gap-1 text-[11px] font-semibold text-link hover:underline">
+        <ExternalLink size={11} /> Ajouter les mentions sur Facebook ({mentions.map((m) => `@${m.name}`).join(", ")})
+      </button>
+      {copied && (
+        <p className="text-[10px] text-ink-3">
+          Noms copiés. Sur Facebook : « … » → « Modifier la publication », tapez @ puis le début du nom et choisissez la Page
+          proposée, puis « Enregistrer ».
+        </p>
+      )}
+    </div>
+  );
+}
+
 function SocialDetail({
   pub,
   networkKey,
@@ -305,6 +340,8 @@ function SocialDetail({
       ) : (
         <p className="text-[11px] italic text-ink-4">Stats pas encore récupérées — cliquez sur « Rafraîchir les stats ».</p>
       )}
+
+      {isFacebook && (pub.targets.fbMentions?.length ?? 0) > 0 && <ManualMentions mentions={pub.targets.fbMentions!} info={info} />}
 
       {(info.videoId || info.postId) && <CommentsSection publicationId={pub.id} networkKey={networkKey} count={stats?.comments} />}
     </div>
@@ -567,6 +604,7 @@ function EventMediaPicker({ eventId, selected, onChange }: { eventId: string; se
 
 function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: () => void; onDone: () => void }) {
   const { me } = useMe();
+  const { runTask } = useBackgroundTasks();
   const [caption, setCaption] = useState(pub.caption ?? "");
   const [files, setFiles] = useState<EventFile[]>(pub.files);
   const [youtube, setYoutube] = useState(!!pub.targets.youtube);
@@ -585,11 +623,22 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
   const addMention = async () => {
     if (!mentionRef.trim()) return;
     setMentionState({ loading: true, error: null });
-    const res = await resolveFacebookMention(mentionRef);
+    const ref = mentionRef.trim();
+    const res = await resolveFacebookMention(ref);
     if (res.page) {
       const page = res.page;
       setFbMentions((prev) => (prev.some((m) => m.id === page.id) ? prev : [...prev, page]));
       setMentionRef("");
+      setMentionState({ loading: false, error: null });
+      return;
+    }
+    // Simple nom (pas un lien ni un identifiant) : mention à ajouter à la main sur Facebook après publication.
+    if (!/facebook\.com|fb\.com|^\d+$/i.test(ref)) {
+      const name = ref.replace(/^@/, "");
+      setFbMentions((prev) => (prev.some((m) => m.name === name) ? prev : [...prev, { id: "", name }]));
+      setMentionRef("");
+      setMentionState({ loading: false, error: null });
+      return;
     }
     setMentionState({ loading: false, error: res.error });
   };
@@ -619,51 +668,73 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
     fbMentions: canFacebook ? fbMentions : [],
   };
 
-  const persistFiles = async () => {
-    const changed = files.map((f) => f.id).join() !== pub.files.map((f) => f.id).join();
-    if (changed) await setPublicationFiles(pub.id, files);
+  const persistFiles = async (selected: EventFile[] = files) => {
+    const changed = selected.map((f) => f.id).join() !== pub.files.map((f) => f.id).join();
+    if (changed) await setPublicationFiles(pub.id, selected);
   };
 
+  /**
+   * Publication en tâche de fond (BackgroundTasksContext) : le compositeur se ferme tout de suite,
+   * la progression s'affiche en bas à droite et on peut continuer à travailler ailleurs dans le board.
+   */
   const publishNow = async () => {
     if (count === 0 && !caption.trim()) return alert("Écrivez le texte de la publication.");
     if (!confirm("Publier maintenant sur les réseaux sélectionnés ? Action publique et non réversible.")) return;
-    setBusy(true);
-    const failures: string[] = [];
-    let anyOk = false;
-    try {
-      await persistFiles();
-      if (targets.youtube) {
-        try {
-          await publishPublicationToYoutube({ id: pub.id, files, media: pub.media }, { title: publicationTitle(pub), description: caption }, me);
-          anyOk = true;
-        } catch (e) {
-          failures.push(`YouTube : ${e instanceof Error ? e.message : "échec"}`);
-        }
-      }
+    const snapshot = { targets, caption, files };
+    onClose();
 
-      const socialTargets: { key: SocialTargetKey; caption: string }[] = [
-        ...FACEBOOK_REGIONS.filter((r) => targets.facebook?.[r.key]).map((r) => ({ key: r.key as SocialTargetKey, caption })),
-        ...(targets.instagram ? [{ key: "instagram" as SocialTargetKey, caption }] : []),
-      ];
-      if (socialTargets.length > 0) {
-        try {
-          const results = await publishSocial(pub.id, socialTargets, me, { igUserTags: targets.igTags, fbMentions: targets.fbMentions });
-          anyOk ||= results.some((r) => r.ok);
-          const socialFailures = describeFailures(results);
-          if (socialFailures) failures.push(socialFailures);
-          const warnings = describeWarnings(results);
-          if (warnings) failures.push(`Attention — ${warnings}`);
-        } catch (e) {
-          failures.push(e instanceof Error ? e.message : "Échec de la publication Facebook/Instagram.");
+    void runTask(
+      `Publication — ${publicationTitle(pub)}`,
+      async ({ setProgress }) => {
+        const failures: string[] = [];
+        let anyOk = false;
+        await persistFiles(snapshot.files);
+        if (snapshot.targets.youtube) {
+          setProgress(undefined, "Envoi de la vidéo à YouTube…");
+          try {
+            await publishPublicationToYoutube(
+              { id: pub.id, files: snapshot.files, media: pub.media },
+              { title: publicationTitle(pub), description: snapshot.caption },
+              me
+            );
+            anyOk = true;
+          } catch (e) {
+            failures.push(`YouTube : ${e instanceof Error ? e.message : "échec"}`);
+          }
         }
-      }
 
-      if (anyOk) await markMediaPublished(pub.id, caption);
-      if (failures.length > 0) alert(`${anyOk ? "Publié partiellement." : "Échec de la publication."}\n\n${failures.join("\n")}`);
-      if (anyOk) onDone();
-    } finally {
-      setBusy(false);
-    }
+        const socialTargets: { key: SocialTargetKey; caption: string }[] = [
+          ...FACEBOOK_REGIONS.filter((r) => snapshot.targets.facebook?.[r.key]).map((r) => ({ key: r.key as SocialTargetKey, caption: snapshot.caption })),
+          ...(snapshot.targets.instagram ? [{ key: "instagram" as SocialTargetKey, caption: snapshot.caption }] : []),
+        ];
+        if (socialTargets.length > 0) {
+          setProgress(undefined, "Publication sur Facebook / Instagram…");
+          try {
+            const results = await publishSocial(pub.id, socialTargets, me, {
+              igUserTags: snapshot.targets.igTags,
+              fbMentions: snapshot.targets.fbMentions,
+            });
+            anyOk ||= results.some((r) => r.ok);
+            const socialFailures = describeFailures(results);
+            if (socialFailures) failures.push(socialFailures);
+            const warnings = describeWarnings(results);
+            if (warnings) failures.push(`Attention — ${warnings}`);
+          } catch (e) {
+            failures.push(e instanceof Error ? e.message : "Échec de la publication Facebook/Instagram.");
+          }
+        }
+
+        if (!anyOk) throw new Error(failures.join("\n") || "Échec de la publication.");
+        await markMediaPublished(pub.id, snapshot.caption, snapshot.targets);
+        return failures;
+      },
+      {
+        success: (failures) => {
+          const manual = (snapshot.targets.fbMentions ?? []).length > 0 ? "\nPensez à ajouter les mentions Facebook (onglet Publiés)." : "";
+          return (failures.length ? `Publié partiellement.\n${failures.join("\n")}` : "Publié.") + manual;
+        },
+      }
+    );
   };
 
   const schedule = async () => {
@@ -768,7 +839,7 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
                         addMention();
                       }
                     }}
-                    placeholder="Lien de la Page (facebook.com/…) ou identifiant"
+                    placeholder="Nom de la Page, lien facebook.com/… ou identifiant"
                     className="min-w-0 flex-1 rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
                   />
                   <button
@@ -783,16 +854,24 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
                 {fbMentions.length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {fbMentions.map((m) => (
-                      <span key={m.id} className="flex items-center gap-1 rounded-full bg-sel-bg px-2 py-0.5 text-[11px] font-semibold text-link">
+                      <span
+                        key={m.id || m.name}
+                        title={m.id ? "Mention automatique" : "À ajouter à la main sur Facebook après publication"}
+                        className="flex items-center gap-1 rounded-full bg-sel-bg px-2 py-0.5 text-[11px] font-semibold text-link"
+                      >
                         @{m.name}
-                        <button onClick={() => setFbMentions((prev) => prev.filter((x) => x.id !== m.id))} className="hover:text-bad">
+                        {!m.id && <span className="font-normal opacity-70">(manuelle)</span>}
+                        <button onClick={() => setFbMentions((prev) => prev.filter((x) => x !== m))} className="hover:text-bad">
                           <X size={10} />
                         </button>
                       </span>
                     ))}
                   </div>
                 )}
-                <p className="text-[10px] text-ink-4">Les Pages sont mentionnées à la fin du texte et reçoivent une notification.</p>
+                <p className="text-[10px] text-ink-4">
+                  En attendant l&rsquo;accord de Meta, les mentions s&rsquo;ajoutent à la main : après publication, bouton « Ajouter les
+                  mentions sur Facebook » dans l&rsquo;onglet Publiés.
+                </p>
               </div>
             )}
           </div>
@@ -934,41 +1013,55 @@ function EventSearch({ onPick }: { onPick: (e: EventOption) => void }) {
  */
 function NewPublicationDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (pubId: string) => void }) {
   const { userId } = useMe();
+  const { runTask } = useBackgroundTasks();
   const [step, setStep] = useState<"ask" | "event" | "content">("ask");
   const [event, setEvent] = useState<EventOption | null>(null);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<DbEventType>("communication");
   const [caption, setCaption] = useState("");
   const [files, setFiles] = useState<File[]>([]);
-  const [busy, setBusy] = useState(false);
   const [converting, setConverting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const create = async () => {
+  /** Envoi des médias en tâche de fond : la fenêtre se ferme tout de suite, le compositeur s'ouvre quand tout est prêt. */
+  const create = () => {
     if (!event && !title.trim()) return alert("Donnez un titre à la publication.");
     if (files.length === 0 && !caption.trim()) return alert("Ajoutez un texte ou des médias.");
-    setBusy(true);
-    try {
-      let fileIds: string[] = [];
-      let media: Awaited<ReturnType<typeof uploadStandaloneMedia>> = [];
-      if (files.length > 0 && event) {
-        const results = await uploadEventFiles(event.id, files);
-        const failed = results.filter((r) => !r.ok);
-        if (failed.length) throw new Error(`Échec de l'envoi : ${failed.map((f) => f.name).join(", ")}`);
-        fileIds = results.map((r) => r.id).filter((id): id is string => !!id);
-      } else if (files.length > 0) {
-        media = await uploadStandaloneMedia(files);
-      }
-      const id = await createPublication(
-        { eventId: event?.id ?? null, fileIds, media, title: event ? null : title.trim(), category: event ? null : category, caption },
-        userId
-      );
-      onCreated(id);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Échec de la création.");
-    } finally {
-      setBusy(false);
-    }
+    const snapshot = { event, title: title.trim(), category, caption, files };
+    onClose();
+
+    void runTask(
+      `Nouvelle publication — ${snapshot.event?.title ?? snapshot.title}`,
+      async ({ setProgress }) => {
+        const onProgress = (sent: number, total: number, current: string) =>
+          setProgress(total ? sent / total : undefined, `${current} — ${Math.round((sent / Math.max(total, 1)) * 100)} %`);
+        let fileIds: string[] = [];
+        let media: Awaited<ReturnType<typeof uploadStandaloneMedia>> = [];
+        if (snapshot.files.length > 0 && snapshot.event) {
+          const results = await uploadEventFiles(snapshot.event.id, snapshot.files, onProgress);
+          const failed = results.filter((r) => !r.ok);
+          if (failed.length) throw new Error(`Échec de l'envoi : ${failed.map((f) => f.name).join(", ")}`);
+          fileIds = results.map((r) => r.id).filter((id): id is string => !!id);
+        } else if (snapshot.files.length > 0) {
+          media = await uploadStandaloneMedia(snapshot.files, onProgress);
+        }
+        setProgress(undefined, "Création de la publication…");
+        return createPublication(
+          {
+            eventId: snapshot.event?.id ?? null,
+            fileIds,
+            media,
+            title: snapshot.event ? null : snapshot.title,
+            category: snapshot.event ? null : snapshot.category,
+            caption: snapshot.caption,
+          },
+          userId
+        );
+      },
+      { success: () => "Prête dans « À publier » — choisissez les réseaux pour la publier." }
+    ).then((id) => {
+      if (id) onCreated(id);
+    });
   };
 
   const kind = files.length === 0 ? "Texte" : files.length > 1 ? `Galerie (${files.length})` : files[0].type.startsWith("video") ? "Vidéo" : "Photo";
@@ -1108,8 +1201,8 @@ function NewPublicationDialog({ onClose, onCreated }: { onClose: () => void; onC
               <button onClick={() => setStep("ask")} className="rounded-btn border border-line px-4 py-2 text-sm text-ink-2">
                 Retour
               </button>
-              <button onClick={create} disabled={busy || converting} className="rounded-btn bg-navy px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
-                {busy ? "Envoi…" : "Continuer vers la publication"}
+              <button onClick={create} disabled={converting} className="rounded-btn bg-navy px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+                Continuer vers la publication
               </button>
             </div>
           </div>
@@ -1269,6 +1362,7 @@ export function PublicationScreen() {
   const [creating, setCreating] = useState(false);
   const [refreshingStats, setRefreshingStats] = useState(false);
   const [filters, setFilters] = useState<Filters>({ category: "all", competition: "all", kind: "all" });
+  const { completions } = useBackgroundTasks();
   const tabRef = useRef(tab);
   useEffect(() => {
     tabRef.current = tab;
@@ -1301,6 +1395,11 @@ export function PublicationScreen() {
       setRefreshingStats(false);
     }
   };
+
+  // Une tâche de fond vient de se terminer (publication, nouvelle publication…) : on recharge la liste.
+  useEffect(() => {
+    if (completions > 0) queueMicrotask(() => void refetch(true));
+  }, [completions]);
 
   useEffect(() => {
     refetch().then((list) => {
@@ -1400,7 +1499,8 @@ export function PublicationScreen() {
         <NewPublicationDialog
           onClose={() => setCreating(false)}
           onCreated={async (id) => {
-            setCreating(false);
+            // Appelé à la fin de la tâche de fond : si l'utilisateur est toujours sur cet écran,
+            // on lui ouvre directement le compositeur de la nouvelle publication.
             setTab("to_publish");
             tabRef.current = "to_publish";
             const list = await refetch();

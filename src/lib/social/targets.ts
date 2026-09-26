@@ -85,13 +85,18 @@ export function withNetworkEntry(info: PublishInfo, key: NetworkKey, value: Soci
 
 export const NETWORK_KEYS: NetworkKey[] = ["youtube", ...SOCIAL_TARGETS.map((t) => t.key)];
 
-/** Page Facebook mentionnée dans une publication — écrite @[id] dans le message (fonctionnalité Meta « Page Mentions »). */
+/**
+ * Page Facebook à mentionner. Avec un `id`, elle est écrite @[id] dans le message (fonctionnalité
+ * Meta « Page Mentions », accès avancé requis — sans lui Facebook retire la mention en silence).
+ * Sans `id` (saisie par simple nom), elle est à ajouter à la main sur Facebook après publication.
+ */
 export type FacebookMention = { id: string; name: string };
 
-/** Message Facebook final : le texte suivi des mentions de Pages. */
+/** Message Facebook final : le texte suivi des mentions de Pages identifiées par leur id. */
 export function withFacebookMentions(message: string, mentions: FacebookMention[] | undefined): string {
-  if (!mentions?.length) return message;
-  const tags = mentions.map((m) => `@[${m.id}]`).join(" ");
+  const withId = (mentions ?? []).filter((m) => m.id);
+  if (withId.length === 0) return message;
+  const tags = withId.map((m) => `@[${m.id}]`).join(" ");
   return message.trim() ? `${message}\n\n${tags}` : tags;
 }
 

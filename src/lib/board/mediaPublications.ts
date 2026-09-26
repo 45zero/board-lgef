@@ -240,11 +240,17 @@ export async function cancelScheduledPublication(id: string) {
   if (error) throw new Error(error.message);
 }
 
-export async function markMediaPublished(id: string, caption?: string) {
+/** `targets` est conservé : il sert ensuite à retrouver les Pages à mentionner à la main (voir SocialDetail). */
+export async function markMediaPublished(id: string, caption?: string, targets?: PublicationTargets) {
   const supabase = createClient();
   const { error } = await supabase
     .from("media_publications")
-    .update({ status: "published", published_at: new Date().toISOString(), ...(caption !== undefined ? { caption } : {}) })
+    .update({
+      status: "published",
+      published_at: new Date().toISOString(),
+      ...(caption !== undefined ? { caption } : {}),
+      ...(targets ? { targets: targets as unknown as Json } : {}),
+    })
     .eq("id", id);
   if (error) throw new Error(error.message);
 }

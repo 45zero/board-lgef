@@ -1203,22 +1203,24 @@ export function AttachmentsField({
             multiple
             accept="image/*,video/*"
             className="hidden"
-            onChange={async (e) => {
-              if (e.target.files?.length) {
-                const res = await hook.addFiles(e.target.files);
-                if (res.failed.length) alert(`Échec pour : ${res.failed.join(", ")}`);
-              }
+            onChange={(e) => {
+              // Envoi en tâche de fond : progression en bas à droite, on peut fermer l'événement.
+              if (e.target.files?.length) hook.addFiles(Array.from(e.target.files));
               e.target.value = "";
             }}
           />
           <button
             type="button"
-            disabled={hook.uploading}
             onClick={() => inputRef.current?.click()}
-            className="flex items-center gap-1.5 rounded-btn border border-dashed border-line px-3 py-2 text-xs font-semibold text-ink-3 hover:bg-hover disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-btn border border-dashed border-line px-3 py-2 text-xs font-semibold text-ink-3 hover:bg-hover"
           >
-            <Paperclip size={13} /> {hook.uploading ? "Envoi…" : "Ajouter une pièce jointe (photo, vidéo)"}
+            <Paperclip size={13} /> Ajouter une pièce jointe (photo, vidéo)
           </button>
+          {hook.uploading && (
+            <p className="text-[11px] text-ink-4">
+              Envoi en cours en arrière-plan (voir en bas à droite) — vous pouvez fermer l&rsquo;événement et continuer à travailler.
+            </p>
+          )}
         </>
       )}
 
@@ -1243,8 +1245,14 @@ export function AttachmentsField({
           eventTitle={eventTitle}
           publishing={hook.publishing === publishingFile.id}
           onClose={() => setPublishingFileId(null)}
-          onPublishYoutube={(data) => hook.publishYoutube(publishingFile, data)}
-          onPublishFacebook={(sel) => hook.publishFacebook(publishingFile, sel)}
+          onPublishYoutube={async (data) => {
+            await hook.publishYoutube(publishingFile, data);
+            setPublishingFileId(null);
+          }}
+          onPublishFacebook={async (sel) => {
+            await hook.publishFacebook(publishingFile, sel);
+            setPublishingFileId(null);
+          }}
         />
       )}
     </div>

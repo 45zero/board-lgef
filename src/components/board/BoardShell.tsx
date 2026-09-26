@@ -17,6 +17,7 @@ import { MobileShell } from "./mobile/MobileShell";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useBoardPreferences } from "@/hooks/board/useBoardPreferences";
 import { BOARD_APPS } from "@/lib/board/tokens";
+import { BackgroundTasksPanel } from "./BackgroundTasksPanel";
 
 export type NavLayout = "rail" | "list";
 export type Theme = "light" | "dark";
@@ -33,7 +34,13 @@ export function BoardShell() {
   const currentApp = BOARD_APPS.find((a) => a.id === app) ?? BOARD_APPS[0];
 
   if (isMobile === null) return null;
-  if (isMobile) return <MobileShell />;
+  if (isMobile)
+    return (
+      <>
+        <MobileShell />
+        <BackgroundTasksPanel />
+      </>
+    );
 
   const showContextPanel =
     prefs.contextPanelOpen && (app === "accueil" || app === "mails" || app === "calendrier");
@@ -92,6 +99,8 @@ export function BoardShell() {
           />
         )}
       </div>
+
+      <BackgroundTasksPanel />
 
       {settingsOpen && (
         <BoardSettingsModal

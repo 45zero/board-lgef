@@ -12,6 +12,11 @@ import {
   type EventFile,
 } from "@/lib/board/eventFiles";
 import { queueMediaForPublication } from "@/lib/board/mediaPublications";
+import { useBackgroundTasks } from "@/contexts/BackgroundTasksContext";
+
+function formatMb(bytes: number) {
+  return `${(bytes / 1024 / 1024).toFixed(bytes > 100 * 1024 * 1024 ? 0 : 1)} Mo`;
+}
 
 const isPublishableMedia = (f: EventFile) =>
   (f.content_type ?? "").startsWith("image") || (f.content_type ?? "").startsWith("video");
@@ -19,6 +24,7 @@ const isPublishableMedia = (f: EventFile) =>
 /** Pièces jointes d'un événement (photo/vidéo) + publication YouTube/Facebook. */
 export function useEventFiles(eventId: string | undefined, canManage: boolean) {
   const { user } = useAuth();
+  const { runTask } = useBackgroundTasks();
   const [files, setFiles] = useState<EventFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -47,29 +53,45 @@ export function useEventFiles(eventId: string | undefined, canManage: boolean) {
       .then(({ data }) => setMe(data ?? null));
   }, [user?.id]);
 
-  const addFiles = async (fileList: FileList | File[]) => {
-    if (!eventId || !canManage) return { ok: 0, failed: [] as string[] };
+  /**
+   * Envoi en tâche de fond (voir BackgroundTasksContext) : rend la main tout de suite, la
+   * progression s'affiche en bas à droite et on peut quitter l'événement ou changer de module.
+   */
+  const addFiles = (fileList: FileList | File[]) => {
+    if (!eventId || !canManage) return;
+    const files = Array.from(fileList);
+    if (files.length === 0) return;
     setUploading(true);
-    try {
-      const results = await uploadEventFiles(eventId, Array.from(fileList));
-      const successCount = results.filter((r) => r.ok).length;
-      const updated = await listEventFiles(eventId);
-      setFiles(updated);
-      // Les nouveaux fichiers arrivent en tête (created_at desc) — on met en file
-      // de publication les N derniers uploadés avec succès (photo/vidéo uniquement).
-      if (successCount > 0) {
-        updated
-          .slice(0, successCount)
-          .filter(isPublishableMedia)
-          .forEach((f) => queueMediaForPublication(f.id, eventId, f.content_type));
+    void runTask(
+      files.length > 1 ? `Envoi de ${files.length} fichiers` : `Envoi de ${files[0].name}`,
+      async ({ setProgress }) => {
+        try {
+          const results = await uploadEventFiles(eventId, files, (sent, total, current) =>
+            setProgress(total ? sent / total : undefined, `${current} — ${formatMb(sent)} / ${formatMb(total)}`)
+          );
+          const uploaded = results.filter((r) => r.ok && r.id);
+          const updated = await listEventFiles(eventId);
+          setFiles(updated);
+          // Chaque photo/vidéo envoyée rejoint la file « À publier » du centre de publication.
+          await Promise.all(
+            updated
+              .filter((f) => uploaded.some((u) => u.id === f.id) && isPublishableMedia(f))
+              .map((f) => queueMediaForPublication(f.id, eventId, f.content_type))
+          );
+          const failed = results.filter((r) => !r.ok);
+          if (failed.length === files.length) throw new Error(`Échec de l'envoi : ${failed.map((f) => f.name).join(", ")}`);
+          return { ok: uploaded.length, failed: failed.map((f) => f.name) };
+        } finally {
+          setUploading(false);
+        }
+      },
+      {
+        success: (r) =>
+          r.failed.length
+            ? `${r.ok} fichier(s) envoyé(s) — échec pour : ${r.failed.join(", ")}`
+            : `${r.ok} fichier${r.ok > 1 ? "s" : ""} ajouté${r.ok > 1 ? "s" : ""} à l'événement.`,
       }
-      return {
-        ok: successCount,
-        failed: results.filter((r) => !r.ok).map((r) => r.name),
-      };
-    } finally {
-      setUploading(false);
-    }
+    );
   };
 
   const removeFile = async (file: EventFile) => {
@@ -78,24 +100,32 @@ export function useEventFiles(eventId: string | undefined, canManage: boolean) {
     setFiles((prev) => prev.filter((f) => f.id !== file.id));
   };
 
+  // Publications en tâche de fond : l'envoi d'une vidéo à YouTube/Facebook peut prendre plusieurs minutes.
   const doPublishYoutube = async (file: EventFile, data: { title: string; description?: string }) => {
     setPublishing(file.id);
-    try {
-      await publishToYoutube(file, data, me);
-      await refetch();
-    } finally {
-      setPublishing(null);
-    }
+    void runTask(`YouTube — ${data.title}`, async ({ setProgress }) => {
+      setProgress(undefined, "Envoi de la vidéo à YouTube…");
+      try {
+        await publishToYoutube(file, data, me);
+        await refetch();
+      } finally {
+        setPublishing(null);
+      }
+    }, { success: () => "Vidéo publiée sur YouTube." });
   };
 
   const doPublishFacebook = async (file: EventFile, selection: Parameters<typeof publishToFacebook>[1]) => {
     setPublishing(file.id);
-    try {
-      await publishToFacebook(file, selection, me);
-      await refetch();
-    } finally {
-      setPublishing(null);
-    }
+    void runTask(`Facebook — ${file.filename}`, async ({ setProgress }) => {
+      setProgress(undefined, "Publication sur les pages Facebook…");
+      try {
+        const partialFailures = await publishToFacebook(file, selection, me);
+        await refetch();
+        return partialFailures;
+      } finally {
+        setPublishing(null);
+      }
+    }, { success: (failures) => (failures ? `Publié partiellement :\n${failures}` : "Publié sur Facebook.") });
   };
 
   return {

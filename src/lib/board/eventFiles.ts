@@ -96,10 +96,14 @@ const CHUNK_SIZE = 3 * 1024 * 1024; // 3 Mio — multiple de 256 Kio (requis par
  * On envoie donc le fichier par morceaux à notre propre route, qui relaie
  * chaque morceau à la session resumable Drive côté serveur.
  */
+/** Progression d'un envoi : octets envoyés / total, et nom du fichier en cours. */
+export type UploadProgress = (sentBytes: number, totalBytes: number, currentFile: string) => void;
+
 async function putFileToDriveViaRelay(
   chunkEndpoint: string,
   uploadUrl: string,
-  file: File
+  file: File,
+  onChunk?: (sentInFile: number) => void
 ): Promise<{ id: string; webViewLink?: string }> {
   let offset = 0;
   while (offset < file.size) {
@@ -116,6 +120,7 @@ async function putFileToDriveViaRelay(
     });
     if (res.status === 308) {
       offset = end;
+      onChunk?.(offset);
       continue;
     }
     if (!res.ok) {
@@ -127,9 +132,12 @@ async function putFileToDriveViaRelay(
   throw new Error("Échec de l'envoi vers Drive (fichier vide).");
 }
 
-async function uploadEventFilesToDrive(eventId: string, files: File[]) {
+async function uploadEventFilesToDrive(eventId: string, files: File[], onProgress?: UploadProgress) {
   const results: UploadResult[] = [];
+  const total = files.reduce((n, f) => n + f.size, 0);
+  let done = 0;
   for (const file of files) {
+    onProgress?.(done, total, file.name);
     try {
       const initRes = await fetch(`/api/events/${eventId}/attachments/drive`, {
         method: "POST",
@@ -147,7 +155,9 @@ async function uploadEventFilesToDrive(eventId: string, files: File[]) {
         continue;
       }
 
-      const driveFile = await putFileToDriveViaRelay(`/api/events/${eventId}/attachments/drive/chunk`, initJson.uploadUrl, file);
+      const driveFile = await putFileToDriveViaRelay(`/api/events/${eventId}/attachments/drive/chunk`, initJson.uploadUrl, file, (sent) =>
+        onProgress?.(done + sent, total, file.name)
+      );
 
       const confirmRes = await fetch(`/api/events/${eventId}/attachments/drive/confirm`, {
         method: "POST",
@@ -169,6 +179,8 @@ async function uploadEventFilesToDrive(eventId: string, files: File[]) {
     } catch (e) {
       results.push({ ok: false, name: file.name, error: e instanceof Error ? e.message : "Erreur réseau." });
     }
+    done += file.size;
+    onProgress?.(done, total, file.name);
   }
   return results;
 }
@@ -179,8 +191,8 @@ async function uploadEventFilesToDrive(eventId: string, files: File[]) {
  * compte Google désigné en réglages (board_settings), pas celui de l'uploadeur.
  * Repli automatique sur Supabase Storage tant qu'aucun Drive de board n'est connecté.
  */
-export async function uploadEventFiles(eventId: string, files: File[]) {
-  return uploadEventFilesToDrive(eventId, files);
+export async function uploadEventFiles(eventId: string, files: File[], onProgress?: UploadProgress) {
+  return uploadEventFilesToDrive(eventId, files, onProgress);
 }
 
 /**
@@ -188,9 +200,12 @@ export async function uploadEventFiles(eventId: string, files: File[]) {
  * dossier « LGEF Drive / Publications / AAAA / MM - Mois ». Pas de repli Supabase Storage — ses
  * règles d'accès exigent un événement dans le chemin du fichier.
  */
-export async function uploadStandaloneMedia(files: File[]): Promise<StandaloneMedia[]> {
+export async function uploadStandaloneMedia(files: File[], onProgress?: UploadProgress): Promise<StandaloneMedia[]> {
   const media: StandaloneMedia[] = [];
+  const total = files.reduce((n, f) => n + f.size, 0);
+  let done = 0;
   for (const file of files) {
+    onProgress?.(done, total, file.name);
     const initRes = await fetch("/api/publications/drive", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -204,7 +219,10 @@ export async function uploadStandaloneMedia(files: File[]): Promise<StandaloneMe
           : initJson.error ?? `Échec de l'envoi de ${file.name}.`
       );
     }
-    const driveFile = await putFileToDriveViaRelay("/api/publications/drive/chunk", initJson.uploadUrl, file);
+    const driveFile = await putFileToDriveViaRelay("/api/publications/drive/chunk", initJson.uploadUrl, file, (sent) =>
+      onProgress?.(done + sent, total, file.name)
+    );
+    done += file.size;
     media.push({
       drive_file_id: driveFile.id,
       filename: file.name,
@@ -277,5 +295,5 @@ export async function publishToFacebook(
   const results = await publishSocial(publicationId, targets, by);
   const failures = describeFailures(results);
   if (failures && !results.some((r) => r.ok)) throw new Error(failures);
-  if (failures) alert(`Publié partiellement :\n${failures}`);
+  return failures;
 }
