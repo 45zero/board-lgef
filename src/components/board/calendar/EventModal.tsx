@@ -35,7 +35,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "carte", label: "Carte" },
 ];
 
-/** « par Prénom Nom » du créateur de l'événement (events.created_by), lu à l'ouverture de la fiche. */
+/** « par Prénom Nom » d'un utilisateur (créateur ou dernier modificateur de l'événement), lu à l'ouverture de la fiche. */
 function CreatorName({ userId }: { userId: string | null | undefined }) {
   const [name, setName] = useState<string | null>(null);
   useEffect(() => {
@@ -106,6 +106,15 @@ export function EventModal({
                 <CreatorName userId={event!.createdBy} />
               </div>
             )}
+            {isEditing &&
+              event!.updatedAt &&
+              // Une ligne « modifié » seulement si l'événement a vraiment été retouché après sa création.
+              (!event!.createdAt || Date.parse(event!.updatedAt) - Date.parse(event!.createdAt) > 60_000) && (
+                <div className="text-xs text-white/60">
+                  Modifié le {format(parseISO(event!.updatedAt), "d MMMM yyyy 'à' HH:mm", { locale: fr })}
+                  <CreatorName userId={event!.updatedBy} />
+                </div>
+              )}
           </div>
           <button onClick={onClose} className="rounded-full p-1.5 text-white/80 hover:bg-white/10">
             <X size={18} />

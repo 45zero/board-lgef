@@ -74,6 +74,9 @@ export interface CalendarEvent {
   coverage: CoverageState | null;
   createdBy: string | null;
   createdAt: string | null;
+  /** Dernière modification (trigger set_event_updated_by côté base). Absent pour les événements Google. */
+  updatedBy?: string | null;
+  updatedAt?: string | null;
   status: "pending" | "approved" | "rejected" | "completed" | null;
 }
 
@@ -90,6 +93,8 @@ export interface EventRow {
   requires_coverage: boolean | null;
   created_by: string | null;
   created_at: string | null;
+  updated_by: string | null;
+  updated_at: string | null;
   status: "pending" | "approved" | "rejected" | "completed" | null;
 }
 
@@ -141,6 +146,8 @@ export function mapEventRow(row: EventRow, coverageRequest?: CoverageRequestRow)
     coverage: deriveCoverageState(requiresCoverage, coverageRequest),
     createdBy: row.created_by,
     createdAt: row.created_at,
+    updatedBy: row.updated_by,
+    updatedAt: row.updated_at,
     status: row.status,
   };
 }
