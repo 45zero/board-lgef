@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { MobileHeader } from "@/components/board/mobile/MobileHeader";
 import { MobileBottomNav, type MobileTab } from "@/components/board/mobile/MobileBottomNav";
 import { MobileCalendrierScreen } from "@/components/board/mobile/screens/MobileCalendrierScreen";
@@ -17,8 +17,17 @@ const TITLES: Record<MobileTab, { title: string; kicker: string }> = {
 export function MobileShell() {
   const [tab, setTab] = useState<MobileTab>("calendrier");
   const [toast, setToast] = useState(false);
+  const [mailMenuOpen, setMailMenuOpen] = useState(false);
+  const [mailContext, setMailContext] = useState<string | null>(null);
+  const closeMailMenu = useCallback(() => setMailMenuOpen(false), []);
 
-  const { title, kicker } = TITLES[tab];
+  const { title } = TITLES[tab];
+  const kicker = tab === "mails" && mailContext ? mailContext : TITLES[tab].kicker;
+
+  const selectTab = (next: MobileTab) => {
+    setMailMenuOpen(false);
+    setTab(next);
+  };
 
   const handleCenterPress = () => {
     // Capture de frais (scan de justificatif) — pas encore construite ; le
@@ -29,14 +38,23 @@ export function MobileShell() {
 
   return (
     <div className="relative flex h-dvh flex-col bg-shell">
-      <MobileHeader title={title} kicker={kicker} />
+      <MobileHeader
+        title={title}
+        kicker={kicker}
+        onLogoClick={tab === "mails" ? () => setMailMenuOpen((o) => !o) : undefined}
+        menuOpen={mailMenuOpen}
+      />
 
-      <main className="flex-1 overflow-hidden">
-        {tab === "calendrier" ? (
+      {/* Calendrier et Mails restent montés (masqués quand inactifs) : les mails se chargent dès
+          l'ouverture de l'appli et le passage d'un onglet à l'autre est instantané, comme une appli native. */}
+      <main className="relative flex-1 overflow-hidden">
+        <div className={tab === "calendrier" ? "h-full" : "hidden"}>
           <MobileCalendrierScreen />
-        ) : tab === "mails" ? (
-          <MobileMailsScreen />
-        ) : (
+        </div>
+        <div className={tab === "mails" ? "h-full" : "hidden"}>
+          <MobileMailsScreen menuOpen={tab === "mails" && mailMenuOpen} onMenuClose={closeMailMenu} onContextChange={setMailContext} />
+        </div>
+        {tab !== "calendrier" && tab !== "mails" && (
           <div className="flex h-full items-center justify-center p-6 text-center text-sm text-ink-3">
             Module « {title} » — bientôt sur mobile
           </div>
@@ -49,7 +67,7 @@ export function MobileShell() {
         </div>
       )}
 
-      <MobileBottomNav active={tab} onSelect={setTab} onCenterPress={handleCenterPress} />
+      <MobileBottomNav active={tab} onSelect={selectTab} onCenterPress={handleCenterPress} />
     </div>
   );
 }

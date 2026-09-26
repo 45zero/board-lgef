@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { readCache, writeCache } from "@/lib/board/localCache";
 import {
   Mail,
   Menu,
@@ -67,11 +68,21 @@ function base64UrlToBlob(base64url: string, mimeType: string) {
   return new Blob([bytes], { type: mimeType });
 }
 
+// Caches partagés au niveau du module (survivent au démontage de l'écran) ; les listes sont aussi
+// gardées dans le navigateur pour un affichage instantané à la prochaine ouverture (voir localCache).
+const messagesCache = new Map<string, MessageListItem[]>();
+const messageDetailCache = new Map<string, MessageDetail>();
+/** Nombre de messages dont le contenu est préchargé en tête de liste. */
+const PREFETCH_DETAILS = 10;
+
 export function MailsScreen() {
-  const [accounts, setAccounts] = useState<Account[] | null>(null);
-  const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<Account[] | null>(() => readCache<Account[]>("mail:accounts") ?? null);
+  const [activeAccountId, setActiveAccountId] = useState<string | null>(() => readCache<Account[]>("mail:accounts")?.[0]?.id ?? null);
   const [folder, setFolder] = useState<string>("INBOX");
-  const [labels, setLabels] = useState<LabelItem[]>([]);
+  const [labels, setLabels] = useState<LabelItem[]>(() => {
+    const first = readCache<Account[]>("mail:accounts")?.[0]?.id;
+    return (first && readCache<LabelItem[]>(`mail:labels:${first}`)) || [];
+  });
   const [newLabelName, setNewLabelName] = useState("");
   const [addingLabel, setAddingLabel] = useState(false);
   const [searchInput, setSearchInput] = useState("");
@@ -108,19 +119,35 @@ export function MailsScreen() {
   useEffect(() => {
     getMyConnectedAccounts().then((accs) => {
       setAccounts(accs);
-      if (accs.length > 0) setActiveAccountId(accs[0].id);
+      writeCache("mail:accounts", accs);
+      setActiveAccountId((current) => (current && accs.some((a) => a.id === current) ? current : (accs[0]?.id ?? null)));
     });
   }, []);
 
   useEffect(() => {
     if (!activeAccountId) return;
-    listMyLabels(activeAccountId).then(setLabels);
+    listMyLabels(activeAccountId).then((l) => {
+      setLabels(l);
+      writeCache(`mail:labels:${activeAccountId}`, l);
+    });
   }, [activeAccountId]);
 
-  // Cache mémoire par dossier — un dossier déjà visité s'affiche instantanément
-  // pendant qu'on revalide en arrière-plan (stale-while-revalidate).
-  const messagesCache = useRef(new Map<string, MessageListItem[]>());
-  const messageDetailCache = useRef(new Map<string, MessageDetail>());
+  /** Précharge le contenu des premiers messages (3 à la fois) pour qu'ils s'ouvrent sans attente. */
+  const prefetchDetails = (accountId: string, list: MessageListItem[]) => {
+    const ids = list.slice(0, PREFETCH_DETAILS).map((m) => m.id).filter((id) => !messageDetailCache.has(id));
+    let next = 0;
+    const worker = async () => {
+      while (next < ids.length) {
+        const id = ids[next++];
+        try {
+          messageDetailCache.set(id, await getMyMessage(accountId, id));
+        } catch {
+          // préchargement best-effort
+        }
+      }
+    };
+    void Promise.all([worker(), worker(), worker()]);
+  };
 
   const refresh = () => {
     if (!activeAccountId) return;
@@ -133,7 +160,8 @@ export function MailsScreen() {
       return;
     }
     const cacheKey = `${activeAccountId}:${folder}:${activeQuery.trim()}`;
-    const cached = messagesCache.current.get(cacheKey);
+    // Mémoire (dossier déjà visité) puis cache du navigateur (dernière ouverture de l'appli) : affichage instantané, revalidé juste après.
+    const cached = messagesCache.get(cacheKey) ?? (activeQuery.trim() ? undefined : readCache<MessageListItem[]>(`mail:list:${cacheKey}`));
     if (cached) {
       setMessages(cached);
       setLoading(false);
@@ -144,8 +172,10 @@ export function MailsScreen() {
     const labelIds: string[] = systemFolder ? [...systemFolder.labelIds] : [folder];
     listMyMessages(activeAccountId, { labelIds, query: activeQuery.trim() || undefined })
       .then((res) => {
-        messagesCache.current.set(cacheKey, res.messages);
+        messagesCache.set(cacheKey, res.messages);
+        if (!activeQuery.trim()) writeCache(`mail:list:${cacheKey}`, res.messages);
         setMessages(res.messages);
+        prefetchDetails(activeAccountId, res.messages);
       })
       .finally(() => setLoading(false));
   };
@@ -164,10 +194,14 @@ export function MailsScreen() {
 
   const openMessage = async (id: string) => {
     if (!activeAccountId) return;
-    const cached = messageDetailCache.current.get(id);
-    if (cached) setSelected(cached);
+    const cached = messageDetailCache.get(id);
+    if (cached) {
+      // Déjà préchargé : ouverture instantanée.
+      setSelected(cached);
+      return;
+    }
     const detail = await getMyMessage(activeAccountId, id);
-    messageDetailCache.current.set(id, detail);
+    messageDetailCache.set(id, detail);
     setSelected(detail);
   };
 

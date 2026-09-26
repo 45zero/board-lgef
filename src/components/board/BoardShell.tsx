@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TopBar } from "./TopBar";
 import { AppRail } from "./AppRail";
 import { Dock } from "./Dock";
@@ -22,8 +22,50 @@ import { BackgroundTasksPanel } from "./BackgroundTasksPanel";
 export type NavLayout = "rail" | "list";
 export type Theme = "light" | "dark";
 
+/** Modules gardés en mémoire une fois ouverts (les autres n'existent pas encore). */
+const KEEP_ALIVE_APPS = ["accueil", "mails", "calendrier", "ged", "audiovisuel", "drive", "inscription"];
+/** Préchargés en arrière-plan juste après l'ouverture du board : les plus consultés. */
+const PRELOAD_APPS = ["mails", "calendrier"];
+
+function renderScreen(id: string, props: { punchedIn: boolean; onTogglePunch: () => void }) {
+  switch (id) {
+    case "accueil":
+      return <AccueilScreen punchedIn={props.punchedIn} onTogglePunch={props.onTogglePunch} />;
+    case "mails":
+      return <MailsScreen />;
+    case "calendrier":
+      return <CalendrierScreen />;
+    case "ged":
+      return <GedScreen />;
+    case "audiovisuel":
+      return <PublicationScreen />;
+    case "drive":
+      return <DriveScreen />;
+    case "inscription":
+      return <InscriptionScreen />;
+    default:
+      return null;
+  }
+}
+
 export function BoardShell() {
   const [app, setApp] = useState("accueil");
+  const [mounted, setMounted] = useState<Set<string>>(() => new Set(["accueil"]));
+
+  // Module ouvert → monté pour de bon ; les modules les plus consultés sont préchargés dès que le
+  // navigateur est libre, pour qu'ils s'affichent sans attente au premier clic.
+  const selectApp = (id: string) => {
+    setMounted((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    setApp(id);
+  };
+  useEffect(() => {
+    const preload = () => setMounted((prev) => new Set([...prev, ...PRELOAD_APPS]));
+    const w = window as Window & { requestIdleCallback?: (cb: () => void) => number };
+    const handle = w.requestIdleCallback ? w.requestIdleCallback(preload) : window.setTimeout(preload, 1500);
+    return () => {
+      if (!w.requestIdleCallback) window.clearTimeout(handle);
+    };
+  }, []);
   const [theme, setTheme] = useState<Theme>("light");
   const [nav, setNav] = useState<NavLayout>("rail");
   const [punchedIn, setPunchedIn] = useState(true);
@@ -57,25 +99,18 @@ export function BoardShell() {
 
         <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
           {prefs.navStyle === "rail" && (
-            <AppRail nav={nav} activeApp={app} onSelectApp={setApp} onToggleNav={setNav} />
+            <AppRail nav={nav} activeApp={app} onSelectApp={selectApp} onToggleNav={setNav} />
           )}
 
-          <main className="flex-1 overflow-y-auto rounded-panel">
-            {app === "accueil" ? (
-              <AccueilScreen punchedIn={punchedIn} onTogglePunch={() => setPunchedIn((p) => !p)} />
-            ) : app === "mails" ? (
-              <MailsScreen />
-            ) : app === "calendrier" ? (
-              <CalendrierScreen />
-            ) : app === "ged" ? (
-              <GedScreen />
-            ) : app === "audiovisuel" ? (
-              <PublicationScreen />
-            ) : app === "drive" ? (
-              <DriveScreen />
-            ) : app === "inscription" ? (
-              <InscriptionScreen />
-            ) : (
+          {/* Les modules déjà ouverts restent montés (masqués quand inactifs) : y revenir est
+              instantané, avec leurs données et leur position de défilement, comme une appli native. */}
+          <main className="relative flex-1 overflow-hidden rounded-panel">
+            {KEEP_ALIVE_APPS.filter((id) => mounted.has(id)).map((id) => (
+              <div key={id} className={app === id ? "h-full overflow-y-auto" : "hidden"}>
+                {renderScreen(id, { punchedIn, onTogglePunch: () => setPunchedIn((p) => !p) })}
+              </div>
+            ))}
+            {!KEEP_ALIVE_APPS.includes(app) && (
               <div className="flex h-full items-center justify-center rounded-panel border border-line bg-card/60 text-ink-3">
                 Module « {currentApp.label} » — à venir
               </div>
@@ -93,7 +128,7 @@ export function BoardShell() {
         {prefs.navStyle === "dock" && (
           <Dock
             activeApp={app}
-            onSelectApp={setApp}
+            onSelectApp={selectApp}
             theme={theme}
             onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
           />

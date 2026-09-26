@@ -4,6 +4,10 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { mapEventRow, type CalendarEvent, type EventRow, type CoverageRequestRow } from "@/lib/board/calendar";
+import { readCache, writeCache } from "@/lib/board/localCache";
+
+/** Rôle de l'utilisateur, lu une fois par session (il ne change pas d'un changement de semaine à l'autre). */
+const roleByUser = new Map<string, string | null>();
 
 /** Porté de calendrier-lgef/src/hooks/useEvents.ts, généralisé du mois à une plage libre (semaine). */
 export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
@@ -13,14 +17,27 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
 
   const fetchEvents = useCallback(async () => {
     if (!user) return;
-    setLoading(true);
 
     const supabase = createClient();
     const startISO = rangeStart.toISOString();
     const endISO = rangeEnd.toISOString();
 
-    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-    const role = profile?.role;
+    // Affichage instantané de la dernière version connue de cette plage, rafraîchie juste après.
+    const cacheKey = `cal:${user.id}:${startISO}:${endISO}`;
+    const cached = readCache<CalendarEvent[]>(cacheKey);
+    if (cached) {
+      setEvents(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
+    let role = roleByUser.get(user.id);
+    if (role === undefined) {
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+      role = profile?.role ?? null;
+      roleByUser.set(user.id, role);
+    }
 
     const baseSelect =
       "id, title, event_type, start_date, end_date, location, online_meeting, registration_enabled, organizer_message, requires_coverage, created_by, created_at, updated_by, updated_at, status";
@@ -83,7 +100,9 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       );
     }
 
-    setEvents(rows.map((row) => mapEventRow(row, coverageByEvent.get(row.id))));
+    const mapped = rows.map((row) => mapEventRow(row, coverageByEvent.get(row.id)));
+    setEvents(mapped);
+    writeCache(cacheKey, mapped);
     setLoading(false);
   }, [user, rangeStart, rangeEnd]);
 

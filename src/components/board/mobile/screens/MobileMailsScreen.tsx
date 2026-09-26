@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { readCache, writeCache } from "@/lib/board/localCache";
 import {
   Mail,
   Plus,
@@ -67,11 +68,32 @@ function base64UrlToBlob(base64url: string, mimeType: string) {
   return new Blob([bytes], { type: mimeType });
 }
 
-export function MobileMailsScreen() {
-  const [accounts, setAccounts] = useState<Account[] | null>(null);
-  const [activeAccountId, setActiveAccountId] = useState<string | null>(null);
+// Caches partagés au niveau du module : ils survivent à un changement d'onglet (l'écran peut être
+// démonté) ; les listes sont aussi gardées dans le navigateur pour un affichage instantané à la
+// prochaine ouverture de l'appli (voir localCache).
+const messagesCache = new Map<string, MessageListItem[]>();
+const messageDetailCache = new Map<string, MessageDetail>();
+/** Nombre de messages dont le contenu est préchargé en tête de liste, pour une ouverture instantanée. */
+const PREFETCH_DETAILS = 10;
+
+export function MobileMailsScreen({
+  menuOpen = false,
+  onMenuClose,
+  onContextChange,
+}: {
+  menuOpen?: boolean;
+  onMenuClose?: () => void;
+  /** Libellé « Dossier · compte » affiché sous le titre de l'en-tête. */
+  onContextChange?: (label: string) => void;
+}) {
+  const [accounts, setAccounts] = useState<Account[] | null>(() => readCache<Account[]>("mail:accounts") ?? null);
+  const [activeAccountId, setActiveAccountId] = useState<string | null>(() => readCache<Account[]>("mail:accounts")?.[0]?.id ?? null);
   const [folder, setFolder] = useState<string>("INBOX");
-  const [labels, setLabels] = useState<LabelItem[]>([]);
+  // Libellés du compte affiché au démarrage : lus du cache, rafraîchis dès que le compte est connu.
+  const [labels, setLabels] = useState<LabelItem[]>(() => {
+    const first = readCache<Account[]>("mail:accounts")?.[0]?.id;
+    return (first && readCache<LabelItem[]>(`mail:labels:${first}`)) || [];
+  });
 
   const [messages, setMessages] = useState<MessageListItem[]>([]);
   const [drafts, setDrafts] = useState<DraftListItem[]>([]);
@@ -88,19 +110,42 @@ export function MobileMailsScreen() {
   useEffect(() => {
     getMyConnectedAccounts().then((accs) => {
       setAccounts(accs);
-      if (accs.length > 0) setActiveAccountId(accs[0].id);
+      writeCache("mail:accounts", accs);
+      setActiveAccountId((current) => (current && accs.some((a) => a.id === current) ? current : (accs[0]?.id ?? null)));
     });
   }, []);
 
   useEffect(() => {
     if (!activeAccountId) return;
-    listMyLabels(activeAccountId).then(setLabels);
+    listMyLabels(activeAccountId).then((l) => {
+      setLabels(l);
+      writeCache(`mail:labels:${activeAccountId}`, l);
+    });
   }, [activeAccountId]);
 
-  // Cache mémoire par dossier — un dossier déjà visité s'affiche instantanément
-  // pendant qu'on revalide en arrière-plan (stale-while-revalidate).
-  const messagesCache = useRef(new Map<string, MessageListItem[]>());
-  const messageDetailCache = useRef(new Map<string, MessageDetail>());
+  // Dossier et compte affichés dans l'en-tête (les onglets étant repliés dans le menu du logo).
+  useEffect(() => {
+    const folderName = SYSTEM_FOLDERS.find((f) => f.id === folder)?.name ?? labels.find((l) => l.id === folder)?.name ?? "Mails";
+    const account = accounts?.find((a) => a.id === activeAccountId);
+    onContextChange?.(account ? `${folderName} · ${account.label || account.email}` : folderName);
+  }, [folder, labels, accounts, activeAccountId, onContextChange]);
+
+  /** Précharge le contenu des premiers messages (3 à la fois) pour qu'ils s'ouvrent sans attente. */
+  const prefetchDetails = (accountId: string, list: MessageListItem[]) => {
+    const ids = list.slice(0, PREFETCH_DETAILS).map((m) => m.id).filter((id) => !messageDetailCache.has(id));
+    let next = 0;
+    const worker = async () => {
+      while (next < ids.length) {
+        const id = ids[next++];
+        try {
+          messageDetailCache.set(id, await getMyMessage(accountId, id));
+        } catch {
+          // préchargement best-effort
+        }
+      }
+    };
+    void Promise.all([worker(), worker(), worker()]);
+  };
 
   const refresh = () => {
     if (!activeAccountId) return;
@@ -113,7 +158,7 @@ export function MobileMailsScreen() {
       return;
     }
     const cacheKey = `${activeAccountId}:${folder}`;
-    const cached = messagesCache.current.get(cacheKey);
+    const cached = messagesCache.get(cacheKey) ?? readCache<MessageListItem[]>(`mail:list:${cacheKey}`);
     if (cached) {
       setMessages(cached);
       setLoading(false);
@@ -124,8 +169,10 @@ export function MobileMailsScreen() {
     const labelIds: string[] = systemFolder ? [...systemFolder.labelIds] : [folder];
     listMyMessages(activeAccountId, { labelIds })
       .then((res) => {
-        messagesCache.current.set(cacheKey, res.messages);
+        messagesCache.set(cacheKey, res.messages);
+        writeCache(`mail:list:${cacheKey}`, res.messages);
         setMessages(res.messages);
+        prefetchDetails(activeAccountId, res.messages);
       })
       .finally(() => setLoading(false));
   };
@@ -138,10 +185,14 @@ export function MobileMailsScreen() {
 
   const openMessage = async (id: string) => {
     if (!activeAccountId) return;
-    const cached = messageDetailCache.current.get(id);
-    if (cached) setSelected(cached);
+    const cached = messageDetailCache.get(id);
+    if (cached) {
+      // Déjà préchargé : ouverture instantanée, sans nouvel aller-retour réseau.
+      setSelected(cached);
+      return;
+    }
     const detail = await getMyMessage(activeAccountId, id);
-    messageDetailCache.current.set(id, detail);
+    messageDetailCache.set(id, detail);
     setSelected(detail);
   };
 
@@ -242,59 +293,88 @@ export function MobileMailsScreen() {
 
   return (
     <div className="relative flex h-full flex-col">
-      <div className="flex shrink-0 items-center gap-2 overflow-x-auto px-4 py-2.5">
-        {accounts.map((acc) => (
-          <button
-            key={acc.id}
-            onClick={() => setActiveAccountId(acc.id)}
-            className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold ${
-              activeAccountId === acc.id
-                ? "border-navy bg-navy text-white"
-                : "border-line bg-card text-ink-2"
-            }`}
-          >
-            {acc.label || acc.email}
-          </button>
-        ))}
-        <a
-          href="/api/oauth/google/start"
-          className="flex shrink-0 items-center gap-1 rounded-full border border-dashed border-line px-3 py-1.5 text-xs font-semibold text-ink-3"
-        >
-          <Plus size={12} /> Compte
-        </a>
-        <button
-          onClick={refresh}
-          className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-line text-ink-3"
-          aria-label="Actualiser"
-        >
-          <RefreshCw size={13} />
-        </button>
-      </div>
+      {/* Comptes, dossiers et libellés : repliés par défaut pour que les mails soient tout en haut,
+          ouverts en touchant le logo de l'en-tête (voir MobileShell). */}
+      {menuOpen && (
+        <>
+          <div className="absolute inset-0 z-30 bg-black/30" onClick={onMenuClose} />
+          <div className="absolute inset-x-0 top-0 z-40 max-h-[75%] overflow-y-auto rounded-b-modal border-b border-line bg-card pb-3 shadow-modal">
+            <div className="px-4 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">Comptes</div>
+            <div className="flex flex-wrap items-center gap-2 px-4 py-1.5">
+              {accounts.map((acc) => (
+                <button
+                  key={acc.id}
+                  onClick={() => {
+                    setActiveAccountId(acc.id);
+                    onMenuClose?.();
+                  }}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                    activeAccountId === acc.id ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-2"
+                  }`}
+                >
+                  {acc.label || acc.email}
+                </button>
+              ))}
+              <a
+                href="/api/oauth/google/start"
+                className="flex items-center gap-1 rounded-full border border-dashed border-line px-3 py-1.5 text-xs font-semibold text-ink-3"
+              >
+                <Plus size={12} /> Compte
+              </a>
+            </div>
 
-      <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto px-4 pb-2.5">
-        {SYSTEM_FOLDERS.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => setFolder(f.id)}
-            className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${
-              folder === f.id ? "bg-navy text-white" : "bg-subtle text-ink-2"
-            }`}
-          >
-            <f.icon size={12} /> {f.name}
-          </button>
-        ))}
-        {labels.map((l) => (
-          <button
-            key={l.id}
-            onClick={() => setFolder(l.id)}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${
-              folder === l.id ? "bg-navy text-white" : "bg-subtle text-ink-2"
-            }`}
-          >
-            {l.name}
-          </button>
-        ))}
-      </div>
+            <div className="px-4 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">Dossiers</div>
+            <div className="px-2">
+              {SYSTEM_FOLDERS.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => {
+                    setFolder(f.id);
+                    onMenuClose?.();
+                  }}
+                  className={`flex w-full items-center gap-2.5 rounded-btn px-3 py-2.5 text-left text-sm font-semibold ${
+                    folder === f.id ? "bg-sel-bg text-link" : "text-ink-2 active:bg-hover"
+                  }`}
+                >
+                  <f.icon size={15} /> {f.name}
+                </button>
+              ))}
+            </div>
+
+            {labels.length > 0 && (
+              <>
+                <div className="px-4 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">Libellés</div>
+                <div className="flex flex-wrap gap-1.5 px-4">
+                  {labels.map((l) => (
+                    <button
+                      key={l.id}
+                      onClick={() => {
+                        setFolder(l.id);
+                        onMenuClose?.();
+                      }}
+                      className={`rounded-full px-3 py-1.5 text-xs font-semibold ${folder === l.id ? "bg-navy text-white" : "bg-subtle text-ink-2"}`}
+                    >
+                      {l.name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="px-4 pt-3">
+              <button
+                onClick={() => {
+                  refresh();
+                  onMenuClose?.();
+                }}
+                className="flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-xs font-semibold text-ink-3"
+              >
+                <RefreshCw size={12} /> Actualiser
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="flex-1 overflow-y-auto pb-16">
         {loading && (

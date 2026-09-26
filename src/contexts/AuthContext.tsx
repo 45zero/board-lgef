@@ -1,5 +1,6 @@
 "use client";
 
+import { clearLocalCache } from "@/lib/board/localCache";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { User, Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
@@ -53,6 +54,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     const supabase = createClient();
     await supabase.auth.signOut({ scope: "local" });
+    // Les mails/événements mis en cache pour l'affichage instantané ne doivent pas survivre à la session.
+    clearLocalCache();
     setUser(null);
     setSession(null);
   };
