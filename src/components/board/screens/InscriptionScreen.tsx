@@ -745,8 +745,8 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
     setSendResult(null);
     try {
       await saveSubject();
-      const { sent } = await sendCampaign(campaign.id);
-      setSendResult(`${sent} email(s) envoyé(s).`);
+      const { sent, error } = await sendCampaign(campaign.id);
+      setSendResult(error ?? `${sent} email(s) envoyé(s).`);
       await refetch(campaign);
     } catch (e) {
       setSendResult(e instanceof Error ? e.message : "Échec de l'envoi.");
@@ -763,7 +763,11 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
     setWaResult(null);
     try {
       const { sent, failed, firstError } = await sendCampaignWhatsApp(campaign.id);
-      setWaResult(`${sent} WhatsApp envoyé(s)${failed ? ` — ${failed} échec(s) : ${firstError}` : ""}.`);
+      setWaResult(
+        sent === 0 && !failed && firstError
+          ? firstError
+          : `${sent} WhatsApp envoyé(s)${failed ? ` — ${failed} échec(s) : ${firstError}` : ""}.`
+      );
       await refetch(campaign);
     } catch (e) {
       setWaResult(e instanceof Error ? e.message : "Échec de l'envoi WhatsApp.");

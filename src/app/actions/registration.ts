@@ -439,7 +439,7 @@ export async function sendCampaign(campaignId: string) {
     .select("*")
     .eq("campaign_id", campaignId)
     .is("sent_at", null);
-  if (!recipients || recipients.length === 0) return { sent: 0 };
+  if (!recipients || recipients.length === 0) return { sent: 0, error: null as string | null };
 
   const event = campaign.events as unknown as { title: string; start_date: string; location: string | null } | null;
   const eventTitle = event?.title ?? "Événement";
@@ -494,7 +494,7 @@ export async function sendCampaign(campaignId: string) {
       (indexes) => markSent(indexes.map((i) => withEmail[i].id))
     );
     sent = result.sent;
-    if (sent === 0 && result.errors.length > 0) throw new Error(`Échec de l'envoi : ${result.errors[0]}`);
+    if (sent === 0 && result.errors.length > 0) return { sent, error: `Échec de l'envoi : ${result.errors[0]}` };
   } else {
     const boardAccountId = await getBoardDriveAccountId();
     let account = boardAccountId ? await getGoogleAccountById(boardAccountId) : null;
@@ -502,7 +502,7 @@ export async function sendCampaign(campaignId: string) {
       const accounts = await listConnectedAccounts(userId);
       account = accounts.find((a) => a.provider === "google") ?? null;
     }
-    if (!account) throw new Error("Aucun compte Google connecté pour envoyer les emails (Paramètres du board → Drive du board).");
+    if (!account) return { sent, error: "Aucun compte Google connecté pour envoyer les emails (Paramètres du board → Drive du board)." };
 
     for (const [i, m] of messages.entries()) {
       try {
@@ -516,14 +516,19 @@ export async function sendCampaign(campaignId: string) {
   }
 
   await supabase.from("event_registration_campaigns").update({ status: "sent" }).eq("id", campaignId);
-  return { sent };
+  return { sent, error: null };
 }
 
 /** Invitations WhatsApp (API Meta, modèle approuvé) à tous les destinataires avec un mobile, pas encore invités par WhatsApp. */
 export async function sendCampaignWhatsApp(campaignId: string) {
   const { supabase } = await requireStaff();
+  // Messages renvoyés plutôt que levés : en production Next masque le texte des erreurs serveur (500 générique).
   if (!isWhatsAppConfigured()) {
-    throw new Error("WhatsApp non configuré : modèle d'invitation en attente (META_WHATSAPP_TEMPLATE_INVITATION).");
+    return {
+      sent: 0,
+      failed: 0,
+      firstError: "WhatsApp pas encore activé : le modèle d'invitation doit être validé par Meta (META_WHATSAPP_TEMPLATE_INVITATION).",
+    };
   }
 
   const { data: campaign } = await supabase
