@@ -125,10 +125,13 @@ export function kindFromContentTypes(contentTypes: (string | null)[]): Publicati
   return (contentTypes[0] ?? "").startsWith("video") ? "video" : "photo";
 }
 
-/** Instagram n'accepte que du JPEG en image (et exige toujours un média) — les autres formats restent publiables sur Facebook. */
+/**
+ * Médias publiables sur Instagram : vidéos et toutes les images — celles qui ne sont pas en JPEG
+ * (PNG, WebP…) sont converties à la volée côté serveur (voir src/lib/social/mediaUrls.ts).
+ */
 export function isInstagramCompatible(contentType: string | null): boolean {
   const ct = (contentType ?? "").toLowerCase();
-  return ct.startsWith("video") || ct === "image/jpeg" || ct === "image/jpg";
+  return ct.startsWith("video") || (ct.startsWith("image") && !/heic|heif/.test(ct));
 }
 
 /* ---------- Sous-catégories des compétitions (déduites du titre) ---------- */

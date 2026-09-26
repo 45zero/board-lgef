@@ -78,6 +78,7 @@ import {
 import { EVENT_TYPE_TO_ORG, ORG_TO_EVENT_TYPE, CALENDAR_ORG_KEYS, type DbEventType } from "@/lib/board/calendar";
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
 import { useAuth } from "@/contexts/AuthContext";
+import { pdfToJpegFiles } from "@/lib/board/pdfToImages";
 import { createClient } from "@/lib/supabase/client";
 import { personName } from "@/components/board/calendar/EventTabs";
 import { YoutubeIcon, FacebookIcon, TiktokIcon, InstagramIcon } from "@/components/board/publication/BrandIcons";
@@ -290,7 +291,7 @@ function SocialDetail({
         <>
           <div className="flex flex-wrap gap-1.5">
             <StatTile icon={Eye} label="Vues" value={stats.views} />
-            {isInstagram && <StatTile icon={Users} label="Portée" value={stats.reach} />}
+            {(isInstagram || stats.reach !== undefined) && <StatTile icon={Users} label="Portée" value={stats.reach} />}
             <StatTile icon={Heart} label={isFacebook ? "Réactions" : "J'aime"} value={stats.likes} />
             <StatTile icon={MessageCircle} label="Comm." value={stats.comments} />
             {isFacebook && <StatTile icon={Repeat2} label="Partages" value={stats.shares} />}
@@ -582,9 +583,10 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
 
   const canYoutube = count === 1 && videos === 1;
   const canFacebook = count <= 1 || videos === 0;
-  const canInstagram = count >= 1 && count <= 10 && contentTypes.every((ct) => isInstagramCompatible(ct));
+  // Sans média, Instagram reçoit un visuel généré à partir du texte (voir /api/media/text-card).
+  const canInstagram = count <= 10 && contentTypes.every((ct) => isInstagramCompatible(ct));
   const fbReason = !canFacebook ? "Galerie : photos uniquement" : null;
-  const igReason = count === 0 ? "Photo ou vidéo requise" : count > 10 ? "10 médias max." : !canInstagram ? "Vidéos et photos JPEG uniquement" : null;
+  const igReason = count > 10 ? "10 médias max." : !canInstagram ? "Format non pris en charge (HEIC)" : count === 0 ? "Visuel généré depuis le texte" : null;
   const ytReason = !canYoutube ? "Une seule vidéo" : null;
 
   const anyTarget = (canYoutube && youtube) || (canFacebook && (fb.lorraine || fb.champagne_ardenne || fb.alsace)) || (canInstagram && instagram);
@@ -856,6 +858,7 @@ function NewPublicationDialog({ onClose, onCreated }: { onClose: () => void; onC
   const [caption, setCaption] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
+  const [converting, setConverting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const create = async () => {
@@ -976,18 +979,35 @@ function NewPublicationDialog({ onClose, onCreated }: { onClose: () => void; onC
                 ref={inputRef}
                 type="file"
                 multiple
-                accept="image/*,video/*"
+                accept="image/*,video/*,application/pdf"
                 className="hidden"
-                onChange={(e) => {
-                  if (e.target.files) setFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
+                onChange={async (e) => {
+                  const picked = Array.from(e.target.files ?? []);
                   e.target.value = "";
+                  if (picked.length === 0) return;
+                  setConverting(true);
+                  try {
+                    // Un PDF devient une galerie : une photo JPEG par page (10 max).
+                    const expanded: File[] = [];
+                    for (const f of picked) {
+                      if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) expanded.push(...(await pdfToJpegFiles(f)));
+                      else expanded.push(f);
+                    }
+                    setFiles((prev) => [...prev, ...expanded]);
+                  } catch (err) {
+                    alert(err instanceof Error ? `PDF illisible : ${err.message}` : "PDF illisible.");
+                  } finally {
+                    setConverting(false);
+                  }
                 }}
               />
               <button
                 onClick={() => inputRef.current?.click()}
-                className="flex w-full items-center gap-1.5 rounded-btn border border-dashed border-line px-3 py-2 text-xs font-semibold text-ink-3 hover:bg-hover"
+                disabled={converting}
+                className="flex w-full items-center gap-1.5 rounded-btn border border-dashed border-line px-3 py-2 text-xs font-semibold text-ink-3 hover:bg-hover disabled:opacity-50"
               >
-                <Plus size={13} /> Ajouter des photos / une vidéo (facultatif — sans média : post texte)
+                <Plus size={13} />{" "}
+                {converting ? "Conversion du PDF…" : "Ajouter photos (JPEG, PNG), vidéo ou PDF — facultatif, sans média : post texte"}
               </button>
               {files.map((f, i) => (
                 <div key={`${f.name}-${i}`} className="flex items-center gap-2 text-xs text-ink-2">
@@ -1005,7 +1025,7 @@ function NewPublicationDialog({ onClose, onCreated }: { onClose: () => void; onC
               <button onClick={() => setStep("ask")} className="rounded-btn border border-line px-4 py-2 text-sm text-ink-2">
                 Retour
               </button>
-              <button onClick={create} disabled={busy} className="rounded-btn bg-navy px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+              <button onClick={create} disabled={busy || converting} className="rounded-btn bg-navy px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
                 {busy ? "Envoi…" : "Continuer vers la publication"}
               </button>
             </div>

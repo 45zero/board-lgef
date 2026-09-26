@@ -194,15 +194,26 @@ export async function getFacebookPostStats(postId: string, accessToken: string):
     fields: "permalink_url,reactions.summary(true).limit(0),comments.summary(true).limit(0),shares",
     access_token: accessToken,
   });
-  return {
-    stats: {
-      likes: summaryCount(post.reactions),
-      comments: summaryCount(post.comments),
-      shares: Number((post.shares as { count?: number } | undefined)?.count ?? 0),
-      fetchedAt: new Date().toISOString(),
-    },
-    permalink: typeof post.permalink_url === "string" ? post.permalink_url : undefined,
+  const stats: SocialStats = {
+    likes: summaryCount(post.reactions),
+    comments: summaryCount(post.comments),
+    shares: Number((post.shares as { count?: number } | undefined)?.count ?? 0),
+    fetchedAt: new Date().toISOString(),
   };
+  // Vues/portée d'un post photo/texte/galerie : post_media_view et post_total_media_view_unique
+  // (remplaçants de post_impressions depuis juin 2026, cf. IR2F). Meta renvoie parfois une liste
+  // vide (post trop récent, reel) — on laisse alors les vues non renseignées plutôt qu'à 0.
+  try {
+    const insights = await graphFetch(`/${postId}/insights`, {
+      metric: "post_media_view,post_total_media_view_unique",
+      access_token: accessToken,
+    });
+    stats.views = extractInsightMetric(insights.data, "post_media_view");
+    stats.reach = extractInsightMetric(insights.data, "post_total_media_view_unique");
+  } catch {
+    // Les vues sont un bonus : réactions/commentaires/partages restent à jour.
+  }
+  return { stats, permalink: typeof post.permalink_url === "string" ? post.permalink_url : undefined };
 }
 
 type InsightMetric = { name?: string; values?: { value?: number }[]; total_value?: { value?: number } };

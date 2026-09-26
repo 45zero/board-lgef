@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/supabase/database.types";
 import { signMediaStreamToken } from "@/lib/board/mediaStreamToken";
 import { getSocialAccountById } from "@/lib/social/accounts";
+import { signedJpegUrl, signedTextCardUrl } from "@/lib/social/mediaUrls";
 import {
   publishFacebookVideo,
   publishFacebookPhoto,
@@ -22,9 +23,9 @@ import {
 } from "@/lib/social/graph";
 import {
   SOCIAL_TARGETS,
+  NETWORK_KEYS,
   getNetworkEntry,
   withNetworkEntry,
-  isInstagramCompatible,
   kindFromContentTypes,
   type NetworkKey,
   type PublicationKind,
@@ -67,6 +68,10 @@ type EventFileRow = {
 };
 
 type MediaItem = { url: string; kind: "image" | "video"; contentType: string | null };
+
+function isJpeg(contentType: string | null) {
+  return /^image\/(jpe?g|pjpeg)$/i.test(contentType ?? "");
+}
 
 export async function loadPublication(client: Client, id: string): Promise<PublicationRow> {
   const { data, error } = await client
@@ -164,13 +169,25 @@ export async function publishPublicationToSocial(
 
       try {
         if (target.plateforme === "INSTAGRAM") {
-          if (items.length === 0) throw new Error("Instagram exige au moins une photo ou une vidéo.");
-          if (items.some((i) => !isInstagramCompatible(i.contentType))) throw new Error("Instagram n'accepte que les vidéos et les photos JPEG.");
+          // Post texte : Instagram exige un média — on publie un visuel généré à partir du texte.
+          if (items.length === 0) {
+            if (!caption.trim()) throw new Error("Le texte de la publication est vide.");
+            const { mediaId } = await publishInstagramMedia(account.externalId, account.accessToken, {
+              url: signedTextCardUrl(caption),
+              caption,
+              kind: "image",
+            });
+            return { key, entry: { published: true, at, by, postId: mediaId, mediaType: "text" } };
+          }
+          // Instagram n'accepte que le JPEG : les autres images (PNG, WebP…) passent par la conversion.
+          const igItems = items.slice(0, 10).map((i) =>
+            i.kind === "image" && !isJpeg(i.contentType) ? { ...i, url: signedJpegUrl(i.url) } : i
+          );
           const { mediaId } =
-            items.length > 1
-              ? await publishInstagramCarousel(account.externalId, account.accessToken, { items: items.slice(0, 10), caption })
-              : await publishInstagramMedia(account.externalId, account.accessToken, { url: items[0].url, caption, kind: items[0].kind });
-          return { key, entry: { published: true, at, by, postId: mediaId, mediaType: items.length > 1 ? "gallery" : items[0].kind } };
+            igItems.length > 1
+              ? await publishInstagramCarousel(account.externalId, account.accessToken, { items: igItems, caption })
+              : await publishInstagramMedia(account.externalId, account.accessToken, { url: igItems[0].url, caption, kind: igItems[0].kind });
+          return { key, entry: { published: true, at, by, postId: mediaId, mediaType: igItems.length > 1 ? "gallery" : igItems[0].kind } };
         }
 
         if (items.length === 0) {
@@ -415,7 +432,11 @@ export async function deletePublicationPosts(client: Client, publicationId: stri
 
   const deleted = results.filter((r) => r.ok).map((r) => r.key);
   if (deleted.length > 0) {
-    await savePublishInfo(client, pub, (current) => deleted.reduce((acc, key) => withNetworkEntry(acc, key, undefined), current));
+    const next = await savePublishInfo(client, pub, (current) => deleted.reduce((acc, key) => withNetworkEntry(acc, key, undefined), current));
+    // Plus en ligne nulle part : la publication quitte « Publiés » et revient dans « À publier ».
+    if (!NETWORK_KEYS.some((k) => getNetworkEntry(next, k)?.published)) {
+      await client.from("media_publications").update({ status: "to_publish", published_at: null }).eq("id", pub.id);
+    }
   }
   return results;
 }
