@@ -61,7 +61,7 @@ export function useEventFiles(eventId: string | undefined, canManage: boolean) {
         updated
           .slice(0, successCount)
           .filter(isPublishableMedia)
-          .forEach((f) => queueMediaForPublication(f.id, eventId));
+          .forEach((f) => queueMediaForPublication(f.id, eventId, f.content_type));
       }
       return {
         ok: successCount,

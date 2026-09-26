@@ -24,18 +24,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
     return NextResponse.json({ ok: false, error: "Données manquantes" }, { status: 400 });
   }
 
-  const { error } = await supabase.from("event_files").insert({
-    event_id: eventId,
-    filename,
-    content_type: contentType || null,
-    size_bytes: sizeBytes ?? null,
-    storage_provider: "drive",
-    drive_file_id: fileId,
-    drive_web_view_link: webViewLink ?? null,
-  });
+  const { data, error } = await supabase
+    .from("event_files")
+    .insert({
+      event_id: eventId,
+      filename,
+      content_type: contentType || null,
+      size_bytes: sizeBytes ?? null,
+      storage_provider: "drive",
+      drive_file_id: fileId,
+      drive_web_view_link: webViewLink ?? null,
+    })
+    .select("id")
+    .single();
   if (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true });
+  // L'id sert au centre de publication pour grouper les fichiers d'une nouvelle publication.
+  return NextResponse.json({ ok: true, id: data?.id });
 }

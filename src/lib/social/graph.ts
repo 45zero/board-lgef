@@ -52,6 +52,36 @@ export async function publishFacebookPhoto(pageId: string, accessToken: string, 
   return { postId: String(body.post_id ?? body.id) };
 }
 
+/** Post texte seul sur le fil d'une page Facebook. */
+export async function publishFacebookText(pageId: string, accessToken: string, { message }: { message: string }) {
+  const body = await graphFetch(`/${pageId}/feed`, { message, access_token: accessToken }, "POST");
+  return { postId: String(body.id) };
+}
+
+/**
+ * Galerie photo sur une page Facebook : chaque photo est d'abord envoyée non publiée, puis un seul
+ * post du fil les rattache (attached_media) — c'est ce qui donne un vrai album dans le fil plutôt
+ * que N posts séparés. Facebook n'accepte pas de vidéo dans attached_media.
+ */
+export async function publishFacebookGallery(pageId: string, accessToken: string, { urls, message }: { urls: string[]; message: string }) {
+  const photoIds: string[] = [];
+  for (const url of urls) {
+    const photo = await graphFetch(`/${pageId}/photos`, { url, published: "false", access_token: accessToken }, "POST");
+    photoIds.push(String(photo.id));
+  }
+  const params: Record<string, string> = { message, access_token: accessToken };
+  photoIds.forEach((id, i) => {
+    params[`attached_media[${i}]`] = JSON.stringify({ media_fbid: id });
+  });
+  const body = await graphFetch(`/${pageId}/feed`, params, "POST");
+  return { postId: String(body.id) };
+}
+
+/** Supprime un post, une vidéo ou un média (Facebook comme Instagram — même appel Graph). */
+export async function deleteGraphObject(objectId: string, accessToken: string): Promise<void> {
+  await graphFetch(`/${objectId}`, { access_token: accessToken }, "DELETE");
+}
+
 // Une image se traite en quelques secondes ; une vidéo (Reel) de 30s à 2min côté Meta. Le budget
 // vidéo (6 × 8s) tient sous le maxDuration de 60s déclaré sur src/app/page.tsx.
 const INSTAGRAM_IMAGE_POLL = { attempts: 5, delayMs: 1500 };
@@ -83,6 +113,42 @@ export async function publishInstagramMedia(
   await waitForInstagramContainer(containerId, accessToken, kind === "video" ? INSTAGRAM_VIDEO_POLL : INSTAGRAM_IMAGE_POLL);
 
   const published = await graphFetch(`/${igUserId}/media_publish`, { creation_id: containerId, access_token: accessToken }, "POST");
+  return { mediaId: String(published.id) };
+}
+
+/**
+ * Carrousel Instagram (2 à 10 médias, photos JPEG et/ou vidéos) : un conteneur enfant par média,
+ * puis un conteneur CAROUSEL qui les regroupe avec la légende, puis media_publish.
+ */
+export async function publishInstagramCarousel(
+  igUserId: string,
+  accessToken: string,
+  { items, caption }: { items: { url: string; kind: "image" | "video" }[]; caption: string }
+) {
+  if (items.length < 2 || items.length > 10) throw new Error("Un carrousel Instagram contient de 2 à 10 médias.");
+
+  const children: string[] = [];
+  for (const item of items) {
+    const params: Record<string, string> =
+      item.kind === "video"
+        ? { media_type: "VIDEO", video_url: item.url, is_carousel_item: "true", access_token: accessToken }
+        : { image_url: item.url, is_carousel_item: "true", access_token: accessToken };
+    const child = await graphFetch(`/${igUserId}/media`, params, "POST");
+    children.push(String(child.id));
+  }
+  const hasVideo = items.some((i) => i.kind === "video");
+  await Promise.all(
+    children.map((id) => waitForInstagramContainer(id, accessToken, hasVideo ? INSTAGRAM_VIDEO_POLL : INSTAGRAM_IMAGE_POLL))
+  );
+
+  const container = await graphFetch(
+    `/${igUserId}/media`,
+    { media_type: "CAROUSEL", children: children.join(","), caption, access_token: accessToken },
+    "POST"
+  );
+  await waitForInstagramContainer(String(container.id), accessToken, INSTAGRAM_IMAGE_POLL);
+
+  const published = await graphFetch(`/${igUserId}/media_publish`, { creation_id: String(container.id), access_token: accessToken }, "POST");
   return { mediaId: String(published.id) };
 }
 

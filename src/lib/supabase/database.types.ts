@@ -169,8 +169,8 @@ export type Database = {
       media_publications: {
         Row: {
           id: string
-          event_file_id: string
-          event_id: string
+          event_file_id: string | null
+          event_id: string | null
           status: string
           scheduled_at: string | null
           caption: string | null
@@ -178,11 +178,17 @@ export type Database = {
           created_by: string | null
           created_at: string
           published_at: string | null
+          kind: string | null
+          file_ids: string[]
+          media: Json
+          title: string | null
+          category: string | null
+          publish_info: Json | null
         }
         Insert: {
           id?: string
-          event_file_id: string
-          event_id: string
+          event_file_id?: string | null
+          event_id?: string | null
           status?: string
           scheduled_at?: string | null
           caption?: string | null
@@ -190,11 +196,17 @@ export type Database = {
           created_by?: string | null
           created_at?: string
           published_at?: string | null
+          kind?: string | null
+          file_ids?: string[]
+          media?: Json
+          title?: string | null
+          category?: string | null
+          publish_info?: Json | null
         }
         Update: {
           id?: string
-          event_file_id?: string
-          event_id?: string
+          event_file_id?: string | null
+          event_id?: string | null
           status?: string
           scheduled_at?: string | null
           caption?: string | null
@@ -202,6 +214,12 @@ export type Database = {
           created_by?: string | null
           created_at?: string
           published_at?: string | null
+          kind?: string | null
+          file_ids?: string[]
+          media?: Json
+          title?: string | null
+          category?: string | null
+          publish_info?: Json | null
         }
         Relationships: []
       }

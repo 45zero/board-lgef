@@ -1,37 +1,13 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import type { Json } from "@/lib/supabase/database.types";
-import { getDriveStreamUrl } from "@/app/actions/media-stream";
-import { publishSocial, type SocialPublishResult } from "@/app/actions/social";
-import { SOCIAL_TARGETS, type FacebookRegion, type SocialStats, type SocialTargetKey } from "@/lib/social/targets";
+import { publishSocial } from "@/app/actions/social";
+import { ensureFilePublication, publishPublicationToYoutube } from "@/lib/board/mediaPublications";
+import { describeFailures, type FacebookRegion, type PublishInfo, type StandaloneMedia } from "@/lib/social/targets";
 
 const BUCKET = "event-files";
 
-export interface PublishTarget {
-  published: boolean;
-  at?: string;
-  by?: { first_name: string | null; last_name: string | null } | null;
-}
-
-/**
- * Publication Facebook/Instagram : ids Meta (vidéo pour une vidéo Facebook, post/média sinon) et
- * dernières stats connues. Les publications faites par l'ancienne Edge Function n'ont que
- * `published`/`at` — leur id est retrouvé au premier rafraîchissement des stats.
- */
-export interface SocialPublishTarget extends PublishTarget {
-  videoId?: string;
-  postId?: string;
-  permalink?: string;
-  mediaType?: "video" | "image";
-  stats?: SocialStats;
-}
-
-export interface PublishInfo {
-  youtube?: PublishTarget & { videoId?: string; title?: string };
-  facebook?: Partial<Record<FacebookRegion, SocialPublishTarget>>;
-  instagram?: SocialPublishTarget;
-}
+export type { PublishTarget, SocialPublishTarget, PublishInfo } from "@/lib/social/targets";
 
 export interface EventFile {
   id: string;
@@ -76,9 +52,11 @@ export async function listEventFiles(eventId: string): Promise<EventFile[]> {
   return (data as unknown as EventFile[]) ?? [];
 }
 
+export type UploadResult = { ok: boolean; name: string; error?: string; id?: string };
+
 async function uploadEventFilesToSupabase(eventId: string, files: File[]) {
   const supabase = createClient();
-  const results: { ok: boolean; name: string; error?: string }[] = [];
+  const results: UploadResult[] = [];
   for (const file of files) {
     const objectPath = `${eventId}/${crypto.randomUUID()}_${slugifyFilename(file.name)}`;
     const { error: uploadError } = await supabase.storage
@@ -88,20 +66,24 @@ async function uploadEventFilesToSupabase(eventId: string, files: File[]) {
       results.push({ ok: false, name: file.name, error: uploadError.message });
       continue;
     }
-    const { error: insertError } = await supabase.from("event_files").insert({
-      event_id: eventId,
-      path: objectPath,
-      filename: file.name,
-      content_type: file.type || null,
-      size_bytes: file.size,
-      storage_provider: "supabase",
-    });
+    const { data: inserted, error: insertError } = await supabase
+      .from("event_files")
+      .insert({
+        event_id: eventId,
+        path: objectPath,
+        filename: file.name,
+        content_type: file.type || null,
+        size_bytes: file.size,
+        storage_provider: "supabase",
+      })
+      .select("id")
+      .single();
     if (insertError) {
       await supabase.storage.from(BUCKET).remove([objectPath]).catch(() => {});
       results.push({ ok: false, name: file.name, error: insertError.message });
       continue;
     }
-    results.push({ ok: true, name: file.name });
+    results.push({ ok: true, name: file.name, id: inserted?.id });
   }
   return results;
 }
@@ -115,7 +97,7 @@ const CHUNK_SIZE = 3 * 1024 * 1024; // 3 Mio — multiple de 256 Kio (requis par
  * chaque morceau à la session resumable Drive côté serveur.
  */
 async function putFileToDriveViaRelay(
-  eventId: string,
+  chunkEndpoint: string,
   uploadUrl: string,
   file: File
 ): Promise<{ id: string; webViewLink?: string }> {
@@ -123,7 +105,7 @@ async function putFileToDriveViaRelay(
   while (offset < file.size) {
     const end = Math.min(offset + CHUNK_SIZE, file.size);
     const chunk = file.slice(offset, end);
-    const res = await fetch(`/api/events/${eventId}/attachments/drive/chunk`, {
+    const res = await fetch(chunkEndpoint, {
       method: "PUT",
       headers: {
         "X-Upload-Url": uploadUrl,
@@ -146,7 +128,7 @@ async function putFileToDriveViaRelay(
 }
 
 async function uploadEventFilesToDrive(eventId: string, files: File[]) {
-  const results: { ok: boolean; name: string; error?: string }[] = [];
+  const results: UploadResult[] = [];
   for (const file of files) {
     try {
       const initRes = await fetch(`/api/events/${eventId}/attachments/drive`, {
@@ -165,7 +147,7 @@ async function uploadEventFilesToDrive(eventId: string, files: File[]) {
         continue;
       }
 
-      const driveFile = await putFileToDriveViaRelay(eventId, initJson.uploadUrl, file);
+      const driveFile = await putFileToDriveViaRelay(`/api/events/${eventId}/attachments/drive/chunk`, initJson.uploadUrl, file);
 
       const confirmRes = await fetch(`/api/events/${eventId}/attachments/drive/confirm`, {
         method: "POST",
@@ -183,7 +165,7 @@ async function uploadEventFilesToDrive(eventId: string, files: File[]) {
         results.push({ ok: false, name: file.name, error: confirmJson.error ?? "Échec de l'enregistrement." });
         continue;
       }
-      results.push({ ok: true, name: file.name });
+      results.push({ ok: true, name: file.name, id: confirmJson.id });
     } catch (e) {
       results.push({ ok: false, name: file.name, error: e instanceof Error ? e.message : "Erreur réseau." });
     }
@@ -199,6 +181,38 @@ async function uploadEventFilesToDrive(eventId: string, files: File[]) {
  */
 export async function uploadEventFiles(eventId: string, files: File[]) {
   return uploadEventFilesToDrive(eventId, files);
+}
+
+/**
+ * Médias d'une publication autonome (créée depuis le centre, sans événement) : Drive du board,
+ * dossier « LGEF Drive / Publications / AAAA / MM - Mois ». Pas de repli Supabase Storage — ses
+ * règles d'accès exigent un événement dans le chemin du fichier.
+ */
+export async function uploadStandaloneMedia(files: File[]): Promise<StandaloneMedia[]> {
+  const media: StandaloneMedia[] = [];
+  for (const file of files) {
+    const initRes = await fetch("/api/publications/drive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: file.name, mimeType: file.type }),
+    });
+    const initJson = await initRes.json();
+    if (!initRes.ok || !initJson.ok) {
+      throw new Error(
+        initJson.reason === "no_drive"
+          ? "Aucun Drive de board configuré (Réglages) — impossible d'héberger les médias d'une publication sans événement."
+          : initJson.error ?? `Échec de l'envoi de ${file.name}.`
+      );
+    }
+    const driveFile = await putFileToDriveViaRelay("/api/publications/drive/chunk", initJson.uploadUrl, file);
+    media.push({
+      drive_file_id: driveFile.id,
+      filename: file.name,
+      content_type: file.type || null,
+      web_view_link: driveFile.webViewLink ?? null,
+    });
+  }
+  return media;
 }
 
 export async function deleteEventFile(file: { id: string; path: string | null }) {
@@ -234,82 +248,19 @@ export async function createEventFileShareUrl(path: string) {
   return data.signedUrl;
 }
 
-/** Lecture-modification-écriture sûre : relit toujours publish_info avant de le patcher. */
-export async function updatePublishInfo(fileId: string, updater: (current: PublishInfo) => PublishInfo) {
-  const supabase = createClient();
-  const { data: current } = await supabase.from("event_files").select("publish_info").eq("id", fileId).single();
-  const next = updater((current?.publish_info as PublishInfo | null) ?? {});
-  await supabase.from("event_files").update({ publish_info: next as unknown as Json }).eq("id", fileId);
-  return next;
-}
-
 /**
- * Publication réelle — appelle les Edge Functions déjà en production sur ce même
- * projet Supabase (calendrier-lgef). Poste effectivement sur la chaîne YouTube /
- * les pages Facebook publiques de la fédération : ne jamais appeler sans
+ * Publication depuis l'onglet Fichiers d'un événement — passe par la publication « un seul
+ * fichier » de ce média (créée au besoin), comme le centre de publication : même source de vérité
+ * pour les stats. Publie réellement sur les comptes publics de la ligue : ne jamais appeler sans
  * confirmation explicite de l'utilisateur.
  */
-async function getPublishableVideoUrl(file: EventFile): Promise<string | null> {
-  if (file.storage_provider === "drive" && file.drive_file_id) {
-    return getDriveStreamUrl(file.event_id, file.drive_file_id);
-  }
-  if (file.path) return createEventFileUrl(file.path);
-  return null;
-}
-
 export async function publishToYoutube(
   file: EventFile,
-  { title, description }: { title: string; description?: string },
+  meta: { title: string; description?: string },
   by: { first_name: string | null; last_name: string | null } | null
 ) {
-  const supabase = createClient();
-  const videoUrl = await getPublishableVideoUrl(file);
-  if (!videoUrl) throw new Error("Impossible de générer l'URL de la vidéo.");
-
-  const { data, error } = await supabase.functions.invoke("publish-youtube", {
-    body: { videoUrl, title, description: description ?? "" },
-  });
-  if (error || !data?.success) {
-    throw new Error(data?.error ?? error?.message ?? "Échec de la publication YouTube.");
-  }
-
-  return updatePublishInfo(file.id, (current) => ({
-    ...current,
-    youtube: {
-      published: true,
-      videoId: data.youtube?.videoId,
-      title,
-      at: data.youtube?.at ?? new Date().toISOString(),
-      by,
-    },
-  }));
-}
-
-/**
- * Publication Facebook/Instagram via la Graph API côté serveur (src/app/actions/social.ts) — plus
- * via l'Edge Function publish-facebook, qui ne renvoyait pas les ids nécessaires aux stats.
- * Renvoie un résultat par cible : un échec sur une page n'annule pas les autres.
- */
-export async function publishToSocial(
-  file: EventFile,
-  targets: { key: SocialTargetKey; caption: string }[],
-  by: { first_name: string | null; last_name: string | null } | null
-): Promise<SocialPublishResult[]> {
-  if (targets.length === 0) return [];
-  return publishSocial(file.id, targets, by);
-}
-
-/** Libellé lisible des échecs d'une publication multi-cibles (null si tout est passé). */
-export function describeSocialFailures(results: SocialPublishResult[]): string | null {
-  const failed = results.filter((r) => !r.ok);
-  if (failed.length === 0) return null;
-  return failed
-    .map((r) => {
-      const t = SOCIAL_TARGETS.find((x) => x.key === r.key);
-      const name = t ? `${t.plateforme === "INSTAGRAM" ? "Instagram" : "Facebook"} ${t.label}` : r.key;
-      return `${name} : ${r.error ?? "échec"}`;
-    })
-    .join("\n");
+  const publicationId = await ensureFilePublication(file);
+  await publishPublicationToYoutube({ id: publicationId, files: [file], media: [] }, meta, by);
 }
 
 export async function publishToFacebook(
@@ -320,9 +271,11 @@ export async function publishToFacebook(
   const targets = (Object.entries(selection) as [FacebookRegion, { enabled: boolean; message: string } | undefined][])
     .filter(([, sel]) => sel?.enabled)
     .map(([key, sel]) => ({ key, caption: sel!.message }));
+  if (targets.length === 0) return;
 
-  const results = await publishToSocial(file, targets, by);
-  const failures = describeSocialFailures(results);
+  const publicationId = await ensureFilePublication(file);
+  const results = await publishSocial(publicationId, targets, by);
+  const failures = describeFailures(results);
   if (failures && !results.some((r) => r.ok)) throw new Error(failures);
   if (failures) alert(`Publié partiellement :\n${failures}`);
 }

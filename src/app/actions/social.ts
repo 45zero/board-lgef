@@ -1,34 +1,24 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import type { Json } from "@/lib/supabase/database.types";
-import { getDriveStreamUrl } from "@/app/actions/media-stream";
-import { getSocialAccountById } from "@/lib/social/accounts";
 import {
-  publishFacebookVideo,
-  publishFacebookPhoto,
-  publishInstagramMedia,
-  getFacebookVideoStats,
-  getFacebookPostStats,
-  getInstagramStats,
-  findFacebookVideoNear,
-  getFacebookComments,
-  getInstagramComments,
-  deleteComment,
-  type StatsResult,
-} from "@/lib/social/graph";
-import { SOCIAL_TARGETS, isInstagramCompatible, type SocialComment, type SocialTargetKey } from "@/lib/social/targets";
-import type { PublishInfo, SocialPublishTarget } from "@/lib/board/eventFiles";
+  publishPublicationToSocial,
+  refreshPublicationStats,
+  listPublicationComments,
+  deletePublicationComment,
+  deletePublicationPosts,
+} from "@/lib/social/publisher";
+import {
+  publishedNetworks,
+  type NetworkKey,
+  type PublishInfo,
+  type SocialComment,
+  type SocialPublishResult,
+  type SocialTargetKey,
+} from "@/lib/social/targets";
 
-type FileRow = {
-  id: string;
-  event_id: string;
-  path: string | null;
-  content_type: string | null;
-  storage_provider: string;
-  drive_file_id: string | null;
-  publish_info: Json | null;
-};
+// Server actions du centre de publication — fines enveloppes authentifiées autour du cœur
+// src/lib/social/publisher.ts (partagé avec le cron des publications programmées).
 
 type By = { first_name: string | null; last_name: string | null } | null;
 
@@ -41,214 +31,98 @@ async function requireUser() {
   return supabase;
 }
 
-async function loadFile(supabase: Awaited<ReturnType<typeof createClient>>, fileId: string): Promise<FileRow> {
-  const { data, error } = await supabase
-    .from("event_files")
-    .select("id, event_id, path, content_type, storage_provider, drive_file_id, publish_info")
-    .eq("id", fileId)
-    .single();
-  if (error || !data) throw new Error("Média introuvable.");
-  return data as FileRow;
-}
-
-/** Lecture-modification-écriture : relit publish_info juste avant d'écrire (une publication Instagram peut durer ~50s, un autre onglet a pu écrire entre-temps). */
-async function patchPublishInfo(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  fileId: string,
-  updater: (current: PublishInfo) => PublishInfo
-) {
-  const { data } = await supabase.from("event_files").select("publish_info").eq("id", fileId).single();
-  const next = updater((data?.publish_info as PublishInfo | null) ?? {});
-  const { error } = await supabase.from("event_files").update({ publish_info: next as unknown as Json }).eq("id", fileId);
-  if (error) throw new Error(error.message);
-  return next;
-}
-
-function getTarget(info: PublishInfo, key: SocialTargetKey): SocialPublishTarget | undefined {
-  return key === "instagram" ? info.instagram : info.facebook?.[key];
-}
-
-function withTarget(info: PublishInfo, key: SocialTargetKey, value: SocialPublishTarget): PublishInfo {
-  if (key === "instagram") return { ...info, instagram: value };
-  return { ...info, facebook: { ...info.facebook, [key]: value } };
-}
-
-/** URL publique temporaire que Meta va télécharger — lien signé Supabase Storage, ou relais signé pour un fichier Drive. */
-async function getPublicMediaUrl(supabase: Awaited<ReturnType<typeof createClient>>, file: FileRow): Promise<string> {
-  if (file.storage_provider === "drive" && file.drive_file_id) {
-    return getDriveStreamUrl(file.event_id, file.drive_file_id);
-  }
-  if (file.path) {
-    const { data } = await supabase.storage.from("event-files").createSignedUrl(file.path, 3600);
-    if (data?.signedUrl) return data.signedUrl;
-  }
-  throw new Error("Impossible de générer l'URL du média.");
-}
-
-export type SocialPublishResult = { key: SocialTargetKey; ok: boolean; error?: string };
-
-/**
- * Publie un média du board sur les pages Facebook et/ou le compte Instagram sélectionnés, en
- * appelant directement la Graph API (remplace l'Edge Function publish-facebook, qui ne renvoyait
- * pas les ids de post — indispensables pour les stats). Les cibles partent en parallèle ; un échec
- * sur l'une n'empêche pas les autres, chaque résultat est renvoyé séparément.
- */
+/** Publie sur les pages Facebook / le compte Instagram sélectionnés (un résultat par cible). */
 export async function publishSocial(
-  fileId: string,
+  publicationId: string,
   targets: { key: SocialTargetKey; caption: string }[],
   by: By
 ): Promise<SocialPublishResult[]> {
   const supabase = await requireUser();
-  const file = await loadFile(supabase, fileId);
-
-  const ct = (file.content_type ?? "").toLowerCase();
-  const kind = ct.startsWith("video") ? "video" : ct.startsWith("image") ? "image" : null;
-  if (!kind) throw new Error("Seuls les photos et les vidéos peuvent être publiés.");
-
-  const mediaUrl = await getPublicMediaUrl(supabase, file);
-  const at = new Date().toISOString();
-
-  const settled = await Promise.all(
-    targets.map(async ({ key, caption }): Promise<{ key: SocialTargetKey; entry?: SocialPublishTarget; error?: string }> => {
-      const target = SOCIAL_TARGETS.find((t) => t.key === key);
-      const account = target ? getSocialAccountById(target.accountId) : null;
-      if (!target || !account) return { key, error: "Compte non configuré (SOCIAL_ACCOUNTS_JSON)." };
-
-      try {
-        if (target.plateforme === "INSTAGRAM") {
-          if (!isInstagramCompatible(file.content_type)) throw new Error("Instagram n'accepte que les vidéos et les photos JPEG.");
-          const { mediaId } = await publishInstagramMedia(account.externalId, account.accessToken, { url: mediaUrl, caption, kind });
-          return { key, entry: { published: true, at, by, postId: mediaId, mediaType: kind } };
-        }
-        if (kind === "video") {
-          const { videoId } = await publishFacebookVideo(account.externalId, account.accessToken, { fileUrl: mediaUrl, description: caption });
-          return { key, entry: { published: true, at, by, videoId, mediaType: kind } };
-        }
-        const { postId } = await publishFacebookPhoto(account.externalId, account.accessToken, { url: mediaUrl, caption });
-        return { key, entry: { published: true, at, by, postId, mediaType: kind } };
-      } catch (e) {
-        return { key, error: e instanceof Error ? e.message : "Erreur inattendue." };
-      }
-    })
-  );
-
-  const successes = settled.filter((s) => s.entry);
-  if (successes.length > 0) {
-    await patchPublishInfo(supabase, fileId, (current) =>
-      successes.reduce((acc, s) => withTarget(acc, s.key, s.entry!), current)
-    );
-  }
-
-  return settled.map((s) => ({ key: s.key, ok: !!s.entry, error: s.error }));
+  if (targets.length === 0) return [];
+  return publishPublicationToSocial(supabase, publicationId, targets, by);
 }
 
-async function fetchTargetStats(
-  key: SocialTargetKey,
-  entry: SocialPublishTarget,
-  isVideo: boolean
-): Promise<{ entry: SocialPublishTarget; changed: boolean }> {
-  const target = SOCIAL_TARGETS.find((t) => t.key === key)!;
-  const account = getSocialAccountById(target.accountId);
-  if (!account) return { entry, changed: false };
-
-  let next = entry;
-  // Publications antérieures (Edge Function) : pas d'id enregistré — on retrouve la vidéo par sa date.
-  if (target.plateforme === "FACEBOOK" && !next.videoId && !next.postId && isVideo && next.at) {
-    const videoId = await findFacebookVideoNear(account.externalId, account.accessToken, next.at);
-    if (!videoId) return { entry, changed: false };
-    next = { ...next, videoId, mediaType: "video" };
-  }
-
-  let result: StatsResult;
-  if (target.plateforme === "INSTAGRAM") {
-    if (!next.postId) return { entry, changed: false };
-    result = await getInstagramStats(next.postId, account.accessToken);
-  } else if (next.videoId) {
-    result = await getFacebookVideoStats(account.externalId, next.videoId, account.accessToken);
-  } else if (next.postId) {
-    result = await getFacebookPostStats(next.postId, account.accessToken);
-  } else {
-    return { entry, changed: false };
-  }
-
-  return { entry: { ...next, stats: result.stats, permalink: result.permalink ?? next.permalink }, changed: true };
-}
-
-/**
- * Rafraîchit les stats Meta de chaque publication Facebook/Instagram des médias donnés et les fige
- * dans publish_info (affichage instantané ensuite, sans rappeler Meta à chaque ouverture). Une stat
- * illisible ne bloque pas les autres — on garde l'ancienne valeur.
- */
-export async function refreshSocialStats(fileIds: string[]): Promise<{ updated: number }> {
+/** Relit les stats (Facebook, Instagram, YouTube) et les fige dans publish_info. */
+export async function refreshSocialStats(publicationIds: string[]): Promise<{ updated: number; youtubeError?: string }> {
   const supabase = await requireUser();
-  let updated = 0;
-
-  await Promise.all(
-    fileIds.slice(0, 50).map(async (fileId) => {
-      const file = await loadFile(supabase, fileId).catch(() => null);
-      if (!file) return;
-      const info = (file.publish_info as PublishInfo | null) ?? {};
-      const isVideo = (file.content_type ?? "").startsWith("video");
-
-      const results = await Promise.all(
-        SOCIAL_TARGETS.map(async ({ key }) => {
-          const entry = getTarget(info, key);
-          if (!entry?.published) return null;
-          try {
-            const r = await fetchTargetStats(key, entry, isVideo);
-            return r.changed ? { key, entry: r.entry } : null;
-          } catch (e) {
-            console.error(`[social.refreshSocialStats] ${fileId}/${key}`, e);
-            return null;
-          }
-        })
-      );
-
-      const changes = results.filter((r): r is { key: SocialTargetKey; entry: SocialPublishTarget } => !!r);
-      if (changes.length === 0) return;
-      await patchPublishInfo(supabase, fileId, (current) =>
-        changes.reduce((acc, c) => withTarget(acc, c.key, { ...getTarget(acc, c.key), ...c.entry }), current)
-      );
-      updated += changes.length;
-    })
-  );
-
-  return { updated };
-}
-
-async function resolveCommentTarget(fileId: string, key: SocialTargetKey) {
-  const supabase = await requireUser();
-  const file = await loadFile(supabase, fileId);
-  const entry = getTarget((file.publish_info as PublishInfo | null) ?? {}, key);
-  const target = SOCIAL_TARGETS.find((t) => t.key === key);
-  const account = target ? getSocialAccountById(target.accountId) : null;
-  if (!target || !account) throw new Error("Compte non configuré.");
-  const objectId = entry?.videoId ?? entry?.postId;
-  if (!objectId) throw new Error("Publication introuvable sur le réseau — rafraîchissez les stats.");
-  return { plateforme: target.plateforme, objectId, account };
+  return refreshPublicationStats(supabase, publicationIds);
 }
 
 /** Commentaires lus en direct sur la plateforme (jamais stockés côté board). */
-export async function getSocialComments(fileId: string, key: SocialTargetKey): Promise<{ error: string | null; comments: SocialComment[] }> {
+export async function getSocialComments(publicationId: string, key: NetworkKey): Promise<{ error: string | null; comments: SocialComment[] }> {
   try {
-    const { plateforme, objectId, account } = await resolveCommentTarget(fileId, key);
-    const comments =
-      plateforme === "FACEBOOK"
-        ? await getFacebookComments(objectId, account.accessToken)
-        : await getInstagramComments(objectId, account.accessToken);
-    return { error: null, comments };
+    const supabase = await requireUser();
+    return { error: null, comments: await listPublicationComments(supabase, publicationId, key) };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Erreur inattendue.", comments: [] };
   }
 }
 
-/** Supprime un commentaire directement sur Facebook/Instagram — irréversible. */
-export async function deleteSocialComment(fileId: string, key: SocialTargetKey, commentId: string): Promise<{ error: string | null }> {
+/** Supprime un commentaire directement sur la plateforme — irréversible. */
+export async function deleteSocialComment(key: NetworkKey, commentId: string): Promise<{ error: string | null }> {
   try {
-    const { account } = await resolveCommentTarget(fileId, key);
-    await deleteComment(commentId, account.accessToken);
+    const supabase = await requireUser();
+    await deletePublicationComment(supabase, key, commentId);
     return { error: null };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Erreur inattendue." };
   }
+}
+
+/** Supprime la publication sur les réseaux demandés (irréversible). */
+export async function deleteSocialPosts(publicationId: string, keys: NetworkKey[]): Promise<SocialPublishResult[]> {
+  const supabase = await requireUser();
+  return deletePublicationPosts(supabase, publicationId, keys);
+}
+
+export type FilePublicationsSummary = { publicationId: string; networks: NetworkKey[] }[];
+
+/** Publications (déjà en ligne) qui contiennent ce fichier d'événement — pour proposer leur suppression des réseaux avant de supprimer le fichier. */
+export async function getPublishedForFile(eventFileId: string): Promise<FilePublicationsSummary> {
+  const supabase = await requireUser();
+  const { data } = await supabase
+    .from("media_publications")
+    .select("id, publish_info, file_ids, event_file_id")
+    .or(`event_file_id.eq.${eventFileId},file_ids.cs.{${eventFileId}}`);
+  return (data ?? [])
+    .map((p) => ({ publicationId: p.id, networks: publishedNetworks(p.publish_info as PublishInfo | null) }))
+    .filter((p) => p.networks.length > 0);
+}
+
+/**
+ * Avant la suppression d'un fichier d'événement : supprime (si demandé) ses publications des
+ * réseaux, puis le retire des galeries qui le contiennent. La publication dont il est le fichier
+ * principal disparaît ensuite d'elle-même (ON DELETE CASCADE sur event_file_id).
+ */
+export async function detachFileFromPublications(eventFileId: string, deleteFromNetworks: boolean): Promise<SocialPublishResult[]> {
+  const supabase = await requireUser();
+  const results: SocialPublishResult[] = [];
+
+  if (deleteFromNetworks) {
+    for (const { publicationId, networks } of await getPublishedForFile(eventFileId)) {
+      results.push(...(await deletePublicationPosts(supabase, publicationId, networks)));
+    }
+  }
+
+  const { data: pubs } = await supabase
+    .from("media_publications")
+    .select("id, file_ids, event_file_id")
+    .or(`event_file_id.eq.${eventFileId},file_ids.cs.{${eventFileId}}`);
+  for (const p of pubs ?? []) {
+    const remaining = (p.file_ids ?? []).filter((id: string) => id !== eventFileId);
+    // Dernier fichier de la publication : la cascade la supprimera avec le fichier.
+    if (remaining.length === 0) continue;
+    await supabase
+      .from("media_publications")
+      .update({
+        file_ids: remaining,
+        // Le fichier principal d'une galerie passe au suivant, sinon la cascade emporterait toute la galerie.
+        event_file_id: p.event_file_id === eventFileId ? remaining[0] : p.event_file_id,
+        // null = recalculé d'après le fichier restant (voir publicationKind côté client).
+        kind: remaining.length === 1 ? null : "gallery",
+      })
+      .eq("id", p.id);
+  }
+
+  return results;
 }

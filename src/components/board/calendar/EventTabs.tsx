@@ -26,6 +26,8 @@ import { useEventComments } from "@/hooks/board/useEventComments";
 import { useEventExpenses } from "@/hooks/board/useEventExpenses";
 import { useEventFiles } from "@/hooks/board/useEventFiles";
 import { getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
+import { getPublishedForFile, detachFileFromPublications } from "@/app/actions/social";
+import { describeFailures, networkLabel, type NetworkKey } from "@/lib/social/targets";
 import { REMINDER_PRESETS } from "@/hooks/board/useEventModalState";
 import type { useUserRole } from "@/hooks/board/useUserRole";
 import type { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
@@ -1024,6 +1026,70 @@ function PublishBadges({ file }: { file: EventFile }) {
   );
 }
 
+/**
+ * Confirmation de suppression d'une pièce jointe. Si le média est en ligne, propose (coché par
+ * défaut) de le supprimer aussi des réseaux ; il disparaît dans tous les cas du centre de
+ * publication (cascade en base).
+ */
+function DeleteFileDialog({
+  file,
+  networks,
+  onClose,
+  onConfirm,
+}: {
+  file: EventFile;
+  networks: NetworkKey[];
+  onClose: () => void;
+  onConfirm: (fromNetworks: boolean) => Promise<void>;
+}) {
+  const [fromNetworks, setFromNetworks] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-sm space-y-3 rounded-modal border border-line bg-card p-5 shadow-modal" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-bold text-ink">Supprimer « {file.filename} » ?</h3>
+        <p className="text-xs text-ink-3">
+          Le fichier sera retiré de l&rsquo;événement et du centre de publication.
+        </p>
+        {networks.length > 0 && (
+          <div className="space-y-2 rounded-btn border border-line p-3">
+            <p className="text-xs font-semibold text-ink-2">Ce média est en ligne sur :</p>
+            <ul className="space-y-0.5 text-xs text-ink-3">
+              {networks.map((k) => (
+                <li key={k}>• {networkLabel(k)}</li>
+              ))}
+            </ul>
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-ink">
+              <input type="checkbox" checked={fromNetworks} onChange={(e) => setFromNetworks(e.target.checked)} />
+              Supprimer aussi des réseaux (irréversible)
+            </label>
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-btn border border-line px-4 py-2 text-sm text-ink-2">
+            Annuler
+          </button>
+          <button
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onConfirm(networks.length > 0 && fromNetworks);
+              } finally {
+                setBusy(false);
+              }
+            }}
+            className="rounded-btn bg-red px-4 py-2 text-sm font-bold text-white shadow-btn-red disabled:opacity-50"
+          >
+            {busy ? "Suppression…" : "Supprimer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AttachmentRow({
   file,
   canManage,
@@ -1106,6 +1172,12 @@ export function AttachmentsField({
   const inputRef = useRef<HTMLInputElement>(null);
   const [publishingFileId, setPublishingFileId] = useState<string | null>(null);
   const publishingFile = hook.files.find((f) => f.id === publishingFileId) ?? null;
+  const [removing, setRemoving] = useState<{ file: EventFile; networks: NetworkKey[] } | null>(null);
+
+  const askRemove = async (file: EventFile) => {
+    const published = await getPublishedForFile(file.id).catch(() => []);
+    setRemoving({ file, networks: [...new Set(published.flatMap((p) => p.networks))] });
+  };
 
   return (
     <div className="space-y-2">
@@ -1118,7 +1190,7 @@ export function AttachmentsField({
           file={f}
           canManage={canManage}
           canPublish={canPublish}
-          onRemove={() => hook.removeFile(f)}
+          onRemove={() => askRemove(f)}
           onPublishClick={() => setPublishingFileId(f.id)}
         />
       ))}
@@ -1148,6 +1220,21 @@ export function AttachmentsField({
             <Paperclip size={13} /> {hook.uploading ? "Envoi…" : "Ajouter une pièce jointe (photo, vidéo)"}
           </button>
         </>
+      )}
+
+      {removing && (
+        <DeleteFileDialog
+          file={removing.file}
+          networks={removing.networks}
+          onClose={() => setRemoving(null)}
+          onConfirm={async (fromNetworks) => {
+            const results = await detachFileFromPublications(removing.file.id, fromNetworks);
+            const failures = describeFailures(results);
+            if (failures) alert(`Certaines publications n'ont pas pu être supprimées des réseaux :\n\n${failures}`);
+            await hook.removeFile(removing.file);
+            setRemoving(null);
+          }}
+        />
       )}
 
       {publishingFile && (
