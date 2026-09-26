@@ -65,6 +65,8 @@ import {
   PUBLICATION_KIND_LABELS,
   competitionTag,
   describeFailures,
+  describeWarnings,
+  normalizeInstagramUsernames,
   getNetworkEntry,
   isInstagramCompatible,
   networkLabel,
@@ -572,6 +574,8 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
     alsace: !!pub.targets.facebook?.alsace,
   });
   const [instagram, setInstagram] = useState(!!pub.targets.instagram);
+  const [igTagsInput, setIgTagsInput] = useState((pub.targets.igTags ?? []).map((u) => `@${u}`).join(" "));
+  const igTags = normalizeInstagramUsernames(igTagsInput);
   const [scheduledAt, setScheduledAt] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -594,6 +598,7 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
     youtube: canYoutube && youtube,
     facebook: canFacebook ? fb : {},
     instagram: canInstagram && instagram,
+    igTags: canInstagram && instagram ? igTags : [],
   };
 
   const persistFiles = async () => {
@@ -624,10 +629,12 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
       ];
       if (socialTargets.length > 0) {
         try {
-          const results = await publishSocial(pub.id, socialTargets, me);
+          const results = await publishSocial(pub.id, socialTargets, me, { igUserTags: targets.igTags });
           anyOk ||= results.some((r) => r.ok);
           const socialFailures = describeFailures(results);
           if (socialFailures) failures.push(socialFailures);
+          const warnings = describeWarnings(results);
+          if (warnings) failures.push(`Attention — ${warnings}`);
         } catch (e) {
           failures.push(e instanceof Error ? e.message : "Échec de la publication Facebook/Instagram.");
         }
@@ -739,6 +746,24 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
             setInstagram,
             igReason,
             <span className="text-xs font-normal text-ink-3">@lgefofficiel</span>
+          )}
+
+          {canInstagram && instagram && (videos < count || count === 0) && (
+            <div className="space-y-1 rounded-btn border border-line px-3 py-2">
+              <label className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+                Identifier des comptes Instagram sur la photo
+              </label>
+              <input
+                value={igTagsInput}
+                onChange={(e) => setIgTagsInput(e.target.value)}
+                placeholder="@club_exemple @autre_compte"
+                className="w-full rounded-btn border border-line px-2.5 py-1.5 text-sm outline-none"
+              />
+              <p className="text-[10px] text-ink-4">
+                {igTags.length > 0 ? `${igTags.length} compte${igTags.length > 1 ? "s" : ""} identifié${igTags.length > 1 ? "s" : ""} — ` : ""}
+                notifiés sur Instagram (comptes publics). Pour une simple mention, écrivez aussi @compte dans le texte.
+              </p>
+            </div>
           )}
 
           <div className="flex items-center gap-2 rounded-btn border border-dashed border-line px-3 py-2 text-sm font-semibold text-ink-4 opacity-60">

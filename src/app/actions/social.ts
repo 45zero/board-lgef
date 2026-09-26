@@ -35,11 +35,12 @@ async function requireUser() {
 export async function publishSocial(
   publicationId: string,
   targets: { key: SocialTargetKey; caption: string }[],
-  by: By
+  by: By,
+  options: { igUserTags?: string[] } = {}
 ): Promise<SocialPublishResult[]> {
   const supabase = await requireUser();
   if (targets.length === 0) return [];
-  return publishPublicationToSocial(supabase, publicationId, targets, by);
+  return publishPublicationToSocial(supabase, publicationId, targets, by, options);
 }
 
 /** Relit les stats (Facebook, Instagram, YouTube) et les fige dans publish_info. */

@@ -87,7 +87,25 @@ export const NETWORK_KEYS: NetworkKey[] = ["youtube", ...SOCIAL_TARGETS.map((t) 
 
 export type SocialComment = { id: string; author: string; text: string; createdAt: string };
 
-export type SocialPublishResult = { key: NetworkKey; ok: boolean; error?: string };
+/** `warning` : publié, mais avec une réserve (ex. identifications Instagram ignorées). */
+export type SocialPublishResult = { key: NetworkKey; ok: boolean; error?: string; warning?: string };
+
+/** Avertissements des publications réussies (null s'il n'y en a pas). */
+export function describeWarnings(results: SocialPublishResult[]): string | null {
+  const warned = results.filter((r) => r.ok && r.warning);
+  if (warned.length === 0) return null;
+  return warned.map((r) => `${networkLabel(r.key)} : ${r.warning}`).join("\n");
+}
+
+/**
+ * Comptes Instagram à identifier sur les photos, saisis librement (« @club, @autre club… ») :
+ * @ retiré, minuscules, format Instagram (lettres, chiffres, point, tiret bas ; 30 max), sans doublon.
+ */
+export function normalizeInstagramUsernames(input: string | string[]): string[] {
+  const raw = Array.isArray(input) ? input : input.split(/[\s,;]+/);
+  const out = raw.map((u) => u.trim().replace(/^@+/, "").toLowerCase()).filter((u) => /^[a-z0-9._]{1,30}$/.test(u));
+  return [...new Set(out)].slice(0, 20);
+}
 
 /** Libellé lisible des échecs d'une opération multi-réseaux (null si tout est passé). */
 export function describeFailures(results: SocialPublishResult[]): string | null {

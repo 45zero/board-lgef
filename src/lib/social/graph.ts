@@ -98,15 +98,30 @@ async function waitForInstagramContainer(containerId: string, accessToken: strin
 }
 
 /** Image (JPEG) ou Reel sur le compte Instagram pro — mécanique conteneur → attente → media_publish. */
+/**
+ * Identifications de comptes sur une photo Instagram (`user_tags`) : positions réparties sur le bas
+ * de l'image (x, y entre 0 et 1) — l'API exige des coordonnées, sans intérêt ici puisque la
+ * personne identifiée est notifiée quel que soit l'endroit. Photos uniquement.
+ */
+function userTagsParam(usernames: string[] | undefined): Record<string, string> {
+  if (!usernames?.length) return {};
+  const tags = usernames.slice(0, 20).map((username, i) => ({
+    username,
+    x: Number(((i + 1) / (Math.min(usernames.length, 20) + 1)).toFixed(3)),
+    y: 0.9,
+  }));
+  return { user_tags: JSON.stringify(tags) };
+}
+
 export async function publishInstagramMedia(
   igUserId: string,
   accessToken: string,
-  { url, caption, kind }: { url: string; caption: string; kind: "image" | "video" }
+  { url, caption, kind, userTags }: { url: string; caption: string; kind: "image" | "video"; userTags?: string[] }
 ) {
   const params: Record<string, string> =
     kind === "video"
       ? { media_type: "REELS", video_url: url, caption, access_token: accessToken }
-      : { image_url: url, caption, access_token: accessToken };
+      : { image_url: url, caption, access_token: accessToken, ...userTagsParam(userTags) };
   const container = await graphFetch(`/${igUserId}/media`, params, "POST");
   const containerId = String(container.id);
 
@@ -123,7 +138,7 @@ export async function publishInstagramMedia(
 export async function publishInstagramCarousel(
   igUserId: string,
   accessToken: string,
-  { items, caption }: { items: { url: string; kind: "image" | "video" }[]; caption: string }
+  { items, caption, userTags }: { items: { url: string; kind: "image" | "video" }[]; caption: string; userTags?: string[] }
 ) {
   if (items.length < 2 || items.length > 10) throw new Error("Un carrousel Instagram contient de 2 à 10 médias.");
 
@@ -132,7 +147,7 @@ export async function publishInstagramCarousel(
     const params: Record<string, string> =
       item.kind === "video"
         ? { media_type: "VIDEO", video_url: item.url, is_carousel_item: "true", access_token: accessToken }
-        : { image_url: item.url, is_carousel_item: "true", access_token: accessToken };
+        : { image_url: item.url, is_carousel_item: "true", access_token: accessToken, ...userTagsParam(userTags) };
     const child = await graphFetch(`/${igUserId}/media`, params, "POST");
     children.push(String(child.id));
   }

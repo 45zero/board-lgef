@@ -61,7 +61,9 @@ export async function GET(request: Request) {
 
     const results: SocialPublishResult[] = [];
     try {
-      if (social.length > 0) results.push(...(await publishPublicationToSocial(client, pub.id, social, author)));
+      if (social.length > 0) {
+        results.push(...(await publishPublicationToSocial(client, pub.id, social, author, { igUserTags: targets.igTags })));
+      }
       if (targets.youtube) results.push(await publishPublicationToYoutubeServer(client, pub.id, author));
     } catch (e) {
       results.push({ key: "lorraine", ok: false, error: e instanceof Error ? e.message : "Erreur inattendue." });

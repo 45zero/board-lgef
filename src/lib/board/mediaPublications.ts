@@ -19,6 +19,8 @@ export interface PublicationTargets {
   facebook?: { lorraine?: boolean; champagne_ardenne?: boolean; alsace?: boolean };
   tiktok?: boolean;
   instagram?: boolean;
+  /** Comptes Instagram identifiés sur les photos (sans @). */
+  igTags?: string[];
 }
 
 /**

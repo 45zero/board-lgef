@@ -27,6 +27,7 @@ import {
   getNetworkEntry,
   withNetworkEntry,
   kindFromContentTypes,
+  normalizeInstagramUsernames,
   type NetworkKey,
   type PublicationKind,
   type PublishInfo,
@@ -154,40 +155,49 @@ export async function publishPublicationToSocial(
   client: Client,
   publicationId: string,
   targets: { key: SocialTargetKey; caption: string }[],
-  by: By
+  by: By,
+  options: { igUserTags?: string[] } = {}
 ): Promise<SocialPublishResult[]> {
   const pub = await loadPublication(client, publicationId);
+  const igTags = normalizeInstagramUsernames(options.igUserTags ?? []);
   const items = await resolveMediaItems(client, pub);
   const kind: PublicationKind = pub.kind ?? kindFromContentTypes(items.map((i) => i.contentType));
   const at = new Date().toISOString();
 
   const settled = await Promise.all(
-    targets.map(async ({ key, caption }): Promise<{ key: SocialTargetKey; entry?: SocialPublishTarget; error?: string }> => {
+    targets.map(async ({ key, caption }): Promise<{ key: SocialTargetKey; entry?: SocialPublishTarget; error?: string; warning?: string }> => {
       const target = SOCIAL_TARGETS.find((t) => t.key === key);
       const account = target ? getSocialAccountById(target.accountId) : null;
       if (!target || !account) return { key, error: "Compte non configuré (SOCIAL_ACCOUNTS_JSON)." };
 
       try {
         if (target.plateforme === "INSTAGRAM") {
+          if (items.length === 0 && !caption.trim()) throw new Error("Le texte de la publication est vide.");
           // Post texte : Instagram exige un média — on publie un visuel généré à partir du texte.
-          if (items.length === 0) {
-            if (!caption.trim()) throw new Error("Le texte de la publication est vide.");
-            const { mediaId } = await publishInstagramMedia(account.externalId, account.accessToken, {
-              url: signedTextCardUrl(caption),
-              caption,
-              kind: "image",
-            });
-            return { key, entry: { published: true, at, by, postId: mediaId, mediaType: "text" } };
-          }
-          // Instagram n'accepte que le JPEG : les autres images (PNG, WebP…) passent par la conversion.
-          const igItems = items.slice(0, 10).map((i) =>
-            i.kind === "image" && !isJpeg(i.contentType) ? { ...i, url: signedJpegUrl(i.url) } : i
-          );
-          const { mediaId } =
+          // Sinon, Instagram n'accepte que le JPEG : les autres images (PNG, WebP…) passent par la conversion.
+          const igItems =
+            items.length === 0
+              ? [{ url: signedTextCardUrl(caption), kind: "image" as const, contentType: "image/jpeg" }]
+              : items.slice(0, 10).map((i) => (i.kind === "image" && !isJpeg(i.contentType) ? { ...i, url: signedJpegUrl(i.url) } : i));
+          const publishIg = (userTags?: string[]) =>
             igItems.length > 1
-              ? await publishInstagramCarousel(account.externalId, account.accessToken, { items: igItems, caption })
-              : await publishInstagramMedia(account.externalId, account.accessToken, { url: igItems[0].url, caption, kind: igItems[0].kind });
-          return { key, entry: { published: true, at, by, postId: mediaId, mediaType: igItems.length > 1 ? "gallery" : igItems[0].kind } };
+              ? publishInstagramCarousel(account.externalId, account.accessToken, { items: igItems, caption, userTags })
+              : publishInstagramMedia(account.externalId, account.accessToken, { url: igItems[0].url, caption, kind: igItems[0].kind, userTags });
+
+          let warning: string | undefined;
+          let mediaId: string;
+          const tags = igTags.length > 0 && igItems.some((i) => i.kind === "image") ? igTags : undefined;
+          try {
+            ({ mediaId } = await publishIg(tags));
+          } catch (e) {
+            if (!tags) throw e;
+            // Un compte identifié introuvable/privé fait échouer tout le conteneur : on republie sans
+            // identification plutôt que de perdre la publication, et on le signale.
+            ({ mediaId } = await publishIg(undefined));
+            warning = `identifications ignorées (${e instanceof Error ? e.message : "compte introuvable"})`;
+          }
+          const mediaType = items.length === 0 ? "text" : igItems.length > 1 ? "gallery" : igItems[0].kind;
+          return { key, warning, entry: { published: true, at, by, postId: mediaId, mediaType } };
         }
 
         if (items.length === 0) {
@@ -218,7 +228,7 @@ export async function publishPublicationToSocial(
   if (successes.length > 0) {
     await savePublishInfo(client, pub, (current) => successes.reduce((acc, s) => withNetworkEntry(acc, s.key, s.entry!), current));
   }
-  return settled.map((s) => ({ key: s.key, ok: !!s.entry, error: s.error }));
+  return settled.map((s) => ({ key: s.key, ok: !!s.entry, error: s.error, warning: s.warning }));
 }
 
 /* ---------- YouTube (Edge Function youtube-manage) ---------- */
