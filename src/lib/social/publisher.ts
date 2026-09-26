@@ -19,6 +19,7 @@ import {
   getInstagramComments,
   deleteComment,
   deleteGraphObject,
+  setCommentHidden,
   type StatsResult,
 } from "@/lib/social/graph";
 import {
@@ -389,9 +390,8 @@ function metaTarget(key: SocialTargetKey) {
   return { target, account };
 }
 
-export async function listPublicationComments(client: Client, publicationId: string, key: NetworkKey): Promise<SocialComment[]> {
-  const pub = await loadPublication(client, publicationId);
-  const entry = getNetworkEntry(pub.publish_info, key);
+/** Commentaires d'une publication sur un réseau, lus en direct sur la plateforme. */
+export async function listNetworkComments(client: Client, key: NetworkKey, entry: SocialPublishTarget | undefined): Promise<SocialComment[]> {
   if (key === "youtube") {
     if (!entry?.videoId) throw new Error("Vidéo YouTube introuvable.");
     return (await invokeYoutube<{ comments: SocialComment[] }>(client, { action: "comments", videoId: entry.videoId })).comments ?? [];
@@ -404,6 +404,21 @@ export async function listPublicationComments(client: Client, publicationId: str
     : getInstagramComments(objectId, account.accessToken);
 }
 
+export async function listPublicationComments(client: Client, publicationId: string, key: NetworkKey): Promise<SocialComment[]> {
+  const pub = await loadPublication(client, publicationId);
+  return listNetworkComments(client, key, getNetworkEntry(pub.publish_info, key));
+}
+
+/** Masque (retire de la vue publique) ou rétablit un commentaire — YouTube : « retenu pour examen ». */
+export async function setNetworkCommentHidden(client: Client, key: NetworkKey, commentId: string, hidden: boolean): Promise<void> {
+  if (key === "youtube") {
+    await invokeYoutube(client, { action: "moderate_comment", commentId, status: hidden ? "heldForReview" : "published" });
+    return;
+  }
+  const { target, account } = metaTarget(key);
+  await setCommentHidden(target.plateforme, commentId, hidden, account.accessToken);
+}
+
 export async function deletePublicationComment(client: Client, key: NetworkKey, commentId: string): Promise<void> {
   if (key === "youtube") {
     await invokeYoutube(client, { action: "delete_comment", commentId });
@@ -414,6 +429,17 @@ export async function deletePublicationComment(client: Client, key: NetworkKey, 
 }
 
 /* ---------- Suppression sur les réseaux ---------- */
+
+/** Traduit les erreurs techniques connues en consigne compréhensible. */
+function friendlyNetworkError(key: NetworkKey, message: string): string {
+  if (key === "youtube" && /insufficient authentication scopes/i.test(message)) {
+    return "le jeton YouTube n'a pas encore les droits de gestion (youtube.force-ssl) — à régénérer, puis réessayer.";
+  }
+  if (key === "instagram" && /permission/i.test(message)) {
+    return "le token Instagram n'a pas le droit de supprimer (instagram_manage_contents) — supprimez le post dans l'app Instagram.";
+  }
+  return message;
+}
 
 /**
  * Supprime la publication sur les réseaux demandés (irréversible) et retire les entrées
@@ -438,7 +464,10 @@ export async function deletePublicationPosts(client: Client, publicationId: stri
         }
         return { key, ok: true };
       } catch (e) {
-        return { key, ok: false, error: e instanceof Error ? e.message : "Erreur inattendue." };
+        const message = e instanceof Error ? e.message : "Erreur inattendue.";
+        // Déjà supprimé sur la plateforme (à la main, par exemple) : le but est atteint.
+        if (/does not exist|not found|videoNotFound|cannot be loaded/i.test(message)) return { key, ok: true };
+        return { key, ok: false, error: friendlyNetworkError(key, message) };
       }
     })
   );

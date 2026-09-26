@@ -58,6 +58,9 @@ import {
   deleteSocialComment,
   deleteSocialPosts,
   resolveFacebookMention,
+  listFlaggedComments,
+  moderateComment,
+  type ModerationRow,
 } from "@/app/actions/social";
 import {
   FACEBOOK_REGIONS,
@@ -118,6 +121,12 @@ function publishedEntries(pub: MediaPublication) {
 function isStale(entry: SocialPublishTarget) {
   const fetchedAt = entry.stats?.fetchedAt ? Date.parse(entry.stats.fetchedAt) : 0;
   return Date.now() - fetchedAt > STATS_STALE_MS;
+}
+
+/** « 26/09/2026 à 21:10 ». */
+function formatDateTime(iso: string) {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString("fr-FR")} à ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 function timeAgo(iso: string) {
@@ -344,6 +353,90 @@ function SocialDetail({
       {isFacebook && (pub.targets.fbMentions?.length ?? 0) > 0 && <ManualMentions mentions={pub.targets.fbMentions!} info={info} />}
 
       {(info.videoId || info.postId) && <CommentsSection publicationId={pub.id} networkKey={networkKey} count={stats?.comments} />}
+    </div>
+  );
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  hidden: "Masqué automatiquement",
+  unhidden: "Rétabli",
+  deleted: "Supprimé",
+  hide_failed: "Masquage impossible",
+  none: "Visible",
+};
+
+/**
+ * Commentaires signalés par Claude (haineux ou à vérifier) sur cette publication, avec les décisions
+ * possibles : masquer, rétablir, supprimer sur le réseau, ou « non haineux ».
+ */
+function FlaggedComments({ rows, onChanged }: { rows: ModerationRow[]; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (rows.length === 0) return null;
+  const hateful = rows.filter((r) => r.verdict === "hateful").length;
+
+  const decide = async (row: ModerationRow, decision: Parameters<typeof moderateComment>[1]) => {
+    if (decision === "delete" && !confirm("Supprimer définitivement ce commentaire sur le réseau ?")) return;
+    setBusyId(row.id);
+    const res = await moderateComment(row.id, decision);
+    setError(res.error);
+    setBusyId(null);
+    onChanged();
+  };
+
+  return (
+    <div className="mt-2">
+      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1 text-[11px] font-bold text-bad hover:underline">
+        <AlertTriangle size={12} />
+        {hateful > 0 ? `${hateful} commentaire${hateful > 1 ? "s" : ""} haineux` : ""}
+        {hateful > 0 && rows.length > hateful ? " · " : ""}
+        {rows.length > hateful ? `${rows.length - hateful} à vérifier` : ""}
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1.5">
+          {error && <p className="text-[11px] text-bad">{error}</p>}
+          {rows.map((r) => (
+            <div key={r.id} className="rounded-btn border border-line bg-subtle px-2.5 py-2 text-[11px]">
+              <div className="flex flex-wrap items-center gap-1.5 text-ink-4">
+                <NetworkIcon networkKey={r.network} size={11} />
+                <span className={`rounded-full px-1.5 py-0.5 font-bold ${r.verdict === "hateful" ? "bg-bad-bg text-bad" : "bg-warn-bg text-warn"}`}>
+                  {r.verdict === "hateful" ? "Haineux" : "À vérifier"}
+                </span>
+                <span>{ACTION_LABELS[r.action] ?? r.action}</span>
+                {r.commented_at && <span>· {formatDateTime(r.commented_at)}</span>}
+              </div>
+              <p className="mt-1 text-ink-2">
+                <strong className="text-ink">{r.author ?? "Anonyme"}</strong> : « {r.text} »
+              </p>
+              {r.reason && <p className="mt-0.5 italic text-ink-3">{r.reason}</p>}
+              {r.action_error && <p className="mt-0.5 text-bad">{r.action_error}</p>}
+              <div className="mt-1.5 flex flex-wrap gap-3 font-semibold">
+                {r.action !== "hidden" && r.action !== "deleted" && (
+                  <button disabled={busyId === r.id} onClick={() => decide(r, "hide")} className="text-link hover:underline disabled:opacity-50">
+                    Masquer
+                  </button>
+                )}
+                {r.action === "hidden" && (
+                  <button disabled={busyId === r.id} onClick={() => decide(r, "unhide")} className="text-link hover:underline disabled:opacity-50">
+                    Rétablir
+                  </button>
+                )}
+                {r.action !== "deleted" && (
+                  <button disabled={busyId === r.id} onClick={() => decide(r, "delete")} className="text-bad hover:underline disabled:opacity-50">
+                    Supprimer
+                  </button>
+                )}
+                {r.action !== "deleted" && (
+                  <button disabled={busyId === r.id} onClick={() => decide(r, "not_hateful")} className="text-ink-3 hover:underline disabled:opacity-50">
+                    Non haineux
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1220,12 +1313,14 @@ function PublicationCard({
   onOpenComposer,
   onCancelSchedule,
   onChanged,
+  flagged,
 }: {
   pub: MediaPublication;
   tab: PublicationStatus;
   onOpenComposer: () => void;
   onCancelSchedule: () => void;
   onChanged: () => void;
+  flagged: ModerationRow[];
 }) {
   const [sharing, setSharing] = useState(false);
   const first = pub.files[0] ?? null;
@@ -1234,8 +1329,17 @@ function PublicationCard({
   const kind = publicationKind(pub);
   const category = publicationCategory(pub);
   const orgColor = category ? ORG_COLORS[EVENT_TYPE_TO_ORG[category]] : null;
-  const uploader = first ? personName(first.uploaded_by_profile) : null;
-  const createdAt = new Date(pub.created_at).toLocaleDateString("fr-FR");
+  // Ajouté par : l'uploadeur du média d'événement, sinon le créateur de la publication (centre).
+  const addedBy = first?.uploaded_by_profile ? personName(first.uploaded_by_profile) : pub.creator ? personName(pub.creator) : null;
+  const addedAt = first?.created_at ?? pub.created_at;
+  // Publié par : qui a cliqué « Publier », sinon le premier réseau publié (publications antérieures).
+  const firstEntry = publishedEntries(pub).sort((a, b) => (a.info.at ?? "").localeCompare(b.info.at ?? ""))[0];
+  const publishedBy = pub.publisher
+    ? personName(pub.publisher)
+    : firstEntry?.info.by
+      ? personName({ ...firstEntry.info.by, email: null })
+      : null;
+  const publishedAt = pub.published_at ?? firstEntry?.info.at ?? null;
   const hasMedia = !!first || !!standalone;
 
   const openMedia = async () => {
@@ -1296,15 +1400,19 @@ function PublicationCard({
           </span>
           <span>·</span>
           <span>{pub.events ? "Événement" : "Publication directe"}</span>
-          <span>·</span>
-          <span>
-            {uploader && uploader !== "—" ? `${uploader} · ` : ""}
-            {createdAt}
-          </span>
+
           {tab === "scheduled" && pub.scheduled_at && (
             <span className="font-semibold text-link">
               {new Date(pub.scheduled_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
             </span>
+          )}
+        </div>
+        <div className="mt-0.5 text-[11px] text-ink-4">
+          Ajouté{addedBy && addedBy !== "—" ? ` par ${addedBy}` : ""} le {formatDateTime(addedAt)}
+          {tab === "published" && publishedAt && (
+            <>
+              {" "}· <span className="text-ink-3">Publié{publishedBy && publishedBy !== "—" ? ` par ${publishedBy}` : ""} le {formatDateTime(publishedAt)}</span>
+            </>
           )}
         </div>
         {kind === "text" && pub.caption && <p className="mt-1 line-clamp-2 text-xs text-ink-3">{pub.caption}</p>}
@@ -1315,6 +1423,7 @@ function PublicationCard({
           </p>
         )}
         {tab === "published" && <PublishedStatsRow pub={pub} onChanged={onChanged} />}
+        {tab === "published" && <FlaggedComments rows={flagged} onChanged={onChanged} />}
       </div>
 
       <div className="flex shrink-0 items-center gap-3 self-center">
@@ -1363,6 +1472,7 @@ export function PublicationScreen() {
   const [refreshingStats, setRefreshingStats] = useState(false);
   const [filters, setFilters] = useState<Filters>({ category: "all", competition: "all", kind: "all" });
   const { completions } = useBackgroundTasks();
+  const [flaggedRows, setFlaggedRows] = useState<ModerationRow[]>([]);
   const tabRef = useRef(tab);
   useEffect(() => {
     tabRef.current = tab;
@@ -1376,6 +1486,8 @@ export function PublicationScreen() {
     setItems(list);
     setCounts(countRes);
     setLoading(false);
+    // Commentaires signalés par la modération : seulement utiles dans « Publiés ».
+    if (tabRef.current === "published") listFlaggedComments(list.map((p) => p.id)).then(setFlaggedRows).catch(() => setFlaggedRows([]));
     return list;
   };
 
@@ -1476,6 +1588,7 @@ export function PublicationScreen() {
                       refetch();
                     }}
                     onChanged={() => refetch(true)}
+                    flagged={flaggedRows.filter((r) => r.publication_id === pub.id)}
                   />
                 ))}
               </div>

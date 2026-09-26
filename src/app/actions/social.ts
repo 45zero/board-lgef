@@ -7,6 +7,7 @@ import {
   listPublicationComments,
   deletePublicationComment,
   deletePublicationPosts,
+  setNetworkCommentHidden,
 } from "@/lib/social/publisher";
 import { getSocialAccountById } from "@/lib/social/accounts";
 import { resolveFacebookPage } from "@/lib/social/graph";
@@ -56,6 +57,73 @@ export async function resolveFacebookMention(ref: string): Promise<{ error: stri
     return { error: null, page: await resolveFacebookPage(ref, account.accessToken) };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Page introuvable.", page: null };
+  }
+}
+
+export type ModerationRow = {
+  id: string;
+  publication_id: string;
+  network: NetworkKey;
+  comment_id: string;
+  author: string | null;
+  text: string | null;
+  commented_at: string | null;
+  verdict: "hateful" | "review" | "ok";
+  severity: string | null;
+  categories: string[];
+  reason: string | null;
+  action: string;
+  action_error: string | null;
+  created_at: string;
+};
+
+/** Commentaires signalés par la modération (haineux ou à vérifier) pour ces publications. */
+export async function listFlaggedComments(publicationIds: string[]): Promise<ModerationRow[]> {
+  const supabase = await requireUser();
+  if (publicationIds.length === 0) return [];
+  const { data } = await supabase
+    .from("comment_moderation")
+    .select("id, publication_id, network, comment_id, author, text, commented_at, verdict, severity, categories, reason, action, action_error, created_at")
+    .in("publication_id", publicationIds)
+    .neq("verdict", "ok")
+    .order("created_at", { ascending: false });
+  return (data as ModerationRow[] | null) ?? [];
+}
+
+/**
+ * Décision humaine sur un commentaire signalé : masquer, rétablir (démasquer), supprimer sur le
+ * réseau, ou marquer « non haineux » (le rétablit s'il avait été masqué automatiquement).
+ */
+export async function moderateComment(
+  moderationId: string,
+  decision: "hide" | "unhide" | "delete" | "not_hateful"
+): Promise<{ error: string | null }> {
+  try {
+    const supabase = await requireUser();
+    const { data: row } = await supabase.from("comment_moderation").select("network, comment_id, action").eq("id", moderationId).single();
+    if (!row) throw new Error("Commentaire introuvable.");
+    const key = row.network as NetworkKey;
+
+    if (decision === "delete") {
+      await deletePublicationComment(supabase, key, row.comment_id);
+      await supabase.from("comment_moderation").update({ action: "deleted", action_error: null }).eq("id", moderationId);
+    } else if (decision === "hide") {
+      await setNetworkCommentHidden(supabase, key, row.comment_id, true);
+      await supabase.from("comment_moderation").update({ action: "hidden", action_error: null }).eq("id", moderationId);
+    } else {
+      if (row.action === "hidden") await setNetworkCommentHidden(supabase, key, row.comment_id, false);
+      await supabase
+        .from("comment_moderation")
+        .update({
+          action: row.action === "hidden" ? "unhidden" : row.action,
+          action_error: null,
+          ...(decision === "not_hateful" ? { verdict: "ok" } : {}),
+        })
+        .eq("id", moderationId);
+    }
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Erreur inattendue." };
   }
 }
 

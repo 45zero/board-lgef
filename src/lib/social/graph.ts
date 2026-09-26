@@ -330,6 +330,16 @@ export async function getInstagramComments(mediaId: string, accessToken: string)
   return data.map((c) => ({ id: c.id, author: c.username ?? "Anonyme", text: c.text ?? "", createdAt: c.timestamp ?? "" }));
 }
 
+/**
+ * Masque/démasque un commentaire. Facebook (`is_hidden`, pages_manage_engagement) : invisible du
+ * public, toujours visible par son auteur et ses amis, qui ne savent pas qu'il est masqué.
+ * Instagram (`hide`, instagram_manage_comments) : même principe.
+ */
+export async function setCommentHidden(plateforme: "FACEBOOK" | "INSTAGRAM", commentId: string, hidden: boolean, accessToken: string) {
+  const params: Record<string, string> = plateforme === "FACEBOOK" ? { is_hidden: String(hidden) } : { hide: String(hidden) };
+  await graphFetch(`/${commentId}`, { ...params, access_token: accessToken }, "POST");
+}
+
 /** Supprime un commentaire (Facebook ou Instagram, même appel) — irréversible. */
 export async function deleteComment(commentId: string, accessToken: string): Promise<void> {
   await graphFetch(`/${commentId}`, { access_token: accessToken }, "DELETE");

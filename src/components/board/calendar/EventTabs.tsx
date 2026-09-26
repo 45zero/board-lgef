@@ -984,6 +984,13 @@ function PublishPanel({
   );
 }
 
+/** « 26/09/2026 à 21:10 » — date et heure d'un ajout ou d'une publication. */
+function formatDateTime(iso: string | null | undefined) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return `${d.toLocaleDateString("fr-FR")} à ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
 function PublishBadges({ file }: { file: EventFile }) {
   const yt = file.publish_info?.youtube;
   const fb = file.publish_info?.facebook;
@@ -1003,13 +1010,12 @@ function PublishBadges({ file }: { file: EventFile }) {
           rel="noreferrer"
           className="flex items-center gap-1.5 text-[11px] font-semibold text-red hover:underline"
         >
-          <YoutubeBadge size={13} /> YouTube · {byName(yt.by)} · {new Date(yt.at ?? "").toLocaleDateString("fr-FR")}
+          <YoutubeBadge size={13} /> YouTube · publié par {byName(yt.by)} le {formatDateTime(yt.at)}
         </a>
       )}
       {fbEntries.map((e) => (
         <div key={e.key} className="flex items-center gap-1.5 text-[11px] font-semibold text-link">
-          <FacebookBadge size={11} /> Facebook · {e.label} · {byName(e.info!.by)} ·{" "}
-          {new Date(e.info!.at ?? "").toLocaleDateString("fr-FR")}
+          <FacebookBadge size={11} /> Facebook · {e.label} · publié par {byName(e.info!.by)} le {formatDateTime(e.info!.at)}
         </div>
       ))}
       {ig?.published && (
@@ -1019,7 +1025,7 @@ function PublishBadges({ file }: { file: EventFile }) {
           rel="noreferrer"
           className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-2 hover:underline"
         >
-          Instagram · @lgefofficiel · {byName(ig.by)} · {new Date(ig.at ?? "").toLocaleDateString("fr-FR")}
+          Instagram · @lgefofficiel · publié par {byName(ig.by)} le {formatDateTime(ig.at)}
         </a>
       )}
     </div>
@@ -1127,8 +1133,7 @@ function AttachmentRow({
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold text-ink">{file.filename}</span>
             <span className="block text-[11px] text-ink-4">
-              {formatFileSize(file.size_bytes)} · {uploader} ·{" "}
-              {new Date(file.created_at).toLocaleDateString("fr-FR")}
+              {formatFileSize(file.size_bytes)} · ajouté par {uploader} le {formatDateTime(file.created_at)}
               {isDrive && (
                 <span className="ml-1.5 rounded-full bg-subtle px-1.5 py-0.5 font-semibold text-ink-3">Drive</span>
               )}

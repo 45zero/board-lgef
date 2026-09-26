@@ -6,11 +6,110 @@ import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/bo
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import { getMyConnectedAccounts, disconnectMyAccount } from "@/app/actions/connected-accounts";
-import { getBoardDriveAccountId, setBoardDriveAccount } from "@/app/actions/board-settings";
+import {
+  getBoardDriveAccountId,
+  setBoardDriveAccount,
+  getModerationRecipients,
+  setModerationRecipients,
+} from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
 import { useAuth } from "@/contexts/AuthContext";
 
 /** Compte connecté : déconnexion puis retour à la page de connexion pour se connecter avec un autre compte. */
+/**
+ * Alertes « commentaire haineux » : chacun choisit ses canaux ; les admins choisissent en plus qui
+ * prévenir (en plus d'eux-mêmes et de l'auteur de la publication, toujours prévenus).
+ */
+function HateAlertsSection({ notif }: { notif: ReturnType<typeof useNotificationPreferences> }) {
+  const role = useUserRole();
+  const isAdmin = role.isAdmin || role.isSuperUser;
+  const [data, setData] = useState<Awaited<ReturnType<typeof getModerationRecipients>> | null>(null);
+  const [query, setQuery] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (isAdmin) getModerationRecipients().then(setData);
+  }, [isAdmin]);
+
+  const toggleRecipient = async (id: string) => {
+    if (!data) return;
+    const ids = data.ids.includes(id) ? data.ids.filter((x) => x !== id) : [...data.ids, id];
+    setData({ ...data, ids });
+    setSaving(true);
+    try {
+      await setModerationRecipients(ids);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const q = query.trim().toLowerCase();
+  const selected = data?.members.filter((m) => data.ids.includes(m.id)) ?? [];
+  const matches = q ? (data?.members ?? []).filter((m) => !data!.ids.includes(m.id) && `${m.name} ${m.email ?? ""}`.toLowerCase().includes(q)).slice(0, 6) : [];
+
+  return (
+    <div className="mt-5">
+      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Commentaires haineux</div>
+      <div className="space-y-3 rounded-btn border border-line p-3">
+        <p className="text-xs text-ink-4">
+          Claude analyse les commentaires de vos publications ; les commentaires haineux sont masqués automatiquement et vous
+          êtes alerté.
+        </p>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold text-ink-2">Alerte par e-mail</div>
+          <Toggle on={notif.hateAlertEmail} onClick={() => notif.setHateAlertEmail(!notif.hateAlertEmail)} />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-ink-2">Alerte par notification</div>
+            <div className="text-xs text-ink-4">Cloche et notification push de l&rsquo;application LGEF</div>
+          </div>
+          <Toggle on={notif.hateAlertPush} onClick={() => notif.setHateAlertPush(!notif.hateAlertPush)} />
+        </div>
+
+        {isAdmin && data && (
+          <div className="space-y-2 border-t border-dashed border-line pt-3">
+            <div className="text-sm font-semibold text-ink-2">Personnes prévenues en plus</div>
+            <div className="text-xs text-ink-4">
+              Les administrateurs et l&rsquo;auteur de la publication sont toujours prévenus.{saving ? " Enregistrement…" : ""}
+            </div>
+            {selected.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {selected.map((m) => (
+                  <span key={m.id} className="flex items-center gap-1 rounded-full bg-sel-bg px-2 py-0.5 text-[11px] font-semibold text-link">
+                    {m.name}
+                    <button onClick={() => toggleRecipient(m.id)} className="hover:text-red">
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Ajouter une personne (nom ou e-mail)…"
+              className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+            />
+            {matches.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => {
+                  toggleRecipient(m.id);
+                  setQuery("");
+                }}
+                className="block w-full truncate rounded-btn px-2 py-1 text-left text-xs text-ink-2 hover:bg-hover"
+              >
+                {m.name} <span className="text-ink-4">{m.email}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AccountSection() {
   const { user, logout } = useAuth();
   const [leaving, setLeaving] = useState(false);
@@ -254,6 +353,8 @@ export function BoardSettingsModal({
             </div>
           </div>
         </div>
+
+        <HateAlertsSection notif={notif} />
 
         <div className="mt-5">
           <div className="mb-2 flex items-center justify-between">

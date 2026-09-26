@@ -184,6 +184,7 @@ export type Database = {
           title: string | null
           category: string | null
           publish_info: Json | null
+          published_by: string | null
         }
         Insert: {
           id?: string
@@ -202,6 +203,7 @@ export type Database = {
           title?: string | null
           category?: string | null
           publish_info?: Json | null
+          published_by?: string | null
         }
         Update: {
           id?: string
@@ -220,6 +222,61 @@ export type Database = {
           title?: string | null
           category?: string | null
           publish_info?: Json | null
+          published_by?: string | null
+        }
+        Relationships: []
+      }
+      comment_moderation: {
+        Row: {
+          id: string
+          publication_id: string
+          network: string
+          comment_id: string
+          author: string | null
+          text: string | null
+          commented_at: string | null
+          verdict: string
+          severity: string | null
+          categories: string[]
+          reason: string | null
+          action: string
+          action_error: string | null
+          notified_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          publication_id: string
+          network: string
+          comment_id: string
+          author?: string | null
+          text?: string | null
+          commented_at?: string | null
+          verdict: string
+          severity?: string | null
+          categories?: string[]
+          reason?: string | null
+          action?: string
+          action_error?: string | null
+          notified_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          publication_id?: string
+          network?: string
+          comment_id?: string
+          author?: string | null
+          text?: string | null
+          commented_at?: string | null
+          verdict?: string
+          severity?: string | null
+          categories?: string[]
+          reason?: string | null
+          action?: string
+          action_error?: string | null
+          notified_at?: string | null
+          created_at?: string
         }
         Relationships: []
       }
@@ -227,18 +284,21 @@ export type Database = {
         Row: {
           id: boolean
           drive_connected_account_id: string | null
+          moderation_recipient_ids: string[]
           updated_by: string | null
           updated_at: string
         }
         Insert: {
           id?: boolean
           drive_connected_account_id?: string | null
+          moderation_recipient_ids?: string[]
           updated_by?: string | null
           updated_at?: string
         }
         Update: {
           id?: boolean
           drive_connected_account_id?: string | null
+          moderation_recipient_ids?: string[]
           updated_by?: string | null
           updated_at?: string
         }
@@ -2189,6 +2249,8 @@ export type Database = {
           organisation_id: string | null
           notify_email: boolean
           notify_push: boolean
+          hate_alert_email: boolean
+          hate_alert_push: boolean
         }
         Insert: {
           id: string
@@ -2211,6 +2273,8 @@ export type Database = {
           organisation_id?: string | null
           notify_email?: boolean
           notify_push?: boolean
+          hate_alert_email?: boolean
+          hate_alert_push?: boolean
         }
         Update: {
           id?: string
@@ -2233,6 +2297,8 @@ export type Database = {
           organisation_id?: string | null
           notify_email?: boolean
           notify_push?: boolean
+          hate_alert_email?: boolean
+          hate_alert_push?: boolean
         }
         Relationships: []
       }
@@ -4212,7 +4278,7 @@ export type Database = {
       invoice_status: "submitted" | "processing" | "approved" | "rejected" | "paid"
       label_color: "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "pink" | "gray"
       note_member_role: "createur" | "destinataire" | "collaborateur"
-      notification_type: "card_assigned" | "card_commented" | "card_mentioned" | "card_due_soon" | "board_shared" | "director_assignment" | "expense_submitted" | "account_request" | "coverage_request" | "coverage_request_created" | "coverage_approved" | "coverage_denied" | "coverage_assignment" | "coverage_rejected" | "event_deleted" | "event_mentioned" | "event_commented" | "account_request_approved" | "account_request_denied" | "assignment_created" | "assignment_updated" | "expense_approved" | "expense_rejected" | "coverage_accepted" | "coverage_accepted_admin" | "director_request" | "director_approved" | "director_denied" | "director_reassigned" | "director_invitation" | "director_accepted" | "director_declined" | "event_team_added" | "event_reminder"
+      notification_type: "card_assigned" | "card_commented" | "card_mentioned" | "card_due_soon" | "board_shared" | "director_assignment" | "expense_submitted" | "account_request" | "coverage_request" | "coverage_request_created" | "coverage_approved" | "coverage_denied" | "coverage_assignment" | "coverage_rejected" | "event_deleted" | "event_mentioned" | "event_commented" | "account_request_approved" | "account_request_denied" | "assignment_created" | "assignment_updated" | "expense_approved" | "expense_rejected" | "coverage_accepted" | "coverage_accepted_admin" | "director_request" | "director_approved" | "director_denied" | "director_reassigned" | "director_invitation" | "director_accepted" | "director_declined" | "event_team_added" | "event_reminder" | "hateful_comment"
       response_status: "accepted" | "rejected"
       sector_type: "arbitrage" | "technique" | "formation" | "communication" | "competitions"
       user_role: "user" | "technician" | "super_user" | "admin" | "organizer" | "comite_directeur_bad" | "comite_directeur"

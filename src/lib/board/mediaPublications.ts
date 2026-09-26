@@ -51,11 +51,19 @@ export interface MediaPublication {
   publish_info: PublishInfo | null;
   event_files: EventFile | null;
   events: { title: string; start_date: string; event_type: DbEventType | null } | null;
+  published_by: string | null;
+  /** Qui a créé la publication (centre de publication) — null pour celles ajoutées automatiquement depuis un événement. */
+  creator: PersonRef | null;
+  /** Qui a cliqué « Publier ». */
+  publisher: PersonRef | null;
   /** Tous les fichiers d'événement de la publication, dans l'ordre (résolus à la lecture). */
   files: EventFile[];
 }
 
 const FILE_SELECT = "*, uploaded_by_profile:profiles(first_name, last_name, email)";
+const PERSON = "first_name, last_name, email";
+
+export type PersonRef = { first_name: string | null; last_name: string | null; email: string | null };
 
 export function publicationTitle(pub: MediaPublication): string {
   return pub.events?.title ?? pub.title ?? "Publication";
@@ -102,7 +110,9 @@ export async function listMediaPublications(status: PublicationStatus): Promise<
   const supabase = createClient();
   const { data, error } = await supabase
     .from("media_publications")
-    .select(`*, event_files(${FILE_SELECT}), events(title, start_date, event_type)`)
+    .select(
+      `*, event_files(${FILE_SELECT}), events(title, start_date, event_type), creator:profiles!media_publications_created_by_fkey(${PERSON}), publisher:profiles!media_publications_published_by_fkey(${PERSON})`
+    )
     .eq("status", status)
     .order(status === "scheduled" ? "scheduled_at" : status === "published" ? "published_at" : "created_at", {
       ascending: status === "scheduled",
@@ -243,10 +253,15 @@ export async function cancelScheduledPublication(id: string) {
 /** `targets` est conservé : il sert ensuite à retrouver les Pages à mentionner à la main (voir SocialDetail). */
 export async function markMediaPublished(id: string, caption?: string, targets?: PublicationTargets) {
   const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const { error } = await supabase
     .from("media_publications")
     .update({
       status: "published",
+      // Qui a publié : prévenu en cas de commentaire haineux (voir src/lib/social/moderationAlerts.ts).
+      published_by: user?.id ?? null,
       published_at: new Date().toISOString(),
       ...(caption !== undefined ? { caption } : {}),
       ...(targets ? { targets: targets as unknown as Json } : {}),

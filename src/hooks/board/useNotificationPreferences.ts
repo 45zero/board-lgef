@@ -11,6 +11,8 @@ export function useNotificationPreferences() {
   const { user } = useAuth();
   const [notifyEmail, setNotifyEmailState] = useState(true);
   const [notifyPush, setNotifyPushState] = useState(true);
+  const [hateAlertEmail, setHateAlertEmailState] = useState(true);
+  const [hateAlertPush, setHateAlertPushState] = useState(true);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -18,13 +20,15 @@ export function useNotificationPreferences() {
     const supabase = createClient();
     supabase
       .from("profiles")
-      .select("notify_email, notify_push")
+      .select("notify_email, notify_push, hate_alert_email, hate_alert_push")
       .eq("id", user.id)
       .single()
       .then(({ data }) => {
         if (data) {
           setNotifyEmailState(data.notify_email);
           setNotifyPushState(data.notify_push);
+          setHateAlertEmailState(data.hate_alert_email);
+          setHateAlertPushState(data.hate_alert_push);
         }
         setLoaded(true);
       });
@@ -44,5 +48,28 @@ export function useNotificationPreferences() {
     await supabase.from("profiles").update({ notify_push: value }).eq("id", user.id);
   };
 
-  return { notifyEmail, notifyPush, setNotifyEmail, setNotifyPush, loaded };
+  /** Alertes « commentaire haineux » (modération des publications) — canaux propres, indépendants des notifications générales. */
+  const setHateAlertEmail = async (value: boolean) => {
+    setHateAlertEmailState(value);
+    if (!user?.id) return;
+    await createClient().from("profiles").update({ hate_alert_email: value }).eq("id", user.id);
+  };
+
+  const setHateAlertPush = async (value: boolean) => {
+    setHateAlertPushState(value);
+    if (!user?.id) return;
+    await createClient().from("profiles").update({ hate_alert_push: value }).eq("id", user.id);
+  };
+
+  return {
+    notifyEmail,
+    notifyPush,
+    setNotifyEmail,
+    setNotifyPush,
+    hateAlertEmail,
+    hateAlertPush,
+    setHateAlertEmail,
+    setHateAlertPush,
+    loaded,
+  };
 }

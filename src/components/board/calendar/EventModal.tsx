@@ -7,6 +7,7 @@ import { X, Trash2, MapPin, ChevronDown, Camera, Video, ClipboardCheck } from "l
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
 import { CALENDAR_ORG_KEYS, type CalendarEvent } from "@/lib/board/calendar";
 import { useEventModalState } from "@/hooks/board/useEventModalState";
+import { createClient } from "@/lib/supabase/client";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { Toggle } from "@/components/board/Toggle";
 import {
@@ -33,6 +34,23 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "gestion", label: "Gestion frais" },
   { id: "carte", label: "Carte" },
 ];
+
+/** « par Prénom Nom » du créateur de l'événement (events.created_by), lu à l'ouverture de la fiche. */
+function CreatorName({ userId }: { userId: string | null | undefined }) {
+  const [name, setName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!userId) return;
+    createClient()
+      .from("profiles")
+      .select("first_name, last_name, email")
+      .eq("id", userId)
+      .single()
+      .then(({ data }) => {
+        if (data) setName([data.first_name, data.last_name].filter(Boolean).join(" ") || data.email || null);
+      });
+  }, [userId]);
+  return name ? <> par {name}</> : null;
+}
 
 export function EventModal({
   event,
@@ -85,6 +103,7 @@ export function EventModal({
             {isEditing && event!.createdAt && (
               <div className="mt-1 text-xs text-white/60">
                 Créé le {format(parseISO(event!.createdAt), "d MMMM yyyy 'à' HH:mm", { locale: fr })}
+                <CreatorName userId={event!.createdBy} />
               </div>
             )}
           </div>
