@@ -152,7 +152,7 @@ export function useDirectorAttendance(eventId?: string) {
     if (!eventId) return;
     const supabase = createClient();
     const channel = supabase
-      .channel(`director-attendance-${eventId}`)
+      .channel(`director-attendance-${eventId}-${crypto.randomUUID()}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "director_attendance", filter: `event_id=eq.${eventId}` },

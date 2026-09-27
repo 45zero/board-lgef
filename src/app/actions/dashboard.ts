@@ -11,7 +11,7 @@ import { getSolicitations } from "@/lib/board/solicitation";
 // indépendamment : une source en erreur est simplement omise.
 
 /** Élément d'une action, pour le traiter directement depuis la popup du tableau de bord. */
-export type DashboardActionItem = { id: string; eventId: string | null; title: string; date: string | null; detail?: string };
+export type DashboardActionItem = { id: string; eventId: string | null; title: string; date: string | null; location?: string | null; detail?: string };
 
 export type DashboardAction = {
   id: string;
@@ -86,14 +86,14 @@ export async function getDashboard(period: "day" | "week"): Promise<Dashboard> {
     safe(async () => {
       const { data } = await service
         .from("director_attendance")
-        .select("id, event_id, events!inner(title, start_date)")
+        .select("id, event_id, events!inner(title, start_date, location)")
         .eq("director_id", userId)
         .eq("status", "pending")
         .gte("events.start_date", now.toISOString())
         .limit(30);
       const items = (data ?? []).map((d) => {
-        const ev = d.events as unknown as { title: string; start_date: string };
-        return { id: d.id, eventId: d.event_id, title: ev.title, date: ev.start_date };
+        const ev = d.events as unknown as { title: string; start_date: string; location: string | null };
+        return { id: d.id, eventId: d.event_id, title: ev.title, date: ev.start_date, location: ev.location };
       });
       push({ id: "presence", app: "calendrier", tone: "orange", count: items.length, items, title: "Présences à confirmer", detail: "Invitations du comité directeur" });
     }, undefined),
@@ -103,28 +103,28 @@ export async function getDashboard(period: "day" | "week"): Promise<Dashboard> {
       // Uniquement les événements à venir : les anciennes demandes jamais clôturées ne sont plus des actions.
       const { data: mineRows } = await service
         .from("coverage_requests")
-        .select("id, event_id, details, events!inner(title, start_date)")
+        .select("id, event_id, details, events!inner(title, start_date, location)")
         .or(`assigned_technician_id.eq.${userId},technician_id.eq.${userId}`)
         .or("technician_response.is.null,technician_response.eq.pending")
         .neq("status", "cancelled")
         .gte("events.start_date", now.toISOString())
         .limit(30);
       const mineItems = (mineRows ?? []).map((c) => {
-        const ev = c.events as unknown as { title: string; start_date: string };
-        return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date, detail: c.details ?? undefined };
+        const ev = c.events as unknown as { title: string; start_date: string; location: string | null };
+        return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date, location: ev.location, detail: c.details ?? undefined };
       });
       push({ id: "captation-repondre", app: "calendrier", tone: "red", count: mineItems.length, items: mineItems, title: "Captations à accepter", detail: "Des événements vous sont proposés" });
       if (isAdmin) {
         const { data: toAssign, count: toAssignCount } = await service
           .from("coverage_requests")
-          .select("id, event_id, events!inner(title, start_date)", { count: "exact" })
+          .select("id, event_id, details, events!inner(title, start_date, location)", { count: "exact" })
           .eq("status", "pending")
           .gte("events.start_date", now.toISOString())
           .order("created_at")
           .limit(30);
         const assignItems = (toAssign ?? []).map((c) => {
-          const ev = c.events as unknown as { title: string; start_date: string };
-          return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date };
+          const ev = c.events as unknown as { title: string; start_date: string; location: string | null };
+          return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date, location: ev.location, detail: c.details ?? undefined };
         });
         push({ id: "captation-attribuer", app: "calendrier", tone: "orange", count: toAssignCount ?? assignItems.length, items: assignItems, title: "Demandes de captation à traiter", detail: "À valider et attribuer à un technicien" });
       }

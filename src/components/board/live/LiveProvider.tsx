@@ -167,7 +167,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!userId) return;
     const supabase = createClient();
-    const channel = supabase.channel(`board-live-${userId}`);
+    const channel = supabase.channel(`board-live-${userId}-${crypto.randomUUID()}`);
     for (const table of LIVE_TABLES) {
       channel.on("postgres_changes", { event: "*", schema: "public", table }, () => {
         emit(table);

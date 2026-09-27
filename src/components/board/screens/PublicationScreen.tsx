@@ -706,7 +706,7 @@ function EventMediaPicker({ eventId, selected, onChange }: { eventId: string; se
   );
 }
 
-function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: () => void; onDone: () => void }) {
+export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: () => void; onDone: () => void }) {
   const { me } = useMe();
   const { runTask } = useBackgroundTasks();
   const [caption, setCaption] = useState(pub.caption ?? "");

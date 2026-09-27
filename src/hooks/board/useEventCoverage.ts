@@ -59,7 +59,7 @@ export function useEventCoverage(eventId?: string) {
     if (!eventId) return;
     const supabase = createClient();
     const channel = supabase
-      .channel(`coverage-requests-${eventId}`)
+      .channel(`coverage-requests-${eventId}-${crypto.randomUUID()}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "coverage_requests", filter: `event_id=eq.${eventId}` },

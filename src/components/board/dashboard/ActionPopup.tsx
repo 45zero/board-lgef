@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, Check, ChevronRight } from "lucide-react";
+import { X, Check, ChevronRight, CalendarDays, MapPin } from "lucide-react";
 import type { DashboardAction, DashboardActionItem } from "@/app/actions/dashboard";
 import {
   declareExpenses,
@@ -32,7 +32,50 @@ const APP_LABELS: Record<string, string> = {
   inscription: "Inscription",
 };
 
-function Row({ title, subtitle, eventId, children }: { title: string; subtitle?: string; eventId?: string | null; children?: React.ReactNode }) {
+/** Date et lieu d'un événement, avec un léger bouton pour ouvrir le lieu dans Google Maps. */
+function WhenWhere({ date, location }: { date: string | null; location?: string | null }) {
+  return (
+    <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-3">
+      {date && (
+        <span className="flex items-center gap-1">
+          <CalendarDays size={11} className="text-ink-4" /> {fmt(date)}
+        </span>
+      )}
+      {location && (
+        <span className="flex min-w-0 items-center gap-1">
+          <MapPin size={11} className="shrink-0 text-ink-4" />
+          <span className="truncate">{location}</span>
+          <a
+            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="shrink-0 rounded-full border border-line px-1.5 py-px text-[10px] font-semibold text-link hover:border-link hover:bg-sel-bg"
+          >
+            Carte
+          </a>
+        </span>
+      )}
+    </div>
+  );
+}
+
+function Row({
+  title,
+  subtitle,
+  eventId,
+  date,
+  location,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  eventId?: string | null;
+  /** Date + lieu (avec bouton Carte) sur une ligne dédiée. */
+  date?: string | null;
+  location?: string | null;
+  children?: React.ReactNode;
+}) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3 last:border-b-0">
       <div className="min-w-0 flex-1">
@@ -40,6 +83,7 @@ function Row({ title, subtitle, eventId, children }: { title: string; subtitle?:
           <span className="truncate text-sm font-bold text-ink">{title}</span>
           {eventId && <EventArrow eventId={eventId} className="h-6 w-6" />}
         </div>
+        {(date !== undefined || location) && <WhenWhere date={date ?? null} location={location} />}
         {subtitle && <div className="truncate text-[11px] text-ink-4">{subtitle}</div>}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">{children}</div>
@@ -222,7 +266,7 @@ function CoverageRow({ item, onDone }: { item: DashboardActionItem; onDone: () =
     if (ok) onDone();
   };
   return (
-    <Row title={item.title} eventId={item.eventId} subtitle={`${fmt(item.date)}${item.detail ? ` · ${item.detail}` : ""}`}>
+    <Row title={item.title} eventId={item.eventId} date={item.date} location={item.location} subtitle={item.detail}>
       <button disabled={busy || !cov.request} onClick={() => respond("rejected")} className={btnKo}>
         Refuser
       </button>
@@ -243,7 +287,7 @@ function AttendanceRow({ item, onDone }: { item: DashboardActionItem; onDone: ()
     if (ok) onDone();
   };
   return (
-    <Row title={item.title} eventId={item.eventId} subtitle={fmt(item.date)}>
+    <Row title={item.title} eventId={item.eventId} date={item.date} location={item.location}>
       <button disabled={busy || !att.attendance} onClick={() => respond("denied")} className={btnKo}>
         Absent
       </button>
@@ -273,17 +317,15 @@ function AssignRow({ item, technicians, onDone }: { item: DashboardActionItem; t
     if (ok) onDone();
     else setError("L'assignation a échoué.");
   };
-  const details = cov.request?.details;
+  const details = cov.request?.details ?? item.detail;
   return (
     <div className="border-b border-line px-4 py-3 last:border-b-0">
       <div className="flex items-center gap-1.5">
         <span className="truncate text-sm font-bold text-ink">{item.title}</span>
         {item.eventId && <EventArrow eventId={item.eventId} className="h-6 w-6" />}
       </div>
-      <div className="truncate text-[11px] text-ink-4">
-        {fmt(item.date)}
-        {details ? ` · ${details}` : ""}
-      </div>
+      <WhenWhere date={item.date} location={item.location} />
+      {details && <div className="truncate text-[11px] text-ink-4">{details}</div>}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <select
           value={techId}
@@ -365,7 +407,7 @@ export function ActionPopup({
       body = items.length ? <AssignList items={items} onDone={removeItem} /> : null;
       break;
     case "publier":
-      body = items.length ? items.map((i) => <Row key={i.id} title={i.title} eventId={i.eventId} subtitle={fmt(i.date)} />) : null;
+      body = items.length ? items.map((i) => <Row key={i.id} title={i.title} eventId={i.eventId} date={i.date} />) : null;
       break;
     default:
       body = <p className="p-4 text-sm text-ink-3">{action.detail}</p>;

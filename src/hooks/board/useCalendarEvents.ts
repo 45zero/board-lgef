@@ -134,7 +134,7 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
     if (!user) return;
     const supabase = createClient();
     const channel = supabase
-      .channel("calendar-events-live")
+      .channel(`calendar-events-live-${crypto.randomUUID()}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "events" }, () => fetchEvents())
       .on("postgres_changes", { event: "*", schema: "public", table: "coverage_requests" }, () => fetchEvents())
       .on("postgres_changes", { event: "*", schema: "public", table: "director_attendance" }, () => fetchEvents())

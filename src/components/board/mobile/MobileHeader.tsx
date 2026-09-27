@@ -10,11 +10,14 @@ export function MobileHeader({
   kicker,
   onLogoClick,
   menuOpen = false,
+  onSettings,
 }: {
   title: string;
   kicker: string;
   onLogoClick?: () => void;
   menuOpen?: boolean;
+  /** Roue crantée : feuille Paramètres (bouton central…). */
+  onSettings?: () => void;
 }) {
   return (
     <div
@@ -39,7 +42,7 @@ export function MobileHeader({
       </button>
 
       <div className="flex items-center gap-1.5">
-        <button className="flex h-8 w-8 items-center justify-center rounded-full text-white/85 hover:bg-white/10" aria-label="Paramètres">
+        <button onClick={onSettings} className="flex h-8 w-8 items-center justify-center rounded-full text-white/85 hover:bg-white/10" aria-label="Paramètres">
           <Settings size={17} />
         </button>
         <NotificationBell variant="mobile" />

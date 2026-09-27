@@ -7,6 +7,8 @@ import { MobileCalendrierScreen } from "@/components/board/mobile/screens/Mobile
 import { MobileMailsScreen } from "@/components/board/mobile/screens/MobileMailsScreen";
 import { FraisScreen } from "@/components/board/screens/FraisScreen";
 import { AccueilScreen } from "@/components/board/screens/AccueilScreen";
+import { MobileSettingsSheet, useCenterAction } from "@/components/board/mobile/MobileSettingsSheet";
+import { SocialCapture } from "@/components/board/publication/SocialCapture";
 
 const TITLES: Record<MobileTab, { title: string; kicker: string }> = {
   calendrier: { title: "Calendrier", kicker: "EVENEMENTS" },
@@ -31,11 +33,16 @@ export function MobileShell() {
     setTab(next);
   };
 
-  // Bouton central « Frais » : ouvre Mes frais (déclarer, suivre, valider pour un N+1).
+  // Bouton central, réglable dans Paramètres : « Frais » ouvre Mes frais (photo d'un justificatif,
+  // déclaration…) ; « Publication réseaux » ouvre la caméra puis le centre de publication.
+  const [center, setCenter] = useCenterAction();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [fraisOpen, setFraisOpen] = useState(false);
+  const [socialOpen, setSocialOpen] = useState(false);
   const handleCenterPress = () => {
     setMailMenuOpen(false);
-    setFraisOpen(true);
+    if (center === "social") setSocialOpen(true);
+    else setFraisOpen(true);
   };
 
   return (
@@ -45,6 +52,7 @@ export function MobileShell() {
         kicker={kicker}
         onLogoClick={tab === "mails" ? () => setMailMenuOpen((o) => !o) : undefined}
         menuOpen={mailMenuOpen}
+        onSettings={() => setSettingsOpen(true)}
       />
 
       {/* Calendrier et Mails restent montés (masqués quand inactifs) : les mails se chargent dès
@@ -90,7 +98,19 @@ export function MobileShell() {
         </div>
       )}
 
-      <MobileBottomNav active={tab} onSelect={selectTab} onCenterPress={handleCenterPress} />
+      {socialOpen && <SocialCapture onClose={() => setSocialOpen(false)} />}
+      {settingsOpen && (
+        <MobileSettingsSheet
+          value={center}
+          onChange={(a) => {
+            setCenter(a);
+            setSettingsOpen(false);
+          }}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
+      <MobileBottomNav active={tab} onSelect={selectTab} onCenterPress={handleCenterPress} center={center} />
     </div>
   );
 }
