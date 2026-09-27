@@ -1628,7 +1628,7 @@ export type Database = {
         Row: {
           id: string
           user_id: string
-          event_id: string
+          event_id: string | null
           expense_ids: string[]
           total_amount: number
           status: string
@@ -1648,11 +1648,12 @@ export type Database = {
           reviewer_comment: string | null
           notified_at: string | null
           notified_month: string | null
+          period_month: string | null
         }
         Insert: {
           id?: string
           user_id: string
-          event_id: string
+          event_id?: string | null
           expense_ids?: string[]
           total_amount?: number
           status?: string
@@ -1672,11 +1673,12 @@ export type Database = {
           reviewer_comment?: string | null
           notified_at?: string | null
           notified_month?: string | null
+          period_month?: string | null
         }
         Update: {
           id?: string
           user_id?: string
-          event_id?: string
+          event_id?: string | null
           expense_ids?: string[]
           total_amount?: number
           status?: string
@@ -1696,6 +1698,7 @@ export type Database = {
           reviewer_comment?: string | null
           notified_at?: string | null
           notified_month?: string | null
+          period_month?: string | null
         }
         Relationships: []
       }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, Clock, XCircle, AlertCircle, MinusCircle } from "lucide-react";
 import { declareExpenses, getMyExpenseStatus, type ExpenseStatus } from "@/app/actions/expenses";
+import { targetKey, type ExpenseTarget } from "@/lib/board/expenseCategories";
 
 export const EXPENSE_STATUS_META: Record<ExpenseStatus, { label: string; className: string; icon: typeof Clock }> = {
   a_declarer: { label: "À déclarer", className: "bg-warn-bg text-warn", icon: AlertCircle },
@@ -24,26 +25,37 @@ export function ExpenseStatusBadge({ status }: { status: ExpenseStatus }) {
 
 export const formatEuros = (n: number) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(n);
 
+/** Confirme « Pas de frais » (les lignes déjà saisies sont supprimées). */
+export const confirmNoExpense = (lineCount: number) =>
+  confirm(
+    lineCount > 0
+      ? `Déclarer qu'il n'y a aucun frais pour cet événement ? Les ${lineCount} ligne(s) saisie(s) seront supprimées.`
+      : "Déclarer qu'il n'y a aucun frais pour cet événement ?"
+  );
+
 /**
- * Bas de la fiche de frais d'un événement : statut de ma déclaration (et motif d'un refus), puis
- * « Déclarer » (envoie au N+1) ou « Pas de frais ». Utilisé dans l'onglet Frais de la fiche
- * événement et dans le modal de « Mes frais ».
+ * Bas d'une fiche de frais : statut de ma déclaration (et motif d'un refus), puis « Déclarer »
+ * (envoie au N+1) ou « Pas de frais » (événements uniquement, y compris après un refus). Utilisé
+ * dans l'onglet Frais de la fiche événement et dans le modal de « Mes frais ».
  */
-export function DeclarationBar({ eventId, total, lineCount, onDone }: { eventId: string; total: number; lineCount: number; onDone?: () => void }) {
+export function DeclarationBar({ target, total, lineCount, onDone }: { target: ExpenseTarget; total: number; lineCount: number; onDone?: () => void }) {
   const [info, setInfo] = useState<Awaited<ReturnType<typeof getMyExpenseStatus>> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(() => getMyExpenseStatus(eventId).then(setInfo).catch(() => undefined), [eventId]);
+  const key = targetKey(target);
+  // La cible est un objet recréé à chaque rendu : on se fie à sa clé.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const load = useCallback(() => getMyExpenseStatus(target).then(setInfo).catch(() => undefined), [key]);
   useEffect(() => {
     void load();
   }, [load]);
 
   const declare = async (noExpense: boolean) => {
-    if (noExpense && !confirm("Déclarer qu'il n'y a aucun frais pour cet événement ?")) return;
+    if (noExpense && !confirmNoExpense(lineCount)) return;
     setBusy(true);
     setError(null);
-    const res = await declareExpenses(eventId, noExpense);
+    const res = await declareExpenses(target, noExpense);
     setBusy(false);
     if (res.error) return setError(res.error);
     await load();
@@ -71,7 +83,7 @@ export function DeclarationBar({ eventId, total, lineCount, onDone }: { eventId:
       {error && <p className="text-xs text-bad">{error}</p>}
       {!locked && (
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {lineCount === 0 && info.status !== "no_expense" && (
+          {"eventId" in target && info.status !== "no_expense" && (lineCount === 0 || info.status === "rejected") && (
             <button
               disabled={busy}
               onClick={() => declare(true)}

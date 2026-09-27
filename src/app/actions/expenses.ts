@@ -1,14 +1,25 @@
 "use server";
 
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { archiveReceipts, type ReceiptToArchive } from "@/lib/board/expenseArchive";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { DbEventType } from "@/lib/board/calendar";
 import { getSolicitations, type SolicitationRole } from "@/lib/board/solicitation";
+import {
+  CATEGORY_META,
+  EXPENSE_CATEGORIES,
+  monthLabel,
+  type ExpenseAmountColumn,
+  type ExpenseCategory,
+  type ExpenseTarget,
+} from "@/lib/board/expenseCategories";
 
 // Gestion des frais du board. Données partagées avec l'appli calendrier :
-// - event_expenses : lignes de frais d'une personne sur un événement (écrites par le client, RLS « own ») ;
-// - expense_submissions : la déclaration (une par personne et par événement), statut
-//   pending → approved / rejected, ou no_expense (« pas de frais »).
+// - event_expenses : lignes de frais d'une personne, sur un événement ou hors événement (event_id nul) ;
+// - event_expense_attachments : justificatifs d'une ligne (en plus de event_expenses.file_url) ;
+// - expense_submissions : la déclaration (une par personne et par événement, ou par mois pour les
+//   frais hors événement — period_month), statut pending → approved / rejected, ou no_expense.
 // Les déclarations ne sont modifiables en base que par les admins (RLS) : ces actions passent par
 // le client service role APRÈS avoir vérifié elles-mêmes le droit (la personne, son N+1, un admin).
 
@@ -16,7 +27,12 @@ export type ExpenseStatus = "a_declarer" | "pending" | "approved" | "rejected" |
 export type { SolicitationRole } from "@/lib/board/solicitation";
 
 export type MyExpenseItem = {
-  eventId: string;
+  /** Identifiant stable de la fiche (événement ou mois hors événement). */
+  key: string;
+  /** Nul pour les frais hors événement. */
+  eventId: string | null;
+  /** 'YYYY-MM' pour les frais hors événement. */
+  month: string | null;
   title: string;
   start: string;
   end: string;
@@ -32,8 +48,11 @@ export type MyExpenseItem = {
   reviewerComment: string | null;
 };
 
+export type ExpenseAttachment = { url: string; name: string; type: string | null };
+
 export type ExpenseLine = {
   id: string;
+  event_id: string | null;
   toll_fees: number | null;
   meal_fees: number | null;
   other_fees: number | null;
@@ -45,8 +64,12 @@ export type ExpenseLine = {
   car_rental_fees: number | null;
   distance_km: number | null;
   description: string | null;
+  merchant_name: string | null;
+  expense_date: string | null;
   total_amount: number | null;
   file_url: string | null;
+  created_at: string;
+  attachments: ExpenseAttachment[];
 };
 
 export type SubmissionToReview = {
@@ -57,12 +80,27 @@ export type SubmissionToReview = {
   reviewedAt: string | null;
   reviewerComment: string | null;
   person: { id: string; name: string; email: string | null };
-  event: { id: string; title: string; start: string; eventType: DbEventType | null };
+  /** `id` nul : frais hors événement du mois `start`. */
+  event: { id: string | null; title: string; start: string; eventType: DbEventType | null };
   lines: ExpenseLine[];
-  attachments: { url: string; name: string }[];
+  attachments: ExpenseAttachment[];
+};
+
+/** Ligne à créer (saisie manuelle, justificatif lu par Claude, import). */
+export type NewExpenseLine = {
+  eventId: string | null;
+  category: ExpenseCategory;
+  amount: number;
+  /** 'YYYY-MM-DD' */
+  date: string | null;
+  merchant: string | null;
+  description: string | null;
+  distanceKm: number | null;
+  attachments: { url: string; type: string | null }[];
 };
 
 type Person = { id: string; first_name: string | null; last_name: string | null; email: string | null; role: string | null };
+type Service = ReturnType<typeof createServiceClient>;
 
 const personName = (p: Pick<Person, "first_name" | "last_name" | "email"> | null | undefined) =>
   p ? [p.first_name, p.last_name].filter(Boolean).join(" ") || p.email || "—" : "—";
@@ -91,75 +129,154 @@ function toStatus(s: string | null | undefined): ExpenseStatus {
   return "a_declarer";
 }
 
+const MONTH_RE = /^\d{4}-\d{2}$/;
+
+/** [début, fin[ d'un mois 'YYYY-MM', au format date. */
+function monthRange(month: string): [string, string] {
+  if (!MONTH_RE.test(month)) throw new Error("Mois invalide.");
+  const [y, m] = month.split("-").map(Number);
+  const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+  return [`${month}-01`, `${next}-01`];
+}
+
+/** Mois d'une ligne hors événement : sa date de dépense, à défaut sa date de saisie. */
+const lineMonth = (l: { expense_date: string | null; created_at: string }) => (l.expense_date ?? l.created_at).slice(0, 7);
+
+/** Lignes d'une personne pour une fiche (événement, ou hors événement sur un mois). */
+async function linesOf(service: Service, userId: string, target: ExpenseTarget) {
+  const q = service.from("event_expenses").select("*").eq("user_id", userId);
+  if ("eventId" in target) return (await q.eq("event_id", target.eventId)).data ?? [];
+  const [from, to] = monthRange(target.month);
+  const { data } = await q
+    .is("event_id", null)
+    .or(`and(expense_date.gte.${from},expense_date.lt.${to}),and(expense_date.is.null,created_at.gte.${from},created_at.lt.${to})`);
+  return data ?? [];
+}
+
+async function submissionOf(service: Service, userId: string, target: ExpenseTarget) {
+  const q = service
+    .from("expense_submissions")
+    .select("id, status, reviewed_by, reviewed_at, reviewer_comments, reviewer_comment")
+    .eq("user_id", userId);
+  const { data } =
+    "eventId" in target ? await q.eq("event_id", target.eventId).maybeSingle() : await q.is("event_id", null).eq("period_month", target.month).maybeSingle();
+  return data;
+}
+
+/** Justificatifs des lignes : file_url de la ligne + pièces jointes. */
+async function withAttachments(service: Service, lines: Record<string, unknown>[]): Promise<ExpenseLine[]> {
+  const ids = lines.map((l) => l.id as string);
+  const { data: atts } = ids.length
+    ? await service.from("event_expense_attachments").select("expense_id, file_url, file_type").in("expense_id", ids).order("created_at")
+    : { data: [] as { expense_id: string | null; file_url: string; file_type: string | null }[] };
+  return lines.map((l) => {
+    const own = (atts ?? []).filter((a) => a.expense_id === l.id);
+    const attachments: ExpenseAttachment[] = [];
+    if (l.file_url && !own.some((a) => a.file_url === l.file_url)) attachments.push({ url: l.file_url as string, name: "Justificatif", type: null });
+    own.forEach((a, i) => attachments.push({ url: a.file_url, name: own.length > 1 ? `Justificatif ${i + 1}` : "Justificatif", type: a.file_type }));
+    return { ...(l as unknown as Omit<ExpenseLine, "attachments">), attachments };
+  });
+}
+
 /**
- * Mes frais : les événements (commencés, 12 derniers mois) où je suis sollicité — membre ou
- * responsable d'équipe, assigné, comité directeur à la présence confirmée, technicien ayant accepté
- * la captation — plus ceux où j'ai déjà une déclaration, avec total des lignes et statut.
+ * Mes frais : les événements (12 derniers mois) où je suis sollicité — membre ou responsable
+ * d'équipe, assigné, comité directeur à la présence confirmée, technicien ayant accepté la
+ * captation — ou où j'ai saisi des frais / une déclaration, plus mes frais hors événement par mois.
  */
 export async function getMyExpenses(): Promise<MyExpenseItem[]> {
   const { userId, service } = await currentUser();
   const since = new Date(Date.now() - 365 * 86_400_000).toISOString();
 
   // Frais : seulement les sollicitations effectives (présence confirmée, captation acceptée).
-  const [roles, submissions] = await Promise.all([
+  const [roles, submissions, allLines] = await Promise.all([
     getSolicitations(service, userId),
     service
       .from("expense_submissions")
-      .select("id, event_id, status, submitted_at, reviewed_at, reviewed_by, reviewer_comments, reviewer_comment")
+      .select("id, event_id, period_month, status, submitted_at, reviewed_at, reviewed_by, reviewer_comments, reviewer_comment")
       .eq("user_id", userId),
+    service.from("event_expenses").select("event_id, total_amount, expense_date, created_at").eq("user_id", userId).gte("created_at", since),
   ]);
 
-  const subByEvent = new Map((submissions.data ?? []).filter((s) => s.event_id).map((s) => [s.event_id as string, s]));
-  const eventIds = [...new Set([...roles.keys(), ...subByEvent.keys()])];
-  if (eventIds.length === 0) return [];
-
-  const [{ data: events }, { data: lines }] = await Promise.all([
-    service
-      .from("events")
-      .select("id, title, start_date, end_date, event_type")
-      .in("id", eventIds)
-      .lte("start_date", new Date().toISOString())
-      .gte("start_date", since)
-      .order("start_date", { ascending: false }),
-    service.from("event_expenses").select("event_id, total_amount").eq("user_id", userId).in("event_id", eventIds),
-  ]);
+  const subs = submissions.data ?? [];
+  const subByEvent = new Map(subs.filter((s) => s.event_id).map((s) => [s.event_id as string, s]));
+  const subByMonth = new Map(subs.filter((s) => !s.event_id && s.period_month).map((s) => [s.period_month as string, s]));
 
   const totals = new Map<string, { total: number; count: number }>();
-  for (const l of lines ?? []) {
-    if (!l.event_id) continue;
-    const cur = totals.get(l.event_id) ?? { total: 0, count: 0 };
-    totals.set(l.event_id, { total: cur.total + Number(l.total_amount ?? 0), count: cur.count + 1 });
-  }
+  const add = (key: string, amount: number) => {
+    const cur = totals.get(key) ?? { total: 0, count: 0 };
+    totals.set(key, { total: cur.total + amount, count: cur.count + 1 });
+  };
+  for (const l of allLines.data ?? []) add(l.event_id ? `event:${l.event_id}` : `month:${lineMonth(l)}`, Number(l.total_amount ?? 0));
 
-  const reviewerIds = [...new Set((submissions.data ?? []).map((s) => s.reviewed_by).filter((id): id is string => !!id))];
+  const withLines = [...totals.keys()].filter((k) => k.startsWith("event:")).map((k) => k.slice(6));
+  const eventIds = [...new Set([...roles.keys(), ...subByEvent.keys(), ...withLines])];
+  const { data: events } = eventIds.length
+    ? await service
+        .from("events")
+        .select("id, title, start_date, end_date, event_type")
+        .in("id", eventIds)
+        .gte("start_date", since)
+        .order("start_date", { ascending: false })
+    : { data: [] };
+
+  const reviewerIds = [...new Set(subs.map((s) => s.reviewed_by).filter((id): id is string => !!id))];
   const { data: reviewers } = reviewerIds.length
     ? await service.from("profiles").select("id, first_name, last_name, email").in("id", reviewerIds)
     : { data: [] as Person[] };
   const reviewerById = new Map((reviewers ?? []).map((r) => [r.id, r]));
 
-  return (events ?? []).map((e) => {
-    const sub = subByEvent.get(e.id);
-    const t = totals.get(e.id) ?? { total: 0, count: 0 };
+  const now = new Date().toISOString();
+  const subFields = (sub: (typeof subs)[number] | undefined) => ({
+    status: toStatus(sub?.status),
+    submissionId: sub?.id ?? null,
+    submittedAt: sub?.submitted_at ?? null,
+    reviewedAt: sub?.reviewed_at ?? null,
+    reviewerName: sub?.reviewed_by ? personName(reviewerById.get(sub.reviewed_by)) : null,
+    reviewerComment: sub?.reviewer_comments ?? sub?.reviewer_comment ?? null,
+  });
+
+  const eventItems: MyExpenseItem[] = (events ?? [])
+    // Événements à venir : seulement s'il y a déjà des frais (hôtel réservé à l'avance…).
+    .filter((e) => e.start_date <= now || totals.has(`event:${e.id}`) || subByEvent.has(e.id))
+    .map((e) => {
+      const t = totals.get(`event:${e.id}`) ?? { total: 0, count: 0 };
+      return {
+        key: `event:${e.id}`,
+        eventId: e.id,
+        month: null,
+        title: e.title,
+        start: e.start_date,
+        end: e.end_date,
+        eventType: e.event_type as DbEventType | null,
+        roles: [...(roles.get(e.id) ?? [])],
+        total: t.total,
+        lineCount: t.count,
+        ...subFields(subByEvent.get(e.id)),
+      };
+    });
+
+  const months = new Set([...[...totals.keys()].filter((k) => k.startsWith("month:")).map((k) => k.slice(6)), ...subByMonth.keys()]);
+  const monthItems: MyExpenseItem[] = [...months].map((m) => {
+    const t = totals.get(`month:${m}`) ?? { total: 0, count: 0 };
     return {
-      eventId: e.id,
-      title: e.title,
-      start: e.start_date,
-      end: e.end_date,
-      eventType: e.event_type as DbEventType | null,
-      roles: [...(roles.get(e.id) ?? [])],
+      key: `month:${m}`,
+      eventId: null,
+      month: m,
+      title: `Frais hors événement · ${monthLabel(m)}`,
+      start: `${m}-01T00:00:00.000Z`,
+      end: `${m}-01T00:00:00.000Z`,
+      eventType: null,
+      roles: [],
       total: t.total,
       lineCount: t.count,
-      status: toStatus(sub?.status),
-      submissionId: sub?.id ?? null,
-      submittedAt: sub?.submitted_at ?? null,
-      reviewedAt: sub?.reviewed_at ?? null,
-      reviewerName: sub?.reviewed_by ? personName(reviewerById.get(sub.reviewed_by)) : null,
-      reviewerComment: sub?.reviewer_comments ?? sub?.reviewer_comment ?? null,
+      ...subFields(subByMonth.get(m)),
     };
   });
+
+  return [...eventItems, ...monthItems].sort((a, b) => b.start.localeCompare(a.start));
 }
 
-async function notify(service: ReturnType<typeof createServiceClient>, userIds: string[], title: string, message: string, data: Record<string, unknown>) {
+async function notify(service: Service, userIds: string[], title: string, message: string, data: Record<string, unknown>) {
   for (const userId of userIds) {
     const { data: notif } = await service
       .from("notifications")
@@ -172,29 +289,40 @@ async function notify(service: ReturnType<typeof createServiceClient>, userIds: 
   }
 }
 
+async function targetTitle(service: Service, target: ExpenseTarget) {
+  if ("month" in target) return `les frais hors événement de ${monthLabel(target.month).toLowerCase()}`;
+  const { data } = await service.from("events").select("title").eq("id", target.eventId).single();
+  return `« ${data?.title ?? "un événement"} »`;
+}
+
 /**
- * Déclare mes frais d'un événement (ou « pas de frais ») : la déclaration passe en attente de
- * validation et mon N+1 est prévenu. Possible tant qu'elle n'est pas validée (y compris après un refus).
+ * Déclare mes frais d'une fiche (ou « pas de frais », qui supprime les lignes saisies) : la
+ * déclaration passe en attente de validation et mon N+1 est prévenu. Possible tant qu'elle n'est
+ * pas validée (y compris après un refus).
  */
-export async function declareExpenses(eventId: string, noExpense = false): Promise<{ error: string | null }> {
+export async function declareExpenses(target: ExpenseTarget, noExpense = false): Promise<{ error: string | null }> {
   try {
     const { userId, service } = await currentUser();
-    const { data: lines } = await service.from("event_expenses").select("id, total_amount").eq("event_id", eventId).eq("user_id", userId);
-    if (!noExpense && (lines ?? []).length === 0) throw new Error("Ajoutez au moins une ligne de frais avant de déclarer.");
-
-    const { data: existing } = await service
-      .from("expense_submissions")
-      .select("id, status")
-      .eq("event_id", eventId)
-      .eq("user_id", userId)
-      .maybeSingle();
+    if ("month" in target && noExpense) throw new Error("« Pas de frais » ne concerne que les événements.");
+    const existing = await submissionOf(service, userId, target);
     if (existing?.status === "approved") throw new Error("Ces frais sont déjà validés.");
+
+    let lines = await linesOf(service, userId, target);
+    if (noExpense && lines.length > 0) {
+      const ids = lines.map((l) => l.id);
+      await service.from("event_expense_attachments").delete().in("expense_id", ids);
+      const { error } = await service.from("event_expenses").delete().in("id", ids).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      lines = [];
+    }
+    if (!noExpense && lines.length === 0) throw new Error("Ajoutez au moins une ligne de frais avant de déclarer.");
 
     const payload = {
       user_id: userId,
-      event_id: eventId,
-      expense_ids: (lines ?? []).map((l) => l.id),
-      total_amount: noExpense ? 0 : (lines ?? []).reduce((n, l) => n + Number(l.total_amount ?? 0), 0),
+      event_id: "eventId" in target ? target.eventId : null,
+      period_month: "month" in target ? target.month : null,
+      expense_ids: lines.map((l) => l.id),
+      total_amount: noExpense ? 0 : lines.reduce((n, l) => n + Number(l.total_amount ?? 0), 0),
       status: noExpense ? "no_expense" : "pending",
       submitted_at: new Date().toISOString(),
       reviewed_at: null,
@@ -208,17 +336,14 @@ export async function declareExpenses(eventId: string, noExpense = false): Promi
     if (error) throw new Error(error.message);
 
     if (!noExpense) {
-      const [{ data: me }, { data: event }] = await Promise.all([
-        service.from("profiles").select("first_name, last_name, email, expense_validator_id").eq("id", userId).single(),
-        service.from("events").select("title").eq("id", eventId).single(),
-      ]);
+      const { data: me } = await service.from("profiles").select("first_name, last_name, email, expense_validator_id").eq("id", userId).single();
       if (me?.expense_validator_id) {
         await notify(
           service,
           [me.expense_validator_id],
           "Frais à valider",
-          `${personName(me)} a déclaré ${payload.total_amount.toFixed(2)} € pour « ${event?.title ?? "un événement"} ».`,
-          { kind: "expense_to_validate", event_id: eventId }
+          `${personName(me)} a déclaré ${payload.total_amount.toFixed(2)} € pour ${await targetTitle(service, target)}.`,
+          { kind: "expense_to_validate", event_id: payload.event_id, period_month: payload.period_month }
         );
       }
     }
@@ -263,7 +388,7 @@ export async function getSubmissionsToReview(
 
   let q = service
     .from("expense_submissions")
-    .select("id, user_id, event_id, expense_ids, total_amount, status, submitted_at, reviewed_at, reviewer_comments, reviewer_comment")
+    .select("id, user_id, event_id, period_month, expense_ids, total_amount, status, submitted_at, reviewed_at, reviewer_comments, reviewer_comment")
     .in("status", status === "pending" ? ["pending", "revision_requested"] : [status])
     .order("submitted_at", { ascending: status === "pending", nullsFirst: false })
     .limit(200);
@@ -273,34 +398,29 @@ export async function getSubmissionsToReview(
 
   const personIds = [...new Set(subs.map((s) => s.user_id))];
   const eventIds = [...new Set(subs.map((s) => s.event_id).filter((id): id is string => !!id))];
-  const [{ data: people }, { data: events }, { data: lines }] = await Promise.all([
+  // Lignes hors événement : celles retenues au moment de la déclaration.
+  const monthLineIds = subs.filter((s) => !s.event_id).flatMap((s) => s.expense_ids ?? []);
+  const [{ data: people }, { data: events }, { data: eventLines }, { data: monthLines }] = await Promise.all([
     service.from("profiles").select("id, first_name, last_name, email").in("id", personIds),
-    service.from("events").select("id, title, start_date, event_type").in("id", eventIds),
-    service.from("event_expenses").select("*").in("event_id", eventIds).in("user_id", personIds),
+    eventIds.length
+      ? service.from("events").select("id, title, start_date, event_type").in("id", eventIds)
+      : Promise.resolve({ data: [] as { id: string; title: string; start_date: string; event_type: string | null }[] }),
+    eventIds.length ? service.from("event_expenses").select("*").in("event_id", eventIds).in("user_id", personIds) : Promise.resolve({ data: [] }),
+    monthLineIds.length ? service.from("event_expenses").select("*").in("id", monthLineIds) : Promise.resolve({ data: [] }),
   ]);
-  const lineIds = (lines ?? []).map((l) => l.id);
-  const { data: atts } = lineIds.length
-    ? await service.from("event_expense_attachments").select("expense_id, file_url, file_type").in("expense_id", lineIds)
-    : { data: [] as { expense_id: string; file_url: string; file_type: string | null }[] };
+  const lines = await withAttachments(service, [...(eventLines ?? []), ...(monthLines ?? [])] as Record<string, unknown>[]);
 
   const peopleById = new Map((people ?? []).map((p) => [p.id, p]));
   const eventsById = new Map((events ?? []).map((e) => [e.id, e]));
 
   return subs
-    .filter((s) => s.event_id && eventsById.has(s.event_id))
+    .filter((s) => (s.event_id ? eventsById.has(s.event_id) : !!s.period_month))
     .map((s) => {
-      const event = eventsById.get(s.event_id!)!;
+      const event = s.event_id ? eventsById.get(s.event_id)! : null;
       const person = peopleById.get(s.user_id);
-      const myLines = (lines ?? []).filter((l) => l.event_id === s.event_id && l.user_id === s.user_id) as unknown as (ExpenseLine & {
-        event_id: string;
-        user_id: string;
-      })[];
-      const attachments = [
-        ...myLines.filter((l) => l.file_url).map((l) => ({ url: l.file_url!, name: "Justificatif" })),
-        ...(atts ?? [])
-          .filter((a) => myLines.some((l) => l.id === a.expense_id))
-          .map((a, i) => ({ url: a.file_url, name: `Pièce jointe ${i + 1}` })),
-      ];
+      const myLines = event
+        ? lines.filter((l) => l.event_id === s.event_id && (l as unknown as { user_id: string }).user_id === s.user_id)
+        : lines.filter((l) => (s.expense_ids ?? []).includes(l.id));
       return {
         submissionId: s.id,
         status: toStatus(s.status),
@@ -309,9 +429,11 @@ export async function getSubmissionsToReview(
         reviewedAt: s.reviewed_at,
         reviewerComment: s.reviewer_comments ?? s.reviewer_comment ?? null,
         person: { id: s.user_id, name: personName(person), email: person?.email ?? null },
-        event: { id: event.id, title: event.title, start: event.start_date, eventType: event.event_type as DbEventType | null },
+        event: event
+          ? { id: event.id, title: event.title, start: event.start_date, eventType: event.event_type as DbEventType | null }
+          : { id: null, title: `Frais hors événement · ${monthLabel(s.period_month!)}`, start: `${s.period_month}-01T00:00:00.000Z`, eventType: null },
         lines: myLines,
-        attachments,
+        attachments: myLines.flatMap((l) => l.attachments),
       };
     });
 }
@@ -324,7 +446,11 @@ export async function reviewSubmission(
 ): Promise<{ error: string | null }> {
   try {
     const { userId, isAdmin, service } = await currentUser();
-    const { data: sub } = await service.from("expense_submissions").select("id, user_id, event_id, total_amount").eq("id", submissionId).single();
+    const { data: sub } = await service
+      .from("expense_submissions")
+      .select("id, user_id, event_id, period_month, total_amount")
+      .eq("id", submissionId)
+      .single();
     if (!sub) throw new Error("Déclaration introuvable.");
     if (!isAdmin) {
       const { data: owner } = await service.from("profiles").select("expense_validator_id").eq("id", sub.user_id).single();
@@ -344,15 +470,15 @@ export async function reviewSubmission(
       .eq("id", submissionId);
     if (error) throw new Error(error.message);
 
-    const { data: event } = await service.from("events").select("title").eq("id", sub.event_id!).single();
+    const what = await targetTitle(service, sub.event_id ? { eventId: sub.event_id } : { month: sub.period_month! });
     await notify(
       service,
       [sub.user_id],
       decision === "approved" ? "Frais validés" : "Frais refusés",
       decision === "approved"
-        ? `Vos frais (${Number(sub.total_amount ?? 0).toFixed(2)} €) pour « ${event?.title ?? "un événement"} » ont été validés.`
-        : `Vos frais pour « ${event?.title ?? "un événement"} » ont été refusés : ${comment.trim()}`,
-      { kind: "expense_reviewed", event_id: sub.event_id, decision }
+        ? `Vos frais (${Number(sub.total_amount ?? 0).toFixed(2)} €) pour ${what} ont été validés.`
+        : `Vos frais pour ${what} ont été refusés : ${comment.trim()}`,
+      { kind: "expense_reviewed", event_id: sub.event_id, period_month: sub.period_month, decision }
     );
     return { error: null };
   } catch (e) {
@@ -383,20 +509,15 @@ export async function setExpenseValidator(personId: string, validatorId: string 
   }
 }
 
-/** Statut de ma déclaration pour un événement (onglet Frais de la fiche et modal « Mes frais »). */
-export async function getMyExpenseStatus(eventId: string): Promise<{
+/** Statut de ma déclaration pour une fiche (onglet Frais de la fiche et modal « Mes frais »). */
+export async function getMyExpenseStatus(target: ExpenseTarget): Promise<{
   status: ExpenseStatus;
   reviewerName: string | null;
   reviewerComment: string | null;
   reviewedAt: string | null;
 }> {
   const { userId, service } = await currentUser();
-  const { data: sub } = await service
-    .from("expense_submissions")
-    .select("status, reviewed_by, reviewed_at, reviewer_comments, reviewer_comment")
-    .eq("event_id", eventId)
-    .eq("user_id", userId)
-    .maybeSingle();
+  const sub = await submissionOf(service, userId, target);
   let reviewerName: string | null = null;
   if (sub?.reviewed_by) {
     const { data: r } = await service.from("profiles").select("first_name, last_name, email").eq("id", sub.reviewed_by).single();
@@ -408,6 +529,100 @@ export async function getMyExpenseStatus(eventId: string): Promise<{
     reviewerComment: sub?.reviewer_comments ?? sub?.reviewer_comment ?? null,
     reviewedAt: sub?.reviewed_at ?? null,
   };
+}
+
+/** Mes lignes d'une fiche, avec leurs justificatifs. */
+export async function getMyExpenseLines(target: ExpenseTarget): Promise<ExpenseLine[]> {
+  const { userId, service } = await currentUser();
+  const lines = await linesOf(service, userId, target);
+  lines.sort((a, b) => (b.expense_date ?? b.created_at).localeCompare(a.expense_date ?? a.created_at));
+  return withAttachments(service, lines as Record<string, unknown>[]);
+}
+
+/** Ajoute des lignes de frais (une catégorie chacune) et leurs justificatifs. */
+export async function addExpenseLines(input: NewExpenseLine[]): Promise<{ error: string | null; ids: string[] }> {
+  try {
+    const { userId, service } = await currentUser();
+    const scansPrefix = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/expense_scans/expense_scans/${userId}/`;
+    const ids: string[] = [];
+    for (const line of input) {
+      if (!EXPENSE_CATEGORIES.includes(line.category)) throw new Error("Catégorie inconnue.");
+      if (!(line.amount > 0) || line.amount > 100_000) throw new Error("Montant invalide.");
+      if (line.date && !/^\d{4}-\d{2}-\d{2}$/.test(line.date)) throw new Error("Date invalide.");
+      // Justificatifs : uniquement des fichiers déposés par la personne elle-même.
+      if (line.attachments.some((a) => !a.url.startsWith(scansPrefix))) throw new Error("Justificatif non reconnu.");
+
+      const target: ExpenseTarget = line.eventId ? { eventId: line.eventId } : { month: (line.date ?? new Date().toISOString()).slice(0, 7) };
+      const sub = await submissionOf(service, userId, target);
+      if (sub?.status === "approved") throw new Error("Ces frais sont déjà validés : impossible d'y ajouter une ligne.");
+
+      const amount = Math.round(line.amount * 100) / 100;
+      const byCategory: Partial<Record<ExpenseAmountColumn, number>> = { [CATEGORY_META[line.category].column]: amount };
+      const { data, error } = await service
+        .from("event_expenses")
+        .insert({
+          user_id: userId,
+          event_id: line.eventId,
+          ...byCategory,
+          total_amount: amount,
+          expense_date: line.date,
+          merchant_name: line.merchant?.trim() || null,
+          description: line.description?.trim() || null,
+          other_fees_description: line.category === "other" ? line.description?.trim() || line.merchant?.trim() || null : null,
+          distance_km: line.distanceKm,
+          file_url: line.attachments[0]?.url ?? null,
+        })
+        .select("id")
+        .single();
+      if (error) throw new Error(error.message);
+      if (line.attachments.length) {
+        const { error: attErr } = await service
+          .from("event_expense_attachments")
+          .insert(line.attachments.map((a) => ({ expense_id: data.id, file_url: a.url, file_type: a.type })));
+        if (attErr) throw new Error(attErr.message);
+      }
+      ids.push(data.id);
+    }
+    // Copie des justificatifs dans le Drive (année / mois / événement), après la réponse.
+    const toArchive: ReceiptToArchive[] = input.flatMap((l) =>
+      l.attachments.map((a) => ({
+        userId,
+        eventId: l.eventId,
+        date: l.date,
+        category: l.category,
+        merchant: l.merchant,
+        amount: l.amount,
+        url: a.url,
+        type: a.type,
+      }))
+    );
+    if (toArchive.length) after(() => archiveReceipts(toArchive));
+    return { error: null, ids };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Erreur inattendue.", ids: [] };
+  }
+}
+
+/** Supprime une de mes lignes (tant que la fiche n'est pas validée). */
+export async function deleteExpenseLine(lineId: string): Promise<{ error: string | null }> {
+  try {
+    const { userId, service } = await currentUser();
+    const { data: line } = await service
+      .from("event_expenses")
+      .select("id, event_id, expense_date, created_at")
+      .eq("id", lineId)
+      .eq("user_id", userId)
+      .single();
+    if (!line) throw new Error("Ligne introuvable.");
+    const sub = await submissionOf(service, userId, line.event_id ? { eventId: line.event_id } : { month: lineMonth(line) });
+    if (sub?.status === "approved") throw new Error("Ces frais sont déjà validés.");
+    await service.from("event_expense_attachments").delete().eq("expense_id", lineId);
+    const { error } = await service.from("event_expenses").delete().eq("id", lineId).eq("user_id", userId);
+    if (error) throw new Error(error.message);
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Erreur inattendue." };
+  }
 }
 
 /** Personnes autorisées (en plus des administrateurs) à régler les N+1. */

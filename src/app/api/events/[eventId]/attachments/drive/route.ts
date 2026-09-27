@@ -4,14 +4,10 @@ import { fr } from "date-fns/locale";
 import { createClient } from "@/lib/supabase/server";
 import { getGoogleAccountById } from "@/lib/google/accounts";
 import { getBoardDriveAccountId } from "@/app/actions/board-settings";
-import { findOrCreateFolder, createResumableUploadSession } from "@/lib/google/drive";
+import { createResumableUploadSession } from "@/lib/google/drive";
+import { archiveSubFolder, eventArchiveFolder } from "@/lib/google/archiveFolders";
 
-const ROOT_FOLDER_NAME = "LGEF Drive";
 const MEDIA_FOLDER_NAME = "Médias";
-
-function capitalize(s: string) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
 
 /** N'accepte que les métadonnées (nom, type) — le fichier lui-même part directement du navigateur vers Google. */
 export async function POST(request: Request, { params }: { params: Promise<{ eventId: string }> }) {
@@ -48,20 +44,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
   const uploadDate = format(new Date(), "d MMMM yyyy 'à' HH:mm", { locale: fr });
 
   try {
-    const rootFolder = await findOrCreateFolder(account, { name: ROOT_FOLDER_NAME });
-    const yearFolder = await findOrCreateFolder(account, {
-      name: format(eventDateObj, "yyyy"),
-      parentId: rootFolder.id,
-    });
-    const monthFolder = await findOrCreateFolder(account, {
-      name: `${format(eventDateObj, "MM")} - ${capitalize(format(eventDateObj, "MMMM", { locale: fr }))}`,
-      parentId: yearFolder.id,
-    });
-    const eventFolder = await findOrCreateFolder(account, {
-      name: `${format(eventDateObj, "dd")} - ${eventTitle}`,
-      parentId: monthFolder.id,
-    });
-    const mediaFolder = await findOrCreateFolder(account, { name: MEDIA_FOLDER_NAME, parentId: eventFolder.id });
+    const cache = new Map();
+    const eventFolder = await eventArchiveFolder(account, { title: eventTitle, start: eventDateObj }, cache);
+    const mediaFolder = await archiveSubFolder(account, eventFolder, MEDIA_FOLDER_NAME, cache);
 
     const description = [
       `Événement : ${eventTitle}`,

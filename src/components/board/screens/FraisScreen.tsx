@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Receipt, ShieldCheck, Users, X, Paperclip, Search, ChevronRight } from "lucide-react";
+import { Receipt, ShieldCheck, Users, X, Search, ChevronRight } from "lucide-react";
 import {
   getMyExpenses,
   getMyValidatorScope,
@@ -15,8 +15,10 @@ import {
   type SubmissionToReview,
   type ValidatorAssignment,
 } from "@/app/actions/expenses";
-import { useEventExpenses } from "@/hooks/board/useEventExpenses";
-import { FraisTab } from "@/components/board/calendar/EventTabs";
+import { ExpenseLinesEditor, AttachmentLinks } from "@/components/board/expenses/ExpenseLinesEditor";
+import { ExpenseImport } from "@/components/board/expenses/ExpenseImport";
+import { EventArrow } from "@/components/board/calendar/EventOpener";
+import { lineParts } from "@/lib/board/expenseCategories";
 import { ExpenseStatusBadge, EXPENSE_STATUS_META, formatEuros } from "@/components/board/expenses/ExpenseStatus";
 import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
@@ -131,9 +133,8 @@ function FilterChip({ active, onClick, children }: { active: boolean; onClick: (
 
 /* ---------- Mes frais ---------- */
 
-/** Fiche de frais d'un événement : lignes (saisie/suppression) + déclaration au N+1. */
+/** Fiche de frais (événement ou hors événement d'un mois) : lignes, justificatifs, déclaration au N+1. */
 export function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpenseItem; onClose: () => void; onChanged: () => void }) {
-  const hook = useEventExpenses(item.eventId);
   const locked = item.status === "approved";
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -144,9 +145,11 @@ export function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpens
               <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-white/70">Note de frais</div>
               <h3 className="mt-1 truncate text-base font-extrabold">{item.title}</h3>
               <div className="mt-0.5 text-xs text-white/80">
-                {fmtDate(item.start)} · {item.roles.join(", ") || "—"}
+                {item.eventId ? `${fmtDate(item.start)} · ${item.roles.join(", ") || "—"}` : "Dépenses sans événement, déclarées pour le mois"}
               </div>
-              <OpenEventButton eventId={item.eventId} className="mt-2 flex items-center gap-1 text-xs font-semibold text-white/90 hover:underline" />
+              {item.eventId && (
+                <OpenEventButton eventId={item.eventId} className="mt-2 flex items-center gap-1 text-xs font-semibold text-white/90 hover:underline" />
+              )}
             </div>
             <button onClick={onClose} className="rounded-full p-1 text-white/80 hover:bg-white/10">
               <X size={18} />
@@ -154,17 +157,7 @@ export function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpens
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-5">
-          {locked ? (
-            <div className="space-y-3">
-              <ExpenseStatusBadge status="approved" />
-              <p className="text-sm text-ink-2">
-                {formatEuros(item.total)} validés{item.reviewerName ? ` par ${item.reviewerName}` : ""}
-                {item.reviewedAt ? ` le ${new Date(item.reviewedAt).toLocaleDateString("fr-FR")}` : ""}.
-              </p>
-            </div>
-          ) : (
-            <FraisTab hook={hook} eventId={item.eventId} onDeclared={onChanged} />
-          )}
+          <ExpenseLinesEditor target={item.eventId ? { eventId: item.eventId } : { month: item.month! }} locked={locked} onChanged={onChanged} />
         </div>
       </div>
     </div>
@@ -201,6 +194,7 @@ function MyExpenses() {
 
   return (
     <div className="space-y-3">
+      <ExpenseImport onAdded={() => void load()} />
       <div className="flex flex-wrap gap-1.5">
         {MINE_FILTERS.map((f) => (
           <FilterChip key={f.id} active={filter === f.id} onClick={() => setFilter(f.id)}>
@@ -222,7 +216,7 @@ function MyExpenses() {
               <GroupHeader label={monthLabel(key)} count={group.length} total={group.reduce((n, i) => n + i.total, 0)} />
               {group.map((i) => (
                 <button
-                  key={i.eventId}
+                  key={i.key}
                   onClick={() => setOpen(i)}
                   className="flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
                 >
@@ -230,9 +224,10 @@ function MyExpenses() {
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="truncate text-sm font-bold text-ink">{i.title}</span>
                       <OrgChip eventType={i.eventType} />
+                      {i.eventId && <EventArrow eventId={i.eventId} className="h-6 w-6" />}
                     </div>
                     <div className="mt-0.5 text-[11px] text-ink-4">
-                      {fmtDate(i.start)} · {i.roles.join(", ") || "Déclaration existante"}
+                      {i.eventId ? `${fmtDate(i.start)} · ${i.roles.join(", ") || "Frais saisis"}` : "Hors événement"}
                       {i.lineCount > 0 && ` · ${i.lineCount} ligne${i.lineCount > 1 ? "s" : ""}`}
                     </div>
                     {i.status === "rejected" && i.reviewerComment && <div className="mt-0.5 truncate text-[11px] text-bad">Motif : {i.reviewerComment}</div>}
@@ -268,17 +263,6 @@ function MyExpenses() {
 
 /* ---------- À valider (N+1) ---------- */
 
-const LINE_FIELDS: { key: keyof SubmissionToReview["lines"][number]; label: string }[] = [
-  { key: "transport_fees", label: "Transport" },
-  { key: "fuel_fees", label: "Carburant" },
-  { key: "toll_fees", label: "Péage" },
-  { key: "parking_fees", label: "Parking" },
-  { key: "car_rental_fees", label: "Location" },
-  { key: "hotel_fees", label: "Hôtel" },
-  { key: "meal_fees", label: "Repas" },
-  { key: "other_fees", label: "Autres" },
-];
-
 /** Fiche de validation : détail des lignes, justificatifs, puis Valider / Refuser (motif obligatoire). */
 export function ReviewModal({ sub, onClose, onDone }: { sub: SubmissionToReview; onClose: () => void; onDone: () => void }) {
   const [comment, setComment] = useState("");
@@ -306,7 +290,9 @@ export function ReviewModal({ sub, onClose, onDone }: { sub: SubmissionToReview;
               <div className="mt-0.5 truncate text-xs text-white/80">
                 {sub.event.title} · {fmtDate(sub.event.start)}
               </div>
-              <OpenEventButton eventId={sub.event.id} className="mt-2 flex items-center gap-1 text-xs font-semibold text-white/90 hover:underline" />
+              {sub.event.id && (
+                <OpenEventButton eventId={sub.event.id} className="mt-2 flex items-center gap-1 text-xs font-semibold text-white/90 hover:underline" />
+              )}
             </div>
             <button onClick={onClose} className="rounded-full p-1 text-white/80 hover:bg-white/10">
               <X size={18} />
@@ -320,39 +306,40 @@ export function ReviewModal({ sub, onClose, onDone }: { sub: SubmissionToReview;
             <span className="text-xl font-extrabold text-ink">{formatEuros(sub.total)}</span>
           </div>
 
-          {sub.lines.map((l, idx) => {
-            const parts = LINE_FIELDS.filter((f) => Number(l[f.key] ?? 0) > 0);
-            return (
-              <div key={l.id} className="rounded-btn border border-line p-3 text-sm">
-                <div className="mb-1 flex items-center justify-between text-xs font-semibold text-ink-3">
-                  <span>Ligne {idx + 1}</span>
-                  <span className="text-ink">{formatEuros(Number(l.total_amount ?? 0))}</span>
+          {sub.lines.map((l) => (
+            <div key={l.id} className="rounded-btn border border-line p-3 text-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-semibold text-ink">
+                    {lineParts(l)
+                      .map((p) => p.label.replace(/ \(.*\)$/, ""))
+                      .join(" + ") || "Frais"}
+                    {l.merchant_name && <span className="font-normal text-ink-3"> · {l.merchant_name}</span>}
+                  </div>
+                  <div className="text-[11px] text-ink-4">
+                    {new Date(`${(l.expense_date ?? l.created_at).slice(0, 10)}T12:00:00`).toLocaleDateString("fr-FR")}
+                    {(l.description || l.other_fees_description) && ` · ${l.description || l.other_fees_description}`}
+                    {l.distance_km ? ` · ${l.distance_km} km` : ""}
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-ink-2">
-                  {parts.map((f) => (
-                    <span key={f.key}>
-                      {f.label} : <strong>{formatEuros(Number(l[f.key]))}</strong>
+                <span className="shrink-0 font-bold text-ink">{formatEuros(Number(l.total_amount ?? 0))}</span>
+              </div>
+              {lineParts(l).length > 1 && (
+                <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-ink-2">
+                  {lineParts(l).map((p) => (
+                    <span key={p.category}>
+                      {p.label} : <strong>{formatEuros(p.amount)}</strong>
                     </span>
                   ))}
-                  {l.distance_km ? <span>Distance : {l.distance_km} km</span> : null}
                 </div>
-                {(l.other_fees_description || l.description) && (
-                  <p className="mt-1 text-xs italic text-ink-3">{l.other_fees_description || l.description}</p>
-                )}
-              </div>
-            );
-          })}
-
-          {sub.attachments.length > 0 && (
-            <div className="space-y-1">
-              <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">Justificatifs</div>
-              {sub.attachments.map((a) => (
-                <a key={a.url} href={a.url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs font-semibold text-link hover:underline">
-                  <Paperclip size={12} /> {a.name}
-                </a>
-              ))}
+              )}
+              {l.attachments.length > 0 ? (
+                <AttachmentLinks attachments={l.attachments} />
+              ) : (
+                <p className="mt-1 text-[11px] italic text-ink-4">Sans justificatif</p>
+              )}
             </div>
-          )}
+          ))}
 
           {sub.reviewerComment && !canDecide && <p className="rounded-btn bg-subtle px-3 py-2 text-xs text-ink-2">Commentaire : {sub.reviewerComment}</p>}
 
@@ -464,7 +451,10 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
                   className="flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-bold text-ink">{groupBy === "person" ? s.event.title : s.person.name}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-sm font-bold text-ink">{groupBy === "person" ? s.event.title : s.person.name}</span>
+                      {s.event.id && <EventArrow eventId={s.event.id} className="h-6 w-6" />}
+                    </div>
                     <div className="truncate text-[11px] text-ink-4">
                       {groupBy === "person" ? "" : `${s.event.title} · `}
                       {fmtDate(s.event.start)}

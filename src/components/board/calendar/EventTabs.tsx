@@ -20,13 +20,12 @@ import {
   Share2,
 } from "lucide-react";
 import { YoutubeIcon, FacebookIcon, InstagramIcon } from "@/components/board/publication/BrandIcons";
-import { DeclarationBar } from "@/components/board/expenses/ExpenseStatus";
+import { ExpenseLinesEditor } from "@/components/board/expenses/ExpenseLinesEditor";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { COVERAGE_COLORS } from "@/lib/board/tokens";
 import { useEventTeam } from "@/hooks/board/useEventTeam";
 import { useEventComments } from "@/hooks/board/useEventComments";
-import { useEventExpenses } from "@/hooks/board/useEventExpenses";
 import { useEventFiles } from "@/hooks/board/useEventFiles";
 import { getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
 import { getPublishedForFile, detachFileFromPublications } from "@/app/actions/social";
@@ -372,59 +371,10 @@ export function EquipeTab({ hook }: { hook: ReturnType<typeof useEventTeam> }) {
   );
 }
 
-export function FraisTab({ hook, eventId, onDeclared }: { hook: ReturnType<typeof useEventExpenses>; eventId?: string; onDeclared?: () => void }) {
-  const [toll, setToll] = useState(0);
-  const [meal, setMeal] = useState(0);
-  const [other, setOther] = useState(0);
-  const [otherDesc, setOtherDesc] = useState("");
-
-  const total = hook.expenses.reduce((sum, e) => sum + (e.total_amount ?? 0), 0);
-
-  return (
-    <div className="space-y-4">
-      <div className="text-lg font-extrabold text-ink">{total.toFixed(2)} €</div>
-
-      {hook.expenses.map((e) => (
-        <div key={e.id} className="flex items-center justify-between rounded-btn border border-line px-3 py-2 text-sm">
-          <span>
-            Péage {e.toll_fees ?? 0} € · Repas {e.meal_fees ?? 0} € · Autres {e.other_fees ?? 0} €
-            {e.other_fees_description ? ` (${e.other_fees_description})` : ""}
-          </span>
-          <button onClick={() => hook.deleteExpense(e.id)} className="text-xs font-semibold text-red hover:underline">
-            Supprimer
-          </button>
-        </div>
-      ))}
-
-      <div className="space-y-2 rounded-panel border border-line p-3">
-        <div className="grid grid-cols-3 gap-2">
-          <input type="number" min={0} step={0.01} value={toll || ""} onChange={(e) => setToll(parseFloat(e.target.value) || 0)} placeholder="Péage €" className="rounded-btn border border-line px-2 py-1.5 text-sm" />
-          <input type="number" min={0} step={0.01} value={meal || ""} onChange={(e) => setMeal(parseFloat(e.target.value) || 0)} placeholder="Repas €" className="rounded-btn border border-line px-2 py-1.5 text-sm" />
-          <input type="number" min={0} step={0.01} value={other || ""} onChange={(e) => setOther(parseFloat(e.target.value) || 0)} placeholder="Autres €" className="rounded-btn border border-line px-2 py-1.5 text-sm" />
-        </div>
-        {other > 0 && (
-          <input value={otherDesc} onChange={(e) => setOtherDesc(e.target.value)} placeholder="Description des autres frais" className="w-full rounded-btn border border-line px-2 py-1.5 text-sm" />
-        )}
-        <button
-          onClick={async () => {
-            const ok = await hook.createExpense({ toll_fees: toll, meal_fees: meal, other_fees: other, other_fees_description: otherDesc || null });
-            if (ok) {
-              setToll(0);
-              setMeal(0);
-              setOther(0);
-              setOtherDesc("");
-            }
-          }}
-          disabled={toll === 0 && meal === 0 && other === 0}
-          className="rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
-        >
-          Ajouter la ligne de frais
-        </button>
-      </div>
-
-      {eventId && <DeclarationBar key={hook.expenses.length} eventId={eventId} total={total} lineCount={hook.expenses.length} onDone={onDeclared} />}
-    </div>
-  );
+/** Onglet Frais de la fiche événement : mes lignes (avec justificatifs lus par Claude) et ma déclaration. */
+export function FraisTab({ eventId, onDeclared }: { eventId?: string; onDeclared?: () => void }) {
+  if (!eventId) return <p className="text-sm text-ink-4">Enregistrez l&rsquo;événement pour saisir des frais.</p>;
+  return <ExpenseLinesEditor target={{ eventId }} onChanged={onDeclared} />;
 }
 
 export function GestionFraisPlaceholder() {

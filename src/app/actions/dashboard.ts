@@ -78,7 +78,7 @@ export async function getDashboard(period: "day" | "week"): Promise<Dashboard> {
       const toDeclare = mine.filter((m) => m.status === "a_declarer").length;
       const rejected = mine.filter((m) => m.status === "rejected").length;
       push({ id: "frais-valider", app: "frais", tone: "red", count: scope.pending, title: "Notes de frais à valider", detail: "Votre équipe attend votre validation" });
-      push({ id: "frais-refuses", app: "frais", tone: "red", count: rejected, title: "Frais refusés à corriger", detail: "Voir le motif et redéclarer" });
+      push({ id: "frais-refuses", app: "frais", tone: "red", count: rejected, title: "Frais refusés à corriger", detail: "Corriger et redéclarer, ou indiquer « pas de frais »" });
       push({ id: "frais-declarer", app: "frais", tone: "orange", count: toDeclare, title: "Frais à déclarer", detail: "Événements où vous étiez sollicité" });
     }, undefined),
 

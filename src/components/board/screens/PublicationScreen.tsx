@@ -1,5 +1,6 @@
 "use client";
 
+import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Send,
@@ -885,8 +886,9 @@ function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: ()
             <X size={16} />
           </button>
         </div>
-        <p className="text-xs text-ink-4">
-          {pub.events ? "Événement" : "Publication directe"} · {categoryLabel(publicationCategory(pub))} · {kindLabel}
+        <p className="flex items-center gap-1.5 text-xs text-ink-4">
+          {pub.events ? `Événement · ${pub.events.title}` : "Publication directe"} · {categoryLabel(publicationCategory(pub))} · {kindLabel}
+          {pub.event_id && <EventArrow eventId={pub.event_id} className="h-6 w-6" />}
         </p>
 
         {pub.event_id && files.length > 0 && <EventMediaPicker eventId={pub.event_id} selected={files} onChange={setFiles} />}
@@ -1101,6 +1103,7 @@ function EventSearch({ onPick }: { onPick: (e: EventOption) => void }) {
             />
             <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{e.title}</span>
             <span className="shrink-0 text-[11px] text-ink-4">{new Date(e.start_date).toLocaleDateString("fr-FR")}</span>
+            <EventArrow eventId={e.id} className="h-6 w-6" />
           </button>
         ))}
       </div>
@@ -1409,7 +1412,10 @@ function PublicationCard({
             {kind === "gallery" && ` (${pub.files.length || pub.media.length})`}
           </span>
           <span>·</span>
-          <span>{pub.events ? "Événement" : "Publication directe"}</span>
+          <span className="flex items-center gap-1">
+            {pub.events ? `Événement · ${pub.events.title}` : "Publication directe"}
+            {pub.event_id && <EventArrow eventId={pub.event_id} className="h-5 w-5" />}
+          </span>
 
           {tab === "scheduled" && pub.scheduled_at && (
             <span className="font-semibold text-link">

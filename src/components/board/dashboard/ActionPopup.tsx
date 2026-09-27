@@ -12,9 +12,10 @@ import {
   type SubmissionToReview,
 } from "@/app/actions/expenses";
 import { ExpenseSheetModal, ReviewModal } from "@/components/board/screens/FraisScreen";
-import { formatEuros } from "@/components/board/expenses/ExpenseStatus";
-import { OpenEventButton } from "@/components/board/calendar/OpenEventButton";
+import { confirmNoExpense, formatEuros } from "@/components/board/expenses/ExpenseStatus";
+import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { useEventCoverage } from "@/hooks/board/useEventCoverage";
+import { useAvailableTechnicians, type TechnicianOption } from "@/hooks/board/useAvailableTechnicians";
 import { useDirectorAttendance } from "@/hooks/board/useDirectorAttendance";
 
 const fmt = (iso: string | null) =>
@@ -31,11 +32,14 @@ const APP_LABELS: Record<string, string> = {
   inscription: "Inscription",
 };
 
-function Row({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Row({ title, subtitle, eventId, children }: { title: string; subtitle?: string; eventId?: string | null; children?: React.ReactNode }) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3 last:border-b-0">
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-bold text-ink">{title}</div>
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-bold text-ink">{title}</span>
+          {eventId && <EventArrow eventId={eventId} className="h-6 w-6" />}
+        </div>
         {subtitle && <div className="truncate text-[11px] text-ink-4">{subtitle}</div>}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">{children}</div>
@@ -65,8 +69,11 @@ function ValidateRow({ sub, onDone, onDetails }: { sub: SubmissionToReview; onDo
     <div className="border-b border-line px-4 py-3 last:border-b-0">
       <div className="flex flex-wrap items-center gap-2">
         <button onClick={onDetails} className="min-w-0 flex-1 text-left">
-          <div className="truncate text-sm font-bold text-ink">
-            {sub.person.name} · {formatEuros(sub.total)}
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-sm font-bold text-ink">
+              {sub.person.name} · {formatEuros(sub.total)}
+            </span>
+            {sub.event.id && <EventArrow eventId={sub.event.id} className="h-6 w-6" />}
           </div>
           <div className="truncate text-[11px] text-ink-4">
             {sub.event.title} · {fmt(sub.event.start)} — voir le détail
@@ -160,14 +167,23 @@ function DeclareList({ statuses, onChanged }: { statuses: MyExpenseItem["status"
   return (
     <>
       {items.map((i) => (
-        <Row key={i.eventId} title={i.title} subtitle={`${fmt(i.start)} · ${i.roles.join(", ")}${i.reviewerComment ? ` · Motif : ${i.reviewerComment}` : ""}`}>
-          {i.status === "a_declarer" && i.lineCount === 0 && (
+        <Row
+          key={i.key}
+          title={i.title}
+          eventId={i.eventId}
+          subtitle={`${i.eventId ? `${fmt(i.start)} · ${i.roles.join(", ")}` : "Hors événement"}${i.lineCount ? ` · ${formatEuros(i.total)}` : ""}${
+            i.reviewerComment ? ` · Motif : ${i.reviewerComment}` : ""
+          }`}
+        >
+          {i.eventId && (i.status === "rejected" || i.lineCount === 0) && (
             <button
-              disabled={busy === i.eventId}
+              disabled={busy === i.key}
               onClick={async () => {
-                setBusy(i.eventId);
-                await declareExpenses(i.eventId, true);
+                if (!confirmNoExpense(i.lineCount)) return;
+                setBusy(i.key);
+                const res = await declareExpenses({ eventId: i.eventId! }, true);
                 setBusy(null);
+                if (res.error) return alert(res.error);
                 refresh();
               }}
               className={btnGhost}
@@ -206,8 +222,7 @@ function CoverageRow({ item, onDone }: { item: DashboardActionItem; onDone: () =
     if (ok) onDone();
   };
   return (
-    <Row title={item.title} subtitle={`${fmt(item.date)}${item.detail ? ` · ${item.detail}` : ""}`}>
-      {item.eventId && <OpenEventButton eventId={item.eventId} label="Voir" className={btnGhost} />}
+    <Row title={item.title} eventId={item.eventId} subtitle={`${fmt(item.date)}${item.detail ? ` · ${item.detail}` : ""}`}>
       <button disabled={busy || !cov.request} onClick={() => respond("rejected")} className={btnKo}>
         Refuser
       </button>
@@ -228,8 +243,7 @@ function AttendanceRow({ item, onDone }: { item: DashboardActionItem; onDone: ()
     if (ok) onDone();
   };
   return (
-    <Row title={item.title} subtitle={fmt(item.date)}>
-      {item.eventId && <OpenEventButton eventId={item.eventId} label="Voir" className={btnGhost} />}
+    <Row title={item.title} eventId={item.eventId} subtitle={fmt(item.date)}>
       <button disabled={busy || !att.attendance} onClick={() => respond("denied")} className={btnKo}>
         Absent
       </button>
@@ -237,6 +251,72 @@ function AttendanceRow({ item, onDone }: { item: DashboardActionItem; onDone: ()
         <Check size={12} /> Présent
       </button>
     </Row>
+  );
+}
+
+/* ---------- Demandes de captation à attribuer (admin) ---------- */
+
+function AssignRow({ item, technicians, onDone }: { item: DashboardActionItem; technicians: TechnicianOption[]; onDone: () => void }) {
+  const cov = useEventCoverage(item.eventId ?? undefined);
+  const [techId, setTechId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const tech = technicians.find((t) => t.id === techId);
+  const assign = async (direct: boolean) => {
+    if (!tech) return;
+    setBusy(true);
+    setError(null);
+    const ok = direct
+      ? await cov.assignTechnician(tech)
+      : await cov.assignPending(tech, { title: item.title, start: new Date(item.date ?? Date.now()) });
+    setBusy(false);
+    if (ok) onDone();
+    else setError("L'assignation a échoué.");
+  };
+  const details = cov.request?.details;
+  return (
+    <div className="border-b border-line px-4 py-3 last:border-b-0">
+      <div className="flex items-center gap-1.5">
+        <span className="truncate text-sm font-bold text-ink">{item.title}</span>
+        {item.eventId && <EventArrow eventId={item.eventId} className="h-6 w-6" />}
+      </div>
+      <div className="truncate text-[11px] text-ink-4">
+        {fmt(item.date)}
+        {details ? ` · ${details}` : ""}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select
+          value={techId}
+          onChange={(e) => setTechId(e.target.value)}
+          className="min-w-0 flex-1 rounded-btn border border-line bg-card px-2 py-1.5 text-sm outline-none"
+        >
+          <option value="">Choisir un technicien…</option>
+          {technicians.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+        <button disabled={busy || !tech} onClick={() => assign(false)} title="Le technicien reçoit la mission et doit l'accepter" className={btnGhost}>
+          Proposer
+        </button>
+        <button disabled={busy || !tech} onClick={() => assign(true)} title="Mission validée immédiatement" className={btnOk}>
+          <Check size={12} /> Désigner
+        </button>
+      </div>
+      {error && <p className="mt-1 text-xs text-bad">{error}</p>}
+    </div>
+  );
+}
+
+function AssignList({ items, onDone }: { items: DashboardActionItem[]; onDone: (id: string) => void }) {
+  const { technicians } = useAvailableTechnicians();
+  return (
+    <>
+      {items.map((i) => (
+        <AssignRow key={i.id} item={i} technicians={technicians} onDone={() => onDone(i.id)} />
+      ))}
+    </>
   );
 }
 
@@ -259,7 +339,7 @@ export function ActionPopup({
   onChanged: () => void;
 }) {
   const [items, setItems] = useState<DashboardActionItem[]>(action.items ?? []);
-  const drop = (id: string) => {
+  const removeItem = (id: string) => {
     setItems((prev) => prev.filter((i) => i.id !== id));
     onChanged();
   };
@@ -276,20 +356,16 @@ export function ActionPopup({
       body = <DeclareList statuses={["rejected"]} onChanged={onChanged} />;
       break;
     case "captation-repondre":
-      body = items.length ? items.map((i) => <CoverageRow key={i.id} item={i} onDone={() => drop(i.id)} />) : null;
+      body = items.length ? items.map((i) => <CoverageRow key={i.id} item={i} onDone={() => removeItem(i.id)} />) : null;
       break;
     case "presence":
-      body = items.length ? items.map((i) => <AttendanceRow key={i.id} item={i} onDone={() => drop(i.id)} />) : null;
+      body = items.length ? items.map((i) => <AttendanceRow key={i.id} item={i} onDone={() => removeItem(i.id)} />) : null;
       break;
     case "captation-attribuer":
+      body = items.length ? <AssignList items={items} onDone={removeItem} /> : null;
+      break;
     case "publier":
-      body = items.length
-        ? items.map((i) => (
-            <Row key={i.id} title={i.title} subtitle={fmt(i.date)}>
-              {i.eventId && <OpenEventButton eventId={i.eventId} label={action.id === "publier" ? "Voir l'événement" : "Traiter"} className={btnGhost} />}
-            </Row>
-          ))
-        : null;
+      body = items.length ? items.map((i) => <Row key={i.id} title={i.title} eventId={i.eventId} subtitle={fmt(i.date)} />) : null;
       break;
     default:
       body = <p className="p-4 text-sm text-ink-3">{action.detail}</p>;

@@ -7,6 +7,7 @@ import { readCache, writeCache } from "@/lib/board/localCache";
 import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
 import { ActionPopup } from "@/components/board/dashboard/ActionPopup";
+import { EventArrow, useOpenEvent } from "@/components/board/calendar/EventOpener";
 
 type Period = "day" | "week";
 
@@ -40,6 +41,7 @@ export function AccueilScreen({
   // Clic sur une action : popup de traitement rapide (valider, accepter…) plutôt que le module complet.
   const [openAction, setOpenAction] = useState<DashboardAction | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const { open: openEvent } = useOpenEvent();
 
   useEffect(() => {
     let cancelled = false;
@@ -168,7 +170,7 @@ export function AccueilScreen({
                       return (
                         <button
                           key={p.eventId}
-                          onClick={() => onNavigate?.("calendrier")}
+                          onClick={() => void openEvent(p.eventId)}
                           className="flex w-full items-start gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
                         >
                           <span className="w-12 shrink-0 font-mono text-xs font-bold text-ink">{time(p.start)}</span>
@@ -185,6 +187,7 @@ export function AccueilScreen({
                               </span>
                             )}
                           </span>
+                          <EventArrow eventId={p.eventId} className="mt-0.5" />
                         </button>
                       );
                     })}

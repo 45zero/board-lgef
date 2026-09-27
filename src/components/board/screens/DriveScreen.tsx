@@ -16,9 +16,8 @@ import {
   CalendarDays,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { mapEventRow, type CalendarEvent, type EventRow } from "@/lib/board/calendar";
 import { listEventFiles, getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
-import { EventModal } from "@/components/board/calendar/EventModal";
+import { EventArrow } from "@/components/board/calendar/EventOpener";
 
 interface ArchiveEvent {
   id: string;
@@ -59,18 +58,6 @@ async function listArchiveEvents(): Promise<ArchiveEvent[]> {
   return Array.from(map.values()).sort((a, b) => b.startDate.localeCompare(a.startDate));
 }
 
-async function fetchEventForModal(eventId: string): Promise<CalendarEvent | null> {
-  const supabase = createClient();
-  const { data } = await supabase
-    .from("events")
-    .select(
-      "id, title, event_type, start_date, end_date, location, online_meeting, organizer_message, requires_coverage, created_by, created_at, status"
-    )
-    .eq("id", eventId)
-    .single();
-  if (!data) return null;
-  return mapEventRow(data as EventRow);
-}
 
 function groupByYearMonth(events: ArchiveEvent[]): Record<string, MonthGroup[]> {
   const groups = new Map<string, MonthGroup>();
@@ -130,7 +117,6 @@ export function DriveScreen() {
   const [selectedEvent, setSelectedEvent] = useState<ArchiveEvent | null>(null);
   const [files, setFiles] = useState<EventFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
-  const [modalEvent, setModalEvent] = useState<CalendarEvent | null>(null);
 
   useEffect(() => {
     listArchiveEvents().then((evs) => {
@@ -168,11 +154,6 @@ export function DriveScreen() {
     setFilesLoading(false);
   };
 
-  const openEventModal = async (ev: ArchiveEvent, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const full = await fetchEventForModal(ev.id);
-    if (full) setModalEvent(full);
-  };
 
   return (
     <div className="flex h-full gap-3 p-4">
@@ -287,14 +268,7 @@ export function DriveScreen() {
                       {ev.fileCount > 1 ? "s" : ""}
                     </span>
                   </span>
-                  <span
-                    onClick={(e) => openEventModal(ev, e)}
-                    role="button"
-                    tabIndex={0}
-                    className="shrink-0 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"
-                  >
-                    Ouvrir l&rsquo;événement
-                  </span>
+                  <EventArrow eventId={ev.id} />
                 </button>
               ))}
             </div>
@@ -302,9 +276,6 @@ export function DriveScreen() {
         </div>
       </div>
 
-      {modalEvent && (
-        <EventModal event={modalEvent} onClose={() => setModalEvent(null)} onSaved={() => setModalEvent(null)} />
-      )}
     </div>
   );
 }

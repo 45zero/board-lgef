@@ -1,5 +1,6 @@
 "use client";
 
+import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -804,7 +805,9 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
       {/* En-tête : titre à gauche, lien / QR / balise / compteurs / aperçu à droite */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-lg font-extrabold text-ink">{ev.title}</h2>
+          <h2 className="flex items-center gap-2 text-lg font-extrabold text-ink">
+            {ev.title} <EventArrow eventId={ev.id} />
+          </h2>
           <p className="text-xs text-ink-4">{format(new Date(ev.start_date), "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })}</p>
         </div>
 
@@ -1175,6 +1178,7 @@ export function InscriptionScreen() {
                     {ev.location ? ` · ${ev.location}` : ""}
                   </span>
                 </span>
+                <EventArrow eventId={ev.id} />
                 <span
                   className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
                     ev.campaignStatus === "sent" ? "bg-good-bg text-good" : "bg-subtle text-ink-3"

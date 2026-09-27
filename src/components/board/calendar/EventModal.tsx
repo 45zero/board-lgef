@@ -364,7 +364,7 @@ export function EventModal({
 
           {tab === "discussion" && isEditing && <DiscussionTab hook={m.comments} />}
           {tab === "equipe" && isEditing && <EquipeTab hook={m.team} />}
-          {tab === "frais" && isEditing && event && <FraisTab hook={m.expenses} eventId={event.id} />}
+          {tab === "frais" && isEditing && event && <FraisTab eventId={event.id} onDeclared={() => void m.expenses.refetch()} />}
           {tab === "gestion" && <GestionFraisPlaceholder />}
           {tab === "carte" && <CarteTab location={m.location} />}
         </div>
