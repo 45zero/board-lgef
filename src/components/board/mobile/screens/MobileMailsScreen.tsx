@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useEffect, useRef, useState } from "react";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { getCachedMail, loadMail, loadMailList, prefetchMails } from "@/lib/board/mailClient";
@@ -165,6 +166,21 @@ export function MobileMailsScreen({
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAccountId, folder]);
+
+  // En direct : nouveau mail (compteur Gmail vérifié toutes les 30 s) → la liste se met à jour
+  // sans fermer le mail ouvert ni afficher de chargement.
+  useLiveRefresh(["mails"], () => {
+    if (!activeAccountId || folder === "DRAFTS") return;
+    const cacheKey = `${activeAccountId}:${folder}`;
+    const systemFolder = SYSTEM_FOLDERS.find((f) => f.id === folder);
+    loadMailList(activeAccountId, { labelIds: systemFolder ? [...systemFolder.labelIds] : [folder] })
+      .then((res) => {
+        messagesCache.set(cacheKey, res.messages);
+        writeCache(`mail:list:${cacheKey}`, res.messages);
+        setMessages(res.messages);
+      })
+      .catch(() => undefined);
+  });
 
   const openMessage = async (id: string) => {
     if (!activeAccountId) return;

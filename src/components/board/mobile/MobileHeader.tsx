@@ -1,7 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { Bell, ChevronDown, Settings } from "lucide-react";
+import { ChevronDown, Settings } from "lucide-react";
+import { NotificationBell } from "@/components/board/live/NotificationBell";
 
 /** `onLogoClick` : sur la page Mails, le logo ouvre le menu comptes / dossiers (d'où le chevron). */
 export function MobileHeader({
@@ -41,12 +42,7 @@ export function MobileHeader({
         <button className="flex h-8 w-8 items-center justify-center rounded-full text-white/85 hover:bg-white/10" aria-label="Paramètres">
           <Settings size={17} />
         </button>
-        <button className="relative flex h-8 w-8 items-center justify-center rounded-full text-white/85 hover:bg-white/10" aria-label="Notifications">
-          <Bell size={17} />
-          <span className="absolute right-0.5 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red text-[8px] font-bold text-white">
-            9+
-          </span>
-        </button>
+        <NotificationBell variant="mobile" />
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-red text-xs font-bold text-white">
           GV
         </div>

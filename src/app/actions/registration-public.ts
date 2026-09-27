@@ -77,6 +77,29 @@ export async function getPublicCampaignContext(eventId: string, publicToken: str
   return { campaign, event, cardHtml: buildCardHtml(campaign, event) };
 }
 
+/**
+ * Notification in-app (cloche du board, en direct) à l'organisateur de la campagne quand
+ * quelqu'un répond. Au mieux : un échec ne doit jamais empêcher la réponse d'être enregistrée.
+ */
+async function notifyOrganizer(campaignId: string, who: string, response: "yes" | "no") {
+  try {
+    const supabase = createServiceClient();
+    const { data: campaign } = await supabase.from("event_registration_campaigns").select("created_by, event_id").eq("id", campaignId).maybeSingle();
+    if (!campaign?.created_by) return;
+    const { data: event } = await supabase.from("events").select("title").eq("id", campaign.event_id).maybeSingle();
+    await supabase.from("notifications").insert({
+      user_id: campaign.created_by,
+      type: "registration_response",
+      title: response === "yes" ? "Nouvelle inscription" : "Réponse négative",
+      message: `${who || "Un invité"} ${response === "yes" ? "participera" : "ne participera pas"} à « ${event?.title ?? "l'événement"} ».`,
+      event_id: campaign.event_id,
+      data: { event_id: campaign.event_id, campaign_id: campaignId, response },
+    });
+  } catch (e) {
+    console.error("[notifyOrganizer]", e);
+  }
+}
+
 /** Réponse via le lien générique — crée le destinataire à la volée à partir de ce qu'il renseigne. */
 export async function submitPublicResponse(
   campaignId: string,
@@ -95,13 +118,14 @@ export async function submitPublicResponse(
     responded_at: new Date().toISOString(),
   });
   if (error) throw new Error(error.message);
+  await notifyOrganizer(campaignId, [params.firstName, params.lastName].filter(Boolean).join(" "), params.response);
 }
 
 export async function submitRegistrationResponse(token: string, response: "yes" | "no") {
   const supabase = createServiceClient();
   const { data: recipient } = await supabase
     .from("event_registration_recipients")
-    .select("id")
+    .select("id, campaign_id, name, first_name, last_name")
     .eq("token", token)
     .maybeSingle();
   if (!recipient) throw new Error("Lien invalide ou expiré.");
@@ -111,4 +135,6 @@ export async function submitRegistrationResponse(token: string, response: "yes" 
     .update({ response, responded_at: new Date().toISOString() })
     .eq("id", recipient.id);
   if (error) throw new Error(error.message);
+  const who = recipient.name || [recipient.first_name, recipient.last_name].filter(Boolean).join(" ");
+  if (recipient.campaign_id) await notifyOrganizer(recipient.campaign_id, who, response);
 }

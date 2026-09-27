@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Receipt, ShieldCheck, Users, X, Search, ChevronRight } from "lucide-react";
 import {
@@ -175,6 +176,7 @@ function MyExpenses() {
   useEffect(() => {
     void load();
   }, [load]);
+  useLiveRefresh(["event_expenses", "expense_submissions", "notifications"], () => void load());
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -392,6 +394,10 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
   useEffect(() => {
     void load();
   }, [load]);
+  useLiveRefresh(["event_expenses", "expense_submissions", "notifications"], () => {
+    void load();
+    onChanged();
+  });
 
   const months = useMemo(() => [...new Set((subs ?? []).map((s) => monthKey(s.event.start)))].sort().reverse(), [subs]);
   const people = useMemo(

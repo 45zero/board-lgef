@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
@@ -667,6 +668,11 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
     setRecipients(await listCampaignRecipients(c.id));
   };
 
+  // En direct : une réponse ou un envoi apparaît immédiatement dans la liste des destinataires.
+  useLiveRefresh(["event_registration_recipients"], () => {
+    if (campaign) void refetch(campaign);
+  });
+
   const refetchCampaign = async () => {
     const c = await getOrCreateCampaign(ev.id);
     setCampaign(c);
@@ -1136,6 +1142,10 @@ export function InscriptionScreen() {
       setLoading(false);
     });
   }, [canAccess]);
+  // En direct : chaque réponse (oui / non) ou envoi met à jour les compteurs de la liste.
+  useLiveRefresh(["event_registration_recipients", "event_registration_campaigns", "events"], () => {
+    if (canAccess) void listRegistrationEvents().then(setEvents);
+  });
 
   if (role.loading) return null;
   if (!canAccess) {

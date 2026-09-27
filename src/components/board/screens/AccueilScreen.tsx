@@ -1,5 +1,6 @@
 "use client";
 
+import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useEffect, useState } from "react";
 import { Clock, ChevronRight, MapPin, CheckCircle2, CalendarDays } from "lucide-react";
 import { getDashboard, type Dashboard, type DashboardAction } from "@/app/actions/dashboard";
@@ -42,6 +43,8 @@ export function AccueilScreen({
   const [openAction, setOpenAction] = useState<DashboardAction | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const { open: openEvent } = useOpenEvent();
+  // En direct : toute action (frais, captation, inscription, notification…) met le tableau de bord à jour.
+  useLiveRefresh(null, () => setReloadKey((k) => k + 1), 1000);
 
   useEffect(() => {
     let cancelled = false;

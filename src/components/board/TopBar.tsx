@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { Search, Bell, Moon, Sun, ChevronRight, Settings } from "lucide-react";
+import { Search, Moon, Sun, ChevronRight, Settings } from "lucide-react";
+import { NotificationBell } from "@/components/board/live/NotificationBell";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { BoardApp } from "@/lib/board/tokens";
@@ -81,16 +82,7 @@ export function TopBar({
         </kbd>
       </div>
 
-      <button
-        type="button"
-        className="relative flex h-9 w-9 items-center justify-center rounded-full border border-line text-ink-2 hover:bg-hover"
-        aria-label="Notifications"
-      >
-        <Bell size={17} />
-        <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red px-1 text-[10px] font-bold text-white ring-2 ring-card">
-          5
-        </span>
-      </button>
+      <NotificationBell />
 
       <button
         type="button"
