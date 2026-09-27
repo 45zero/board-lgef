@@ -276,28 +276,171 @@ export async function replyToMessage(account: ConnectedAccount, messageId: strin
   await gmail.users.messages.send({ userId: "me", requestBody: { raw, threadId: original.threadId } });
 }
 
-/** Transfert texte seul — les pièces jointes de l'original ne sont pas reprises (nécessiterait un MIME multipart). */
+interface ForwardPart {
+  mimeType: string;
+  filename: string;
+  contentId: string | null;
+  data: Buffer;
+}
+
+/** Parties « fichier » de l'original (images intégrées cid: et pièces jointes) — tout sauf les corps texte/HTML. */
+function collectFileParts(part: gmail_v1.Schema$MessagePart, out: gmail_v1.Schema$MessagePart[] = []) {
+  const isBody = !part.filename && (part.mimeType === "text/plain" || part.mimeType === "text/html");
+  const isLeaf = !part.parts?.length;
+  if (isLeaf && !isBody && (part.body?.attachmentId || part.body?.data)) out.push(part);
+  for (const child of part.parts ?? []) collectFileParts(child, out);
+  return out;
+}
+
+function escapeHtmlText(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** En-tête MIME encodé RFC 2047 si non-ASCII (noms de fichiers accentués). */
+function mimeWord(s: string) {
+  return /^[\x20-\x7e]*$/.test(s) ? s.replace(/"/g, "'") : `=?UTF-8?B?${Buffer.from(s, "utf8").toString("base64")}?=`;
+}
+
+function base64Lines(data: Buffer) {
+  return (data.toString("base64").match(/.{1,76}/g) ?? []).join("\r\n");
+}
+
+/**
+ * Transfert complet, comme Gmail : version HTML de l'original (images comprises),
+ * images intégrées (cid:) et pièces jointes réattachées. Envoi en upload média
+ * (message/rfc822) pour ne pas être bridé par la taille du corps JSON.
+ */
 export async function forwardMessage(
   account: ConnectedAccount,
   messageId: string,
   params: { to: string; body: string }
 ) {
-  const original = await getMessage(account, messageId);
   const gmail = await gmailClient(account);
-  const subject = /^fwd?\s*:/i.test(original.subject) ? original.subject : `Fwd : ${original.subject}`;
-  const quoted = [
-    params.body,
-    "",
+  const { data: full } = await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" });
+  const payload = full.payload ?? {};
+  const headers = payload.headers;
+  const originalSubject = headerValue(headers, "Subject") || "(sans objet)";
+  const from = headerValue(headers, "From");
+  const date = headerValue(headers, "Date");
+  const to = headerValue(headers, "To");
+  const cc = headerValue(headers, "Cc");
+  const { text, html } = findBody(payload);
+
+  const subject = /^fwd?\s*:/i.test(originalSubject) ? originalSubject : `Fwd : ${originalSubject}`;
+  const headerBlockText = [
     "---------- Message transféré ----------",
-    `De : ${original.from}`,
-    `Date : ${original.date}`,
-    `Objet : ${original.subject}`,
-    `À : ${original.to}`,
+    `De : ${from}`,
+    `Date : ${date}`,
+    `Objet : ${originalSubject}`,
+    `À : ${to}`,
+    ...(cc ? [`Cc : ${cc}`] : []),
+  ];
+  const plain = [params.body, "", ...headerBlockText, "", text || ""].join("\n");
+
+  const noteHtml = params.body.trim()
+    ? `<div>${escapeHtmlText(params.body).replace(/\n/g, "<br>")}</div><br>`
+    : "";
+  const headerBlockHtml = `<div style="color:#555;">---------- Message transféré ----------<br>
+De : ${escapeHtmlText(from)}<br>
+Date : ${escapeHtmlText(date)}<br>
+Objet : ${escapeHtmlText(originalSubject)}<br>
+À : ${escapeHtmlText(to)}${cc ? `<br>\nCc : ${escapeHtmlText(cc)}` : ""}</div><br>`;
+  const originalHtml = html || `<div style="white-space:pre-wrap;">${escapeHtmlText(text || "")}</div>`;
+  const fullHtml = `<!doctype html><html><head><meta charset="utf-8"></head><body>${noteHtml}${headerBlockHtml}${originalHtml}</body></html>`;
+
+  const files: ForwardPart[] = await Promise.all(
+    collectFileParts(payload).map(async (p) => {
+      let b64 = p.body?.data ?? "";
+      if (p.body?.attachmentId) {
+        const { data } = await gmail.users.messages.attachments.get({
+          userId: "me",
+          messageId,
+          id: p.body.attachmentId,
+        });
+        b64 = data.data ?? "";
+      }
+      const rawCid = headerValue(p.headers, "Content-ID") || headerValue(p.headers, "X-Attachment-Id");
+      return {
+        mimeType: p.mimeType ?? "application/octet-stream",
+        filename: p.filename || "",
+        contentId: rawCid ? rawCid.replace(/^<|>$/g, "") : null,
+        data: Buffer.from(b64, "base64url"),
+      };
+    })
+  );
+  // Image intégrée = référencée par cid: dans le HTML ; tout le reste part en pièce jointe classique.
+  const inline = files.filter((f) => f.contentId && originalHtml.includes(`cid:${f.contentId}`));
+  const attached = files.filter((f) => !inline.includes(f));
+
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const bMixed = `mixed_${stamp}`;
+  const bRelated = `related_${stamp}`;
+  const bAlt = `alt_${stamp}`;
+
+  const filePart = (f: ForwardPart, disposition: "inline" | "attachment") => {
+    const name = f.filename ? `; name="${mimeWord(f.filename)}"` : "";
+    const fname = f.filename ? `; filename="${mimeWord(f.filename)}"` : "";
+    return [
+      `Content-Type: ${f.mimeType}${name}`,
+      "Content-Transfer-Encoding: base64",
+      `Content-Disposition: ${disposition}${fname}`,
+      ...(f.contentId ? [`Content-ID: <${f.contentId}>`] : []),
+      "",
+      base64Lines(f.data),
+    ].join("\r\n");
+  };
+
+  const alternative = [
+    `Content-Type: multipart/alternative; boundary="${bAlt}"`,
     "",
-    original.bodyText || "",
-  ].join("\n");
-  const raw = buildRawMessage({ to: params.to, subject, body: quoted, from: account.email });
-  await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
+    `--${bAlt}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64Lines(Buffer.from(plain, "utf8")),
+    `--${bAlt}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64Lines(Buffer.from(fullHtml, "utf8")),
+    `--${bAlt}--`,
+  ].join("\r\n");
+
+  const related = inline.length
+    ? [
+        `Content-Type: multipart/related; boundary="${bRelated}"`,
+        "",
+        `--${bRelated}`,
+        alternative,
+        ...inline.flatMap((f) => [`--${bRelated}`, filePart(f, "inline")]),
+        `--${bRelated}--`,
+      ].join("\r\n")
+    : alternative;
+
+  const bodyPart = attached.length
+    ? [
+        `Content-Type: multipart/mixed; boundary="${bMixed}"`,
+        "",
+        `--${bMixed}`,
+        related,
+        ...attached.flatMap((f) => [`--${bMixed}`, filePart(f, "attachment")]),
+        `--${bMixed}--`,
+      ].join("\r\n")
+    : related;
+
+  const mime = [
+    `From: ${account.email}`,
+    `To: ${params.to}`,
+    `Subject: =?UTF-8?B?${Buffer.from(subject, "utf8").toString("base64")}?=`,
+    "MIME-Version: 1.0",
+    bodyPart,
+  ].join("\r\n");
+
+  await gmail.users.messages.send({
+    userId: "me",
+    requestBody: {},
+    media: { mimeType: "message/rfc822", body: mime },
+  });
 }
 
 /** Archiver = retirer le libellé INBOX (le message reste accessible, contrairement à la corbeille). */
