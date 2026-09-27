@@ -1,5 +1,8 @@
 "use client";
 
+import { PublicationSettings } from "@/components/board/publication/PublicationSettings";
+import { useCanPublish } from "@/hooks/board/useCanPublish";
+import { useUserRole } from "@/hooks/board/useUserRole";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -23,6 +26,7 @@ import {
   RefreshCw,
   Trash2,
   Plus,
+  Settings,
   Search,
   AlertTriangle,
 } from "lucide-react";
@@ -1479,6 +1483,9 @@ function PublicationCard({
 }
 
 export function PublicationScreen() {
+  const role = useUserRole();
+  const canPublish = useCanPublish();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [tab, setTab] = useState<PublicationStatus>("to_publish");
   const [items, setItems] = useState<MediaPublication[]>([]);
   const [counts, setCounts] = useState<Record<PublicationStatus, number>>({ to_publish: 0, scheduled: 0, published: 0 });
@@ -1537,6 +1544,14 @@ export function PublicationScreen() {
     });
   }, [tab]);
 
+  if (canPublish === false) {
+    return (
+      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-ink-3">
+        Le centre de publication est réservé aux personnes habilitées à publier. Demandez l&rsquo;accès à un administrateur.
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full gap-4 p-4">
       <aside className="w-[220px] shrink-0 rounded-panel border border-line bg-card p-3">
@@ -1553,25 +1568,40 @@ export function PublicationScreen() {
             return (
               <button
                 key={t.id}
-                onClick={() => setTab(t.id)}
+                onClick={() => {
+                  setTab(t.id);
+                  setSettingsOpen(false);
+                }}
                 className={`flex w-full items-center justify-between gap-2.5 rounded-btn px-3 py-2.5 text-left text-sm font-semibold transition-colors ${
-                  tab === t.id ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"
+                  tab === t.id && !settingsOpen ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"
                 }`}
               >
                 <span className="flex items-center gap-2.5">
                   <Icon size={16} /> {t.label}
                 </span>
-                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${tab === t.id ? "bg-white/20 text-white" : "bg-subtle text-ink-3"}`}>
+                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${tab === t.id && !settingsOpen ? "bg-white/20 text-white" : "bg-subtle text-ink-3"}`}>
                   {counts[t.id]}
                 </span>
               </button>
             );
           })}
         </div>
+        {role.isSuperUser && (
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className={`mt-3 flex w-full items-center gap-2.5 rounded-btn border-t border-line px-3 py-2.5 text-left text-sm font-semibold ${
+              settingsOpen ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"
+            }`}
+          >
+            <Settings size={16} /> Paramètres
+          </button>
+        )}
       </aside>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {loading ? (
+        {settingsOpen ? (
+          <PublicationSettings />
+        ) : loading ? (
           <div className="flex h-full items-center justify-center text-ink-4">Chargement…</div>
         ) : items.length === 0 ? (
           <div className="flex h-full items-center justify-center rounded-panel border border-dashed border-line text-sm text-ink-4">

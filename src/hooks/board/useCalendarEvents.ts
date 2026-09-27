@@ -7,10 +7,21 @@ import { mapEventRow, type CalendarEvent, type EventRow, type CoverageRequestRow
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { getMySolicitedEventIds } from "@/app/actions/solicitation";
 
-/** Rôle de l'utilisateur, lu une fois par session (il ne change pas d'un changement de semaine à l'autre). */
-const roleByUser = new Map<string, string | null>();
+/** Profil de visibilité, lu une fois par session (il ne change pas d'un changement de semaine à l'autre). */
+type Access = { seeAll: boolean; solicitedOnly: boolean };
+const accessByUser = new Map<string, Access>();
 
-/** Porté de calendrier-lgef/src/hooks/useEvents.ts, généralisé du mois à une plage libre (semaine). */
+/** Spécialités qui ne voient que les événements où elles sont sollicitées. */
+const SOLICITED_ONLY_SPECIALTIES = ["tech-prestataire", "tech-benevole"];
+
+/**
+ * Événements de la plage, selon le profil :
+ * - administrateurs : tout ;
+ * - prestataires et bénévoles techniques : uniquement les événements où ils sont sollicités ;
+ * - tous les autres : tous les événements de la Ligue (l'icône « où je suis sollicité » filtre),
+ *   les événements personnels (sans organisation, visibilité « private ») restant réservés à leurs
+ *   participants.
+ */
 export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
   const { user } = useAuth();
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -33,20 +44,22 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       setLoading(true);
     }
 
-    let role = roleByUser.get(user.id);
-    if (role === undefined) {
-      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-      role = profile?.role ?? null;
-      roleByUser.set(user.id, role);
+    let access = accessByUser.get(user.id);
+    if (!access) {
+      const [{ data: profile }, { data: specs }] = await Promise.all([
+        supabase.from("profiles").select("role").eq("id", user.id).single(),
+        supabase.from("profile_specialties").select("specialties(slug)").eq("user_id", user.id),
+      ]);
+      const slugs = ((specs ?? []) as unknown as { specialties: { slug: string } | null }[]).map((r) => r.specialties?.slug ?? "");
+      const seeAll = profile?.role === "admin" || profile?.role === "super_user";
+      access = { seeAll, solicitedOnly: !seeAll && slugs.some((s) => SOLICITED_ONLY_SPECIALTIES.includes(s)) };
+      accessByUser.set(user.id, access);
     }
 
     const baseSelect =
-      "id, title, event_type, start_date, end_date, location, online_meeting, registration_enabled, organizer_message, requires_coverage, created_by, created_at, updated_by, updated_at, status";
-
-    let rows: EventRow[] = [];
-
-    if (role === "admin" || role === "super_user") {
-      const { data, error } = await supabase
+      "id, title, event_type, start_date, end_date, location, online_meeting, registration_enabled, organizer_message, requires_coverage, created_by, created_at, updated_by, updated_at, status, visibility";
+    const inRange = () =>
+      supabase
         .from("events")
         .select(baseSelect)
         .gte("start_date", startISO)
@@ -54,6 +67,13 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
         .neq("visibility", "hidden")
         .eq("show_in_calendar", true)
         .order("start_date");
+
+    let rows: EventRow[] = [];
+    // Sollicitations (équipe, affectation, captation, comité directeur) : filtre, icône et droits.
+    const solicitedIds = await getMySolicitedEventIds().catch(() => [] as string[]);
+
+    if (access.seeAll) {
+      const { data, error } = await inRange();
       if (error) console.error("[useCalendarEvents]", error);
       rows = (data as EventRow[] | null) ?? [];
     } else {
@@ -62,27 +82,23 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
         supabase.from("event_assignments").select("event_id").eq("user_id", user.id),
         supabase.from("events").select("id").eq("created_by", user.id),
       ]);
+      const mine = new Set([
+        ...solicitedIds,
+        ...((teamLinks ?? []) as { event_id: string }[]).map((e) => e.event_id),
+        ...((assignments ?? []) as { event_id: string }[]).map((a) => a.event_id),
+        ...((ownEvents ?? []) as { id: string }[]).map((e) => e.id),
+      ]);
 
-      const allEventIds = [
-        ...new Set([
-          ...((teamLinks ?? []) as { event_id: string }[]).map((e) => e.event_id),
-          ...((assignments ?? []) as { event_id: string }[]).map((a) => a.event_id),
-          ...((ownEvents ?? []) as { id: string }[]).map((e) => e.id),
-        ]),
-      ];
-
-      if (allEventIds.length > 0) {
-        const { data, error } = await supabase
-          .from("events")
-          .select(baseSelect)
-          .in("id", allEventIds)
-          .gte("start_date", startISO)
-          .lte("start_date", endISO)
-          .neq("visibility", "hidden")
-          .eq("show_in_calendar", true)
-          .order("start_date");
+      if (access.solicitedOnly) {
+        if (mine.size > 0) {
+          const { data, error } = await inRange().in("id", [...mine]);
+          if (error) console.error("[useCalendarEvents]", error);
+          rows = (data as EventRow[] | null) ?? [];
+        }
+      } else {
+        const { data, error } = await inRange();
         if (error) console.error("[useCalendarEvents]", error);
-        rows = (data as EventRow[] | null) ?? [];
+        rows = ((data ?? []) as (EventRow & { visibility?: string | null })[]).filter((r) => r.visibility !== "private" || mine.has(r.id));
       }
     }
 
@@ -112,7 +128,7 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       );
     }
 
-    const solicited = new Set(await getMySolicitedEventIds().catch(() => [] as string[]));
+    const solicited = new Set(solicitedIds);
     const mapped = rows.map((row) => ({
       ...mapEventRow(row, coverageByEvent.get(row.id)),
       published: publishedByEvent.get(row.id) ?? null,

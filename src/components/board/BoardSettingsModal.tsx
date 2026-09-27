@@ -1,8 +1,7 @@
 "use client";
 
-import { HabillageAdminModal } from "@/components/board/publication/HabillageAdminModal";
 import { useEffect, useState } from "react";
-import { Sparkles, X, PanelLeft, LayoutGrid, LogOut, Palette } from "lucide-react";
+import { Sparkles, X, PanelLeft, LayoutGrid, LogOut } from "lucide-react";
 import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 import { useUserRole } from "@/hooks/board/useUserRole";
@@ -107,28 +106,6 @@ function HateAlertsSection({ notif }: { notif: ReturnType<typeof useNotification
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-/** Administration : habillages appliqués aux photos publiées depuis le mobile. */
-function PublicationsAdminSection() {
-  const role = useUserRole();
-  const [open, setOpen] = useState(false);
-  if (!role.isAdmin && !role.isSuperUser) return null;
-  return (
-    <div className="mt-5">
-      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Publications</div>
-      <button onClick={() => setOpen(true)} className="flex w-full items-center gap-3 rounded-btn border border-line px-3 py-2.5 text-left hover:bg-hover">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-btn bg-subtle text-ink-2">
-          <Palette size={15} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-bold text-ink">Habillages des publications</span>
-          <span className="block text-xs text-ink-4">Logo, texte, signature, gabarits personnalisés</span>
-        </span>
-      </button>
-      {open && <HabillageAdminModal onClose={() => setOpen(false)} />}
     </div>
   );
 }
@@ -404,8 +381,6 @@ export function BoardSettingsModal({
             ))}
           </div>
         </div>
-
-        <PublicationsAdminSection />
 
         <GoogleAccountsSection />
 

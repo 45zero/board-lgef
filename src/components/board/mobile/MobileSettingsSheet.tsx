@@ -35,7 +35,18 @@ export function useCenterAction(): [CenterAction, (a: CenterAction) => void] {
 }
 
 /** Feuille « Paramètres » mobile : choix du bouton central (voir handoff, mobile-06-parametres). */
-export function MobileSettingsSheet({ value, onChange, onClose }: { value: CenterAction; onChange: (a: CenterAction) => void; onClose: () => void }) {
+export function MobileSettingsSheet({
+  value,
+  onChange,
+  onClose,
+  canPublish,
+}: {
+  value: CenterAction;
+  onChange: (a: CenterAction) => void;
+  onClose: () => void;
+  /** « Publication réseaux » n'est proposé qu'aux personnes habilitées à publier. */
+  canPublish: boolean;
+}) {
   return (
     <div className="fixed inset-0 z-[65] flex flex-col justify-end bg-[rgba(6,14,28,0.5)] backdrop-blur-[3px]" onClick={onClose}>
       <div className="rounded-t-[26px] bg-card px-4 pt-2.5" style={{ paddingBottom: "max(26px, env(safe-area-inset-bottom))" }} onClick={(e) => e.stopPropagation()}>
@@ -48,7 +59,7 @@ export function MobileSettingsSheet({ value, onChange, onClose }: { value: Cente
         </div>
         <div className="mb-2 mt-4 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-4">Bouton central</div>
         <div className="flex flex-col gap-2">
-          {CENTER_ACTIONS.map((a) => {
+          {CENTER_ACTIONS.filter((a) => a.id !== "social" || canPublish).map((a) => {
             const Icon = a.icon;
             const active = value === a.id;
             return (

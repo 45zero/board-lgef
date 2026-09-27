@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isPublisher } from "@/lib/board/publishers";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { getInboxUnreadCount } from "@/lib/google/gmail";
@@ -87,6 +88,7 @@ export async function GET(request: Request) {
       : undefined,
     withDb
       ? safe(async () => {
+          if (!(await isPublisher(supabase, userId))) return 0;
           const { count } = await supabase.from("media_publications").select("id", { count: "exact", head: true }).eq("status", "to_publish");
           return count ?? 0;
         }, 0)

@@ -1,5 +1,6 @@
 "use client";
 
+import { useCanPublish } from "@/hooks/board/useCanPublish";
 import { useAppBadges, type AppBadge } from "@/hooks/board/useAppBadges";
 import { AppBadgePills } from "@/components/board/AppBadgePills";
 import type { ComponentType } from "react";
@@ -104,9 +105,10 @@ export function Dock({
   onToggleTheme?: () => void;
 }) {
   const badges = useAppBadges();
+  const canPublish = useCanPublish();
   return (
     <div className="mx-auto mb-4 flex w-fit items-end gap-2">
-      {PINNED.map((id) => (
+      {PINNED.filter((id) => id !== "audiovisuel" || canPublish).map((id) => (
         <DockTile
           key={id}
           icon={ICONS[id] ?? Home}

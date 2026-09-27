@@ -1,5 +1,6 @@
 "use server";
 
+import { isPublisher } from "@/lib/board/publishers";
 import { createClient } from "@/lib/supabase/server";
 import {
   publishPublicationToSocial,
@@ -36,6 +37,17 @@ async function requireUser() {
   return supabase;
 }
 
+/** Publier, modérer, supprimer : réservé aux personnes habilitées (voir lib/board/publishers.ts). */
+async function requirePublisher() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Non authentifié");
+  if (!(await isPublisher(supabase, user.id))) throw new Error("Vous n'êtes pas habilité à publier.");
+  return supabase;
+}
+
 /** Publie sur les pages Facebook / le compte Instagram sélectionnés (un résultat par cible). */
 export async function publishSocial(
   publicationId: string,
@@ -43,7 +55,7 @@ export async function publishSocial(
   by: By,
   options: { igUserTags?: string[]; fbMentions?: FacebookMention[] } = {}
 ): Promise<SocialPublishResult[]> {
-  const supabase = await requireUser();
+  const supabase = await requirePublisher();
   if (targets.length === 0) return [];
   return publishPublicationToSocial(supabase, publicationId, targets, by, options);
 }
@@ -99,7 +111,7 @@ export async function moderateComment(
   decision: "hide" | "unhide" | "delete" | "not_hateful"
 ): Promise<{ error: string | null }> {
   try {
-    const supabase = await requireUser();
+    const supabase = await requirePublisher();
     const { data: row } = await supabase.from("comment_moderation").select("network, comment_id, action").eq("id", moderationId).single();
     if (!row) throw new Error("Commentaire introuvable.");
     const key = row.network as NetworkKey;
@@ -146,7 +158,7 @@ export async function getSocialComments(publicationId: string, key: NetworkKey):
 /** Supprime un commentaire directement sur la plateforme — irréversible. */
 export async function deleteSocialComment(key: NetworkKey, commentId: string): Promise<{ error: string | null }> {
   try {
-    const supabase = await requireUser();
+    const supabase = await requirePublisher();
     await deletePublicationComment(supabase, key, commentId);
     return { error: null };
   } catch (e) {
@@ -156,7 +168,7 @@ export async function deleteSocialComment(key: NetworkKey, commentId: string): P
 
 /** Supprime la publication sur les réseaux demandés (irréversible). */
 export async function deleteSocialPosts(publicationId: string, keys: NetworkKey[]): Promise<SocialPublishResult[]> {
-  const supabase = await requireUser();
+  const supabase = await requirePublisher();
   return deletePublicationPosts(supabase, publicationId, keys);
 }
 

@@ -105,3 +105,32 @@ export async function createHabillageOverlayUpload(fileName: string): Promise<{ 
   if (error || !data) throw new Error(error?.message ?? "Dépôt impossible.");
   return { path, token: data.token, publicUrl: service.storage.from("board-assets").getPublicUrl(path).data.publicUrl };
 }
+
+/* ---------- Centre de publication : personnes habilitées ---------- */
+
+/** Personnes habilitées à publier (en plus des administrateurs) et annuaire pour les choisir. */
+export async function getPublisherSettings(): Promise<{ ids: string[]; members: { id: string; name: string; email: string | null; role: string | null }[] }> {
+  const { supabase } = await requireAdmin();
+  const [{ data: settings }, { data: members }] = await Promise.all([
+    supabase.from("board_settings").select("publisher_ids").eq("id", true).single(),
+    supabase.from("profiles").select("id, first_name, last_name, email, role").order("last_name"),
+  ]);
+  return {
+    ids: settings?.publisher_ids ?? [],
+    members: (members ?? []).map((m) => ({
+      id: m.id,
+      name: [m.first_name, m.last_name].filter(Boolean).join(" ") || m.email || "—",
+      email: m.email,
+      role: m.role,
+    })),
+  };
+}
+
+export async function setPublishers(ids: string[]) {
+  const { supabase, userId } = await requireAdmin();
+  const { error } = await supabase
+    .from("board_settings")
+    .update({ publisher_ids: [...new Set(ids)], updated_by: userId, updated_at: new Date().toISOString() })
+    .eq("id", true);
+  if (error) throw new Error(error.message);
+}

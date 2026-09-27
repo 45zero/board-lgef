@@ -1,5 +1,6 @@
 "use client";
 
+import { useCanPublish } from "@/hooks/board/useCanPublish";
 import { useCallback, useState } from "react";
 import { MobileHeader } from "@/components/board/mobile/MobileHeader";
 import { MobileBottomNav, type MobileTab } from "@/components/board/mobile/MobileBottomNav";
@@ -35,7 +36,10 @@ export function MobileShell() {
 
   // Bouton central, réglable dans Paramètres : « Frais » ouvre Mes frais (photo d'un justificatif,
   // déclaration…) ; « Publication réseaux » ouvre la caméra puis le centre de publication.
-  const [center, setCenter] = useCenterAction();
+  const [centerPref, setCenter] = useCenterAction();
+  const canPublish = !!useCanPublish();
+  // Publication réseaux réservée aux personnes habilitées : sinon, bouton Frais.
+  const center = centerPref === "social" && !canPublish ? "frais" : centerPref;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fraisOpen, setFraisOpen] = useState(false);
   const [socialOpen, setSocialOpen] = useState(false);
@@ -101,6 +105,7 @@ export function MobileShell() {
       {socialOpen && <SocialCapture onClose={() => setSocialOpen(false)} />}
       {settingsOpen && (
         <MobileSettingsSheet
+          canPublish={canPublish}
           value={center}
           onChange={(a) => {
             setCenter(a);

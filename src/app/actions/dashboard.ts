@@ -1,5 +1,6 @@
 "use server";
 
+import { isPublisher } from "@/lib/board/publishers";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { getMyExpenses, getMyValidatorScope } from "@/app/actions/expenses";
@@ -58,7 +59,8 @@ export async function getDashboard(period: "day" | "week"): Promise<Dashboard> {
 
   const { data: me } = await service.from("profiles").select("first_name, role").eq("id", userId).single();
   const isAdmin = me?.role === "admin" || me?.role === "super_user";
-  const isMediaTeam = isAdmin || me?.role === "technician";
+  // Centre de publication : administrateurs et personnes habilitées uniquement.
+  const isMediaTeam = await isPublisher(service, userId);
 
   const now = new Date();
   const from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
