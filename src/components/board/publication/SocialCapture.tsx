@@ -27,6 +27,13 @@ const chip = (active: boolean) =>
 const fmtDay = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
 const label = "mb-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-4";
 
+// Depuis la galerie, certains téléphones transmettent une vidéo sans type (.mov iPhone, HEVC…) :
+// on se fie aussi à l'extension.
+const VIDEO_EXT = /\.(mov|mp4|m4v|3gp|3g2|webm|mkv|avi|hevc)$/i;
+const isVideoFile = (f: File) => f.type.startsWith("video") || VIDEO_EXT.test(f.name);
+/** Type annoncé au lecteur : un .mov (QuickTime) contient en général du H.264 lisible comme du MP4. */
+const playableType = (f: File) => (!f.type || f.type === "video/quicktime" ? "video/mp4" : f.type);
+
 /**
  * Bouton central « Publication réseaux » (mobile) : photo ou vidéo prise sur le moment, habillage
  * LGEF + texte (photos), légende et événement éventuel, puis le compositeur du centre de
@@ -54,7 +61,8 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   const videoRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
 
-  const isVideo = !!file?.type.startsWith("video");
+  const isVideo = !!file && isVideoFile(file);
+  const [videoError, setVideoError] = useState(false);
   const templates = availableTemplates(settings);
 
   // Réglages des habillages (administrateur) : tailles, signature, gabarits actifs et personnalisés.
@@ -99,8 +107,9 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
     if (!f) return;
     setError(null);
     setFile(f);
-    if (f.type.startsWith("video")) {
+    if (isVideoFile(f)) {
       setBitmap(null);
+      setVideoError(false);
       setVideoUrl(URL.createObjectURL(f));
     } else {
       try {
@@ -116,8 +125,9 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
     if (!file || !user) return;
     setError(null);
     try {
-      // Photo : on publie la version habillée ; vidéo : le fichier d'origine.
-      let media = file;
+      // Photo : on publie la version habillée ; vidéo : le fichier d'origine (typé d'après son
+      // extension si le téléphone ne l'a pas fait, sinon les réseaux la refusent).
+      let media = isVideo && !file.type ? new File([file], file.name, { type: /\.mov$/i.test(file.name) ? "video/quicktime" : "video/mp4" }) : file;
       if (!isVideo && bitmap) {
         const canvas = document.createElement("canvas");
         await renderHabillage(canvas, bitmap, { template, format, text, settings });
@@ -217,7 +227,20 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
           <div className="space-y-3">
             {isVideo ? (
               <>
-                {videoUrl && <video src={videoUrl} controls playsInline className="max-h-[50vh] w-full rounded-panel bg-black" />}
+                {videoUrl && file && !videoError && (
+                  // « #t=0.1 » : affiche la première image sur iPhone au lieu d'un cadre noir.
+                  <video key={videoUrl} controls playsInline preload="metadata" onError={() => setVideoError(true)} className="max-h-[50vh] w-full rounded-panel bg-black">
+                    <source src={`${videoUrl}#t=0.1`} type={playableType(file)} />
+                  </video>
+                )}
+                {videoError && (
+                  <div className="rounded-panel bg-subtle p-4 text-sm text-ink-2">
+                    <div className="font-bold">Aperçu indisponible sur ce navigateur</div>
+                    <div className="mt-1 text-xs text-ink-3">
+                      {file?.name} · {file ? `${(file.size / 1_048_576).toFixed(1)} Mo` : ""} — la vidéo sera tout de même envoyée et publiée telle quelle.
+                    </div>
+                  </div>
+                )}
                 <p className="text-xs text-ink-4">L&rsquo;habillage s&rsquo;applique aux photos. Pour une vidéo, votre texte devient la légende de la publication.</p>
               </>
             ) : (
