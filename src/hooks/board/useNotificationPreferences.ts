@@ -13,6 +13,7 @@ export function useNotificationPreferences() {
   const [notifyPush, setNotifyPushState] = useState(true);
   const [hateAlertEmail, setHateAlertEmailState] = useState(true);
   const [hateAlertPush, setHateAlertPushState] = useState(true);
+  const [dailyDigest, setDailyDigestState] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -20,7 +21,7 @@ export function useNotificationPreferences() {
     const supabase = createClient();
     supabase
       .from("profiles")
-      .select("notify_email, notify_push, hate_alert_email, hate_alert_push")
+      .select("notify_email, notify_push, hate_alert_email, hate_alert_push, daily_digest_email")
       .eq("id", user.id)
       .single()
       .then(({ data }) => {
@@ -29,6 +30,7 @@ export function useNotificationPreferences() {
           setNotifyPushState(data.notify_push);
           setHateAlertEmailState(data.hate_alert_email);
           setHateAlertPushState(data.hate_alert_push);
+          setDailyDigestState(data.daily_digest_email);
         }
         setLoaded(true);
       });
@@ -61,7 +63,16 @@ export function useNotificationPreferences() {
     await createClient().from("profiles").update({ hate_alert_push: value }).eq("id", user.id);
   };
 
+  /** Programme de la journée par e-mail à 7 h (voir /api/cron/daily-digest). */
+  const setDailyDigest = async (value: boolean) => {
+    setDailyDigestState(value);
+    if (!user?.id) return;
+    await createClient().from("profiles").update({ daily_digest_email: value }).eq("id", user.id);
+  };
+
   return {
+    dailyDigest,
+    setDailyDigest,
     notifyEmail,
     notifyPush,
     setNotifyEmail,

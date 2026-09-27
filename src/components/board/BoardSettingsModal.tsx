@@ -337,6 +337,13 @@ export function BoardSettingsModal({
           <div className="space-y-3 rounded-btn border border-line p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
+                <div className="text-sm font-semibold text-ink-2">Programme de la journée par e-mail</div>
+                <div className="text-xs text-ink-4">Chaque matin à 7 h : vos actions à faire et vos événements du jour</div>
+              </div>
+              <Toggle on={notif.dailyDigest} onClick={() => notif.setDailyDigest(!notif.dailyDigest)} />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
                 <div className="text-sm font-semibold text-ink-2">Notifications par e-mail</div>
                 <div className="text-xs text-ink-4">Rappels et demandes envoyés aussi par e-mail</div>
               </div>

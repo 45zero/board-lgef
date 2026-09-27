@@ -2264,6 +2264,8 @@ export type Database = {
           hate_alert_email: boolean
           hate_alert_push: boolean
           expense_validator_id: string | null
+          daily_digest_email: boolean
+          daily_digest_sent_on: string | null
         }
         Insert: {
           id: string
@@ -2289,6 +2291,8 @@ export type Database = {
           hate_alert_email?: boolean
           hate_alert_push?: boolean
           expense_validator_id?: string | null
+          daily_digest_email?: boolean
+          daily_digest_sent_on?: string | null
         }
         Update: {
           id?: string
@@ -2314,6 +2318,8 @@ export type Database = {
           hate_alert_email?: boolean
           hate_alert_push?: boolean
           expense_validator_id?: string | null
+          daily_digest_email?: boolean
+          daily_digest_sent_on?: string | null
         }
         Relationships: []
       }
