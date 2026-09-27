@@ -23,7 +23,9 @@ import { YoutubeIcon, FacebookIcon, InstagramIcon } from "@/components/board/pub
 import { ExpenseLinesEditor } from "@/components/board/expenses/ExpenseLinesEditor";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { COVERAGE_COLORS } from "@/lib/board/tokens";
+import { COVERAGE_COLORS, type OrgKey } from "@/lib/board/tokens";
+import { StaffEventsMap, useTravelToEvent } from "@/components/board/calendar/StaffEventsMap";
+import { formatTravel, type Travel } from "@/lib/board/geo";
 import { useEventTeam } from "@/hooks/board/useEventTeam";
 import { useEventComments } from "@/hooks/board/useEventComments";
 import { useEventFiles } from "@/hooks/board/useEventFiles";
@@ -387,13 +389,24 @@ export function GestionFraisPlaceholder() {
   );
 }
 
-export function CarteTab({ location }: { location: string }) {
-  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`;
+/** Onglet Carte : l'événement sur la carte du Grand Est, avec les techniciens et leurs temps de route. */
+export function CarteTab({
+  location,
+  event,
+}: {
+  location: string;
+  event?: { id: string; title: string; org: OrgKey; start: string } | null;
+}) {
+  const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(location)}`;
   return (
     <div className="space-y-3">
-      <div className="flex h-[240px] items-center justify-center rounded-panel border border-dashed border-line bg-subtle text-sm text-ink-4">
-        Emplacement réservé pour la vue cartographique (à fournir par le client — voir handoff §3)
-      </div>
+      {event && location ? (
+        <StaffEventsMap events={[{ ...event, location }]} focusEventId={event.id} className="h-[420px]" />
+      ) : (
+        <div className="flex h-[160px] items-center justify-center rounded-panel border border-dashed border-line bg-subtle text-sm text-ink-4">
+          {event ? "Renseignez un lieu pour afficher la carte." : "Enregistrez l'événement pour afficher la carte."}
+        </div>
+      )}
       <div className="text-sm text-ink-2">{location || "Aucune adresse renseignée."}</div>
       {location && (
         <a
@@ -419,12 +432,16 @@ export function CoverageActions({
   role: ReturnType<typeof useUserRole>;
   technicians: ReturnType<typeof useAvailableTechnicians>["technicians"];
   coverage: ReturnType<typeof useEventCoverage>;
-  eventInfo: { title: string; start: Date };
+  eventInfo: { id?: string; title: string; start: Date };
 }) {
   const { user } = useAuth();
   const [mode, setMode] = useState<"assign" | "direct" | null>(null);
   const [responseOpen, setResponseOpen] = useState(false);
   const req = coverage.request;
+  const eventId = eventInfo.id ?? req?.event_id ?? null;
+  const techId = req?.assigned_technician_id ?? null;
+  const assignedTravel = useTravelToEvent(techId ? eventId : null, techId ? [techId] : undefined);
+  const techTravel = techId ? assignedTravel[techId] : undefined;
   const isAssignedTech = !!user && !!req && req.assigned_technician_id === user.id;
 
   const statusColor =
@@ -450,6 +467,7 @@ export function CoverageActions({
           }
         >
           <Video size={12} /> {req.assigned_technician_name}
+          {techTravel && <span className="font-mono text-[10px] font-normal opacity-80">· {formatTravel(techTravel)}</span>}
           {req.technician_response_notes && <MessageSquare size={11} />}
         </button>
       )}
@@ -484,6 +502,7 @@ export function CoverageActions({
         <TechnicianPickerModal
           mode={mode}
           technicians={technicians}
+          eventId={eventId}
           onClose={() => setMode(null)}
           onSelect={async (t) => {
             if (mode === "direct") await coverage.assignTechnician(t);
@@ -496,6 +515,7 @@ export function CoverageActions({
       {responseOpen && req && (
         <TechnicianResponseModal
           request={req}
+          travel={techTravel}
           canRespond={isAssignedTech && req.technician_response === "pending"}
           onClose={() => setResponseOpen(false)}
           onRespond={async (response, notes) => {
@@ -513,11 +533,13 @@ export function CoverageActions({
  * simple consultation du statut et du message laissé. */
 function TechnicianResponseModal({
   request,
+  travel,
   canRespond,
   onClose,
   onRespond,
 }: {
   request: CoverageRequest;
+  travel?: Travel;
   canRespond: boolean;
   onClose: () => void;
   onRespond: (response: "accepted" | "rejected", notes?: string) => void;
@@ -548,6 +570,13 @@ function TechnicianResponseModal({
             ✕
           </button>
         </div>
+
+        {request.assigned_technician_name && (
+          <div className="mb-3 flex items-center justify-between gap-2 rounded-btn bg-subtle px-3 py-2 text-xs">
+            <span className="font-semibold text-ink-2">{request.assigned_technician_name}</span>
+            <span className="font-mono text-ink-3">{travel ? `🚗 ${formatTravel(travel)} (aller)` : "Trajet non calculable"}</span>
+          </div>
+        )}
 
         {canRespond ? (
           <>
@@ -606,16 +635,22 @@ function TechnicianResponseModal({
 function TechnicianPickerModal({
   mode,
   technicians,
+  eventId,
   onClose,
   onSelect,
 }: {
   mode: "assign" | "direct";
   technicians: ReturnType<typeof useAvailableTechnicians>["technicians"];
+  eventId: string | null;
   onClose: () => void;
   onSelect: (t: ReturnType<typeof useAvailableTechnicians>["technicians"][number]) => void;
 }) {
   const [query, setQuery] = useState("");
-  const filtered = technicians.filter((t) => t.name.toLowerCase().includes(query.toLowerCase()));
+  const travel = useTravelToEvent(eventId, technicians.map((t) => t.id));
+  // Les plus proches d'abord ; ceux sans trajet calculable (adresse manquante) à la fin.
+  const filtered = technicians
+    .filter((t) => t.name.toLowerCase().includes(query.toLowerCase()))
+    .sort((a, b) => (travel[a.id]?.minutes ?? Infinity) - (travel[b.id]?.minutes ?? Infinity));
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
@@ -647,9 +682,10 @@ function TechnicianPickerModal({
             <button
               key={t.id}
               onClick={() => onSelect(t)}
-              className="block w-full rounded-btn px-2 py-2 text-left text-sm hover:bg-hover"
+              className="flex w-full items-center justify-between gap-2 rounded-btn px-2 py-2 text-left text-sm hover:bg-hover"
             >
-              {t.name}
+              <span className="truncate">{t.name}</span>
+              {travel[t.id] && <span className="shrink-0 font-mono text-[11px] text-ink-4">{formatTravel(travel[t.id])}</span>}
             </button>
           ))}
         </div>

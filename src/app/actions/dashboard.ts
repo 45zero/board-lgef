@@ -12,7 +12,16 @@ import { getSolicitations } from "@/lib/board/solicitation";
 // indépendamment : une source en erreur est simplement omise.
 
 /** Élément d'une action, pour le traiter directement depuis la popup du tableau de bord. */
-export type DashboardActionItem = { id: string; eventId: string | null; title: string; date: string | null; location?: string | null; detail?: string };
+export type DashboardActionItem = {
+  id: string;
+  eventId: string | null;
+  title: string;
+  date: string | null;
+  location?: string | null;
+  /** Type de l'événement — couleur de sa pastille sur la carte. */
+  eventType?: DbEventType | null;
+  detail?: string;
+};
 
 export type DashboardAction = {
   id: string;
@@ -119,14 +128,14 @@ export async function getDashboard(period: "day" | "week"): Promise<Dashboard> {
       if (isAdmin) {
         const { data: toAssign, count: toAssignCount } = await service
           .from("coverage_requests")
-          .select("id, event_id, details, events!inner(title, start_date, location)", { count: "exact" })
+          .select("id, event_id, details, events!inner(title, start_date, location, event_type)", { count: "exact" })
           .eq("status", "pending")
           .gte("events.start_date", now.toISOString())
           .order("created_at")
           .limit(30);
         const assignItems = (toAssign ?? []).map((c) => {
-          const ev = c.events as unknown as { title: string; start_date: string; location: string | null };
-          return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date, location: ev.location, detail: c.details ?? undefined };
+          const ev = c.events as unknown as { title: string; start_date: string; location: string | null; event_type: DbEventType | null };
+          return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date, location: ev.location, eventType: ev.event_type, detail: c.details ?? undefined };
         });
         push({ id: "captation-attribuer", app: "calendrier", tone: "orange", count: toAssignCount ?? assignItems.length, items: assignItems, title: "Demandes de captation à traiter", detail: "À valider et attribuer à un technicien" });
       }

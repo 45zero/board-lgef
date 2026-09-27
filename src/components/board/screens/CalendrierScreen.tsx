@@ -37,6 +37,7 @@ import { EventModal } from "@/components/board/calendar/EventModal";
 import { GoogleEventModal } from "@/components/board/calendar/GoogleEventModal";
 import { ORG_COLORS, type OrgKey } from "@/lib/board/tokens";
 import { CalendarSidebar } from "@/components/board/calendar/CalendarSidebar";
+import { StaffEventsMap } from "@/components/board/calendar/StaffEventsMap";
 import type { CalendarEvent } from "@/lib/board/calendar";
 
 const HOUR_START = 8;
@@ -47,7 +48,7 @@ const WEEK_OPTS = { weekStartsOn: 1 as const, locale: fr };
 
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
 type GoogleEventItem = Awaited<ReturnType<typeof listMyEvents>>[number];
-type ViewMode = "day" | "week" | "month";
+type ViewMode = "day" | "week" | "month" | "map";
 
 function hourFloat(iso: string) {
   const d = parseISO(iso);
@@ -64,6 +65,7 @@ const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: "day", label: "Jour" },
   { id: "week", label: "Semaine" },
   { id: "month", label: "Mois" },
+  { id: "map", label: "Carte" },
 ];
 
 export function CalendrierScreen() {
@@ -81,10 +83,13 @@ export function CalendrierScreen() {
     return days;
   }, [anchorDate]);
 
-  const displayDays = useMemo(
-    () => (viewMode === "day" ? [anchorDate] : viewMode === "week" ? weekDays : monthGridDays),
-    [viewMode, anchorDate, weekDays, monthGridDays]
-  );
+  const displayDays = useMemo(() => {
+    if (viewMode === "day") return [anchorDate];
+    if (viewMode === "week") return weekDays;
+    // Carte : les événements du mois affiché, sans les jours de débordement de la grille.
+    if (viewMode === "map") return monthGridDays.filter((d) => isSameMonth(d, anchorDate));
+    return monthGridDays;
+  }, [viewMode, anchorDate, weekDays, monthGridDays]);
   const rangeStart = useMemo(() => startOfDay(displayDays[0]), [displayDays]);
   const rangeEnd = useMemo(() => endOfDay(displayDays[displayDays.length - 1]), [displayDays]);
 
@@ -357,7 +362,16 @@ export function CalendrierScreen() {
         </div>
       </div>
 
-      {viewMode !== "month" ? (
+      {viewMode === "map" ? (
+        <StaffEventsMap
+          events={visibleEvents.filter((e) => !e.onlineMeeting && e.location)}
+          onOpenEvent={(id) => {
+            const ev = visibleEvents.find((e) => e.id === id);
+            if (ev) setEditingInternal(ev);
+          }}
+          className="flex-1"
+        />
+      ) : viewMode !== "month" ? (
         <div className="flex flex-1 overflow-hidden rounded-panel border border-line bg-card">
           <div className="w-12 shrink-0 border-r border-line pt-8">
             {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => (

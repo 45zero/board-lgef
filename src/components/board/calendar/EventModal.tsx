@@ -366,7 +366,9 @@ export function EventModal({
           {tab === "equipe" && isEditing && <EquipeTab hook={m.team} />}
           {tab === "frais" && isEditing && event && <FraisTab eventId={event.id} onDeclared={() => void m.expenses.refetch()} />}
           {tab === "gestion" && <GestionFraisPlaceholder />}
-          {tab === "carte" && <CarteTab location={m.location} />}
+          {tab === "carte" && (
+            <CarteTab location={m.location} event={event ? { id: event.id, title: m.title, org: m.org, start: m.start.toISOString() } : null} />
+          )}
         </div>
 
         {/* Pied */}
@@ -388,7 +390,7 @@ export function EventModal({
                 role={m.role}
                 technicians={m.technicians}
                 coverage={m.coverage}
-                eventInfo={{ title: m.title, start: m.start }}
+                eventInfo={{ id: event!.id, title: m.title, start: m.start }}
               />
             )}
             <button onClick={onClose} className="rounded-btn border border-line px-4 py-2 text-sm text-ink-2">

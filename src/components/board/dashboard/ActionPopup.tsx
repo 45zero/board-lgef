@@ -2,7 +2,10 @@
 
 import { MapPopup } from "@/components/board/calendar/MapPopup";
 import { useEffect, useState } from "react";
-import { X, Check, ChevronRight, CalendarDays, MapPin } from "lucide-react";
+import { X, Check, ChevronRight, CalendarDays, MapPin, Map as MapIcon } from "lucide-react";
+import { StaffEventsMap, useTravelToEvent } from "@/components/board/calendar/StaffEventsMap";
+import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
+import { formatTravel } from "@/lib/board/geo";
 import type { DashboardAction, DashboardActionItem } from "@/app/actions/dashboard";
 import {
   declareExpenses,
@@ -14,7 +17,7 @@ import {
 } from "@/app/actions/expenses";
 import { ExpenseSheetModal, ReviewModal } from "@/components/board/screens/FraisScreen";
 import { confirmNoExpense, formatEuros } from "@/components/board/expenses/ExpenseStatus";
-import { EventArrow } from "@/components/board/calendar/EventOpener";
+import { EventArrow, useOpenEvent } from "@/components/board/calendar/EventOpener";
 import { useEventCoverage } from "@/hooks/board/useEventCoverage";
 import { useAvailableTechnicians, type TechnicianOption } from "@/hooks/board/useAvailableTechnicians";
 import { useDirectorAttendance } from "@/hooks/board/useDirectorAttendance";
@@ -310,6 +313,9 @@ function AssignRow({ item, technicians, onDone }: { item: DashboardActionItem; t
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const tech = technicians.find((t) => t.id === techId);
+  const travel = useTravelToEvent(item.eventId, technicians.length ? technicians.map((t) => t.id) : undefined);
+  // Les plus proches d'abord ; ceux sans trajet calculable (adresse manquante) à la fin.
+  const sorted = [...technicians].sort((a, b) => (travel[a.id]?.minutes ?? Infinity) - (travel[b.id]?.minutes ?? Infinity));
   const assign = async (direct: boolean) => {
     if (!tech) return;
     setBusy(true);
@@ -337,9 +343,10 @@ function AssignRow({ item, technicians, onDone }: { item: DashboardActionItem; t
           className="min-w-0 flex-1 rounded-btn border border-line bg-card px-2 py-1.5 text-sm outline-none"
         >
           <option value="">Choisir un technicien…</option>
-          {technicians.map((t) => (
+          {sorted.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}
+              {travel[t.id] ? ` — ${formatTravel(travel[t.id])}` : ""}
             </option>
           ))}
         </select>
@@ -357,8 +364,24 @@ function AssignRow({ item, technicians, onDone }: { item: DashboardActionItem; t
 
 function AssignList({ items, onDone }: { items: DashboardActionItem[]; onDone: (id: string) => void }) {
   const { technicians } = useAvailableTechnicians();
+  const { open } = useOpenEvent();
+  const [mapOpen, setMapOpen] = useState(false);
+  const mapEvents = items
+    .filter((i) => i.eventId && i.location)
+    .map((i) => ({ id: i.eventId!, title: i.title, org: i.eventType ? EVENT_TYPE_TO_ORG[i.eventType] : ("red" as const), start: i.date, location: i.location }));
   return (
     <>
+      {mapEvents.length > 0 && (
+        <div className="border-b border-line px-4 py-2.5">
+          <button
+            onClick={() => setMapOpen((o) => !o)}
+            className="flex items-center gap-1.5 rounded-btn border border-line px-2.5 py-1.5 text-xs font-semibold text-link hover:bg-hover"
+          >
+            <MapIcon size={13} /> {mapOpen ? "Masquer la carte" : "Carte des demandes et des techniciens"}
+          </button>
+          {mapOpen && <StaffEventsMap events={mapEvents} onOpenEvent={(id) => void open(id)} className="mt-2 h-[340px]" />}
+        </div>
+      )}
       {items.map((i) => (
         <AssignRow key={i.id} item={i} technicians={technicians} onDone={() => onDone(i.id)} />
       ))}
