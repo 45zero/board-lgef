@@ -5,15 +5,15 @@ import { useState } from "react";
 const KEY = "lgef-board:calendar-mine-only";
 
 /**
- * Filtre « Uniquement où je suis sollicité » du calendrier (ordinateur et mobile) : activé par
- * défaut, mémorisé dans le navigateur.
+ * Filtre « Uniquement où je suis sollicité » du calendrier (ordinateur et mobile) : désactivé par
+ * défaut (tous les événements), mémorisé dans le navigateur.
  */
 export function useSolicitedFilter(): [boolean, (value: boolean) => void] {
   const [mineOnly, setMineOnly] = useState<boolean>(() => {
     try {
-      return localStorage.getItem(KEY) !== "0";
+      return localStorage.getItem(KEY) === "1";
     } catch {
-      return true;
+      return false;
     }
   });
   const set = (value: boolean) => {

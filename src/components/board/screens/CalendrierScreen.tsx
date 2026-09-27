@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Plus,
   Search,
+  User,
   X,
   PanelLeftOpen,
 } from "lucide-react";
@@ -328,6 +329,17 @@ export function CalendrierScreen() {
               </button>
             )}
           </div>
+          <button
+            onClick={() => setMineOnly(!mineOnly)}
+            className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-btn border ${
+              mineOnly ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3 hover:bg-hover"
+            }`}
+            title={mineOnly ? "Où je suis sollicité — afficher tous les événements" : "Tous les événements — n'afficher que ceux où je suis sollicité"}
+            aria-label="Événements où je suis sollicité"
+            aria-pressed={mineOnly}
+          >
+            <User size={15} />
+          </button>
 
           <div className="flex items-center gap-0.5 rounded-btn border border-line bg-card p-0.5">
             {VIEW_MODES.map((m) => (
