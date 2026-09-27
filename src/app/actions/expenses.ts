@@ -643,3 +643,56 @@ export async function setExpenseManagers(ids: string[]): Promise<{ error: string
     return { error: e instanceof Error ? e.message : "Erreur inattendue." };
   }
 }
+
+export type ExpenseExportLine = ExpenseLine & { eventTitle: string | null; eventDate: string | null; status: ExpenseStatus };
+
+export type ExpenseExport = {
+  month: string;
+  person: { firstName: string; lastName: string; email: string | null; address: string | null; vehicle: string | null; plate: string | null };
+  lines: ExpenseExportLine[];
+};
+
+/** Lien lisible par le navigateur d'un justificatif : URL publique, ou URL signée (chemins de l'appli calendrier). */
+async function readableUrl(service: Service, url: string) {
+  if (/^https?:\/\//.test(url)) return url;
+  const bucket = url.startsWith("expense_scans/") ? "expense_scans" : "attachments";
+  const { data } = await service.storage.from(bucket).createSignedUrl(url, 600);
+  return data?.signedUrl ?? null;
+}
+
+/** Fiche individuelle de frais d'un mois ('YYYY-MM') : mes lignes (événements du mois + hors événement), pour l'export PDF / Excel. */
+export async function getMyExpenseExport(month: string): Promise<ExpenseExport> {
+  const { userId, service } = await currentUser();
+  monthRange(month);
+  const [items, { data: profile }] = await Promise.all([
+    getMyExpenses(),
+    service.from("profiles").select("first_name, last_name, email, home_address, license_plate, has_company_car").eq("id", userId).single(),
+  ]);
+  const inMonth = items.filter((i) => i.lineCount > 0 && i.start.slice(0, 7) === month);
+
+  const lines: ExpenseExportLine[] = [];
+  for (const item of inMonth) {
+    const raw = await linesOf(service, userId, item.eventId ? { eventId: item.eventId } : { month: item.month! });
+    for (const l of await withAttachments(service, raw as Record<string, unknown>[])) {
+      const attachments = (
+        await Promise.all(l.attachments.map(async (a) => ({ ...a, url: (await readableUrl(service, a.url)) ?? "" })))
+      ).filter((a) => a.url);
+      lines.push({ ...l, attachments, eventTitle: item.eventId ? item.title : null, eventDate: item.eventId ? item.start : null, status: item.status });
+    }
+  }
+  const dateOf = (l: ExpenseExportLine) => l.eventDate ?? l.expense_date ?? l.created_at;
+  lines.sort((a, b) => dateOf(a).localeCompare(dateOf(b)));
+
+  return {
+    month,
+    person: {
+      firstName: profile?.first_name ?? "",
+      lastName: profile?.last_name ?? "",
+      email: profile?.email ?? null,
+      address: profile?.home_address ?? null,
+      vehicle: profile?.has_company_car ? "Véhicule de fonction" : profile?.license_plate ? "Véhicule personnel" : null,
+      plate: profile?.license_plate ?? null,
+    },
+    lines,
+  };
+}

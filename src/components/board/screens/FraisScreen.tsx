@@ -2,7 +2,7 @@
 
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Receipt, ShieldCheck, Users, X, Search, ChevronRight } from "lucide-react";
+import { Receipt, ShieldCheck, Users, X, Search, ChevronRight, Download } from "lucide-react";
 import {
   getMyExpenses,
   getMyValidatorScope,
@@ -18,6 +18,7 @@ import {
 } from "@/app/actions/expenses";
 import { ExpenseLinesEditor, AttachmentLinks } from "@/components/board/expenses/ExpenseLinesEditor";
 import { ExpenseImport } from "@/components/board/expenses/ExpenseImport";
+import { ExpenseExportModal } from "@/components/board/expenses/ExpenseExportModal";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { lineParts } from "@/lib/board/expenseCategories";
 import { ExpenseStatusBadge, EXPENSE_STATUS_META, formatEuros } from "@/components/board/expenses/ExpenseStatus";
@@ -171,6 +172,7 @@ function MyExpenses() {
   const [query, setQuery] = useState("");
   const [month, setMonth] = useState("");
   const [open, setOpen] = useState<MyExpenseItem | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(() => getMyExpenses().then(setItems).catch(() => setItems([])), []);
   useEffect(() => {
@@ -184,6 +186,8 @@ function MyExpenses() {
     return c;
   }, [items]);
   const months = useMemo(() => [...new Set((items ?? []).map((i) => monthKey(i.start)))].sort().reverse(), [items]);
+  // Mois exportables : ceux où des frais ont été saisis.
+  const exportMonths = useMemo(() => [...new Set((items ?? []).filter((i) => i.lineCount > 0).map((i) => monthKey(i.start)))].sort().reverse(), [items]);
   const q = normalize(query.trim());
   const visible = (items ?? []).filter(
     (i) => (filter === "all" || i.status === filter) && (!month || monthKey(i.start) === month) && (!q || normalize(i.title).includes(q))
@@ -205,7 +209,16 @@ function MyExpenses() {
           </FilterChip>
         ))}
       </div>
-      <FiltersRow query={query} onQuery={setQuery} months={months} month={month} onMonth={setMonth} />
+      <FiltersRow query={query} onQuery={setQuery} months={months} month={month} onMonth={setMonth}>
+        <button
+          onClick={() => setExporting(true)}
+          disabled={!exportMonths.length}
+          title={exportMonths.length ? "Fiche individuelle du mois en PDF signé ou Excel" : "Aucun frais saisi à exporter"}
+          className="flex items-center gap-1.5 rounded-btn border border-line bg-card px-3 py-1.5 text-sm font-semibold text-ink-2 hover:bg-hover disabled:opacity-50"
+        >
+          <Download size={14} /> Exporter
+        </button>
+      </FiltersRow>
 
       {visible.length === 0 ? (
         <div className="rounded-panel border border-dashed border-line p-8 text-center text-sm text-ink-4">
@@ -247,6 +260,14 @@ function MyExpenses() {
             </div>
           ))}
         </div>
+      )}
+
+      {exporting && (
+        <ExpenseExportModal
+          months={exportMonths}
+          initialMonth={exportMonths.includes(month) ? month : exportMonths[0]}
+          onClose={() => setExporting(false)}
+        />
       )}
 
       {open && (
