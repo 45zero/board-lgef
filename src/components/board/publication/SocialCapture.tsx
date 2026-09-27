@@ -7,13 +7,16 @@ import { uploadEventFiles, uploadStandaloneMedia } from "@/lib/board/eventFiles"
 import { createPublication, listMediaPublications, type MediaPublication } from "@/lib/board/mediaPublications";
 import {
   HABILLAGE_FORMATS,
-  HABILLAGE_TEMPLATES,
+  availableTemplates,
   canvasToFile,
   loadBitmap,
   renderHabillage,
+  withDefaults,
   type HabillageFormat,
+  type HabillageSettings,
   type HabillageTemplate,
 } from "@/lib/board/habillage";
+import { getHabillageSettings } from "@/app/actions/board-settings";
 import { searchEventsForExpense, type EventCandidate } from "@/app/actions/expense-scan";
 import { Composer } from "@/components/board/screens/PublicationScreen";
 
@@ -36,6 +39,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   const [bitmap, setBitmap] = useState<ImageBitmap | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [template, setTemplate] = useState<HabillageTemplate>("bandeau");
+  const [settings, setSettings] = useState<HabillageSettings>(() => withDefaults(null));
   const [format, setFormat] = useState<HabillageFormat>("portrait");
   const [text, setText] = useState("");
   const [caption, setCaption] = useState("");
@@ -51,12 +55,25 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   const galleryRef = useRef<HTMLInputElement>(null);
 
   const isVideo = !!file?.type.startsWith("video");
+  const templates = availableTemplates(settings);
+
+  // Réglages des habillages (administrateur) : tailles, signature, gabarits actifs et personnalisés.
+  useEffect(() => {
+    getHabillageSettings()
+      .then((s) => {
+        const full = withDefaults(s);
+        setSettings(full);
+        const list = availableTemplates(full);
+        setTemplate((cur) => (list.some((t) => t.id === cur) ? cur : (list[1]?.id ?? "aucun")));
+      })
+      .catch(() => undefined);
+  }, []);
 
   // Aperçu de l'habillage, redessiné à chaque changement.
   useEffect(() => {
     if (step !== "habillage" || !bitmap || !canvasRef.current) return;
-    void renderHabillage(canvasRef.current, bitmap, { template, format, text });
-  }, [step, bitmap, template, format, text]);
+    void renderHabillage(canvasRef.current, bitmap, { template, format, text, settings });
+  }, [step, bitmap, template, format, text, settings]);
 
   useEffect(
     () => () => {
@@ -103,7 +120,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
       let media = file;
       if (!isVideo && bitmap) {
         const canvas = document.createElement("canvas");
-        await renderHabillage(canvas, bitmap, { template, format, text });
+        await renderHabillage(canvas, bitmap, { template, format, text, settings });
         media = await canvasToFile(canvas, `publication-${Date.now()}.jpg`);
       }
       setProgress("Envoi du média…");
@@ -209,7 +226,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                 <div>
                   <div className={label}>Habillage</div>
                   <div className="flex flex-wrap gap-1.5">
-                    {HABILLAGE_TEMPLATES.map((t) => (
+                    {templates.map((t) => (
                       <button key={t.id} onClick={() => setTemplate(t.id)} className={chip(template === t.id)}>
                         {t.label}
                       </button>

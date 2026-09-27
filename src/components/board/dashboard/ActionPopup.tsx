@@ -1,5 +1,6 @@
 "use client";
 
+import { MapPopup } from "@/components/board/calendar/MapPopup";
 import { useEffect, useState } from "react";
 import { X, Check, ChevronRight, CalendarDays, MapPin } from "lucide-react";
 import type { DashboardAction, DashboardActionItem } from "@/app/actions/dashboard";
@@ -32,8 +33,9 @@ const APP_LABELS: Record<string, string> = {
   inscription: "Inscription",
 };
 
-/** Date et lieu d'un événement, avec un léger bouton pour ouvrir le lieu dans Google Maps. */
-function WhenWhere({ date, location }: { date: string | null; location?: string | null }) {
+/** Date et lieu d'un événement, avec un léger bouton « Carte » qui ouvre la carte dans une fenêtre. */
+function WhenWhere({ date, location, title }: { date: string | null; location?: string | null; title?: string }) {
+  const [mapOpen, setMapOpen] = useState(false);
   return (
     <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-3">
       {date && (
@@ -45,17 +47,19 @@ function WhenWhere({ date, location }: { date: string | null; location?: string 
         <span className="flex min-w-0 items-center gap-1">
           <MapPin size={11} className="shrink-0 text-ink-4" />
           <span className="truncate">{location}</span>
-          <a
-            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMapOpen(true);
+            }}
             className="shrink-0 rounded-full border border-line px-1.5 py-px text-[10px] font-semibold text-link hover:border-link hover:bg-sel-bg"
           >
             Carte
-          </a>
+          </button>
         </span>
       )}
+      {mapOpen && location && <MapPopup location={location} title={title} onClose={() => setMapOpen(false)} />}
     </div>
   );
 }
@@ -83,7 +87,7 @@ function Row({
           <span className="truncate text-sm font-bold text-ink">{title}</span>
           {eventId && <EventArrow eventId={eventId} className="h-6 w-6" />}
         </div>
-        {(date !== undefined || location) && <WhenWhere date={date ?? null} location={location} />}
+        {(date !== undefined || location) && <WhenWhere date={date ?? null} location={location} title={title} />}
         {subtitle && <div className="truncate text-[11px] text-ink-4">{subtitle}</div>}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">{children}</div>
@@ -324,7 +328,7 @@ function AssignRow({ item, technicians, onDone }: { item: DashboardActionItem; t
         <span className="truncate text-sm font-bold text-ink">{item.title}</span>
         {item.eventId && <EventArrow eventId={item.eventId} className="h-6 w-6" />}
       </div>
-      <WhenWhere date={item.date} location={item.location} />
+      <WhenWhere date={item.date} location={item.location} title={item.title} />
       {details && <div className="truncate text-[11px] text-ink-4">{details}</div>}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <select

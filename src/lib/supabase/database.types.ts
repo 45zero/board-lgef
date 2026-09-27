@@ -284,6 +284,7 @@ export type Database = {
         Row: {
           id: boolean
           drive_connected_account_id: string | null
+          habillage: Json
           moderation_recipient_ids: string[]
           expense_manager_ids: string[]
           updated_by: string | null
@@ -292,6 +293,7 @@ export type Database = {
         Insert: {
           id?: boolean
           drive_connected_account_id?: string | null
+          habillage?: Json
           moderation_recipient_ids?: string[]
           expense_manager_ids?: string[]
           updated_by?: string | null
@@ -300,6 +302,7 @@ export type Database = {
         Update: {
           id?: boolean
           drive_connected_account_id?: string | null
+          habillage?: Json
           moderation_recipient_ids?: string[]
           expense_manager_ids?: string[]
           updated_by?: string | null
