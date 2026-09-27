@@ -285,6 +285,7 @@ export type Database = {
           id: boolean
           drive_connected_account_id: string | null
           moderation_recipient_ids: string[]
+          expense_manager_ids: string[]
           updated_by: string | null
           updated_at: string
         }
@@ -292,6 +293,7 @@ export type Database = {
           id?: boolean
           drive_connected_account_id?: string | null
           moderation_recipient_ids?: string[]
+          expense_manager_ids?: string[]
           updated_by?: string | null
           updated_at?: string
         }
@@ -299,6 +301,7 @@ export type Database = {
           id?: boolean
           drive_connected_account_id?: string | null
           moderation_recipient_ids?: string[]
+          expense_manager_ids?: string[]
           updated_by?: string | null
           updated_at?: string
         }

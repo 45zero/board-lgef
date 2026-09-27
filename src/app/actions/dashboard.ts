@@ -4,13 +4,18 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { getMyExpenses, getMyValidatorScope } from "@/app/actions/expenses";
 import type { DbEventType } from "@/lib/board/calendar";
+import { getSolicitations } from "@/lib/board/solicitation";
 
 // Tableau de bord : ce que l'utilisateur a À FAIRE (actions, toutes échéances confondues) et son
 // PROGRAMME (événements où il est sollicité) sur la journée ou la semaine. Chaque bloc est calculé
 // indépendamment : une source en erreur est simplement omise.
 
+/** Élément d'une action, pour le traiter directement depuis la popup du tableau de bord. */
+export type DashboardActionItem = { id: string; eventId: string | null; title: string; date: string | null; detail?: string };
+
 export type DashboardAction = {
   id: string;
+  items?: DashboardActionItem[];
   /** Module du board à ouvrir. */
   app: string;
   tone: "red" | "orange" | "navy";
@@ -79,41 +84,66 @@ export async function getDashboard(period: "day" | "week"): Promise<Dashboard> {
 
     // Présence au comité directeur à confirmer.
     safe(async () => {
-      const { count } = await service
+      const { data } = await service
         .from("director_attendance")
-        .select("id, events!inner(start_date)", { count: "exact", head: true })
+        .select("id, event_id, events!inner(title, start_date)")
         .eq("director_id", userId)
         .eq("status", "pending")
-        .gte("events.start_date", now.toISOString());
-      push({ id: "presence", app: "calendrier", tone: "orange", count: count ?? 0, title: "Présences à confirmer", detail: "Invitations du comité directeur" });
+        .gte("events.start_date", now.toISOString())
+        .limit(30);
+      const items = (data ?? []).map((d) => {
+        const ev = d.events as unknown as { title: string; start_date: string };
+        return { id: d.id, eventId: d.event_id, title: ev.title, date: ev.start_date };
+      });
+      push({ id: "presence", app: "calendrier", tone: "orange", count: items.length, items, title: "Présences à confirmer", detail: "Invitations du comité directeur" });
     }, undefined),
 
     // Captations : demandes qui m'attendent (technicien) / à attribuer (admin).
     safe(async () => {
       // Uniquement les événements à venir : les anciennes demandes jamais clôturées ne sont plus des actions.
-      const { count: mine } = await service
+      const { data: mineRows } = await service
         .from("coverage_requests")
-        .select("id, events!inner(start_date)", { count: "exact", head: true })
+        .select("id, event_id, details, events!inner(title, start_date)")
         .or(`assigned_technician_id.eq.${userId},technician_id.eq.${userId}`)
         .or("technician_response.is.null,technician_response.eq.pending")
         .neq("status", "cancelled")
-        .gte("events.start_date", now.toISOString());
-      push({ id: "captation-repondre", app: "calendrier", tone: "red", count: mine ?? 0, title: "Captations à accepter", detail: "Des événements vous sont proposés" });
+        .gte("events.start_date", now.toISOString())
+        .limit(30);
+      const mineItems = (mineRows ?? []).map((c) => {
+        const ev = c.events as unknown as { title: string; start_date: string };
+        return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date, detail: c.details ?? undefined };
+      });
+      push({ id: "captation-repondre", app: "calendrier", tone: "red", count: mineItems.length, items: mineItems, title: "Captations à accepter", detail: "Des événements vous sont proposés" });
       if (isAdmin) {
-        const { count: toAssign } = await service
+        const { data: toAssign, count: toAssignCount } = await service
           .from("coverage_requests")
-          .select("id, events!inner(start_date)", { count: "exact", head: true })
+          .select("id, event_id, events!inner(title, start_date)", { count: "exact" })
           .eq("status", "pending")
-          .gte("events.start_date", now.toISOString());
-        push({ id: "captation-attribuer", app: "calendrier", tone: "orange", count: toAssign ?? 0, title: "Demandes de captation à traiter", detail: "À valider et attribuer à un technicien" });
+          .gte("events.start_date", now.toISOString())
+          .order("created_at")
+          .limit(30);
+        const assignItems = (toAssign ?? []).map((c) => {
+          const ev = c.events as unknown as { title: string; start_date: string };
+          return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date };
+        });
+        push({ id: "captation-attribuer", app: "calendrier", tone: "orange", count: toAssignCount ?? assignItems.length, items: assignItems, title: "Demandes de captation à traiter", detail: "À valider et attribuer à un technicien" });
       }
     }, undefined),
 
     // Centre de publication.
     safe(async () => {
       if (!isMediaTeam) return;
-      const { count } = await service.from("media_publications").select("id", { count: "exact", head: true }).eq("status", "to_publish");
-      push({ id: "publier", app: "audiovisuel", tone: "red", count: count ?? 0, title: "Médias à publier", detail: "Photos et vidéos en attente dans le centre de publication" });
+      const { data: pubs } = await service
+        .from("media_publications")
+        .select("id, event_id, title, created_at, events(title, start_date)")
+        .eq("status", "to_publish")
+        .order("created_at", { ascending: false })
+        .limit(30);
+      const pubItems = (pubs ?? []).map((p) => {
+        const ev = p.events as unknown as { title: string; start_date: string } | null;
+        return { id: p.id, eventId: p.event_id, title: ev?.title ?? p.title ?? "Publication", date: ev?.start_date ?? p.created_at };
+      });
+      push({ id: "publier", app: "audiovisuel", tone: "red", count: pubItems.length, items: pubItems, title: "Médias à publier", detail: "Photos et vidéos en attente dans le centre de publication" });
       const { count: flagged } = await service
         .from("comment_moderation")
         .select("id", { count: "exact", head: true })
@@ -141,29 +171,8 @@ export async function getDashboard(period: "day" | "week"): Promise<Dashboard> {
 
   // Programme : événements de la période où je suis sollicité (ou que j'organise).
   const programme = await safe(async () => {
-    const [team, assigned, directors, coverage, created] = await Promise.all([
-      service.from("event_team_members").select("event_id, role").eq("user_id", userId),
-      service.from("event_assignments").select("event_id").eq("user_id", userId),
-      service.from("director_attendance").select("event_id, status").eq("director_id", userId).neq("status", "denied"),
-      service
-        .from("coverage_requests")
-        .select("event_id")
-        .or(`assigned_technician_id.eq.${userId},technician_id.eq.${userId}`)
-        .eq("technician_response", "accepted")
-        .neq("status", "cancelled"),
-      service.from("events").select("id").eq("created_by", userId).gte("start_date", from.toISOString()).lt("start_date", to.toISOString()),
-    ]);
-    const roles = new Map<string, Set<string>>();
-    const add = (id: string | null, role: string) => {
-      if (!id) return;
-      if (!roles.has(id)) roles.set(id, new Set());
-      roles.get(id)!.add(role);
-    };
-    for (const t of team.data ?? []) add(t.event_id, t.role === "responsable" ? "Responsable" : "Membre");
-    for (const a of assigned.data ?? []) add(a.event_id, "Assigné");
-    for (const d of directors.data ?? []) add(d.event_id, d.status === "approved" ? "Comité directeur" : "Comité directeur (à confirmer)");
-    for (const c of coverage.data ?? []) add(c.event_id, "Captation");
-    for (const e of created.data ?? []) add(e.id, "Organisateur");
+    // Uniquement les événements où je suis sollicité (avoir créé l'événement ne suffit pas).
+    const roles = await getSolicitations(service, userId, { includePendingDirector: true, includeProposedCoverage: true });
     const ids = [...roles.keys()];
     if (ids.length === 0) return [];
     const { data: events } = await service

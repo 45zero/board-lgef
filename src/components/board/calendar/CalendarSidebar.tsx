@@ -16,6 +16,8 @@ export function CalendarSidebar({
   onSelectDay,
   hiddenOrgs,
   onToggleOrg,
+  mineOnly,
+  onToggleMine,
   plannedLabel,
   availabilityPct,
   collapsed,
@@ -29,6 +31,8 @@ export function CalendarSidebar({
   onSelectDay: (d: Date) => void;
   hiddenOrgs: Set<OrgKey>;
   onToggleOrg: (key: OrgKey) => void;
+  mineOnly: boolean;
+  onToggleMine: () => void;
   plannedLabel: string;
   availabilityPct: number;
   collapsed: boolean;
@@ -123,6 +127,17 @@ export function CalendarSidebar({
               })}
             </div>
           </div>
+
+          <button
+            onClick={onToggleMine}
+            className={`flex items-center justify-between gap-2 rounded-btn border px-3 py-2 text-left text-xs font-semibold ${
+              mineOnly ? "border-navy bg-navy text-white" : "border-line text-ink-2 hover:bg-hover"
+            }`}
+            title="Afficher uniquement les événements où vous êtes sollicité (équipe, comité directeur, captation…)"
+          >
+            <span>{mineOnly ? "Où je suis sollicité" : "Tous les événements"}</span>
+            <span className="text-[10px] font-normal opacity-80">{mineOnly ? "Voir tout" : "Filtrer"}</span>
+          </button>
 
           <div>
             <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Mes calendriers</div>

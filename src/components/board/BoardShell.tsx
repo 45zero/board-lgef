@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ChevronLeft } from "lucide-react";
 import { TopBar } from "./TopBar";
 import { AppRail } from "./AppRail";
 import { Dock } from "./Dock";
@@ -125,6 +126,18 @@ export function BoardShell() {
               widgets={prefs.contextPanelWidgets}
               onClose={() => update({ contextPanelOpen: false })}
             />
+          )}
+          {/* Panneau refermé : languette pour le rouvrir (sinon il n'était récupérable que dans les paramètres). */}
+          {!prefs.contextPanelOpen && (app === "accueil" || app === "mails" || app === "calendrier") && (
+            <button
+              type="button"
+              onClick={() => update({ contextPanelOpen: true })}
+              title="Afficher le récapitulatif"
+              aria-label="Afficher le récapitulatif"
+              className="flex w-7 shrink-0 items-center justify-center self-start rounded-l-btn rounded-r-btn border border-line bg-card/80 py-6 text-ink-3 shadow-bar hover:bg-hover hover:text-ink"
+            >
+              <ChevronLeft size={16} />
+            </button>
           )}
         </div>
 

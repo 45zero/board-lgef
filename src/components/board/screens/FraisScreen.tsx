@@ -9,6 +9,8 @@ import {
   reviewSubmission,
   getValidatorAssignments,
   setExpenseValidator,
+  getExpenseManagers,
+  setExpenseManagers,
   type MyExpenseItem,
   type SubmissionToReview,
   type ValidatorAssignment,
@@ -18,6 +20,7 @@ import { FraisTab } from "@/components/board/calendar/EventTabs";
 import { ExpenseStatusBadge, EXPENSE_STATUS_META, formatEuros } from "@/components/board/expenses/ExpenseStatus";
 import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
+import { OpenEventButton } from "@/components/board/calendar/OpenEventButton";
 
 type Tab = "mine" | "validate" | "admin";
 type MineFilter = "a_declarer" | "pending" | "approved" | "rejected" | "all";
@@ -31,6 +34,76 @@ const MINE_FILTERS: { id: MineFilter; label: string }[] = [
 ];
 
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+
+const monthKey = (iso: string) => iso.slice(0, 7);
+const monthLabel = (key: string) => {
+  const [y, m] = key.split("-").map(Number);
+  const label = new Date(y, m - 1, 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+};
+const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+/** Recherche + mois (+ personne) : barre de filtres commune à « Mes frais » et « À valider ». */
+function FiltersRow({
+  query,
+  onQuery,
+  months,
+  month,
+  onMonth,
+  people,
+  person,
+  onPerson,
+  children,
+}: {
+  query: string;
+  onQuery: (v: string) => void;
+  months: string[];
+  month: string;
+  onMonth: (v: string) => void;
+  people?: { id: string; name: string }[];
+  person?: string;
+  onPerson?: (v: string) => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex min-w-[200px] flex-1 items-center gap-2 rounded-btn border border-line bg-card px-2.5 py-1.5">
+        <Search size={13} className="text-ink-4" />
+        <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Rechercher…" className="w-full bg-transparent text-sm outline-none" />
+      </div>
+      <select value={month} onChange={(e) => onMonth(e.target.value)} className="rounded-btn border border-line bg-card px-2 py-1.5 text-sm outline-none">
+        <option value="">Tous les mois</option>
+        {months.map((m) => (
+          <option key={m} value={m}>
+            {monthLabel(m)}
+          </option>
+        ))}
+      </select>
+      {people && onPerson && (
+        <select value={person} onChange={(e) => onPerson(e.target.value)} className="max-w-[200px] rounded-btn border border-line bg-card px-2 py-1.5 text-sm outline-none">
+          <option value="">Toutes les personnes</option>
+          {people.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function GroupHeader({ label, total, count }: { label: string; total: number; count: number }) {
+  return (
+    <div className="flex items-center justify-between bg-subtle px-4 py-1.5 text-[11px] font-bold text-ink-3">
+      <span>{label}</span>
+      <span>
+        {count} fiche{count > 1 ? "s" : ""} · {formatEuros(total)}
+      </span>
+    </div>
+  );
+}
 
 function OrgChip({ eventType }: { eventType: MyExpenseItem["eventType"] }) {
   if (!eventType) return null;
@@ -59,7 +132,7 @@ function FilterChip({ active, onClick, children }: { active: boolean; onClick: (
 /* ---------- Mes frais ---------- */
 
 /** Fiche de frais d'un événement : lignes (saisie/suppression) + déclaration au N+1. */
-function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpenseItem; onClose: () => void; onChanged: () => void }) {
+export function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpenseItem; onClose: () => void; onChanged: () => void }) {
   const hook = useEventExpenses(item.eventId);
   const locked = item.status === "approved";
   return (
@@ -73,6 +146,7 @@ function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpenseItem; 
               <div className="mt-0.5 text-xs text-white/80">
                 {fmtDate(item.start)} · {item.roles.join(", ") || "—"}
               </div>
+              <OpenEventButton eventId={item.eventId} className="mt-2 flex items-center gap-1 text-xs font-semibold text-white/90 hover:underline" />
             </div>
             <button onClick={onClose} className="rounded-full p-1 text-white/80 hover:bg-white/10">
               <X size={18} />
@@ -100,6 +174,8 @@ function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpenseItem; 
 function MyExpenses() {
   const [items, setItems] = useState<MyExpenseItem[] | null>(null);
   const [filter, setFilter] = useState<MineFilter>("a_declarer");
+  const [query, setQuery] = useState("");
+  const [month, setMonth] = useState("");
   const [open, setOpen] = useState<MyExpenseItem | null>(null);
 
   const load = useCallback(() => getMyExpenses().then(setItems).catch(() => setItems([])), []);
@@ -112,7 +188,14 @@ function MyExpenses() {
     for (const i of items ?? []) c[i.status] = (c[i.status] ?? 0) + 1;
     return c;
   }, [items]);
-  const visible = (items ?? []).filter((i) => filter === "all" || i.status === filter);
+  const months = useMemo(() => [...new Set((items ?? []).map((i) => monthKey(i.start)))].sort().reverse(), [items]);
+  const q = normalize(query.trim());
+  const visible = (items ?? []).filter(
+    (i) => (filter === "all" || i.status === filter) && (!month || monthKey(i.start) === month) && (!q || normalize(i.title).includes(q))
+  );
+  // Regroupement par mois.
+  const groups = new Map<string, MyExpenseItem[]>();
+  for (const i of visible) groups.set(monthKey(i.start), [...(groups.get(monthKey(i.start)) ?? []), i]);
 
   if (!items) return <div className="p-6 text-sm text-ink-4">Chargement…</div>;
 
@@ -126,39 +209,45 @@ function MyExpenses() {
           </FilterChip>
         ))}
       </div>
+      <FiltersRow query={query} onQuery={setQuery} months={months} month={month} onMonth={setMonth} />
 
       {visible.length === 0 ? (
         <div className="rounded-panel border border-dashed border-line p-8 text-center text-sm text-ink-4">
-          {filter === "a_declarer" ? "Rien à déclarer : tous vos frais sont à jour. 👍" : "Aucune note de frais ici."}
+          {filter === "a_declarer" && !q && !month ? "Rien à déclarer : tous vos frais sont à jour. 👍" : "Aucune note de frais ici."}
         </div>
       ) : (
         <div className="overflow-hidden rounded-panel border border-line bg-card">
-          {visible.map((i) => (
-            <button
-              key={i.eventId}
-              onClick={() => setOpen(i)}
-              className="flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="truncate text-sm font-bold text-ink">{i.title}</span>
-                  <OrgChip eventType={i.eventType} />
-                </div>
-                <div className="mt-0.5 text-[11px] text-ink-4">
-                  {fmtDate(i.start)} · {i.roles.join(", ") || "Déclaration existante"}
-                  {i.lineCount > 0 && ` · ${i.lineCount} ligne${i.lineCount > 1 ? "s" : ""}`}
-                </div>
-                {i.status === "rejected" && i.reviewerComment && <div className="mt-0.5 truncate text-[11px] text-bad">Motif : {i.reviewerComment}</div>}
-              </div>
-              <span className="shrink-0 text-sm font-bold text-ink">{i.total > 0 ? formatEuros(i.total) : ""}</span>
-              {i.status === "a_declarer" || i.status === "rejected" ? (
-                <span className="shrink-0 rounded-btn bg-red px-3 py-1.5 text-xs font-bold text-white shadow-btn-red">
-                  {i.status === "rejected" ? "Corriger" : "Déclarer"}
-                </span>
-              ) : (
-                <ExpenseStatusBadge status={i.status} />
-              )}
-            </button>
+          {[...groups.entries()].map(([key, group]) => (
+            <div key={key}>
+              <GroupHeader label={monthLabel(key)} count={group.length} total={group.reduce((n, i) => n + i.total, 0)} />
+              {group.map((i) => (
+                <button
+                  key={i.eventId}
+                  onClick={() => setOpen(i)}
+                  className="flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="truncate text-sm font-bold text-ink">{i.title}</span>
+                      <OrgChip eventType={i.eventType} />
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-ink-4">
+                      {fmtDate(i.start)} · {i.roles.join(", ") || "Déclaration existante"}
+                      {i.lineCount > 0 && ` · ${i.lineCount} ligne${i.lineCount > 1 ? "s" : ""}`}
+                    </div>
+                    {i.status === "rejected" && i.reviewerComment && <div className="mt-0.5 truncate text-[11px] text-bad">Motif : {i.reviewerComment}</div>}
+                  </div>
+                  <span className="shrink-0 text-sm font-bold text-ink">{i.total > 0 ? formatEuros(i.total) : ""}</span>
+                  {i.status === "a_declarer" || i.status === "rejected" ? (
+                    <span className="shrink-0 rounded-btn bg-red px-3 py-1.5 text-xs font-bold text-white shadow-btn-red">
+                      {i.status === "rejected" ? "Corriger" : "Déclarer"}
+                    </span>
+                  ) : (
+                    <ExpenseStatusBadge status={i.status} />
+                  )}
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       )}
@@ -191,7 +280,7 @@ const LINE_FIELDS: { key: keyof SubmissionToReview["lines"][number]; label: stri
 ];
 
 /** Fiche de validation : détail des lignes, justificatifs, puis Valider / Refuser (motif obligatoire). */
-function ReviewModal({ sub, onClose, onDone }: { sub: SubmissionToReview; onClose: () => void; onDone: () => void }) {
+export function ReviewModal({ sub, onClose, onDone }: { sub: SubmissionToReview; onClose: () => void; onDone: () => void }) {
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -217,6 +306,7 @@ function ReviewModal({ sub, onClose, onDone }: { sub: SubmissionToReview; onClos
               <div className="mt-0.5 truncate text-xs text-white/80">
                 {sub.event.title} · {fmtDate(sub.event.start)}
               </div>
+              <OpenEventButton eventId={sub.event.id} className="mt-2 flex items-center gap-1 text-xs font-semibold text-white/90 hover:underline" />
             </div>
             <button onClick={onClose} className="rounded-full p-1 text-white/80 hover:bg-white/10">
               <X size={18} />
@@ -301,57 +391,91 @@ function ReviewModal({ sub, onClose, onDone }: { sub: SubmissionToReview; onClos
   );
 }
 
-function ToValidate({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () => void }) {
+/** Déclarations des personnes dont je suis le N+1 — uniquement elles. */
+function ToValidate({ onChanged }: { onChanged: () => void }) {
   const [status, setStatus] = useState<"pending" | "approved" | "rejected">("pending");
-  const [scope, setScope] = useState<"mine" | "all">("mine");
   const [subs, setSubs] = useState<SubmissionToReview[] | null>(null);
   const [open, setOpen] = useState<SubmissionToReview | null>(null);
+  const [query, setQuery] = useState("");
+  const [month, setMonth] = useState("");
+  const [person, setPerson] = useState("");
+  const [groupBy, setGroupBy] = useState<"person" | "month">("person");
 
-  const load = useCallback(() => getSubmissionsToReview(status, scope).then(setSubs).catch(() => setSubs([])), [status, scope]);
+  const load = useCallback(() => getSubmissionsToReview(status, "mine").then(setSubs).catch(() => setSubs([])), [status]);
   useEffect(() => {
     void load();
   }, [load]);
 
+  const months = useMemo(() => [...new Set((subs ?? []).map((s) => monthKey(s.event.start)))].sort().reverse(), [subs]);
+  const people = useMemo(
+    () => [...new Map((subs ?? []).map((s) => [s.person.id, { id: s.person.id, name: s.person.name }])).values()].sort((a, b) => a.name.localeCompare(b.name)),
+    [subs]
+  );
+  const q = normalize(query.trim());
+  const visible = (subs ?? []).filter(
+    (s) =>
+      (!month || monthKey(s.event.start) === month) &&
+      (!person || s.person.id === person) &&
+      (!q || normalize(`${s.person.name} ${s.event.title}`).includes(q))
+  );
+  const groups = new Map<string, { label: string; items: SubmissionToReview[] }>();
+  for (const s of visible) {
+    const key = groupBy === "person" ? s.person.id : monthKey(s.event.start);
+    const label = groupBy === "person" ? s.person.name : monthLabel(key);
+    const g = groups.get(key) ?? { label, items: [] };
+    g.items.push(s);
+    groups.set(key, g);
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-1.5">
-        {(["pending", "approved", "rejected"] as const).map((s) => (
-          <FilterChip key={s} active={status === s} onClick={() => setStatus(s)}>
-            {EXPENSE_STATUS_META[s].label}
+        {(["pending", "approved", "rejected"] as const).map((st) => (
+          <FilterChip key={st} active={status === st} onClick={() => setStatus(st)}>
+            {EXPENSE_STATUS_META[st].label}
           </FilterChip>
         ))}
-        {isAdmin && (
-          <label className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-ink-3">
-            <input type="checkbox" checked={scope === "all"} onChange={(e) => setScope(e.target.checked ? "all" : "mine")} />
-            Toutes les déclarations (admin)
-          </label>
-        )}
       </div>
+      <FiltersRow query={query} onQuery={setQuery} months={months} month={month} onMonth={setMonth} people={people} person={person} onPerson={setPerson}>
+        <div className="flex rounded-full bg-subtle p-0.5 text-xs font-semibold">
+          {(["person", "month"] as const).map((g) => (
+            <button key={g} onClick={() => setGroupBy(g)} className={`rounded-full px-3 py-1 ${groupBy === g ? "bg-navy text-white" : "text-ink-3"}`}>
+              {g === "person" ? "Par personne" : "Par mois"}
+            </button>
+          ))}
+        </div>
+      </FiltersRow>
 
       {!subs ? (
         <div className="p-6 text-sm text-ink-4">Chargement…</div>
-      ) : subs.length === 0 ? (
+      ) : visible.length === 0 ? (
         <div className="rounded-panel border border-dashed border-line p-8 text-center text-sm text-ink-4">
-          {status === "pending" ? "Aucune note de frais en attente de validation." : "Aucune note de frais."}
+          {status === "pending" ? "Aucune note de frais de votre équipe en attente de validation." : "Aucune note de frais."}
         </div>
       ) : (
         <div className="overflow-hidden rounded-panel border border-line bg-card">
-          {subs.map((s) => (
-            <button
-              key={s.submissionId}
-              onClick={() => setOpen(s)}
-              className="flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-bold text-ink">{s.person.name}</div>
-                <div className="truncate text-[11px] text-ink-4">
-                  {s.event.title} · {fmtDate(s.event.start)}
-                  {s.submittedAt && ` · déclaré le ${new Date(s.submittedAt).toLocaleDateString("fr-FR")}`}
-                </div>
-              </div>
-              <span className="shrink-0 text-sm font-bold text-ink">{formatEuros(s.total)}</span>
-              <ChevronRight size={16} className="shrink-0 text-ink-4" />
-            </button>
+          {[...groups.entries()].map(([key, g]) => (
+            <div key={key}>
+              <GroupHeader label={g.label} count={g.items.length} total={g.items.reduce((n, s) => n + s.total, 0)} />
+              {g.items.map((s) => (
+                <button
+                  key={s.submissionId}
+                  onClick={() => setOpen(s)}
+                  className="flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-bold text-ink">{groupBy === "person" ? s.event.title : s.person.name}</div>
+                    <div className="truncate text-[11px] text-ink-4">
+                      {groupBy === "person" ? "" : `${s.event.title} · `}
+                      {fmtDate(s.event.start)}
+                      {s.submittedAt && ` · déclaré le ${new Date(s.submittedAt).toLocaleDateString("fr-FR")}`}
+                    </div>
+                  </div>
+                  <span className="shrink-0 text-sm font-bold text-ink">{formatEuros(s.total)}</span>
+                  <ChevronRight size={16} className="shrink-0 text-ink-4" />
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       )}
@@ -373,66 +497,142 @@ function ToValidate({ isAdmin, onChanged }: { isAdmin: boolean; onChanged: () =>
 
 /* ---------- Administration ---------- */
 
-function ValidatorsAdmin() {
+/** Choix d'une personne avec recherche (plutôt qu'une longue liste déroulante). */
+function PersonPicker({
+  people,
+  value,
+  onChange,
+  placeholder = "Rechercher…",
+}: {
+  people: { id: string; name: string; email: string | null }[];
+  value: string | null;
+  onChange: (id: string | null) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const current = people.find((p) => p.id === value);
+  const nq = normalize(q.trim());
+  const matches = people.filter((p) => !nq || normalize(`${p.name} ${p.email ?? ""}`).includes(nq)).slice(0, 8);
+  return (
+    <div className="relative w-[240px]">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex w-full items-center justify-between gap-2 rounded-btn border px-2.5 py-1.5 text-left text-sm ${current ? "border-line text-ink" : "border-warn text-ink-4"}`}
+      >
+        <span className="truncate">{current?.name ?? "— Aucun —"}</span>
+        <ChevronRight size={13} className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-full rounded-btn border border-line bg-card p-1.5 shadow-modal">
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} className="mb-1 w-full rounded-btn border border-line px-2 py-1 text-sm outline-none" />
+          <button
+            onClick={() => {
+              onChange(null);
+              setOpen(false);
+            }}
+            className="block w-full rounded-btn px-2 py-1 text-left text-xs text-ink-4 hover:bg-hover"
+          >
+            — Aucun —
+          </button>
+          {matches.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => {
+                onChange(p.id);
+                setOpen(false);
+                setQ("");
+              }}
+              className="block w-full truncate rounded-btn px-2 py-1 text-left text-sm text-ink-2 hover:bg-hover"
+            >
+              {p.name} <span className="text-[11px] text-ink-4">{p.email}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ValidatorsAdmin({ isAdmin }: { isAdmin: boolean }) {
   const [rows, setRows] = useState<ValidatorAssignment[] | null>(null);
+  const [managers, setManagers] = useState<string[]>([]);
   const [query, setQuery] = useState("");
+  const [onlyMissing, setOnlyMissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     getValidatorAssignments()
       .then(setRows)
       .catch((e: Error) => setError(e.message));
-  }, []);
+    if (isAdmin) getExpenseManagers().then(setManagers).catch(() => undefined);
+  }, [isAdmin]);
 
-  const change = async (personId: string, validatorId: string) => {
-    const value = validatorId || null;
-    setRows((prev) => prev?.map((r) => (r.id === personId ? { ...r, validatorId: value } : r)) ?? null);
-    const res = await setExpenseValidator(personId, value);
+  const change = async (personId: string, validatorId: string | null) => {
+    setRows((prev) => prev?.map((r) => (r.id === personId ? { ...r, validatorId } : r)) ?? null);
+    const res = await setExpenseValidator(personId, validatorId);
+    if (res.error) setError(res.error);
+  };
+  const saveManagers = async (ids: string[]) => {
+    setManagers(ids);
+    const res = await setExpenseManagers(ids);
     if (res.error) setError(res.error);
   };
 
   if (error) return <p className="text-sm text-bad">{error}</p>;
   if (!rows) return <div className="p-6 text-sm text-ink-4">Chargement…</div>;
 
-  const q = query.trim().toLowerCase();
-  const visible = rows.filter((r) => !q || `${r.name} ${r.email ?? ""}`.toLowerCase().includes(q));
+  const q = normalize(query.trim());
+  const visible = rows.filter((r) => (!q || normalize(`${r.name} ${r.email ?? ""}`).includes(q)) && (!onlyMissing || !r.validatorId));
   const withoutValidator = rows.filter((r) => !r.validatorId).length;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {isAdmin && (
+        <div className="space-y-2 rounded-panel border border-line bg-card p-4">
+          <div className="text-sm font-bold text-ink">Qui peut régler les responsables N+1</div>
+          <p className="text-xs text-ink-4">Les administrateurs y ont toujours accès. Ajoutez ici d&rsquo;autres personnes (RH, direction…).</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {managers.map((id) => {
+              const p = rows.find((r) => r.id === id);
+              return (
+                <span key={id} className="flex items-center gap-1 rounded-full bg-sel-bg px-2.5 py-1 text-xs font-semibold text-link">
+                  {p?.name ?? "—"}
+                  <button onClick={() => saveManagers(managers.filter((m) => m !== id))} className="hover:text-bad">
+                    <X size={11} />
+                  </button>
+                </span>
+              );
+            })}
+            <PersonPicker
+              people={rows.filter((r) => !managers.includes(r.id))}
+              value={null}
+              onChange={(id) => id && saveManagers([...managers, id])}
+              placeholder="Ajouter une personne…"
+            />
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-btn border border-line bg-card px-2.5 py-1.5">
           <Search size={13} className="text-ink-4" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher une personne…" className="w-full bg-transparent text-sm outline-none" />
         </div>
-        <span className="text-xs text-ink-4">
-          {withoutValidator} personne{withoutValidator > 1 ? "s" : ""} sans responsable N+1
-        </span>
+        <FilterChip active={onlyMissing} onClick={() => setOnlyMissing((v) => !v)}>
+          Sans N+1 ({withoutValidator})
+        </FilterChip>
       </div>
-      <div className="overflow-hidden rounded-panel border border-line bg-card">
+      <div className="overflow-visible rounded-panel border border-line bg-card">
         {visible.map((r) => (
           <div key={r.id} className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-ink">{r.name}</div>
               <div className="truncate text-[11px] text-ink-4">{r.email}</div>
             </div>
-            <label className="flex items-center gap-2 text-xs text-ink-3">
-              N+1
-              <select
-                value={r.validatorId ?? ""}
-                onChange={(e) => change(r.id, e.target.value)}
-                className={`max-w-[220px] rounded-btn border px-2 py-1.5 text-sm outline-none ${r.validatorId ? "border-line" : "border-warn"}`}
-              >
-                <option value="">— Aucun —</option>
-                {rows
-                  .filter((v) => v.id !== r.id)
-                  .map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
+            <span className="text-xs text-ink-3">N+1</span>
+            <PersonPicker people={rows.filter((v) => v.id !== r.id)} value={r.validatorId} onChange={(id) => change(r.id, id)} />
           </div>
         ))}
       </div>
@@ -457,8 +657,8 @@ export function FraisScreen() {
 
   const tabs: { id: Tab; label: string; icon: typeof Receipt; badge?: number; show: boolean }[] = [
     { id: "mine", label: "Mes frais", icon: Receipt, show: true },
-    { id: "validate", label: "À valider", icon: ShieldCheck, badge: scope?.pending, show: !!scope && (scope.isValidator || scope.isAdmin) },
-    { id: "admin", label: "Responsables N+1", icon: Users, show: !!scope?.isAdmin },
+    { id: "validate", label: "À valider", icon: ShieldCheck, badge: scope?.pending, show: !!scope?.isValidator },
+    { id: "admin", label: "Responsables N+1", icon: Users, show: !!scope?.canManageValidators },
   ];
 
   return (
@@ -484,8 +684,8 @@ export function FraisScreen() {
       </div>
 
       {tab === "mine" && <MyExpenses />}
-      {tab === "validate" && <ToValidate isAdmin={!!scope?.isAdmin} onChanged={() => void loadScope()} />}
-      {tab === "admin" && <ValidatorsAdmin />}
+      {tab === "validate" && <ToValidate onChanged={() => void loadScope()} />}
+      {tab === "admin" && <ValidatorsAdmin isAdmin={!!scope?.isAdmin} />}
     </div>
   );
 }

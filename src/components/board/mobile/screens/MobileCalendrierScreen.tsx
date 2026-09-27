@@ -28,22 +28,21 @@ import {
 } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useCalendarEvents } from "@/hooks/board/useCalendarEvents";
+import { useSolicitedFilter } from "@/hooks/board/useSolicitedFilter";
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
 import { CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
 import type { CalendarEvent } from "@/lib/board/calendar";
 import { MobileEventModal } from "@/components/board/mobile/MobileEventModal";
-import { useAuth } from "@/contexts/AuthContext";
 
 type View = "mois" | "semaine";
 
 export function MobileCalendrierScreen() {
-  const { user } = useAuth();
   const [view, setView] = useState<View>("mois");
   const [anchor, setAnchor] = useState(() => new Date());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [orgFilter, setOrgFilter] = useState<OrgKey | null>(null);
-  const [mineOnly, setMineOnly] = useState(false);
+  const [mineOnly, setMineOnly] = useSolicitedFilter();
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [editing, setEditing] = useState<CalendarEvent | "new" | null>(null);
 
@@ -77,10 +76,10 @@ export function MobileCalendrierScreen() {
   const filtered = useMemo(() => {
     return events.filter((e) => {
       if (orgFilter && e.org !== orgFilter) return false;
-      if (mineOnly && e.createdBy !== user?.id) return false;
+      if (mineOnly && !e.solicited) return false;
       return true;
     });
-  }, [events, orgFilter, mineOnly, user?.id]);
+  }, [events, orgFilter, mineOnly]);
 
   const eventsForDay = (day: Date) =>
     filtered.filter((e) => isSameDay(parseISO(e.start), day)).sort((a, b) => a.start.localeCompare(b.start));
@@ -163,7 +162,7 @@ export function MobileCalendrierScreen() {
             <ChevronDown size={14} />
           </button>
           <button
-            onClick={() => setMineOnly((v) => !v)}
+            onClick={() => setMineOnly(!mineOnly)}
             className={`flex h-[26px] w-[26px] items-center justify-center rounded-btn border ${
               mineOnly ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
             }`}

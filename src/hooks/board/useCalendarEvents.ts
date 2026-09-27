@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { mapEventRow, type CalendarEvent, type EventRow, type CoverageRequestRow, type PublishedMedia } from "@/lib/board/calendar";
 import { readCache, writeCache } from "@/lib/board/localCache";
+import { getMySolicitedEventIds } from "@/app/actions/solicitation";
 
 /** Rôle de l'utilisateur, lu une fois par session (il ne change pas d'un changement de semaine à l'autre). */
 const roleByUser = new Map<string, string | null>();
@@ -111,7 +112,12 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       );
     }
 
-    const mapped = rows.map((row) => ({ ...mapEventRow(row, coverageByEvent.get(row.id)), published: publishedByEvent.get(row.id) ?? null }));
+    const solicited = new Set(await getMySolicitedEventIds().catch(() => [] as string[]));
+    const mapped = rows.map((row) => ({
+      ...mapEventRow(row, coverageByEvent.get(row.id)),
+      published: publishedByEvent.get(row.id) ?? null,
+      solicited: solicited.has(row.id),
+    }));
     setEvents(mapped);
     writeCache(cacheKey, mapped);
     setLoading(false);

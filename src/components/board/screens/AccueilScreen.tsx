@@ -6,6 +6,7 @@ import { getDashboard, type Dashboard, type DashboardAction } from "@/app/action
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
+import { ActionPopup } from "@/components/board/dashboard/ActionPopup";
 
 type Period = "day" | "week";
 
@@ -36,6 +37,9 @@ export function AccueilScreen({
 }) {
   const [period, setPeriod] = useState<Period>("day");
   const [data, setData] = useState<Dashboard | null>(() => readCache<Dashboard>("dashboard:day") ?? null);
+  // Clic sur une action : popup de traitement rapide (valider, accepter…) plutôt que le module complet.
+  const [openAction, setOpenAction] = useState<DashboardAction | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,7 +59,7 @@ export function AccueilScreen({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [period]);
+  }, [period, reloadKey]);
 
   const actions = data?.actions ?? [];
   const programme = data?.programme ?? [];
@@ -125,7 +129,7 @@ export function AccueilScreen({
               {actions.map((a) => (
                 <button
                   key={a.id}
-                  onClick={() => onNavigate?.(a.app)}
+                  onClick={() => setOpenAction(a)}
                   className={`flex w-full items-center gap-3 rounded-card border border-l-4 border-line bg-card p-4 text-left shadow-card transition hover:border-line-strong ${TONE_CLASSES[a.tone].border}`}
                 >
                   <span className={`flex h-9 min-w-9 items-center justify-center rounded-full px-2 text-sm font-extrabold ${TONE_CLASSES[a.tone].count}`}>
@@ -191,6 +195,14 @@ export function AccueilScreen({
           )}
         </section>
       </div>
+      {openAction && (
+        <ActionPopup
+          action={openAction}
+          onClose={() => setOpenAction(null)}
+          onNavigate={onNavigate}
+          onChanged={() => setReloadKey((k) => k + 1)}
+        />
+      )}
     </div>
   );
 }

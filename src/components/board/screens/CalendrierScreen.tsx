@@ -28,6 +28,7 @@ import {
 } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useCalendarEvents } from "@/hooks/board/useCalendarEvents";
+import { useSolicitedFilter } from "@/hooks/board/useSolicitedFilter";
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import { listMyCalendars, listMyEvents } from "@/app/actions/calendar";
@@ -120,6 +121,7 @@ export function CalendrierScreen() {
   const [editingGoogle, setEditingGoogle] = useState<GoogleEventItem | "new" | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [hiddenOrgs, setHiddenOrgs] = useState<Set<OrgKey>>(() => new Set());
+  const [mineOnly, setMineOnly] = useSolicitedFilter();
 
   const toggleOrgVisibility = (key: OrgKey) => {
     setHiddenOrgs((prev) => {
@@ -166,11 +168,12 @@ export function CalendrierScreen() {
   const visibleEvents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return events.filter((e) => {
+      if (mineOnly && !e.solicited) return false;
       if (hiddenOrgs.has(e.org)) return false;
       if (q && !e.title.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [events, searchQuery, hiddenOrgs]);
+  }, [events, searchQuery, hiddenOrgs, mineOnly]);
 
   const eventsForDay = (day: Date) => visibleEvents.filter((e) => isSameDay(parseISO(e.start), day));
   const googleEventsForDay = (day: Date) =>
@@ -244,6 +247,8 @@ export function CalendrierScreen() {
         }}
         hiddenOrgs={hiddenOrgs}
         onToggleOrg={toggleOrgVisibility}
+        mineOnly={mineOnly}
+        onToggleMine={() => setMineOnly(!mineOnly)}
         plannedLabel={plannedLabel}
         availabilityPct={availabilityPct}
         collapsed={sidebarCollapsed}

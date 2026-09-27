@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { DbEventType } from "@/lib/board/calendar";
+import { getSolicitations, type SolicitationRole } from "@/lib/board/solicitation";
 
 // Gestion des frais du board. Données partagées avec l'appli calendrier :
 // - event_expenses : lignes de frais d'une personne sur un événement (écrites par le client, RLS « own ») ;
@@ -12,7 +13,7 @@ import type { DbEventType } from "@/lib/board/calendar";
 // le client service role APRÈS avoir vérifié elles-mêmes le droit (la personne, son N+1, un admin).
 
 export type ExpenseStatus = "a_declarer" | "pending" | "approved" | "rejected" | "no_expense";
-export type SolicitationRole = "Responsable" | "Membre" | "Assigné" | "Comité directeur" | "Captation";
+export type { SolicitationRole } from "@/lib/board/solicitation";
 
 export type MyExpenseItem = {
   eventId: string;
@@ -72,9 +73,14 @@ async function currentUser() {
   const userId = data?.claims?.sub;
   if (!userId) throw new Error("Non authentifié");
   const service = createServiceClient();
-  const { data: profile } = await service.from("profiles").select("id, role").eq("id", userId).single();
+  const [{ data: profile }, { data: settings }] = await Promise.all([
+    service.from("profiles").select("id, role").eq("id", userId).single(),
+    service.from("board_settings").select("expense_manager_ids").eq("id", true).single(),
+  ]);
   const isAdmin = profile?.role === "admin" || profile?.role === "super_user";
-  return { userId, isAdmin, service };
+  // Régler les N+1 : administrateurs + personnes désignées par un administrateur.
+  const canManageValidators = isAdmin || (settings?.expense_manager_ids ?? []).includes(userId);
+  return { userId, isAdmin, canManageValidators, service };
 }
 
 function toStatus(s: string | null | undefined): ExpenseStatus {
@@ -94,32 +100,14 @@ export async function getMyExpenses(): Promise<MyExpenseItem[]> {
   const { userId, service } = await currentUser();
   const since = new Date(Date.now() - 365 * 86_400_000).toISOString();
 
-  const [team, assigned, directors, coverage, submissions] = await Promise.all([
-    service.from("event_team_members").select("event_id, role").eq("user_id", userId),
-    service.from("event_assignments").select("event_id").eq("user_id", userId),
-    service.from("director_attendance").select("event_id").eq("director_id", userId).eq("status", "approved"),
-    service
-      .from("coverage_requests")
-      .select("event_id")
-      .or(`assigned_technician_id.eq.${userId},technician_id.eq.${userId}`)
-      .eq("technician_response", "accepted")
-      .neq("status", "cancelled"),
+  // Frais : seulement les sollicitations effectives (présence confirmée, captation acceptée).
+  const [roles, submissions] = await Promise.all([
+    getSolicitations(service, userId),
     service
       .from("expense_submissions")
       .select("id, event_id, status, submitted_at, reviewed_at, reviewed_by, reviewer_comments, reviewer_comment")
       .eq("user_id", userId),
   ]);
-
-  const roles = new Map<string, Set<SolicitationRole>>();
-  const add = (eventId: string | null, role: SolicitationRole) => {
-    if (!eventId) return;
-    if (!roles.has(eventId)) roles.set(eventId, new Set());
-    roles.get(eventId)!.add(role);
-  };
-  for (const t of team.data ?? []) add(t.event_id, t.role === "responsable" ? "Responsable" : "Membre");
-  for (const a of assigned.data ?? []) add(a.event_id, "Assigné");
-  for (const d of directors.data ?? []) add(d.event_id, "Comité directeur");
-  for (const c of coverage.data ?? []) add(c.event_id, "Captation");
 
   const subByEvent = new Map((submissions.data ?? []).filter((s) => s.event_id).map((s) => [s.event_id as string, s]));
   const eventIds = [...new Set([...roles.keys(), ...subByEvent.keys()])];
@@ -241,8 +229,8 @@ export async function declareExpenses(eventId: string, noExpense = false): Promi
 }
 
 /** Suis-je N+1 d'au moins une personne (ou admin) ? — affiche l'onglet « À valider ». */
-export async function getMyValidatorScope(): Promise<{ isValidator: boolean; isAdmin: boolean; pending: number }> {
-  const { userId, isAdmin, service } = await currentUser();
+export async function getMyValidatorScope(): Promise<{ isValidator: boolean; isAdmin: boolean; canManageValidators: boolean; pending: number }> {
+  const { userId, isAdmin, canManageValidators, service } = await currentUser();
   const { data: reports } = await service.from("profiles").select("id").eq("expense_validator_id", userId);
   const ids = (reports ?? []).map((r) => r.id);
   let pending = 0;
@@ -254,7 +242,7 @@ export async function getMyValidatorScope(): Promise<{ isValidator: boolean; isA
       .in("user_id", ids);
     pending = count ?? 0;
   }
-  return { isValidator: ids.length > 0, isAdmin, pending };
+  return { isValidator: ids.length > 0, isAdmin, canManageValidators, pending };
 }
 
 /**
@@ -376,16 +364,16 @@ export type ValidatorAssignment = { id: string; name: string; email: string | nu
 
 /** Administration : tous les utilisateurs et leur responsable N+1. */
 export async function getValidatorAssignments(): Promise<ValidatorAssignment[]> {
-  const { isAdmin, service } = await currentUser();
-  if (!isAdmin) throw new Error("Réservé aux administrateurs.");
+  const { canManageValidators, service } = await currentUser();
+  if (!canManageValidators) throw new Error("Vous n'avez pas accès au réglage des responsables.");
   const { data } = await service.from("profiles").select("id, first_name, last_name, email, role, expense_validator_id").order("last_name");
   return (data ?? []).map((p) => ({ id: p.id, name: personName(p), email: p.email, role: p.role, validatorId: p.expense_validator_id }));
 }
 
 export async function setExpenseValidator(personId: string, validatorId: string | null): Promise<{ error: string | null }> {
   try {
-    const { isAdmin, service } = await currentUser();
-    if (!isAdmin) throw new Error("Réservé aux administrateurs.");
+    const { canManageValidators, service } = await currentUser();
+    if (!canManageValidators) throw new Error("Vous n'avez pas accès au réglage des responsables.");
     if (validatorId === personId) throw new Error("Une personne ne peut pas valider ses propres frais.");
     const { error } = await service.from("profiles").update({ expense_validator_id: validatorId }).eq("id", personId);
     if (error) throw new Error(error.message);
@@ -420,4 +408,23 @@ export async function getMyExpenseStatus(eventId: string): Promise<{
     reviewerComment: sub?.reviewer_comments ?? sub?.reviewer_comment ?? null,
     reviewedAt: sub?.reviewed_at ?? null,
   };
+}
+
+/** Personnes autorisées (en plus des administrateurs) à régler les N+1. */
+export async function getExpenseManagers(): Promise<string[]> {
+  const { service } = await currentUser();
+  const { data } = await service.from("board_settings").select("expense_manager_ids").eq("id", true).single();
+  return data?.expense_manager_ids ?? [];
+}
+
+export async function setExpenseManagers(ids: string[]): Promise<{ error: string | null }> {
+  try {
+    const { isAdmin, service } = await currentUser();
+    if (!isAdmin) throw new Error("Réservé aux administrateurs.");
+    const { error } = await service.from("board_settings").update({ expense_manager_ids: ids }).eq("id", true);
+    if (error) throw new Error(error.message);
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Erreur inattendue." };
+  }
 }
