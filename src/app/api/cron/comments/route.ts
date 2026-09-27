@@ -6,7 +6,7 @@ import { runCommentModeration } from "@/lib/social/moderationRunner";
 export const maxDuration = 60;
 
 /**
- * Modération des commentaires — appelée chaque minute par pg_cron (job « moderate-comments »,
+ * Modération des commentaires — appelée toutes les 5 minutes par pg_cron (job « moderate-comments »,
  * voir sql/2026-09-27_cron_comments.sql) avec le secret partagé CRON_SECRET.
  */
 export async function GET(request: Request) {

@@ -14,7 +14,7 @@ type Client = SupabaseClient<Database>;
  * (au passage de la minute 0) pour ne pas solliciter inutilement les API Meta/YouTube.
  */
 const RECENT_DAYS = 30;
-/** Plafond de commentaires analysés par passage (le cron repasse chaque minute, le reste suit au prochain). */
+/** Plafond de commentaires analysés par passage (le cron repasse toutes les 5 minutes, le reste suit au prochain). */
 const MAX_COMMENTS_PER_RUN = 100;
 
 type Found = { pub: PubRow; key: NetworkKey; comment: SocialComment };
