@@ -1,17 +1,21 @@
 import type { Metadata } from "next";
-import { Manrope, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { AuthProvider } from "@/contexts/AuthContext";
 import "./globals.css";
 
-const manrope = Manrope({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+// Polices hébergées dans le projet (versions variables officielles de Google Fonts) : le build ne
+// dépend plus du téléchargement de Google Fonts, qui faisait échouer Turbopack sur Vercel.
+const manrope = localFont({
+  src: "./fonts/Manrope-Variable.ttf",
+  weight: "200 800",
+  display: "swap",
   variable: "--font-manrope",
 });
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+const jetbrainsMono = localFont({
+  src: "./fonts/JetBrainsMono-Variable.ttf",
+  weight: "100 800",
+  display: "swap",
   variable: "--font-jetbrains-mono",
 });
 
