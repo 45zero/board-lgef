@@ -63,8 +63,18 @@ async function checkSize(file: File, format: "portrait" | "carre") {
  * Habillages des publications (administrateurs) : tailles du logo et du texte, signature,
  * gabarits intégrés proposés, gabarits personnalisés (calques PNG transparents), avec aperçu.
  */
-export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
+export function HabillageAdminModal({
+  onClose,
+  focus,
+  onSaved,
+}: {
+  onClose: () => void;
+  /** « general » : réglages communs ; « new » : crée un environnement ; sinon l'id d'un environnement. */
+  focus?: string;
+  onSaved?: () => void;
+}) {
   const [settings, setSettings] = useState<HabillageSettings | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(focus && focus !== "general" && focus !== "new" ? focus : null);
   const [template, setTemplate] = useState<HabillageTemplate>("bandeau");
   const [format, setFormat] = useState<HabillageFormat>("portrait");
   const [sampleText, setSampleText] = useState("Rentrée de l'arbitrage 2026");
@@ -75,9 +85,21 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     getHabillageSettings()
-      .then((s) => setSettings(withDefaults(s)))
-      .catch(() => setSettings(withDefaults(null)));
-  }, []);
+      .catch(() => null)
+      .then((raw) => {
+        const s = withDefaults(raw);
+        if (focus === "new") {
+          // Nouvel environnement (R1, Coupe de France…) : créé tout de suite, ouvert seul.
+          const id = Math.random().toString(36).slice(2, 10);
+          s.custom = [...s.custom, { id, name: "", context: "", overlays: {}, textPosition: "bottom", textColor: "#FFFFFF" }];
+          setFocusedId(id);
+          setTemplate(`custom:${id}`);
+        } else if (focus && focus !== "general") {
+          setTemplate(`custom:${focus}`);
+        }
+        setSettings(s);
+      });
+  }, [focus]);
 
   useEffect(() => {
     if (!settings || !canvasRef.current) return;
@@ -95,6 +117,10 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
   const update = (p: Partial<HabillageSettings>) => setSettings((s) => (s ? { ...s, ...p } : s));
   const updateCustom = (id: string, p: Partial<CustomHabillage>) =>
     setSettings((s) => (s ? { ...s, custom: s.custom.map((c) => (c.id === id ? { ...c, ...p } : c)) } : s));
+
+  const showGeneral = !focus || focus === "general";
+  const showCustom = focus !== "general";
+  const visibleCustom = focusedId ? settings.custom.filter((c) => c.id === focusedId) : settings.custom;
 
   const addCustom = () => {
     const id = Math.random().toString(36).slice(2, 10);
@@ -260,6 +286,7 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
     setMessage(null);
     try {
       await saveHabillageSettings(settings);
+      onSaved?.();
       setMessage({ tone: "ok", text: "Habillages enregistrés : proposés à tous dès la prochaine publication." });
     } catch (e) {
       setMessage({ tone: "bad", text: e instanceof Error ? e.message : "Enregistrement impossible." });
@@ -274,7 +301,13 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
         <div className="flex shrink-0 items-start justify-between bg-navy px-5 py-4 text-white">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-white/70">Centre de publication · Administration</div>
-            <h3 className="mt-1 text-base font-extrabold">Habillages des publications</h3>
+            <h3 className="mt-1 text-base font-extrabold">
+              {focus === "general"
+                ? "Réglages généraux des habillages"
+                : focusedId
+                  ? `Habillage ${settings.custom.find((c) => c.id === focusedId)?.name || "— nouvel environnement"}`
+                  : "Habillages des publications"}
+            </h3>
             <div className="text-xs text-white/80">Appliqués aux photos publiées depuis le mobile (bouton central « Publication réseaux »).</div>
           </div>
           <button onClick={onClose} className="rounded-full p-1 text-white/80 hover:bg-white/10" aria-label="Fermer">
@@ -298,6 +331,8 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
               </ul>
             </section>
 
+            {showGeneral && (
+            <>
             <section className="grid gap-4 sm:grid-cols-2">
               <div>
                 <div className={label}>Hauteur du logo — {settings.logoHeight} px</div>
@@ -345,24 +380,39 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
                 ))}
               </div>
             </section>
+            </>
+            )}
 
+            {showCustom && (
             <section>
               <div className="mb-1.5 flex items-center justify-between">
-                <div className={label}>Gabarits personnalisés</div>
-                <button onClick={addCustom} className="flex items-center gap-1 text-xs font-semibold text-link hover:underline">
-                  <Plus size={13} /> Ajouter
-                </button>
+                <div className={label}>{focusedId ? "Environnement" : "Gabarits personnalisés"}</div>
+                {!focusedId && (
+                  <button onClick={addCustom} className="flex items-center gap-1 text-xs font-semibold text-link hover:underline">
+                    <Plus size={13} /> Ajouter
+                  </button>
+                )}
               </div>
-              {settings.custom.length === 0 && (
+              {visibleCustom.length === 0 && (
                 <p className="rounded-btn border border-dashed border-line p-3 text-xs text-ink-4">
                   Aucun gabarit personnalisé. Créez un calque PNG transparent aux tailles indiquées (Canva, Photoshop…) puis ajoutez-le ici.
                 </p>
               )}
               <div className="space-y-2">
-                {settings.custom.map((c) => (
+                {visibleCustom.map((c) => (
                   <div key={c.id} className="space-y-2 rounded-panel border border-line p-3">
                     <div className="flex items-center gap-2">
-                      <input value={c.name} onChange={(e) => updateCustom(c.id, { name: e.target.value })} className={`${input} min-w-0 flex-1 font-bold`} />
+                      <input
+                        value={c.name}
+                        autoFocus={!c.name}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          // Le nom de l'environnement (« R1 ») sert aussi de contexte, sauf si on l'a changé.
+                          updateCustom(c.id, { name: v, context: !c.context || c.context === c.name ? v : c.context });
+                        }}
+                        placeholder="Nom de l'environnement (ex. R1, Coupe de France)"
+                        className={`${input} min-w-0 flex-1 font-bold`}
+                      />
                       <button onClick={() => setTemplate(`custom:${c.id}`)} className="text-xs font-semibold text-link hover:underline">
                         Aperçu
                       </button>
@@ -495,6 +545,7 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
                 ))}
               </div>
             </section>
+            )}
           </div>
 
           <div className="space-y-3 md:sticky md:top-0 md:self-start">

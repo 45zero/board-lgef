@@ -30,7 +30,7 @@ import { Composer } from "@/components/board/screens/PublicationScreen";
 import { createClient } from "@/lib/supabase/client";
 import { createVideoWorkUploads, removeVideoWork } from "@/app/actions/video-habillage";
 
-type Step = "capture" | "habillage" | "publier";
+type Step = "capture" | "environnement" | "habillage" | "publier";
 
 const chip = (active: boolean) =>
   `rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${active ? "bg-navy text-white" : "bg-subtle text-ink-3"}`;
@@ -224,7 +224,8 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         return setError("Photo illisible : réessayez.");
       }
     }
-    setStep("habillage");
+    // Environnements définis (R1, Coupe de France…) : on demande d'abord dans lequel on évolue.
+    setStep(contexts.length ? "environnement" : "habillage");
   };
 
   /**
@@ -317,7 +318,8 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
 
   const back = () => {
     if (step === "publier") setStep("habillage");
-    else if (step === "habillage") setStep("capture");
+    else if (step === "habillage") setStep(contexts.length ? "environnement" : "capture");
+    else if (step === "environnement") setStep("capture");
     else onClose();
   };
 
@@ -330,7 +332,15 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         <div className="min-w-0 flex-1">
           <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-white/70">Publication réseaux</div>
           <div className="text-sm font-extrabold">
-            {step === "capture" ? "Photo ou vidéo à publier" : step === "habillage" ? (isVideo ? "Aperçu de la vidéo" : "Habillage et texte") : "Légende et événement"}
+            {step === "capture"
+              ? "Photo ou vidéo à publier"
+              : step === "environnement"
+                ? "Choix de l'environnement"
+                : step === "habillage"
+                  ? isVideo
+                    ? "Aperçu de la vidéo"
+                    : "Habillage et texte"
+                  : "Légende et événement"}
           </div>
         </div>
         <button onClick={onClose} className="rounded-full p-1.5 hover:bg-white/10" aria-label="Fermer">
@@ -365,6 +375,51 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
             <input ref={photoRef} type="file" accept="image/*" capture="environment" hidden onChange={pick} />
             <input ref={videoRef} type="file" accept="video/*" capture="environment" hidden onChange={pick} />
             <input ref={galleryRef} type="file" accept="image/*,video/*" hidden onChange={pick} />
+          </div>
+        )}
+
+        {step === "environnement" && (
+          <div className="space-y-3">
+            <h2 className="text-base font-extrabold text-ink">Dans quel environnement voulez-vous évoluer&nbsp;?</h2>
+            <p className="text-xs text-ink-3">L&rsquo;habillage de l&rsquo;environnement (pré-roll, bandeau, logo) s&rsquo;applique à votre {isVideo ? "vidéo" : "photo"}.</p>
+            <div className="grid grid-cols-2 gap-2">
+              {contexts.map((c) => {
+                const t = settings.custom.find((x) => x.context === c);
+                const thumb =
+                  t?.overlays.portrait ??
+                  t?.overlays.carre ??
+                  t?.animations?.vertical?.preview ??
+                  t?.preroll?.animations?.vertical?.preview ??
+                  t?.animations?.horizontal?.preview ??
+                  t?.preroll?.animations?.horizontal?.preview;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      chooseContext(c);
+                      setStep("habillage");
+                    }}
+                    className={`relative overflow-hidden rounded-panel border-2 text-left ${context === c ? "border-red" : "border-line"}`}
+                  >
+                    <div className="aspect-[4/5] w-full bg-navy">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- visuel de l'habillage (bucket public) */}
+                      {thumb && <img src={thumb} alt="" className="h-full w-full object-cover" />}
+                    </div>
+                    <div className="px-2.5 py-2 text-sm font-extrabold text-ink">{c}</div>
+                    {context === c && <span className="absolute left-2 top-2 rounded-full bg-red px-2 py-0.5 text-[10px] font-bold text-white">Suggéré</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => {
+                chooseContext(null);
+                setStep("habillage");
+              }}
+              className="w-full rounded-panel border border-line px-4 py-3 text-left text-sm font-bold text-ink-2"
+            >
+              Général <span className="font-normal text-ink-4">— sans environnement particulier</span>
+            </button>
           </div>
         )}
 
@@ -417,18 +472,11 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                 {videoHabillage ? (
                   <div>
                 {contexts.length > 0 && (
-                  <div className="mb-3">
-                    <div className={label}>Compétition</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      <button onClick={() => chooseContext(null)} className={chip(!context)}>
-                        Général
-                      </button>
-                      {contexts.map((c) => (
-                        <button key={c} onClick={() => chooseContext(c)} className={chip(context === c)}>
-                          {c}
-                        </button>
-                      ))}
-                    </div>
+                  <div className="mb-3 flex items-center gap-2 text-xs text-ink-3">
+                    Environnement : <strong className="text-ink">{context ?? "Général"}</strong>
+                    <button onClick={() => setStep("environnement")} className="font-semibold text-link hover:underline">
+                      Changer
+                    </button>
                   </div>
                 )}
                     <div className={label}>Habillage</div>
@@ -459,18 +507,11 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                 <canvas ref={canvasRef} {...drag} className={`w-full rounded-panel bg-subtle shadow-card ${dragMode ? "cursor-move touch-none" : ""}`} />
                 <div>
                 {contexts.length > 0 && (
-                  <div className="mb-3">
-                    <div className={label}>Compétition</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      <button onClick={() => chooseContext(null)} className={chip(!context)}>
-                        Général
-                      </button>
-                      {contexts.map((c) => (
-                        <button key={c} onClick={() => chooseContext(c)} className={chip(context === c)}>
-                          {c}
-                        </button>
-                      ))}
-                    </div>
+                  <div className="mb-3 flex items-center gap-2 text-xs text-ink-3">
+                    Environnement : <strong className="text-ink">{context ?? "Général"}</strong>
+                    <button onClick={() => setStep("environnement")} className="font-semibold text-link hover:underline">
+                      Changer
+                    </button>
                   </div>
                 )}
                   <div className={label}>Habillage</div>

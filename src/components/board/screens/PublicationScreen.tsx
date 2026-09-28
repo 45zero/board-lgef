@@ -1485,7 +1485,9 @@ function PublicationCard({
 export function PublicationScreen() {
   const role = useUserRole();
   const canPublish = useCanPublish();
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Paramètres (administrateurs) : deux sous-menus, Publication (qui peut publier) et Habillages.
+  const [settingsSection, setSettingsSection] = useState<"publication" | "habillages" | null>(null);
+  const settingsOpen = settingsSection !== null;
   const [tab, setTab] = useState<PublicationStatus>("to_publish");
   const [items, setItems] = useState<MediaPublication[]>([]);
   const [counts, setCounts] = useState<Record<PublicationStatus, number>>({ to_publish: 0, scheduled: 0, published: 0 });
@@ -1570,7 +1572,7 @@ export function PublicationScreen() {
                 key={t.id}
                 onClick={() => {
                   setTab(t.id);
-                  setSettingsOpen(false);
+                  setSettingsSection(null);
                 }}
                 className={`flex w-full items-center justify-between gap-2.5 rounded-btn px-3 py-2.5 text-left text-sm font-semibold transition-colors ${
                   tab === t.id && !settingsOpen ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"
@@ -1587,20 +1589,38 @@ export function PublicationScreen() {
           })}
         </div>
         {role.isSuperUser && (
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className={`mt-3 flex w-full items-center gap-2.5 rounded-btn border-t border-line px-3 py-2.5 text-left text-sm font-semibold ${
-              settingsOpen ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"
-            }`}
-          >
-            <Settings size={16} /> Paramètres
-          </button>
+          <div className="mt-3 border-t border-line pt-2">
+            <button
+              onClick={() => setSettingsSection((s) => s ?? "habillages")}
+              className={`flex w-full items-center gap-2.5 rounded-btn px-3 py-2.5 text-left text-sm font-semibold ${settingsOpen ? "text-navy" : "text-ink-2 hover:bg-hover"}`}
+            >
+              <Settings size={16} /> Paramètres
+            </button>
+            {settingsOpen && (
+              <div className="ml-4 space-y-0.5 border-l border-line pl-2">
+                {(
+                  [
+                    ["habillages", "Habillages"],
+                    ["publication", "Publication"],
+                  ] as const
+                ).map(([id, text]) => (
+                  <button
+                    key={id}
+                    onClick={() => setSettingsSection(id)}
+                    className={`block w-full rounded-btn px-3 py-2 text-left text-sm font-semibold ${settingsSection === id ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"}`}
+                  >
+                    {text}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </aside>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {settingsOpen ? (
-          <PublicationSettings />
+        {settingsSection ? (
+          <PublicationSettings section={settingsSection} />
         ) : loading ? (
           <div className="flex h-full items-center justify-center text-ink-4">Chargement…</div>
         ) : items.length === 0 ? (
