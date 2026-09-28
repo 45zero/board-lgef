@@ -36,13 +36,20 @@ function eventIcon(color: string, selected: boolean): google.maps.Icon {
   };
 }
 
-function staffIcon(kind: StaffKind): google.maps.Icon {
-  const { color, letter } = STAFF_STYLES[kind];
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><rect x="1.5" y="1.5" width="21" height="21" rx="6" fill="${color}" stroke="#fff" stroke-width="2.5"/><text x="12" y="16.5" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#fff">${letter}</text></svg>`;
+/** « Giovanni Verna » → « GV » ; un seul mot → ses deux premières lettres. */
+function initials(name: string) {
+  const words = name.trim().split(/[\s-]+/).filter(Boolean);
+  const s = words.length > 1 ? words[0][0] + words[words.length - 1][0] : (words[0] ?? "?").slice(0, 2);
+  return s.toUpperCase();
+}
+
+function staffIcon(p: StaffPin): google.maps.Icon {
+  const { color } = STAFF_STYLES[p.kind];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><rect x="1.5" y="1.5" width="25" height="25" rx="7" fill="${color}" stroke="#fff" stroke-width="2.5"/><text x="14" y="18.3" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#fff">${esc(initials(p.name))}</text></svg>`;
   return {
     url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-    scaledSize: new google.maps.Size(24, 24),
-    anchor: new google.maps.Point(12, 12),
+    scaledSize: new google.maps.Size(28, 28),
+    anchor: new google.maps.Point(14, 14),
   };
 }
 
@@ -262,7 +269,7 @@ export function StaffEventsMap({
     staffMarkersRef.current = new Map();
     for (const p of staff) {
       if (hiddenKinds.has(p.kind)) continue;
-      const marker = new google.maps.Marker({ map, position: p.position, icon: staffIcon(p.kind), title: `${p.name} — ${STAFF_STYLES[p.kind].label}`, zIndex: 500 });
+      const marker = new google.maps.Marker({ map, position: p.position, icon: staffIcon(p), title: `${p.name} — ${STAFF_STYLES[p.kind].label}`, zIndex: 500 });
       marker.addListener("click", () => {
         openStaffRef.current = p.id;
         infoRef.current?.setContent(staffInfoHtml(p));
@@ -330,9 +337,7 @@ export function StaffEventsMap({
                   className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 font-semibold ${off ? "border-line text-ink-4 opacity-60" : "border-line text-ink-2"}`}
                   title={off ? "Afficher" : "Masquer"}
                 >
-                  <span className="flex h-3.5 w-3.5 items-center justify-center rounded-[4px] text-[8px] font-bold text-white" style={{ background: st.color }}>
-                    {st.letter}
-                  </span>
+                  <span className="h-3 w-3 rounded-[3px]" style={{ background: st.color }} />
                   {st.label} ({n})
                 </button>
               );
@@ -369,8 +374,8 @@ export function StaffEventsMap({
             {!travelLoading && nearest.length === 0 && <div className="px-3 py-1.5 text-[11px] text-ink-4">Aucun trajet calculable.</div>}
             {nearest.map((p) => (
               <button key={p.id} onClick={() => focusStaff(p)} className="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-hover">
-                <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] text-[9px] font-bold text-white" style={{ background: STAFF_STYLES[p.kind].color }}>
-                  {STAFF_STYLES[p.kind].letter}
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] text-[8px] font-bold text-white" style={{ background: STAFF_STYLES[p.kind].color }}>
+                  {initials(p.name)}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-[12px] text-ink-2">{p.name}</span>
                 <span className="flex shrink-0 items-center gap-0.5 font-mono text-[10px] text-ink-3">

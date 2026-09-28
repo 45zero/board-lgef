@@ -83,13 +83,17 @@ export function CalendrierScreen() {
     return days;
   }, [anchorDate]);
 
+  // Carte : sa propre période (mois, semaine ou jour) pilote la plage, les flèches et le libellé.
+  const [mapPeriod, setMapPeriod] = useState<"month" | "week" | "day">("month");
+  const period = viewMode === "map" ? mapPeriod : viewMode;
+
   const displayDays = useMemo(() => {
-    if (viewMode === "day") return [anchorDate];
-    if (viewMode === "week") return weekDays;
-    // Carte : les événements du mois affiché, sans les jours de débordement de la grille.
+    if (period === "day") return [anchorDate];
+    if (period === "week") return weekDays;
+    // Carte au mois : les événements du mois affiché, sans les jours de débordement de la grille.
     if (viewMode === "map") return monthGridDays.filter((d) => isSameMonth(d, anchorDate));
     return monthGridDays;
-  }, [viewMode, anchorDate, weekDays, monthGridDays]);
+  }, [period, viewMode, anchorDate, weekDays, monthGridDays]);
   const rangeStart = useMemo(() => startOfDay(displayDays[0]), [displayDays]);
   const rangeEnd = useMemo(() => endOfDay(displayDays[displayDays.length - 1]), [displayDays]);
 
@@ -206,21 +210,21 @@ export function CalendrierScreen() {
   const showNowLine = nowTop >= 0 && nowTop <= GRID_HEIGHT;
 
   const goPrev = () => {
-    if (viewMode === "day") setAnchorDate((d) => addDays(d, -1));
-    else if (viewMode === "week") setAnchorDate((d) => subWeeks(d, 1));
+    if (period === "day") setAnchorDate((d) => addDays(d, -1));
+    else if (period === "week") setAnchorDate((d) => subWeeks(d, 1));
     else setAnchorDate((d) => subMonths(d, 1));
   };
   const goNext = () => {
-    if (viewMode === "day") setAnchorDate((d) => addDays(d, 1));
-    else if (viewMode === "week") setAnchorDate((d) => addWeeks(d, 1));
+    if (period === "day") setAnchorDate((d) => addDays(d, 1));
+    else if (period === "week") setAnchorDate((d) => addWeeks(d, 1));
     else setAnchorDate((d) => addMonths(d, 1));
   };
   const goToday = () => setAnchorDate(new Date());
 
   const rangeLabel =
-    viewMode === "day"
+    period === "day"
       ? format(anchorDate, "EEEE d MMMM yyyy", { locale: fr })
-      : viewMode === "week"
+      : period === "week"
         ? `${format(weekDays[0], "d MMMM", { locale: fr })} – ${format(weekDays[6], "d MMMM yyyy", { locale: fr })}`
         : format(anchorDate, "MMMM yyyy", { locale: fr });
 
@@ -363,15 +367,39 @@ export function CalendrierScreen() {
       </div>
 
       {viewMode === "map" ? (
-        <StaffEventsMap
-          events={visibleEvents.filter((e) => !e.onlineMeeting && e.location)}
-          onOpenEvent={(id) => {
-            const ev = visibleEvents.find((e) => e.id === id);
-            if (ev) setEditingInternal(ev);
-          }}
-          className="flex-1"
-        />
-      ) : viewMode !== "month" ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-ink-3">Afficher les événements du</span>
+            <div className="flex items-center gap-0.5 rounded-btn border border-line bg-card p-0.5">
+              {(
+                [
+                  { id: "month", label: "Mois" },
+                  { id: "week", label: "Semaine" },
+                  { id: "day", label: "Jour" },
+                ] as const
+              ).map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setMapPeriod(p.id)}
+                  className={`rounded-[6px] px-2.5 py-1 text-xs font-semibold ${
+                    mapPeriod === p.id ? "bg-navy text-white" : "text-ink-3 hover:bg-hover"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <StaffEventsMap
+            events={visibleEvents.filter((e) => !e.onlineMeeting && e.location)}
+            onOpenEvent={(id) => {
+              const ev = visibleEvents.find((e) => e.id === id);
+              if (ev) setEditingInternal(ev);
+            }}
+            className="flex-1"
+          />
+        </div>
+      ) :viewMode !== "month" ? (
         <div className="flex flex-1 overflow-hidden rounded-panel border border-line bg-card">
           <div className="w-12 shrink-0 border-r border-line pt-8">
             {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => (

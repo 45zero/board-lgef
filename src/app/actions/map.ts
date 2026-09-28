@@ -59,22 +59,28 @@ function displayName(p: { first_name: string | null; last_name: string | null; e
   return [p.first_name, p.last_name].filter(Boolean).join(" ") || p.email || "Utilisateur";
 }
 
+/**
+ * Tous les techniciens (toute spécialité `tech-*`) et leur statut. Plusieurs statuts : le plus « interne »
+ * l'emporte (salarié > prestataire > bénévole) ; aucun statut précisé : personnel de la Ligue (salarié).
+ */
+async function getStaffKinds(service: ReturnType<typeof createServiceClient>) {
+  const { data: links } = await service.from("profile_specialties").select("user_id, specialties!inner(slug)").like("specialties.slug", "tech-%");
+  const kindByUser = new Map<string, StaffKind | null>();
+  for (const l of (links ?? []) as unknown as { user_id: string; specialties: { slug: string } }[]) {
+    const kind = STAFF_SPECIALTY[l.specialties.slug] ?? null;
+    const prev = kindByUser.get(l.user_id) ?? null;
+    if (kind && (!prev || STAFF_KINDS.indexOf(kind) < STAFF_KINDS.indexOf(prev))) kindByUser.set(l.user_id, kind);
+    else if (!kindByUser.has(l.user_id)) kindByUser.set(l.user_id, null);
+  }
+  return new Map([...kindByUser].map(([id, k]) => [id, k ?? "salarie"] as const));
+}
+
 /** Techniciens salariés, prestataires et bénévoles, placés à leur domicile. Vide pour les autres profils. */
 export async function getStaffLocations(): Promise<StaffPin[]> {
   const { canSeeStaff } = await getViewer();
   if (!canSeeStaff) return [];
   const service = createServiceClient();
-  const { data: links } = await service
-    .from("profile_specialties")
-    .select("user_id, specialties!inner(slug)")
-    .in("specialties.slug", Object.keys(STAFF_SPECIALTY));
-  // Plusieurs spécialités : on garde la plus « interne » (salarié > prestataire > bénévole).
-  const kindByUser = new Map<string, StaffKind>();
-  for (const l of (links ?? []) as unknown as { user_id: string; specialties: { slug: string } }[]) {
-    const kind = STAFF_SPECIALTY[l.specialties.slug];
-    const prev = kindByUser.get(l.user_id);
-    if (!prev || STAFF_KINDS.indexOf(kind) < STAFF_KINDS.indexOf(prev)) kindByUser.set(l.user_id, kind);
-  }
+  const kindByUser = await getStaffKinds(service);
   if (kindByUser.size === 0) return [];
   const { data: profiles } = await service
     .from("profiles")
@@ -128,11 +134,7 @@ export async function getTravelToEvent(eventId: string, userIds?: string[]): Pro
   let ids = userIds;
   if (!ids) {
     if (!canSeeStaff) return {};
-    const { data: links } = await service
-      .from("profile_specialties")
-      .select("user_id, specialties!inner(slug)")
-      .in("specialties.slug", Object.keys(STAFF_SPECIALTY));
-    ids = [...new Set((links ?? []).map((l) => l.user_id))];
+    ids = [...(await getStaffKinds(service)).keys()];
   }
   if (!canSeeStaff) ids = ids.filter((id) => id === userId);
   ids = ids.slice(0, 100);
