@@ -38,6 +38,7 @@ import {
   markMediaPublished,
   createPublication,
   setPublicationFiles,
+  claimFilesForPublication,
   deletePublication,
   publishPublicationToYoutube,
   publicationTitle,
@@ -50,7 +51,6 @@ import {
 import {
   getEventFileViewUrl,
   createEventFileShareUrl,
-  listEventFiles,
   uploadEventFiles,
   uploadStandaloneMedia,
   type EventFile,
@@ -94,6 +94,7 @@ import { useBackgroundTasks } from "@/contexts/BackgroundTasksContext";
 import { pdfToJpegFiles } from "@/lib/board/pdfToImages";
 import { createClient } from "@/lib/supabase/client";
 import { personName } from "@/components/board/calendar/EventTabs";
+import { AlbumEditor } from "@/components/board/publication/AlbumEditor";
 import { YoutubeIcon, FacebookIcon, TiktokIcon, InstagramIcon } from "@/components/board/publication/BrandIcons";
 
 const TABS: { id: PublicationStatus; label: string; icon: typeof Send }[] = [
@@ -671,50 +672,30 @@ function useMe() {
   return { me, userId: user?.id ?? null };
 }
 
-/** Médias de l'événement sélectionnables pour composer une galerie (photos/vidéos uniquement). */
-function EventMediaPicker({ eventId, selected, onChange }: { eventId: string; selected: EventFile[]; onChange: (files: EventFile[]) => void }) {
-  const [files, setFiles] = useState<EventFile[] | null>(null);
-  useEffect(() => {
-    listEventFiles(eventId).then((all) =>
-      setFiles(all.filter((f) => /^(image|video)\//.test(f.content_type ?? "")).sort((a, b) => a.created_at.localeCompare(b.created_at)))
-    );
-  }, [eventId]);
-
-  if (!files) return <p className="text-[11px] text-ink-4">Chargement des médias de l&rsquo;événement…</p>;
-  if (files.length <= 1) return null;
-
-  const toggle = (f: EventFile) => {
-    const isSelected = selected.some((s) => s.id === f.id);
-    if (isSelected && selected.length === 1) return; // au moins un média
-    onChange(isSelected ? selected.filter((s) => s.id !== f.id) : [...selected, f]);
-  };
-
-  return (
-    <div className="space-y-1.5 rounded-btn border border-line p-3">
-      <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
-        Médias de l&rsquo;événement — cochez-en plusieurs pour une galerie
-      </div>
-      <div className="max-h-40 space-y-1 overflow-y-auto">
-        {files.map((f) => {
-          const isVideo = (f.content_type ?? "").startsWith("video");
-          return (
-            <label key={f.id} className="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
-              <input type="checkbox" checked={selected.some((s) => s.id === f.id)} onChange={() => toggle(f)} />
-              {isVideo ? <Video size={12} className="text-ink-4" /> : <ImageIcon size={12} className="text-ink-4" />}
-              <span className="truncate">{f.filename}</span>
-            </label>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: () => void; onDone: () => void }) {
   const { me } = useMe();
   const { runTask } = useBackgroundTasks();
   const [caption, setCaption] = useState(pub.caption ?? "");
   const [files, setFiles] = useState<EventFile[]>(pub.files);
+  const [albumChanged, setAlbumChanged] = useState(false);
+  // Fermer après avoir modifié l'album recharge la liste (vignette, nombre de médias).
+  const close = albumChanged ? onDone : onClose;
+
+  /** Chaque modification de l'album est enregistrée tout de suite (pas seulement à la publication). */
+  // Les enregistrements passent l'un après l'autre : deux déplacements rapides ne s'écrasent pas dans le désordre.
+  const albumSaves = useRef<Promise<void>>(Promise.resolve());
+  const changeAlbum = (next: EventFile[], added: EventFile[]) => {
+    setFiles(next);
+    setAlbumChanged(true);
+    albumSaves.current = albumSaves.current.then(async () => {
+      try {
+        await setPublicationFiles(pub.id, next);
+        await claimFilesForPublication(pub.id, added.map((f) => f.id));
+      } catch (e) {
+        alert(e instanceof Error ? e.message : "Impossible d'enregistrer l'album.");
+      }
+    });
+  };
   const [youtube, setYoutube] = useState(!!pub.targets.youtube);
   const [fb, setFb] = useState({
     lorraine: !!pub.targets.facebook?.lorraine,
@@ -762,9 +743,10 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
   const canYoutube = count === 1 && videos === 1;
   const canFacebook = count <= 1 || videos === 0;
   // Sans média, Instagram reçoit un visuel généré à partir du texte (voir /api/media/text-card).
-  const canInstagram = count <= 10 && contentTypes.every((ct) => isInstagramCompatible(ct));
+  // Au-delà de 10 médias, Instagram (carrousel limité à 10) reçoit les 10 premiers de l'album.
+  const canInstagram = contentTypes.slice(0, 10).every((ct) => isInstagramCompatible(ct));
   const fbReason = !canFacebook ? "Galerie : photos uniquement" : null;
-  const igReason = count > 10 ? "10 médias max." : !canInstagram ? "Format non pris en charge (HEIC)" : count === 0 ? "Visuel généré depuis le texte" : null;
+  const igReason = !canInstagram ? "Format non pris en charge (HEIC)" : count > 10 ? "Les 10 premiers seulement" : count === 0 ? "Visuel généré depuis le texte" : null;
   const ytReason = !canYoutube ? "Une seule vidéo" : null;
 
   const anyTarget = (canYoutube && youtube) || (canFacebook && (fb.lorraine || fb.champagne_ardenne || fb.alsace)) || (canInstagram && instagram);
@@ -879,14 +861,14 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
   );
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={close}>
       <div
         className="max-h-[85vh] w-full max-w-lg space-y-4 overflow-y-auto rounded-modal border border-line bg-card p-5 shadow-modal"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-ink">{publicationTitle(pub)}</h3>
-          <button onClick={onClose} className="text-ink-4 hover:text-ink">
+          <button onClick={close} className="text-ink-4 hover:text-ink">
             <X size={16} />
           </button>
         </div>
@@ -895,7 +877,7 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
           {pub.event_id && <EventArrow eventId={pub.event_id} className="h-6 w-6" />}
         </p>
 
-        {pub.event_id && files.length > 0 && <EventMediaPicker eventId={pub.event_id} selected={files} onChange={setFiles} />}
+        {pub.event_id && files.length > 0 && <AlbumEditor eventId={pub.event_id} files={files} onChange={changeAlbum} />}
         {pub.media.length > 0 && (
           <ul className="space-y-0.5 text-xs text-ink-3">
             {pub.media.map((m) => (
@@ -1036,7 +1018,7 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
         </div>
 
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-btn border border-line px-4 py-2 text-sm text-ink-2">
+          <button onClick={close} className="rounded-btn border border-line px-4 py-2 text-sm text-ink-2">
             Annuler
           </button>
           <button

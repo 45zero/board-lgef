@@ -183,6 +183,35 @@ export async function setPublicationFiles(id: string, files: EventFile[]) {
   if (error) throw new Error(error.message);
 }
 
+/**
+ * Fichiers ajoutés à un album : on les retire des autres publications « À publier » où ils étaient
+ * (par ex. la publication créée automatiquement à l'envoi), et on supprime celles qui se vident.
+ */
+export async function claimFilesForPublication(id: string, fileIds: string[]) {
+  if (fileIds.length === 0) return;
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("media_publications")
+    .select("id, file_ids, event_file_id, media")
+    .eq("status", "to_publish")
+    .neq("id", id)
+    .overlaps("file_ids", fileIds);
+  await Promise.all(
+    (data ?? []).map(async (p) => {
+      const rest = (p.file_ids ?? []).filter((f) => !fileIds.includes(f));
+      if (rest.length === 0 && !((p.media as unknown[] | null)?.length)) {
+        await supabase.from("media_publications").delete().eq("id", p.id);
+        return;
+      }
+      const { data: files } = await supabase.from("event_files").select("content_type").in("id", rest);
+      await supabase
+        .from("media_publications")
+        .update({ file_ids: rest, event_file_id: rest[0] ?? null, kind: kindFromContentTypes((files ?? []).map((f) => f.content_type)) })
+        .eq("id", p.id);
+    })
+  );
+}
+
 /** Retire une publication du centre (ne touche ni aux fichiers de l'événement, ni aux réseaux). */
 export async function deletePublication(id: string) {
   const supabase = createClient();
