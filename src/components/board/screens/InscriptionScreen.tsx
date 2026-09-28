@@ -65,7 +65,6 @@ import {
   removeContactListMember,
   importContactListIntoCampaign,
   importClubContactsIntoList,
-  prepareClubContactsImport,
 } from "@/app/actions/registration";
 import { uploadCampaignBlockAsset } from "@/lib/board/registrationAssets";
 import type { EmailBlock } from "@/lib/board/registrationEmail";
@@ -441,16 +440,16 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
     try {
       const { readSheet } = await import("read-excel-file/browser");
       const { contacts, skipped } = parseClubExportRows((await readSheet(file)) as unknown[][]);
-      await prepareClubContactsImport(list.id, {
-        clubNumbers: contacts.map((c) => c.clubNumber).filter((n): n is string => !!n),
-        emails: contacts.filter((c) => !c.clubNumber).map((c) => c.email),
-      });
+      let added = 0;
+      let updated = 0;
       for (let i = 0; i < contacts.length; i += 500) {
         setImportMsg(`Import… ${i}/${contacts.length}`);
-        await importClubContactsIntoList(list.id, contacts.slice(i, i + 500));
+        const r = await importClubContactsIntoList(list.id, contacts.slice(i, i + 500));
+        added += r.added;
+        updated += r.updated;
       }
       setImportMsg(
-        `${contacts.length} contact(s) importé(s)${skipped ? ` — ${skipped} ligne(s) sans email ignorée(s)` : ""}.`
+        `${added} contact(s) ajouté(s), ${updated} complété(s)${skipped ? ` — ${skipped} ligne(s) sans email ni mobile ignorée(s)` : ""}.`
       );
       await refetchMembers(list);
       await refetchLists();
@@ -520,7 +519,7 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
                     importing ? "pointer-events-none opacity-50" : ""
                   }`}
                 >
-                  <FileSpreadsheet size={12} /> {importing ? "Import…" : "Importer un export clubs (.xlsx)"}
+                  <FileSpreadsheet size={12} /> {importing ? "Import…" : "Importer un fichier Excel (.xlsx)"}
                   <input
                     type="file"
                     accept=".xlsx"

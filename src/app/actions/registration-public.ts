@@ -2,7 +2,7 @@
 
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { renderCampaignCardHtml, formatEventDateLabel, greetingFor, type EmailBlock } from "@/lib/board/registrationEmail";
-import { personName } from "@/lib/board/clubContacts";
+import { greetingName } from "@/lib/board/clubContacts";
 
 /** Nombre de personnes saisi sur la page publique — borné 1–99 (contrainte en base), 1 par défaut. */
 function cleanAttendees(n: number | null | undefined) {
@@ -58,7 +58,7 @@ export async function getRegistrationContext(eventId: string, token: string) {
     .maybeSingle();
   if (!event) return null;
 
-  return { campaign, recipient, event, cardHtml: buildCardHtml(campaign, event, greetingFor(personName(recipient))) };
+  return { campaign, recipient, event, cardHtml: buildCardHtml(campaign, event, greetingFor(greetingName(recipient))) };
 }
 
 /** Événement d'un destinataire à partir de son seul jeton (lien court WhatsApp). */

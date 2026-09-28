@@ -8,8 +8,8 @@ export interface ClubContact {
   club: string | null;
   /** Mobile au format E.164 (+33…) quand il est reconnu, sinon tel quel. */
   phone: string | null;
-  /** Email principal d'envoi : email officiel du club, à défaut l'email perso. */
-  email: string;
+  /** Email principal d'envoi : email officiel du club, à défaut l'email perso (null : contact joignable par mobile seulement). */
+  email: string | null;
   /** Second destinataire (email perso), s'il diffère de l'email principal. */
   emailSecondary: string | null;
 }
@@ -33,8 +33,9 @@ const COLUMNS = {
   civility: ["civilite"],
   lastName: ["nom"],
   firstName: ["prenom"],
-  clubNumber: ["clubnumero", "numeroclub"],
-  club: ["clubnom", "club", "nomclub"],
+  clubNumber: ["clubnumero", "numeroclub", "numero"],
+  // Annuaire des commissions : la commission tient lieu de « club ».
+  club: ["clubnom", "club", "nomclub", "nomcommission", "commission"],
   phone: ["mobilepersonnel", "mobile", "telephone", "portable"],
   emailPerso: ["emailprincipal", "emailpersonnel", "mailperso"],
   emailClub: ["emailofficielclub", "emailclub", "mailclub"],
@@ -73,13 +74,34 @@ export function personName(p: { first_name?: string | null; last_name?: string |
   return full || p.name || "";
 }
 
+/**
+ * Nom à mettre après « Bonjour » : prénom + nom s'ils sont connus, sinon le nom saisi — sauf quand ce nom n'est que
+ * celui du club (club importé sans président) : on renvoie "" pour un simple « Bonjour, ».
+ */
+export function greetingName(p: {
+  first_name?: string | null;
+  last_name?: string | null;
+  name?: string | null;
+  club?: string | null;
+}) {
+  const full = personName({ first_name: p.first_name, last_name: p.last_name });
+  if (full) return full;
+  const name = p.name?.trim() ?? "";
+  return name && name !== p.club?.trim() ? name : "";
+}
+
 /** Lien wa.me (ouvre WhatsApp avec le message prérempli) — null si pas de mobile exploitable. */
 export function whatsappUrl(phone: string | null, text: string) {
   if (!phone || !phone.startsWith("+")) return null;
   return `https://wa.me/${phone.slice(1)}?text=${encodeURIComponent(text)}`;
 }
 
-/** Lit les lignes d'un export clubs (1re ligne = en-têtes). Ignore les lignes sans aucun email. */
+/**
+ * Lit les lignes d'un export (1re ligne = en-têtes) : export clubs fédéral, ou annuaire des commissions
+ * (« Nom commission » au lieu de « Club(nom) »). Ignore les lignes sans email ni mobile.
+ * Une même personne présente sur plusieurs lignes (plusieurs commissions) est fusionnée : ses commissions
+ * sont regroupées (« Arbitrage · Discipline »).
+ */
 export function parseClubExportRows(rows: unknown[][]): { contacts: ClubContact[]; skipped: number } {
   if (rows.length === 0) throw new Error("Fichier vide.");
   const headers = rows[0].map(normalizeHeader);
@@ -88,32 +110,49 @@ export function parseClubExportRows(rows: unknown[][]): { contacts: ClubContact[
     keyof typeof COLUMNS,
     number
   >;
-  if (col.lastName < 0 || col.club < 0 || (col.emailClub < 0 && col.emailPerso < 0)) {
-    throw new Error("Colonnes attendues introuvables (Nom, Club(nom), Email principal / Email officiel club).");
+  // Nom/Prénom facultatifs : un fichier « clubs seuls » (numéro, club, email officiel) complète l'annuaire existant.
+  if (col.club < 0 || (col.emailClub < 0 && col.emailPerso < 0 && col.phone < 0)) {
+    throw new Error(
+      "Colonnes attendues introuvables (Club(nom) ou Nom commission, Email principal / Email officiel club / Mobile)."
+    );
   }
 
   const at = (r: unknown[], i: number) => (i >= 0 ? cell(r[i]) : null);
-  const contacts: ClubContact[] = [];
+  const byKey = new Map<string, ClubContact>();
   let skipped = 0;
   for (const r of rows.slice(1)) {
     if (!r.some((v) => cell(v))) continue;
     const emailClub = at(r, col.emailClub)?.toLowerCase() ?? null;
     const emailPerso = at(r, col.emailPerso)?.toLowerCase() ?? null;
     const email = emailClub || emailPerso;
-    if (!email) {
+    const phone = normalizeFrPhone(col.phone >= 0 ? r[col.phone] : null);
+    if (!email && !phone) {
       skipped += 1;
       continue;
     }
-    contacts.push({
+    const contact: ClubContact = {
       civility: at(r, col.civility),
       firstName: at(r, col.firstName),
       lastName: at(r, col.lastName),
       clubNumber: at(r, col.clubNumber),
       club: at(r, col.club),
-      phone: normalizeFrPhone(col.phone >= 0 ? r[col.phone] : null),
+      phone,
       email,
       emailSecondary: emailPerso && emailPerso !== email ? emailPerso : null,
-    });
+    };
+
+    // Un club = une ligne (numéro de club) ; sans numéro, une personne = son email, à défaut son mobile.
+    const key = contact.clubNumber ? `club:${contact.clubNumber}` : `pers:${email ?? phone}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, contact);
+      continue;
+    }
+    if (!contact.clubNumber && contact.club && !existing.club?.split(" · ").includes(contact.club)) {
+      existing.club = existing.club ? `${existing.club} · ${contact.club}` : contact.club;
+    }
+    existing.phone ??= contact.phone;
+    existing.emailSecondary ??= contact.emailSecondary;
   }
-  return { contacts, skipped };
+  return { contacts: [...byKey.values()], skipped };
 }

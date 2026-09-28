@@ -12,10 +12,10 @@ import {
   greetingFor,
   type EmailBlock,
 } from "@/lib/board/registrationEmail";
-import { personName, normalizeFrPhone, type ClubContact } from "@/lib/board/clubContacts";
+import { personName, greetingName, normalizeFrPhone, type ClubContact } from "@/lib/board/clubContacts";
 import { isResendConfigured, sendResendBatch } from "@/lib/email/resend";
 import { isWhatsAppConfigured, sendWhatsAppEventInvite } from "@/lib/whatsapp";
-import type { Json } from "@/lib/supabase/database.types";
+import type { Database, Json } from "@/lib/supabase/database.types";
 
 async function requireStaff() {
   const supabase = await createClient();
@@ -317,42 +317,42 @@ export async function removeContactListMember(memberId: string) {
 }
 
 /**
- * Import de l'export clubs, étape 1 (une seule fois pour tout le fichier) : retire de l'annuaire les clubs
- * présents dans le fichier (même numéro de club, à défaut même email) — réimporter l'export met donc à jour
- * sans doublon. Fait avant les lots d'insertion pour qu'un lot n'efface pas ce qu'un lot précédent vient d'ajouter.
+ * Import d'un fichier Excel dans un annuaire (lu côté navigateur, envoyé par lots de 500) — fusion, jamais d'écrasement :
+ * un contact déjà présent (même numéro de club ; sans numéro, même email à défaut même mobile) est complété avec les
+ * cases remplies du fichier, les cases vides du fichier ne l'effacent pas. Les autres sont ajoutés.
+ * Ex. : un fichier « clubs seuls » (numéro, club, email officiel) garde les noms/mobiles des présidents déjà importés.
  */
-export async function prepareClubContactsImport(listId: string, keys: { clubNumbers: string[]; emails: string[] }) {
-  const { supabase } = await requireStaff();
-  const chunks = <T,>(arr: T[]) => Array.from({ length: Math.ceil(arr.length / 300) }, (_, i) => arr.slice(i * 300, i * 300 + 300));
-  for (const part of chunks(keys.clubNumbers)) {
-    const { error } = await supabase
-      .from("registration_contact_list_members")
-      .delete()
-      .eq("list_id", listId)
-      .in("club_number", part);
-    if (error) throw new Error(error.message);
-  }
-  for (const part of chunks(keys.emails)) {
-    const { error } = await supabase
-      .from("registration_contact_list_members")
-      .delete()
-      .eq("list_id", listId)
-      .is("club_number", null)
-      .in("email", part);
-    if (error) throw new Error(error.message);
-  }
-}
-
-/** Import de l'export clubs, étape 2 : insertion d'un lot (Excel lu côté navigateur, envoyé par lots de 500). */
 export async function importClubContactsIntoList(listId: string, contacts: ClubContact[]) {
   const { supabase } = await requireStaff();
-  if (contacts.length === 0) return { added: 0 };
+  if (contacts.length === 0) return { added: 0, updated: 0 };
   if (contacts.length > 1000) throw new Error("Lot trop volumineux.");
 
-  const { error } = await supabase.from("registration_contact_list_members").insert(
-    contacts.map((c) => ({
-      list_id: listId,
-      name: personName({ first_name: c.firstName, last_name: c.lastName }) || c.club || c.email,
+  type MemberInsert = Database["public"]["Tables"]["registration_contact_list_members"]["Insert"];
+  type MemberUpdate = Database["public"]["Tables"]["registration_contact_list_members"]["Update"];
+  type Member = { id: string; club_number: string | null; email: string | null; phone: string | null; first_name: string | null; last_name: string | null };
+  const cols = "id, club_number, email, phone, first_name, last_name";
+  const clubNumbers = contacts.map((c) => c.clubNumber).filter((n): n is string => !!n);
+  const emails = contacts.filter((c) => !c.clubNumber && c.email).map((c) => c.email!);
+  const phones = contacts.filter((c) => !c.clubNumber && !c.email && c.phone).map((c) => c.phone!);
+  const existing = [
+    ...(await fetchRowsByIds<Member>(clubNumbers, (chunk) =>
+      supabase.from("registration_contact_list_members").select(cols).eq("list_id", listId).in("club_number", chunk)
+    )),
+    ...(await fetchRowsByIds<Member>(emails, (chunk) =>
+      supabase.from("registration_contact_list_members").select(cols).eq("list_id", listId).is("club_number", null).in("email", chunk)
+    )),
+    ...(await fetchRowsByIds<Member>(phones, (chunk) =>
+      supabase.from("registration_contact_list_members").select(cols).eq("list_id", listId).is("club_number", null).in("phone", chunk)
+    )),
+  ];
+  const byClub = new Map(existing.filter((m) => m.club_number).map((m) => [m.club_number!, m]));
+  const byEmail = new Map(existing.filter((m) => !m.club_number && m.email).map((m) => [m.email!, m]));
+  const byPhone = new Map(existing.filter((m) => !m.club_number && m.phone).map((m) => [m.phone!, m]));
+
+  const toInsert: MemberInsert[] = [];
+  const toUpdate: { id: string; patch: MemberUpdate }[] = [];
+  for (const c of contacts) {
+    const fields = {
       email: c.email,
       email_secondary: c.emailSecondary,
       club: c.club,
@@ -361,10 +361,39 @@ export async function importClubContactsIntoList(listId: string, contacts: ClubC
       first_name: c.firstName,
       last_name: c.lastName,
       phone: c.phone,
-    }))
-  );
-  if (error) throw new Error(error.message);
-  return { added: contacts.length };
+    };
+    const match = c.clubNumber
+      ? byClub.get(c.clubNumber)
+      : (c.email && byEmail.get(c.email)) || (c.phone && byPhone.get(c.phone)) || undefined;
+    if (!match) {
+      toInsert.push({
+        list_id: listId,
+        name: personName({ first_name: c.firstName, last_name: c.lastName }) || c.club || c.email || c.phone || "",
+        ...fields,
+      });
+      continue;
+    }
+    const patch: MemberUpdate = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== null && v !== ""));
+    const first = c.firstName ?? match.first_name;
+    const last = c.lastName ?? match.last_name;
+    if (c.firstName || c.lastName) patch.name = personName({ first_name: first, last_name: last });
+    if (Object.keys(patch).length > 0) toUpdate.push({ id: match.id, patch });
+  }
+
+  for (let i = 0; i < toInsert.length; i += 500) {
+    const { error } = await supabase.from("registration_contact_list_members").insert(toInsert.slice(i, i + 500));
+    if (error) throw new Error(error.message);
+  }
+  for (let i = 0; i < toUpdate.length; i += 20) {
+    const results = await Promise.all(
+      toUpdate
+        .slice(i, i + 20)
+        .map((u) => supabase.from("registration_contact_list_members").update(u.patch).eq("id", u.id))
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) throw new Error(failed.error.message);
+  }
+  return { added: toInsert.length, updated: toUpdate.length };
 }
 
 /** Importe tous les membres d'un annuaire comme destinataires de la campagne (copie ponctuelle, pas un lien synchronisé). */
@@ -538,7 +567,7 @@ export async function sendCampaign(campaignId: string, recipientIds?: string[]) 
   const messages = withEmail.map((r) => {
     const yesUrl = `${siteUrl()}/inscription/${campaign.event_id}/${r.token}?r=yes`;
     const noUrl = `${siteUrl()}/inscription/${campaign.event_id}/${r.token}?r=no`;
-    const greeting = greetingFor(personName(r));
+    const greeting = greetingFor(greetingName(r));
     const html = buildRegistrationEmailHtml({
       eventTitle,
       eventDateLabel,
@@ -627,7 +656,7 @@ export async function sendCampaignWhatsApp(campaignId: string, recipientIds?: st
     ? await fetchRowsByIds(recipientIds, (chunk) =>
         supabase
           .from("event_registration_recipients")
-          .select("id, token, first_name, last_name, name, phone")
+          .select("id, token, first_name, last_name, name, club, phone")
           .eq("campaign_id", campaignId)
           .like("phone", "+%")
           .in("id", chunk)
@@ -635,7 +664,7 @@ export async function sendCampaignWhatsApp(campaignId: string, recipientIds?: st
     : await fetchAllRows((from, to) =>
         supabase
           .from("event_registration_recipients")
-          .select("id, token, first_name, last_name, name, phone")
+          .select("id, token, first_name, last_name, name, club, phone")
           .eq("campaign_id", campaignId)
           .like("phone", "+%")
           .is("whatsapp_sent_at", null)
@@ -653,7 +682,7 @@ export async function sendCampaignWhatsApp(campaignId: string, recipientIds?: st
       recipients.slice(i, i + CONCURRENCY).map(async (r) => {
         // Ajout manuel = un seul champ « Nom » : on le découpe (1er mot = prénom), sinon le modèle affichait
         // « Bonjour Madame, Monsieur Jean Dupont ».
-        const [nameFirst, ...nameRest] = (r.name ?? "").trim().split(/\s+/);
+        const [nameFirst, ...nameRest] = greetingName({ name: r.name, club: r.club }).split(/\s+/);
         const hasSplitName = !!(r.first_name || r.last_name);
         const result = await sendWhatsAppEventInvite({
           to: r.phone!,
