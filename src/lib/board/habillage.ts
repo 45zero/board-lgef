@@ -16,7 +16,29 @@ export type CustomHabillage = {
   overlays: Partial<Record<"portrait" | "carre", string>>;
   textPosition: "top" | "bottom" | "none";
   textColor: string;
+  /** Animations vidéo (issues d'un .mov avec couche alpha, converti en WebM VP9 transparent). */
+  animations?: Partial<Record<VideoOrientation, HabillageAnimation>>;
+  /** Animation jouée une fois au début de la vidéo, ou en boucle. */
+  animationMode?: "once" | "loop";
 };
+
+export type VideoOrientation = "vertical" | "horizontal";
+export type HabillageAnimation = { url: string; preview: string; duration: number };
+
+/** Dimensions attendues des animations (.mov avec couche alpha). */
+export const HABILLAGE_VIDEO_SIZES: Record<VideoOrientation, { width: number; height: number; label: string }> = {
+  vertical: { width: 1080, height: 1920, label: "Vertical 9:16 — 1080 × 1920 px (Reels, Stories, Shorts)" },
+  horizontal: { width: 1920, height: 1080, label: "Horizontal 16:9 — 1920 × 1080 px (YouTube, Facebook)" },
+};
+
+export const orientationOf = (v: { width: number; height: number }): VideoOrientation => (v.height >= v.width ? "vertical" : "horizontal");
+
+/** Animation d'un gabarit pour une vidéo de cette orientation (ou l'autre, à défaut). */
+export function animationFor(settings: HabillageSettings, template: HabillageTemplate, orientation: VideoOrientation) {
+  const custom = settings.custom.find((c) => `custom:${c.id}` === template);
+  const anim = custom?.animations?.[orientation] ?? custom?.animations?.[orientation === "vertical" ? "horizontal" : "vertical"];
+  return anim ? { ...anim, mode: custom?.animationMode ?? "once" } : null;
+}
 
 export type HabillageSettings = {
   /** Hauteur du logo LGEF, en px sur l'image finale (1080 px de large). */
@@ -169,17 +191,33 @@ function signature(ctx: CanvasRenderingContext2D, text: string, x: number, y: nu
   ctx.textBaseline = "alphabetic";
 }
 
-/** Dessine l'habillage sur `canvas` (l'aperçu et l'export partagent le même rendu). */
+/**
+ * Dessine l'habillage sur `canvas` (l'aperçu et l'export partagent le même rendu). Sans image
+ * (`img` nul) et avec `overlaySize` : calque seul sur fond transparent, à incruster dans une vidéo.
+ */
 export async function renderHabillage(
   canvas: HTMLCanvasElement,
-  img: CanvasImageSource & { width: number; height: number },
-  opts: { template: HabillageTemplate; format: HabillageFormat; text: string; settings?: HabillageSettings }
+  img: (CanvasImageSource & { width: number; height: number }) | null,
+  opts: {
+    template: HabillageTemplate;
+    format: HabillageFormat;
+    text: string;
+    settings?: HabillageSettings;
+    /** Calque vidéo : dimensions de la vidéo finale (1080 px de large). */
+    overlaySize?: { width: number; height: number };
+    /** Vidéo avec animation : le calque PNG du gabarit n'est pas figé par-dessus (l'animation le remplace). */
+    skipOverlayImage?: boolean;
+  }
 ) {
   const settings = opts.settings ?? DEFAULT_HABILLAGE_SETTINGS;
-  const { width: W, height: H } = outputSize(opts.format, img.width, img.height);
+  const { width: W, height: H } = opts.overlaySize ?? outputSize(opts.format, img?.width ?? WIDTH, img?.height ?? 1350);
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d")!;
+  ctx.clearRect(0, 0, W, H);
+  const photo = (x: number, y: number, w: number, h: number) => {
+    if (img) drawCover(ctx, img, x, y, w, h);
+  };
   const logo = await loadImage("/lgef-logo.png");
   const text = opts.text.trim();
   const logoH = settings.logoHeight;
@@ -189,10 +227,13 @@ export async function renderHabillage(
 
   if (opts.template.startsWith("custom:")) {
     const custom = settings.custom.find((c) => `custom:${c.id}` === opts.template);
-    drawCover(ctx, img, 0, 0, W, H);
+    photo(0, 0, W, H);
     if (!custom) return;
     const key = opts.format === "carre" ? "carre" : "portrait";
-    const src = custom.overlays[key] ?? custom.overlays.portrait ?? custom.overlays.carre;
+    // Photo sans calque fixe : l'image clé de l'animation sert de calque.
+    const src = opts.skipOverlayImage
+      ? undefined
+      : (custom.overlays[key] ?? custom.overlays.portrait ?? custom.overlays.carre ?? custom.animations?.vertical?.preview ?? custom.animations?.horizontal?.preview);
     const overlay = src ? await loadImage(src) : null;
     if (overlay) drawCover(ctx, overlay, 0, 0, W, H);
     if (text && custom.textPosition !== "none") {
@@ -210,7 +251,7 @@ export async function renderHabillage(
     const strip = Math.max(logoH + 60, 170);
     ctx.fillStyle = "#FFFFFF";
     ctx.fillRect(0, 0, W, H);
-    drawCover(ctx, img, pad, pad, W - pad * 2, H - pad - strip);
+    photo(pad, pad, W - pad * 2, H - pad - strip);
     ctx.fillStyle = NAVY;
     ctx.fillRect(0, H - strip, W, strip);
     const lw = drawLogo(ctx, logo, pad, H - strip + (strip - logoH) / 2, logoH);
@@ -224,7 +265,7 @@ export async function renderHabillage(
     return;
   }
 
-  drawCover(ctx, img, 0, 0, W, H);
+  photo(0, 0, W, H);
 
   if (opts.template === "bandeau") {
     const band = Math.round(H * 0.42);

@@ -7,7 +7,9 @@ import { uploadEventFiles, uploadStandaloneMedia } from "@/lib/board/eventFiles"
 import { createPublication, listMediaPublications, type MediaPublication } from "@/lib/board/mediaPublications";
 import {
   HABILLAGE_FORMATS,
+  animationFor,
   availableTemplates,
+  orientationOf,
   canvasToFile,
   loadBitmap,
   renderHabillage,
@@ -19,6 +21,8 @@ import {
 import { getHabillageSettings } from "@/app/actions/board-settings";
 import { searchEventsForExpense, type EventCandidate } from "@/app/actions/expense-scan";
 import { Composer } from "@/components/board/screens/PublicationScreen";
+import { createClient } from "@/lib/supabase/client";
+import { createVideoWorkUploads, removeVideoWork } from "@/app/actions/video-habillage";
 
 type Step = "capture" | "habillage" | "publier";
 
@@ -33,6 +37,11 @@ const VIDEO_EXT = /\.(mov|mp4|m4v|3gp|3g2|webm|mkv|avi|hevc)$/i;
 const isVideoFile = (f: File) => f.type.startsWith("video") || VIDEO_EXT.test(f.name);
 /** Type annoncé au lecteur : un .mov (QuickTime) contient en général du H.264 lisible comme du MP4. */
 const playableType = (f: File) => (!f.type || f.type === "video/quicktime" ? "video/mp4" : f.type);
+
+/** Durée maximale d'une vidéo habillée (encodage sur le serveur, limité à 300 s). */
+const VIDEO_HABILLAGE_MAX_SECONDS = 90;
+/** Calque vidéo : 1080 px de large, à la proportion de la vidéo. */
+const overlaySizeFor = (v: { width: number; height: number }) => ({ width: 1080, height: Math.round((1080 * v.height) / v.width / 2) * 2 });
 
 /**
  * Bouton central « Publication réseaux » (mobile) : photo ou vidéo prise sur le moment, habillage
@@ -63,7 +72,14 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
 
   const isVideo = !!file && isVideoFile(file);
   const [videoError, setVideoError] = useState(false);
-  const templates = availableTemplates(settings);
+  const [videoMeta, setVideoMeta] = useState<{ width: number; height: number; duration: number } | null>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
+  // Vidéo : pas de « Cadre » (il redimensionne la photo), et pas d'habillage au-delà de 90 s ou
+  // si le navigateur ne peut pas lire la vidéo (dimensions inconnues).
+  const videoHabillage = isVideo && !videoError && !!videoMeta && videoMeta.duration <= VIDEO_HABILLAGE_MAX_SECONDS;
+  const templates = availableTemplates(settings).filter((t) => !isVideo || t.id !== "cadre");
+  // Animation du gabarit (.mov alpha converti) pour l'orientation de la vidéo.
+  const anim = videoMeta ? animationFor(settings, template, orientationOf(videoMeta)) : null;
 
   // Réglages des habillages (administrateur) : tailles, signature, gabarits actifs et personnalisés.
   useEffect(() => {
@@ -82,6 +98,12 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
     if (step !== "habillage" || !bitmap || !canvasRef.current) return;
     void renderHabillage(canvasRef.current, bitmap, { template, format, text, settings });
   }, [step, bitmap, template, format, text, settings]);
+
+  // Aperçu du calque par-dessus la vidéo.
+  useEffect(() => {
+    if (step !== "habillage" || !videoHabillage || !videoMeta || !overlayRef.current) return;
+    void renderHabillage(overlayRef.current, null, { template, format, text, settings, overlaySize: overlaySizeFor(videoMeta), skipOverlayImage: !!anim });
+  }, [step, videoHabillage, videoMeta, template, format, text, settings, anim]);
 
   useEffect(
     () => () => {
@@ -110,6 +132,8 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
     if (isVideoFile(f)) {
       setBitmap(null);
       setVideoError(false);
+      setVideoMeta(null);
+      setTemplate((cur) => (cur === "cadre" ? "bandeau" : cur));
       setVideoUrl(URL.createObjectURL(f));
     } else {
       try {
@@ -119,6 +143,43 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
       }
     }
     setStep("habillage");
+  };
+
+  /**
+   * Habillage d'une vidéo : calque PNG transparent dessiné ici, vidéo + calque déposés dans le bucket
+   * privé video-work, assemblage par FFmpeg sur le serveur, puis récupération de la vidéo habillée.
+   */
+  const habillerVideo = async (video: File, meta: { width: number; height: number }): Promise<File> => {
+    const canvas = document.createElement("canvas");
+    await renderHabillage(canvas, null, { template, format, text, settings, overlaySize: overlaySizeFor(meta), skipOverlayImage: !!anim });
+    const overlay = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Calque impossible."))), "image/png"));
+
+    setProgress("Envoi de la vidéo pour l'habillage…");
+    const targets = await createVideoWorkUploads(video.name || "video.mp4");
+    const storage = createClient().storage.from("video-work");
+    const [up1, up2] = await Promise.all([
+      storage.uploadToSignedUrl(targets.video.path, targets.video.token, video, { contentType: video.type || "video/mp4" }),
+      storage.uploadToSignedUrl(targets.overlay.path, targets.overlay.token, overlay, { contentType: "image/png" }),
+    ]);
+    if (up1.error || up2.error) throw new Error("Envoi de la vidéo impossible.");
+
+    setProgress("Habillage de la vidéo… (jusqu'à 2 à 3 minutes)");
+    const res = await fetch("/api/media/video-habillage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        videoPath: targets.video.path,
+        overlayPath: targets.overlay.path,
+        animation: anim ? { url: anim.url, mode: anim.mode } : null,
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { url?: string; path?: string; error?: string };
+    if (!res.ok || !body.url) throw new Error(body.error ?? "Habillage de la vidéo impossible.");
+
+    setProgress("Récupération de la vidéo habillée…");
+    const blob = await (await fetch(body.url)).blob();
+    if (body.path) void removeVideoWork(body.path).catch(() => undefined);
+    return new File([blob], `publication-${Date.now()}.mp4`, { type: "video/mp4" });
   };
 
   const publish = async () => {
@@ -133,6 +194,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         await renderHabillage(canvas, bitmap, { template, format, text, settings });
         media = await canvasToFile(canvas, `publication-${Date.now()}.jpg`);
       }
+      if (videoHabillage && videoMeta && template !== "aucun") media = await habillerVideo(media, videoMeta);
       setProgress("Envoi du média…");
       const onProgress = (sent: number, total: number) => setProgress(`Envoi du média… ${Math.round((sent / Math.max(total, 1)) * 100)} %`);
       let fileIds: string[] = [];
@@ -228,10 +290,32 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
             {isVideo ? (
               <>
                 {videoUrl && file && !videoError && (
-                  // « #t=0.1 » : affiche la première image sur iPhone au lieu d'un cadre noir.
-                  <video key={videoUrl} controls playsInline preload="metadata" onError={() => setVideoError(true)} className="max-h-[50vh] w-full rounded-panel bg-black">
-                    <source src={`${videoUrl}#t=0.1`} type={playableType(file)} />
-                  </video>
+                  <div
+                    className="relative mx-auto max-h-[50vh] overflow-hidden rounded-panel bg-black"
+                    style={videoMeta ? { aspectRatio: `${videoMeta.width} / ${videoMeta.height}` } : undefined}
+                  >
+                    {/* « #t=0.1 » : affiche la première image sur iPhone au lieu d'un cadre noir. */}
+                    <video
+                      key={videoUrl}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      onError={() => setVideoError(true)}
+                      onLoadedMetadata={(e) => {
+                        const v = e.currentTarget;
+                        if (v.videoWidth && v.videoHeight) setVideoMeta({ width: v.videoWidth, height: v.videoHeight, duration: v.duration });
+                      }}
+                      className="h-full max-h-[50vh] w-full object-contain"
+                    >
+                      <source src={`${videoUrl}#t=0.1`} type={playableType(file)} />
+                    </video>
+                    {/* Aperçu de l'animation : son image clé (Safari ne lit pas le VP9 transparent). */}
+                    {videoHabillage && anim && (
+                      // eslint-disable-next-line @next/next/no-img-element -- image distante du bucket, superposée à la vidéo
+                      <img src={anim.preview} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-cover" />
+                    )}
+                    {videoHabillage && template !== "aucun" && <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />}
+                  </div>
                 )}
                 {videoError && (
                   <div className="rounded-panel bg-subtle p-4 text-sm text-ink-2">
@@ -241,7 +325,30 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                     </div>
                   </div>
                 )}
-                <p className="text-xs text-ink-4">L&rsquo;habillage s&rsquo;applique aux photos. Pour une vidéo, votre texte devient la légende de la publication.</p>
+                {videoHabillage ? (
+                  <div>
+                    <div className={label}>Habillage</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {templates.map((t) => (
+                        <button key={t.id} onClick={() => setTemplate(t.id)} className={chip(template === t.id)}>
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-ink-4">
+                      {anim
+                        ? `Habillage animé (${anim.mode === "loop" ? "en boucle" : `${anim.duration} s au début`}) : l'aperçu montre une image clé.`
+                        : "L'habillage est incrusté dans la vidéo au moment de publier."}{" "}
+                      Traitement : 1 à 3 minutes.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-ink-4">
+                    {videoMeta && videoMeta.duration > VIDEO_HABILLAGE_MAX_SECONDS
+                      ? `Vidéo de plus de ${VIDEO_HABILLAGE_MAX_SECONDS} s : elle sera publiée sans habillage, votre texte devient la légende.`
+                      : "Habillage indisponible pour cette vidéo : votre texte devient la légende de la publication."}
+                  </p>
+                )}
               </>
             ) : (
               <>
@@ -272,7 +379,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
               value={text}
               onChange={(e) => setText(e.target.value)}
               rows={2}
-              placeholder={isVideo ? "Texte de la publication" : "Texte sur la photo (ex. « Rentrée de l'arbitrage 2026 »)"}
+              placeholder={isVideo && !videoHabillage ? "Texte de la publication" : "Texte de l'habillage (ex. « Rentrée de l'arbitrage 2026 »)"}
               className="w-full rounded-btn border border-line bg-card px-3 py-2 text-sm outline-none focus:border-link"
             />
           </div>

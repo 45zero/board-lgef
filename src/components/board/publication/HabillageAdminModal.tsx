@@ -3,11 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import { X, Upload, Trash2, Plus, ImageIcon, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { createHabillageOverlayUpload, getHabillageSettings, saveHabillageSettings } from "@/app/actions/board-settings";
+import {
+  createHabillageAnimationUpload,
+  createHabillageOverlayUpload,
+  getHabillageSettings,
+  saveHabillageSettings,
+} from "@/app/actions/board-settings";
 import {
   BUILTIN_TEMPLATES,
   HABILLAGE_FORMATS,
   HABILLAGE_SIZES,
+  HABILLAGE_VIDEO_SIZES,
+  type VideoOrientation,
   availableTemplates,
   loadBitmap,
   renderHabillage,
@@ -117,6 +124,43 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  /** Animation .mov (couche alpha) : dépôt, puis conversion en WebM transparent par le serveur. */
+  const uploadAnimation = async (c: CustomHabillage, orientation: VideoOrientation, file: File) => {
+    setMessage(null);
+    setBusy(`${c.id}:anim:${orientation}`);
+    try {
+      const target = await createHabillageAnimationUpload(file.name);
+      const { error } = await createClient()
+        .storage.from("board-assets")
+        .uploadToSignedUrl(target.path, target.token, file, { contentType: file.type || "video/quicktime" });
+      if (error) throw new Error(error.message);
+      setMessage({ tone: "ok", text: "Animation envoyée — conversion en cours (environ 1 minute par tranche de 10 s)…" });
+      const res = await fetch("/api/media/habillage-animation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourcePath: target.path, orientation }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { url?: string; preview?: string; duration?: number; error?: string };
+      if (!res.ok || !body.url || !body.preview) throw new Error(body.error ?? "Conversion impossible.");
+      setSettings((st) =>
+        st
+          ? {
+              ...st,
+              custom: st.custom.map((x) =>
+                x.id === c.id ? { ...x, animations: { ...(x.animations ?? {}), [orientation]: { url: body.url!, preview: body.preview!, duration: body.duration ?? 0 } } } : x
+              ),
+            }
+          : st
+      );
+      setTemplate(`custom:${c.id}`);
+      setMessage({ tone: "ok", text: "Animation prête. Pensez à enregistrer." });
+    } catch (e) {
+      setMessage({ tone: "bad", text: e instanceof Error ? e.message : "Envoi impossible." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const save = async () => {
     setBusy("save");
     setMessage(null);
@@ -154,6 +198,9 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
                 <li>• Original — 1080 px de large, 566 à 1350 px de haut (les calques personnalisés y sont recadrés)</li>
                 <li>• Calques personnalisés : PNG à fond transparent, aux dimensions exactes ci-dessus ; la photo apparaît sous le calque.</li>
                 <li>• Logo LGEF : 1014 × 1246 px d&rsquo;origine, proportions toujours conservées.</li>
+                <li>• Animations vidéo : .mov avec couche alpha (ProRes 4444, Animation ou PNG — pas le « HEVC avec alpha »), 30 s au plus :</li>
+                <li className="pl-3">– {HABILLAGE_VIDEO_SIZES.vertical.label}</li>
+                <li className="pl-3">– {HABILLAGE_VIDEO_SIZES.horizontal.label}</li>
               </ul>
             </section>
 
@@ -256,6 +303,54 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
                           />
                         </label>
                       ))}
+                    </div>
+                    <div className="rounded-btn bg-subtle/60 p-2">
+                      <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
+                        <span className="font-bold text-ink-2">Animation vidéo (.mov avec couche alpha)</span>
+                        <select
+                          value={c.animationMode ?? "once"}
+                          onChange={(e) => updateCustom(c.id, { animationMode: e.target.value as "once" | "loop" })}
+                          className={input}
+                        >
+                          <option value="once">une fois au début</option>
+                          <option value="loop">en boucle</option>
+                        </select>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {(["vertical", "horizontal"] as const).map((o) => {
+                          const a = c.animations?.[o];
+                          const size = HABILLAGE_VIDEO_SIZES[o];
+                          return (
+                            <label key={o} className="flex cursor-pointer items-center gap-2 rounded-btn border border-dashed border-line bg-card px-2.5 py-2 text-xs hover:bg-hover">
+                              {busy === `${c.id}:anim:${o}` ? (
+                                <Loader2 size={14} className="shrink-0 animate-spin" />
+                              ) : a ? (
+                                // eslint-disable-next-line @next/next/no-img-element -- image clé de l'animation (bucket public)
+                                <img src={a.preview} alt="" className="h-9 w-9 shrink-0 rounded bg-subtle object-contain" />
+                              ) : (
+                                <Upload size={14} className="shrink-0 text-ink-4" />
+                              )}
+                              <span className="min-w-0 flex-1">
+                                <span className="block font-bold text-ink-2">{o === "vertical" ? "Verticale 9:16" : "Horizontale 16:9"}</span>
+                                <span className="block text-ink-4">
+                                  {size.width} × {size.height} px · {busy === `${c.id}:anim:${o}` ? "conversion…" : a ? `${a.duration} s — remplacer` : ".mov alpha"}
+                                </span>
+                              </span>
+                              <input
+                                type="file"
+                                accept=".mov,video/quicktime,.webm"
+                                hidden
+                                disabled={!!busy}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  e.target.value = "";
+                                  if (f) void uploadAnimation(c, o, f);
+                                }}
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-ink-3">
                       <span>Texte :</span>

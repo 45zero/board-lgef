@@ -86,6 +86,18 @@ export async function saveHabillageSettings(settings: HabillageSettings) {
       ),
       textPosition: c.textPosition === "top" || c.textPosition === "none" ? c.textPosition : "bottom",
       textColor: /^#[0-9a-fA-F]{6}$/.test(c.textColor) ? c.textColor : "#FFFFFF",
+      animationMode: c.animationMode === "loop" ? "loop" : "once",
+      animations: Object.fromEntries(
+        Object.entries(c.animations ?? {}).filter(
+          ([k, a]) =>
+            (k === "vertical" || k === "horizontal") &&
+            !!a &&
+            typeof a.url === "string" &&
+            a.url.includes("/board-assets/habillages/anim/") &&
+            typeof a.preview === "string" &&
+            a.preview.includes("/board-assets/habillages/anim/")
+        )
+      ),
     })),
   };
   const { error } = await supabase
@@ -133,4 +145,16 @@ export async function setPublishers(ids: string[]) {
     .update({ publisher_ids: [...new Set(ids)], updated_by: userId, updated_at: new Date().toISOString() })
     .eq("id", true);
   if (error) throw new Error(error.message);
+}
+
+/** URL signée pour déposer une animation .mov (couche alpha) à convertir (administrateurs). */
+export async function createHabillageAnimationUpload(fileName: string): Promise<{ path: string; token: string }> {
+  await requireAdmin();
+  const ext = (fileName.split(".").pop() ?? "").toLowerCase();
+  if (!["mov", "webm"].includes(ext)) throw new Error("L'animation doit être un fichier .mov avec couche alpha.");
+  const service = createServiceClient();
+  const path = `habillages/src/${randomUUID()}.${ext}`;
+  const { data, error } = await service.storage.from("board-assets").createSignedUploadUrl(path);
+  if (error || !data) throw new Error(error?.message ?? "Dépôt impossible.");
+  return { path, token: data.token };
 }
