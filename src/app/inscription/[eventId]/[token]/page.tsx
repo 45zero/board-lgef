@@ -17,9 +17,9 @@ export default async function RsvpPage({
   const { recipient, event, cardHtml } = context;
   const initialChoice = r === "yes" || r === "no" ? r : null;
 
-  async function respond(response: "yes" | "no") {
+  async function respond(response: "yes" | "no", attendees: number | null) {
     "use server";
-    await submitRegistrationResponse(token, response);
+    await submitRegistrationResponse(token, response, attendees);
   }
 
   return (

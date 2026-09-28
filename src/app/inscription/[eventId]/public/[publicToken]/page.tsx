@@ -17,7 +17,14 @@ export default async function PublicRsvpPage({
   const { campaign, event, cardHtml } = context;
   const initialChoice = r === "yes" || r === "no" ? r : null;
 
-  async function respond(data: { firstName: string; lastName: string; club: string; email: string; response: "yes" | "no" }) {
+  async function respond(data: {
+    firstName: string;
+    lastName: string;
+    club: string;
+    email: string;
+    response: "yes" | "no";
+    attendees: number | null;
+  }) {
     "use server";
     await submitPublicResponse(campaign.id, data);
   }

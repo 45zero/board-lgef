@@ -805,6 +805,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   };
 
   const yesCount = recipients.filter((r) => r.response === "yes").length;
+  const yesPeople = recipients.filter((r) => r.response === "yes").reduce((sum, r) => sum + (r.attendees ?? 1), 0);
   const noCount = recipients.filter((r) => r.response === "no").length;
 
   return (
@@ -862,6 +863,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
           <div className="flex h-[34px] items-center gap-3 rounded-btn bg-subtle px-3 text-xs">
             <span title="Participent" className="flex items-center gap-1 font-extrabold text-good">
               <Check size={12} /> {yesCount}
+              {yesPeople !== yesCount && <span className="font-semibold text-ink-4">({yesPeople} pers.)</span>}
             </span>
             <span title="Ne participent pas" className="flex items-center gap-1 font-extrabold text-ink-3">
               <X size={12} /> {noCount}
@@ -1074,7 +1076,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
                 })()}
                 {r.response === "yes" && (
                   <span className="flex items-center gap-1 rounded-full bg-good-bg px-2 py-0.5 text-[10px] font-bold text-good">
-                    <Check size={10} /> Participe
+                    <Check size={10} /> Participe{r.attendees ? ` (${r.attendees})` : ""}
                   </span>
                 )}
                 {r.response === "no" && (

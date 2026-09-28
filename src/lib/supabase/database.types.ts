@@ -1387,6 +1387,7 @@ export type Database = {
           club_number: string | null
           email_secondary: string | null
           whatsapp_sent_at: string | null
+          attendees: number | null
         }
         Insert: {
           id?: string
@@ -1408,6 +1409,7 @@ export type Database = {
           club_number?: string | null
           email_secondary?: string | null
           whatsapp_sent_at?: string | null
+          attendees?: number | null
         }
         Update: {
           id?: string
@@ -1429,6 +1431,7 @@ export type Database = {
           club_number?: string | null
           email_secondary?: string | null
           whatsapp_sent_at?: string | null
+          attendees?: number | null
         }
         Relationships: []
       }

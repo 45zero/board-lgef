@@ -16,7 +16,14 @@ export function PublicRsvpForm({
   eventLocation: string | null;
   cardHtml?: string;
   initialChoice?: "yes" | "no" | null;
-  onSubmit: (data: { firstName: string; lastName: string; club: string; email: string; response: "yes" | "no" }) => Promise<void>;
+  onSubmit: (data: {
+    firstName: string;
+    lastName: string;
+    club: string;
+    email: string;
+    response: "yes" | "no";
+    attendees: number | null;
+  }) => Promise<void>;
 }) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -61,10 +68,17 @@ export function PublicRsvpForm({
           />
         </div>
       }
-      onSubmit={async (response) => {
+      onSubmit={async (response, attendees) => {
         if (!firstName.trim() || !lastName.trim()) throw new Error("Merci d'indiquer votre prénom et votre nom.");
         if (!club.trim()) throw new Error("Merci d'indiquer votre club.");
-        await onSubmit({ firstName: firstName.trim(), lastName: lastName.trim(), club: club.trim(), email: email.trim(), response });
+        await onSubmit({
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          club: club.trim(),
+          email: email.trim(),
+          response,
+          attendees,
+        });
       }}
     />
   );

@@ -23,19 +23,26 @@ export function RsvpCard({
   initialChoice?: "yes" | "no" | null;
   alreadyResponded?: "yes" | "no" | null;
   extraFields?: React.ReactNode;
-  onSubmit: (response: "yes" | "no") => Promise<void>;
+  /** `attendees` : nombre de personnes (1–99), renseigné seulement pour « Je participe ». */
+  onSubmit: (response: "yes" | "no", attendees: number | null) => Promise<void>;
 }) {
   const [choice, setChoice] = useState<"yes" | "no" | null>(initialChoice ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<"yes" | "no" | null>(alreadyResponded ?? null);
   const [error, setError] = useState<string | null>(null);
+  const [attendees, setAttendees] = useState("1");
 
   const confirm = async () => {
     if (!choice) return;
+    const count = Number(attendees);
+    if (choice === "yes" && (!Number.isInteger(count) || count < 1 || count > 99)) {
+      setError("Indiquez un nombre de personnes entre 1 et 99.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(choice);
+      await onSubmit(choice, choice === "yes" ? count : null);
       setDone(choice);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Échec de l'envoi.");
@@ -77,7 +84,9 @@ export function RsvpCard({
             }}
           >
             <p className="text-sm font-bold text-ink">
-              {done === "yes" ? "Merci, votre participation est enregistrée !" : "Merci, votre réponse a été enregistrée."}
+              {done === "yes"
+                ? `Merci, votre participation est enregistrée${Number(attendees) > 1 ? ` (${attendees} personnes)` : ""} !`
+                : "Merci, votre réponse a été enregistrée."}
             </p>
           </div>
         ) : (
@@ -101,6 +110,21 @@ export function RsvpCard({
                 <X size={20} /> Je n&rsquo;y participerai pas
               </button>
             </div>
+
+            {choice === "yes" && (
+              <label className="mt-4 flex items-center justify-between gap-3 rounded-btn border border-line px-3 py-2.5">
+                <span className="text-sm font-semibold text-ink-2">Nombre de personnes</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={99}
+                  value={attendees}
+                  onChange={(e) => setAttendees(e.target.value)}
+                  className="w-20 rounded-btn border border-line px-2 py-1.5 text-center text-sm font-bold text-ink outline-none"
+                />
+              </label>
+            )}
 
             {error && <p className="mt-3 text-xs font-semibold text-bad">{error}</p>}
 

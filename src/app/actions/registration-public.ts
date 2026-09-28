@@ -4,6 +4,11 @@ import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { renderCampaignCardHtml, formatEventDateLabel, greetingFor, type EmailBlock } from "@/lib/board/registrationEmail";
 import { personName } from "@/lib/board/clubContacts";
 
+/** Nombre de personnes saisi sur la page publique — borné 1–99 (contrainte en base), 1 par défaut. */
+function cleanAttendees(n: number | null | undefined) {
+  return Number.isInteger(n) && n! >= 1 && n! <= 99 ? n! : 1;
+}
+
 /** Rendu de la carte visuelle de la campagne — même forme que le mail, sans le bloc boutons (remplacé par les vrais boutons interactifs de la page). */
 function buildCardHtml(
   campaign: { blocks: unknown },
@@ -121,7 +126,7 @@ async function notifyOrganizer(campaignId: string, who: string, response: "yes" 
 /** Réponse via le lien générique — crée le destinataire à la volée à partir de ce qu'il renseigne. */
 export async function submitPublicResponse(
   campaignId: string,
-  params: { firstName: string; lastName: string; club?: string; email?: string; response: "yes" | "no" }
+  params: { firstName: string; lastName: string; club?: string; email?: string; response: "yes" | "no"; attendees?: number | null }
 ) {
   const supabase = createServiceClient();
   const { error } = await supabase.from("event_registration_recipients").insert({
@@ -133,13 +138,14 @@ export async function submitPublicResponse(
     email: params.email || null,
     source: "public_link",
     response: params.response,
+    attendees: params.response === "yes" ? cleanAttendees(params.attendees) : null,
     responded_at: new Date().toISOString(),
   });
   if (error) throw new Error(error.message);
   await notifyOrganizer(campaignId, [params.firstName, params.lastName].filter(Boolean).join(" "), params.response);
 }
 
-export async function submitRegistrationResponse(token: string, response: "yes" | "no") {
+export async function submitRegistrationResponse(token: string, response: "yes" | "no", attendees?: number | null) {
   const supabase = createServiceClient();
   const { data: recipient } = await supabase
     .from("event_registration_recipients")
@@ -150,7 +156,11 @@ export async function submitRegistrationResponse(token: string, response: "yes" 
 
   const { error } = await supabase
     .from("event_registration_recipients")
-    .update({ response, responded_at: new Date().toISOString() })
+    .update({
+      response,
+      attendees: response === "yes" ? cleanAttendees(attendees) : null,
+      responded_at: new Date().toISOString(),
+    })
     .eq("id", recipient.id);
   if (error) throw new Error(error.message);
   const who = recipient.name || [recipient.first_name, recipient.last_name].filter(Boolean).join(" ");
