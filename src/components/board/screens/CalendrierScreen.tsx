@@ -469,15 +469,13 @@ export function CalendrierScreen() {
 
           <div
             className="grid flex-1 grid-cols-7 overflow-y-auto"
-            style={{ gridTemplateRows: `repeat(${monthGridDays.length / 7}, minmax(96px, 1fr))` }}
+            style={{ gridTemplateRows: `repeat(${monthGridDays.length / 7}, minmax(96px, auto))` }}
           >
             {monthGridDays.map((day) => {
               const isToday = isSameDay(day, new Date());
               const inMonth = isSameMonth(day, anchorDate);
               const dayEvents = eventsForDay(day);
               const dayGoogleEvents = googleEventsForDay(day);
-              const visible = dayEvents.slice(0, 3);
-              const overflow = dayEvents.length - visible.length;
 
               return (
                 <div
@@ -499,8 +497,8 @@ export function CalendrierScreen() {
                     {format(day, "d")}
                   </button>
 
-                  <div className="flex flex-col gap-0.5 overflow-hidden">
-                    {visible.map((ev) => {
+                  <div className="flex flex-col gap-0.5">
+                    {dayEvents.map((ev) => {
                       const color = ORG_COLORS[ev.org];
                       return (
                         <button
@@ -517,7 +515,7 @@ export function CalendrierScreen() {
                         </button>
                       );
                     })}
-                    {dayGoogleEvents.slice(0, Math.max(0, 3 - visible.length)).map((ev) => (
+                    {dayGoogleEvents.map((ev) => (
                       <button
                         key={`g-${ev.id}`}
                         onClick={(e) => {
@@ -529,17 +527,6 @@ export function CalendrierScreen() {
                         G · {ev.summary}
                       </button>
                     ))}
-                    {overflow > 0 && (
-                      <button
-                        onClick={() => {
-                          setViewMode("day");
-                          setAnchorDate(day);
-                        }}
-                        className="px-1 text-left text-[10px] font-semibold text-ink-4 hover:text-ink"
-                      >
-                        +{overflow} de plus
-                      </button>
-                    )}
                   </div>
                 </div>
               );
