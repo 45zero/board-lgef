@@ -5,12 +5,11 @@ import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { Download, Loader2, Mail, MapPin, MessageCircle, Navigation, Phone, Search, X } from "lucide-react";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
-import { listContactLists } from "@/app/actions/registration";
-import { geocodeListBatch, listMapContacts } from "@/app/actions/cartography";
+import { geocodeListBatch, listMapContacts, listMapDirectories } from "@/app/actions/cartography";
 import { formatFrPhone, personName } from "@/lib/board/clubContacts";
 import { GRAND_EST_BOUNDS } from "@/lib/board/geo";
 
-type Directory = Awaited<ReturnType<typeof listContactLists>>[number];
+type Directory = Awaited<ReturnType<typeof listMapDirectories>>[number];
 type Contact = Awaited<ReturnType<typeof listMapContacts>>[number];
 
 const NAVY = "#0b1d3c";
@@ -66,13 +65,13 @@ export function CartographieScreen() {
   const clustererRef = useRef<MarkerClusterer | null>(null);
   const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
 
-  // Annuaires ; par défaut celui des clubs.
+  // Annuaires ; par défaut celui qui a le plus d'adresses (les autres : pas de points sur la carte).
   useEffect(() => {
     if (!canAccess) return;
-    listContactLists().then((lists) => {
+    listMapDirectories().then((lists) => {
       setDirectories(lists);
-      const clubs = lists.find((l) => /club/i.test(l.name)) ?? lists[0];
-      if (clubs) setListId(clubs.id);
+      const best = [...lists].sort((a, b) => b.addressCount - a.addressCount)[0];
+      if (best) setListId(best.id);
     });
   }, [canAccess]);
 
@@ -239,7 +238,7 @@ export function CartographieScreen() {
             {directories.length === 0 && <option value="">Aucun annuaire — importe un fichier dans Inscription</option>}
             {directories.map((d) => (
               <option key={d.id} value={d.id}>
-                {d.name} ({d.memberCount})
+                {d.name} — {d.memberCount} fiche(s), {d.addressCount ? `${d.addressCount} adresse(s)` : "sans adresse"}
               </option>
             ))}
           </select>

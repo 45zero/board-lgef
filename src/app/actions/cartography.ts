@@ -135,3 +135,24 @@ export async function searchDirectoryEmails(query: string) {
   }
   return out.slice(0, 8);
 }
+
+/** Annuaires avec, pour chacun, le nombre de fiches et de fiches avec adresse — la carte ouvre le plus « cartographiable ». */
+export async function listMapDirectories() {
+  const { supabase } = await requireStaff();
+  const { data: lists, error } = await supabase
+    .from("registration_contact_lists")
+    .select("id, name")
+    .order("name", { ascending: true });
+  if (error) throw new Error(error.message);
+  return Promise.all(
+    (lists ?? []).map(async (l) => {
+      const base = () =>
+        supabase.from("registration_contact_list_members").select("id", { count: "exact", head: true }).eq("list_id", l.id);
+      const [{ count: members }, { count: withAddress }] = await Promise.all([
+        base(),
+        base().or("address.not.is.null,postal_code.not.is.null,city.not.is.null"),
+      ]);
+      return { ...l, memberCount: members ?? 0, addressCount: withAddress ?? 0 };
+    })
+  );
+}
