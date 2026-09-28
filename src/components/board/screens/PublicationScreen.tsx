@@ -212,8 +212,9 @@ function threaded(comments: SocialComment[]): SocialComment[] {
 
 /** Commentaires lus en direct sur la plateforme à l'ouverture (jamais stockés) : réponse au nom de la page et suppression depuis le board. */
 function CommentsSection({ publicationId, networkKey, count }: { publicationId: string; networkKey: NetworkKey; count?: number }) {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // Ouverts d'emblée : chargés dès que le détail du réseau est déplié, repliables ensuite.
+  const [open, setOpen] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [comments, setComments] = useState<SocialComment[] | null>(null);
   const [replyTo, setReplyTo] = useState<SocialComment | null>(null);
@@ -222,16 +223,21 @@ function CommentsSection({ publicationId, networkKey, count }: { publicationId: 
   // YouTube : l'Edge Function youtube-manage n'a pas d'action de réponse.
   const canReply = networkKey !== "youtube";
 
-  const toggle = async () => {
-    if (open) return setOpen(false);
-    setOpen(true);
-    if (comments) return;
-    setLoading(true);
-    const res = await getSocialComments(publicationId, networkKey);
-    setError(res.error);
-    setComments(res.comments);
-    setLoading(false);
-  };
+  useEffect(() => {
+    let alive = true;
+    getSocialComments(publicationId, networkKey).then((res) => {
+      if (!alive) return;
+      setError(res.error);
+      setComments(res.comments);
+      setLoading(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [publicationId, networkKey]);
+
+  const shown = comments?.length ?? count ?? 0;
+  const toggle = () => setOpen((v) => !v);
 
   const remove = async (commentId: string) => {
     if (!confirm("Supprimer ce commentaire sur le réseau ? Action irréversible.")) return;
@@ -261,7 +267,7 @@ function CommentsSection({ publicationId, networkKey, count }: { publicationId: 
     <div>
       <button onClick={toggle} className="flex items-center gap-1 text-[11px] font-semibold text-link hover:underline">
         <MessageCircle size={12} />
-        {open ? "Masquer les commentaires" : `Voir les commentaires${count ? ` (${count})` : ""}`}
+        {open ? `Replier les commentaires${shown ? ` (${shown})` : ""}` : `Afficher les commentaires${shown ? ` (${shown})` : ""}`}
       </button>
       {open && (
         <div className="mt-1.5 space-y-1">
@@ -374,7 +380,6 @@ function SocialDetail({
   onChanged: () => void;
 }) {
   const stats = info.stats;
-  const isInstagram = networkKey === "instagram";
   const isFacebook = networkKey !== "instagram" && networkKey !== "youtube";
   const by = info.by ? personName({ ...info.by, email: null }) : null;
   const [deleting, setDeleting] = useState(false);
@@ -413,17 +418,9 @@ function SocialDetail({
         </span>
       </div>
 
+      {/* Les chiffres sont déjà dans la pastille du réseau : ici, seulement leur fraîcheur. */}
       {stats ? (
-        <>
-          <div className="flex flex-wrap gap-1.5">
-            <StatTile icon={Eye} label="Vues" value={stats.views} />
-            {(isInstagram || stats.reach !== undefined) && <StatTile icon={Users} label="Portée" value={stats.reach} />}
-            <StatTile icon={Heart} label={isFacebook ? "Réactions" : "J'aime"} value={stats.likes} />
-            <StatTile icon={MessageCircle} label="Comm." value={stats.comments} />
-            {isFacebook && <StatTile icon={Repeat2} label="Partages" value={stats.shares} />}
-          </div>
-          <p className="text-[10px] text-ink-4">Stats mises à jour {timeAgo(stats.fetchedAt)}</p>
-        </>
+        <p className="text-[10px] text-ink-4">Stats mises à jour {timeAgo(stats.fetchedAt)}</p>
       ) : (
         <p className="text-[11px] italic text-ink-4">Stats pas encore récupérées — cliquez sur « Rafraîchir les stats ».</p>
       )}
