@@ -606,6 +606,161 @@ function CaptionEditor({ pub, onChanged }: { pub: MediaPublication; onChanged: (
   );
 }
 
+/** Réseaux compatibles avec les médias d'une publication (même règles au compositeur et en « Publier ailleurs »). */
+function networkRules(contentTypes: string[]) {
+  const count = contentTypes.length;
+  const videos = contentTypes.filter((ct) => ct.startsWith("video")).length;
+  return {
+    count,
+    videos,
+    canYoutube: count === 1 && videos === 1,
+    canFacebook: count <= 1 || videos === 0,
+    // Sans média, Instagram reçoit un visuel généré à partir du texte (voir /api/media/text-card).
+    // Au-delà de 10 médias, Instagram (carrousel limité à 10) reçoit les 10 premiers de l'album.
+    canInstagram: contentTypes.slice(0, 10).every((ct) => isInstagramCompatible(ct)),
+  };
+}
+
+/**
+ * Publie après coup une publication déjà en ligne sur un réseau de plus (ex. vidéo sortie sur
+ * YouTube et Facebook, poussée ensuite sur Instagram). Les réseaux déjà publiés sont conservés.
+ */
+function PublishElsewhere({ pub, onChanged }: { pub: MediaPublication; onChanged: () => void }) {
+  const { me } = useMe();
+  const { runTask } = useBackgroundTasks();
+  const [open, setOpen] = useState(false);
+  const [caption, setCaption] = useState(pub.caption ?? "");
+  const [selected, setSelected] = useState<NetworkKey[]>([]);
+
+  const contentTypes = pub.media.length > 0 ? pub.media.map((m) => m.content_type ?? "") : pub.files.map((f) => f.content_type ?? "");
+  const rules = networkRules(contentTypes);
+  const done = new Set(publishedEntries(pub).map((e) => e.key));
+  const available = NETWORK_KEYS.filter((k) => {
+    if (done.has(k)) return false;
+    if (k === "youtube") return rules.canYoutube;
+    if (k === "instagram") return rules.canInstagram && !pub.publish_info?.instagram?.pending;
+    return rules.canFacebook;
+  });
+
+  if (available.length === 0) return null;
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => {
+          setCaption(pub.caption ?? "");
+          setSelected([]);
+          setOpen(true);
+        }}
+        className="flex items-center gap-1 text-[11px] font-semibold text-link hover:underline"
+      >
+        <Plus size={11} /> Publier sur un autre réseau
+      </button>
+    );
+  }
+
+  const publish = () => {
+    if (selected.length === 0) return;
+    if (rules.count === 0 && !caption.trim()) return alert("Écrivez le texte de la publication.");
+    if (!confirm(`Publier maintenant sur ${selected.map(chipLabel).join(", ")} ? Action publique et non réversible.`)) return;
+    const keys = selected;
+    const text = caption;
+    setOpen(false);
+
+    void runTask(
+      `Publication — ${publicationTitle(pub)}`,
+      async ({ setProgress }) => {
+        const failures: string[] = [];
+        let anyOk = false;
+        if (keys.includes("youtube")) {
+          setProgress(undefined, "Envoi de la vidéo à YouTube…");
+          try {
+            await publishPublicationToYoutube(pub, { title: publicationTitle(pub), description: text }, me);
+            anyOk = true;
+          } catch (e) {
+            failures.push(`YouTube : ${e instanceof Error ? e.message : "échec"}`);
+          }
+        }
+
+        const social = keys.filter((k): k is SocialTargetKey => k !== "youtube").map((key) => ({ key, caption: text }));
+        let igPending = false;
+        if (social.length > 0) {
+          setProgress(undefined, "Publication sur Facebook / Instagram…");
+          try {
+            const results = await publishSocial(pub.id, social, me, { igUserTags: pub.targets.igTags, fbMentions: pub.targets.fbMentions });
+            anyOk ||= results.some((r) => r.ok);
+            igPending = results.some((r) => r.key === "instagram" && r.pending);
+            const socialFailures = describeFailures(results);
+            if (socialFailures) failures.push(socialFailures);
+            const warnings = describeWarnings(results);
+            if (warnings) failures.push(`Attention — ${warnings}`);
+          } catch (e) {
+            failures.push(e instanceof Error ? e.message : "Échec de la publication Facebook/Instagram.");
+          }
+        }
+        if (!anyOk) throw new Error(failures.join("\n") || "Échec de la publication.");
+
+        // Même attente que le compositeur pour un Reel encore en traitement chez Instagram.
+        const igDeadline = Date.now() + 5 * 60_000;
+        while (igPending && Date.now() < igDeadline) {
+          setProgress(undefined, "Instagram traite la vidéo…");
+          const [res] = await finishInstagram([pub.id]).catch(() => []);
+          if (!res || res.state === "published") igPending = false;
+          else if (res.state === "failed") {
+            igPending = false;
+            failures.push(`Instagram : ${res.error ?? "échec"}`);
+          } else await new Promise((r) => setTimeout(r, 5000));
+        }
+        if (igPending) failures.push("Instagram : la vidéo est encore en traitement — elle sera mise en ligne automatiquement (quelques minutes).");
+
+        onChanged();
+        return failures;
+      },
+      { success: (failures) => (failures.length ? `Publié partiellement.\n${failures.join("\n")}` : "Publié.") }
+    );
+  };
+
+  return (
+    <div className="mt-2 w-full space-y-2 rounded-btn border border-line p-2.5">
+      <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Publier aussi sur</div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-ink-2">
+        {available.map((k) => (
+          <label key={k} className="flex cursor-pointer items-center gap-1">
+            <input
+              type="checkbox"
+              checked={selected.includes(k)}
+              onChange={(e) => setSelected((prev) => (e.target.checked ? [...prev, k] : prev.filter((x) => x !== k)))}
+            />
+            <NetworkIcon networkKey={k} size={11} /> {chipLabel(k)}
+          </label>
+        ))}
+      </div>
+      {selected.includes("instagram") && rules.count > 10 && (
+        <p className="text-[10px] text-ink-4">Instagram : les 10 premiers médias de l&rsquo;album seulement.</p>
+      )}
+      <textarea
+        value={caption}
+        onChange={(e) => setCaption(e.target.value)}
+        rows={3}
+        placeholder="Texte de la publication…"
+        className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+      />
+      <div className="flex justify-end gap-2">
+        <button onClick={() => setOpen(false)} className="rounded-btn border border-line px-3 py-1 text-[11px] text-ink-2">
+          Annuler
+        </button>
+        <button
+          onClick={publish}
+          disabled={selected.length === 0}
+          className="rounded-btn bg-navy px-3 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+        >
+          Publier
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PublishedStatsRow({ pub, onChanged }: { pub: MediaPublication; onChanged: () => void }) {
   const [openKey, setOpenKey] = useState<NetworkKey | null>(null);
   const entries = publishedEntries(pub);
@@ -628,14 +783,23 @@ function PublishedStatsRow({ pub, onChanged }: { pub: MediaPublication; onChange
               <NetworkIcon networkKey={e.key} size={11} /> {chipLabel(e.key)}
               {stats && (
                 <span className="ml-0.5 flex items-center gap-1 font-semibold opacity-80">
-                  {stats.views !== undefined && (
-                    <span className="flex items-center gap-0.5">
-                      · <Eye size={10} /> {compactFormatter.format(stats.views)}
-                    </span>
-                  )}
-                  <span className="flex items-center gap-0.5">
-                    <MessageCircle size={10} /> {compactFormatter.format(stats.comments)}
-                  </span>
+                  ·
+                  {/* Toutes les stats du détail, en abrégé (portée : Instagram ; partages : Facebook). */}
+                  {(
+                    [
+                      { icon: Eye, value: stats.views, title: "Vues" },
+                      { icon: Users, value: stats.reach, title: "Portée" },
+                      { icon: Heart, value: stats.likes, title: e.key === "youtube" || e.key === "instagram" ? "J'aime" : "Réactions" },
+                      { icon: MessageCircle, value: stats.comments, title: "Commentaires" },
+                      { icon: Repeat2, value: stats.shares, title: "Partages" },
+                    ] as const
+                  )
+                    .filter((s) => s.value !== undefined)
+                    .map(({ icon: Icon, value, title }) => (
+                      <span key={title} title={title} className="flex items-center gap-0.5">
+                        <Icon size={10} /> {compactFormatter.format(value!)}
+                      </span>
+                    ))}
                 </span>
               )}
             </button>
@@ -654,6 +818,9 @@ function PublishedStatsRow({ pub, onChanged }: { pub: MediaPublication; onChange
         )}
       </div>
       <CaptionEditor pub={pub} onChanged={onChanged} />
+      <div className="mt-1.5">
+        <PublishElsewhere pub={pub} onChanged={onChanged} />
+      </div>
       {pub.publish_info?.lastError && (
         <p className="mt-1.5 flex items-start gap-1 text-[11px] text-bad">
           <AlertTriangle size={12} className="mt-0.5 shrink-0" />
@@ -896,15 +1063,9 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
 
   // Types des médias réellement publiés (galerie composée ici pour une publication d'événement).
   const contentTypes = pub.media.length > 0 ? pub.media.map((m) => m.content_type ?? "") : files.map((f) => f.content_type ?? "");
-  const count = contentTypes.length;
-  const videos = contentTypes.filter((ct) => ct.startsWith("video")).length;
+  const { count, videos, canYoutube, canFacebook, canInstagram } = networkRules(contentTypes);
   const kindLabel = count === 0 ? "Texte" : count > 1 ? `Galerie (${count})` : videos ? "Vidéo" : "Photo";
 
-  const canYoutube = count === 1 && videos === 1;
-  const canFacebook = count <= 1 || videos === 0;
-  // Sans média, Instagram reçoit un visuel généré à partir du texte (voir /api/media/text-card).
-  // Au-delà de 10 médias, Instagram (carrousel limité à 10) reçoit les 10 premiers de l'album.
-  const canInstagram = contentTypes.slice(0, 10).every((ct) => isInstagramCompatible(ct));
   const fbReason = !canFacebook ? "Galerie : photos uniquement" : null;
   const igReason = !canInstagram ? "Format non pris en charge (HEIC)" : count > 10 ? "Les 10 premiers seulement" : count === 0 ? "Visuel généré depuis le texte" : null;
   const ytReason = !canYoutube ? "Une seule vidéo" : null;
