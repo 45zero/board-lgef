@@ -40,16 +40,19 @@ export async function POST(request: Request) {
   if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   if (!(await isPublisher(supabase, userId))) return NextResponse.json({ error: "Vous n'êtes pas habilité à publier." }, { status: 403 });
 
-  const { videoPath, overlayPath, animation } = (await request.json()) as {
+  const { videoPath, overlayPath, animation, preroll } = (await request.json()) as {
     videoPath?: string;
     overlayPath?: string;
     /** Animation du gabarit (WebM VP9 transparent du bucket board-assets), jouée une fois ou en boucle. */
     animation?: { url?: string; mode?: "once" | "loop" } | null;
+    /** Pré-roll (volet) joué au début : la vidéo démarre à `revealAt` s, sous le volet qui s'ouvre. */
+    preroll?: { url?: string; revealAt?: number } | null;
   };
   const own = (p?: string) => !!p && p.startsWith(`${userId}/`) && !p.includes("..");
   if (!own(videoPath) || !own(overlayPath)) return NextResponse.json({ error: "Fichiers non reconnus." }, { status: 400 });
   const animPrefix = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/board-assets/habillages/anim/`;
-  if (animation?.url && (!animation.url.startsWith(animPrefix) || !animation.url.endsWith(".webm"))) {
+  const validAnim = (u?: string) => !u || (u.startsWith(animPrefix) && u.endsWith(".webm"));
+  if (!validAnim(animation?.url) || !validAnim(preroll?.url)) {
     return NextResponse.json({ error: "Animation non reconnue." }, { status: 400 });
   }
 
@@ -69,15 +72,34 @@ export async function POST(request: Request) {
 
     // Vidéo ramenée à 1080 px de large ; animation (décodée par libvpx pour garder la transparence,
     // une fois ou en boucle) puis calque PNG (texte, logo) ajustés à sa taille.
+    // Couches, de bas en haut : vidéo (décalée sous le pré-roll), animation du gabarit, calque PNG
+    // (texte, logo, titre), pré-roll. Les animations sont décodées par libvpx pour garder l'alpha.
     const anim = animation?.url ? animation : null;
+    const pre = preroll?.url ? { url: preroll.url, revealAt: Math.min(30, Math.max(0, Number(preroll.revealAt) || 0)) } : null;
     const loop = anim?.mode === "loop";
-    const filter = anim
-      ? "[0:v]scale=1080:-2,setsar=1[base];" +
-        "[2:v]format=rgba[a1];[a1][base]scale2ref=w=main_w:h=main_h[an][b1];" +
-        `[b1][an]overlay=0:0:${loop ? "shortest=1" : "eof_action=pass"}:format=auto[v1];` +
-        "[1:v][v1]scale2ref=w=main_w:h=main_h[ov][b2];[b2][ov]overlay=0:0:format=auto,format=yuv420p[out]"
-      : "[0:v]scale=1080:-2,setsar=1[base];[1:v][base]scale2ref=w=main_w:h=main_h[ov][ref];[ref][ov]overlay=0:0:format=auto,format=yuv420p[out]";
-    const animInput = anim ? [...(loop ? ["-stream_loop", "-1"] : []), "-c:v", "libvpx-vp9", "-i", anim.url!] : [];
+    const inputs: string[] = [];
+    const chain: string[] = [`[0:v]scale=1080:-2,setsar=1${pre ? `,tpad=start_duration=${pre.revealAt}:start_mode=clone` : ""}[s0]`];
+    let cur = "s0";
+    let next = 2;
+    if (anim) {
+      inputs.push(...(loop ? ["-stream_loop", "-1"] : []), "-c:v", "libvpx-vp9", "-i", anim.url!);
+      const i = next++;
+      chain.push(`[${i}:v]format=rgba[a${i}]`, `[a${i}][${cur}]scale2ref=w=main_w:h=main_h[an${i}][b${i}]`, `[b${i}][an${i}]overlay=0:0:${loop ? "shortest=1" : "eof_action=pass"}:format=auto[s${i}]`);
+      cur = `s${i}`;
+    }
+    chain.push(`[1:v][${cur}]scale2ref=w=main_w:h=main_h[ov][bp]`, "[bp][ov]overlay=0:0:format=auto[sp]");
+    cur = "sp";
+    if (pre) {
+      inputs.push("-c:v", "libvpx-vp9", "-i", pre.url);
+      const i = next++;
+      chain.push(`[${i}:v]format=rgba[a${i}]`, `[a${i}][${cur}]scale2ref=w=main_w:h=main_h[an${i}][b${i}]`, `[b${i}][an${i}]overlay=0:0:eof_action=pass:format=auto[s${i}]`);
+      cur = `s${i}`;
+    }
+    chain.push(`[${cur}]format=yuv420p[out]`);
+    const filter = chain.join(";");
+    const animInput = inputs;
+    // Son décalé d'autant que l'image sous le pré-roll.
+    const audio = pre && pre.revealAt > 0 ? ["-af", `adelay=${Math.round(pre.revealAt * 1000)}|${Math.round(pre.revealAt * 1000)}`] : [];
 
     // prettier-ignore
     await run([
@@ -88,7 +110,8 @@ export async function POST(request: Request) {
       "-filter_complex", filter,
       "-map", "[out]",
       "-map", "0:a?",
-      "-t", String(MAX_SECONDS),
+      ...audio,
+      "-t", String(MAX_SECONDS + (pre?.revealAt ?? 0)),
       "-c:v", "libx264",
       "-preset", "veryfast",
       "-crf", "23",

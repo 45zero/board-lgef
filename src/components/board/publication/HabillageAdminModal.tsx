@@ -124,30 +124,54 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  /** Animation .mov (couche alpha) : dépôt, puis conversion en WebM transparent par le serveur. */
+  /** .mov (couche alpha) : dépôt, puis conversion en WebM transparent par le serveur. */
+  const convertAnimation = async (orientation: VideoOrientation, file: File) => {
+    const target = await createHabillageAnimationUpload(file.name);
+    const { error } = await createClient()
+      .storage.from("board-assets")
+      .uploadToSignedUrl(target.path, target.token, file, { contentType: file.type || "video/quicktime" });
+    if (error) throw new Error(error.message);
+    setMessage({ tone: "ok", text: "Animation envoyée — conversion en cours (environ 1 minute par tranche de 10 s)…" });
+    const res = await fetch("/api/media/habillage-animation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourcePath: target.path, orientation }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { url?: string; preview?: string; duration?: number; error?: string };
+    if (!res.ok || !body.url || !body.preview) throw new Error(body.error ?? "Conversion impossible.");
+    return { url: body.url, preview: body.preview, duration: body.duration ?? 0 };
+  };
+
+  /** Pré-roll (volet) : une animation par orientation. */
+  const uploadPreroll = async (orientation: VideoOrientation, file: File) => {
+    setMessage(null);
+    setBusy(`preroll:${orientation}`);
+    try {
+      const anim = await convertAnimation(orientation, file);
+      setSettings((st) => {
+        if (!st) return st;
+        const prev = st.preroll ?? { animations: {}, revealAt: Math.round((anim.duration / 2) * 10) / 10 };
+        return { ...st, preroll: { ...prev, animations: { ...prev.animations, [orientation]: anim } } };
+      });
+      setMessage({ tone: "ok", text: "Pré-roll prêt. Réglez l'instant d'ouverture du volet, puis enregistrez." });
+    } catch (e) {
+      setMessage({ tone: "bad", text: e instanceof Error ? e.message : "Envoi impossible." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const uploadAnimation = async (c: CustomHabillage, orientation: VideoOrientation, file: File) => {
     setMessage(null);
     setBusy(`${c.id}:anim:${orientation}`);
     try {
-      const target = await createHabillageAnimationUpload(file.name);
-      const { error } = await createClient()
-        .storage.from("board-assets")
-        .uploadToSignedUrl(target.path, target.token, file, { contentType: file.type || "video/quicktime" });
-      if (error) throw new Error(error.message);
-      setMessage({ tone: "ok", text: "Animation envoyée — conversion en cours (environ 1 minute par tranche de 10 s)…" });
-      const res = await fetch("/api/media/habillage-animation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourcePath: target.path, orientation }),
-      });
-      const body = (await res.json().catch(() => ({}))) as { url?: string; preview?: string; duration?: number; error?: string };
-      if (!res.ok || !body.url || !body.preview) throw new Error(body.error ?? "Conversion impossible.");
+      const body = await convertAnimation(orientation, file);
       setSettings((st) =>
         st
           ? {
               ...st,
               custom: st.custom.map((x) =>
-                x.id === c.id ? { ...x, animations: { ...(x.animations ?? {}), [orientation]: { url: body.url!, preview: body.preview!, duration: body.duration ?? 0 } } } : x
+                x.id === c.id ? { ...x, animations: { ...(x.animations ?? {}), [orientation]: body } } : x
               ),
             }
           : st
@@ -220,6 +244,72 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
               </div>
             </section>
 
+            <section className="rounded-panel border border-line p-3">
+              <div className={label}>Pré-roll vidéo (avant chaque vidéo)</div>
+              <p className="mb-2 text-xs text-ink-3">
+                Transition de 1 à 2 s en .mov avec couche alpha : l&rsquo;écran démarre couvert (fond, logo), puis le volet s&rsquo;ouvre et découvre la
+                vidéo. Appliqué à toutes les vidéos publiées depuis le mobile.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(["vertical", "horizontal"] as const).map((o) => {
+                  const a = settings.preroll?.animations?.[o];
+                  const size = HABILLAGE_VIDEO_SIZES[o];
+                  return (
+                    <label key={o} className="flex cursor-pointer items-center gap-2 rounded-btn border border-dashed border-line px-2.5 py-2 text-xs hover:bg-hover">
+                      {busy === `preroll:${o}` ? (
+                        <Loader2 size={14} className="shrink-0 animate-spin" />
+                      ) : a ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- image clé du pré-roll (bucket public)
+                        <img src={a.preview} alt="" className="h-9 w-9 shrink-0 rounded bg-subtle object-contain" />
+                      ) : (
+                        <Upload size={14} className="shrink-0 text-ink-4" />
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-bold text-ink-2">{o === "vertical" ? "Vertical 9:16" : "Horizontal 16:9"}</span>
+                        <span className="block text-ink-4">
+                          {size.width} × {size.height} px · {busy === `preroll:${o}` ? "conversion…" : a ? `${a.duration} s — remplacer` : ".mov alpha"}
+                        </span>
+                      </span>
+                      <input
+                        type="file"
+                        accept=".mov,video/quicktime,.webm"
+                        hidden
+                        disabled={!!busy}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          e.target.value = "";
+                          if (f) void uploadPreroll(o, f);
+                        }}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+              {settings.preroll && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-3">
+                  <span>La vidéo démarre à</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={30}
+                    step={0.1}
+                    value={settings.preroll.revealAt}
+                    onChange={(e) => update({ preroll: { ...settings.preroll!, revealAt: Number(e.target.value) } })}
+                    className={`${input} w-20`}
+                  />
+                  <span>s (moment où le volet commence à s&rsquo;ouvrir)</span>
+                  <button
+                    onClick={() => {
+                      if (confirm("Désactiver le pré-roll ?")) update({ preroll: null });
+                    }}
+                    className="ml-auto text-xs font-semibold text-bad hover:underline"
+                  >
+                    Désactiver
+                  </button>
+                </div>
+              )}
+            </section>
+
             <section>
               <div className={label}>Gabarits intégrés proposés</div>
               <div className="space-y-1.5">
@@ -274,6 +364,22 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
                       >
                         <Trash2 size={14} />
                       </button>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-[160px_1fr]">
+                      <input
+                        value={c.context ?? ""}
+                        onChange={(e) => updateCustom(c.id, { context: e.target.value })}
+                        placeholder="Contexte (ex. R1)"
+                        title="Proposé au moment de filmer : « Je suis sur… R1 »"
+                        className={input}
+                      />
+                      <input
+                        value={c.keywords ?? ""}
+                        onChange={(e) => updateCustom(c.id, { keywords: e.target.value })}
+                        placeholder="Mots-clés de l'événement (ex. Régional 1, R1)"
+                        title="Reconnus dans le titre de l'événement en cours pour choisir ce contexte automatiquement"
+                        className={input}
+                      />
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
                       {(["portrait", "carre"] as const).map((fmt) => (

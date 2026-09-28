@@ -7,9 +7,15 @@ import { uploadEventFiles, uploadStandaloneMedia } from "@/lib/board/eventFiles"
 import { createPublication, listMediaPublications, type MediaPublication } from "@/lib/board/mediaPublications";
 import {
   HABILLAGE_FORMATS,
+  DEFAULT_CROP,
   animationFor,
   availableTemplates,
+  contextFromEventTitle,
+  contextsOf,
   orientationOf,
+  prerollFor,
+  type FreeTitle,
+  type PhotoCrop,
   canvasToFile,
   loadBitmap,
   renderHabillage,
@@ -55,6 +61,12 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   const [bitmap, setBitmap] = useState<ImageBitmap | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [template, setTemplate] = useState<HabillageTemplate>("bandeau");
+  // « Je suis sur… » (R1, Coupe de France…) : filtre les gabarits ; proposé d'après l'événement en cours.
+  const [context, setContext] = useState<string | null>(null);
+  const [title, setTitle] = useState<FreeTitle>({ text: "", x: 0.5, y: 0.2, size: 84, color: "#FFFFFF" });
+  const [crop, setCrop] = useState<PhotoCrop>(DEFAULT_CROP);
+  const [dragMode, setDragMode] = useState<"title" | "crop" | null>(null);
+  const dragStart = useRef<{ x: number; y: number; crop: PhotoCrop } | null>(null);
   const [settings, setSettings] = useState<HabillageSettings>(() => withDefaults(null));
   const [format, setFormat] = useState<HabillageFormat>("portrait");
   const [text, setText] = useState("");
@@ -77,7 +89,9 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   // Vidéo : pas de « Cadre » (il redimensionne la photo), et pas d'habillage au-delà de 90 s ou
   // si le navigateur ne peut pas lire la vidéo (dimensions inconnues).
   const videoHabillage = isVideo && !videoError && !!videoMeta && videoMeta.duration <= VIDEO_HABILLAGE_MAX_SECONDS;
-  const templates = availableTemplates(settings).filter((t) => !isVideo || t.id !== "cadre");
+  const templates = availableTemplates(settings, context).filter((t) => !isVideo || t.id !== "cadre");
+  const contexts = contextsOf(settings);
+  const pre = videoMeta ? prerollFor(settings, orientationOf(videoMeta)) : null;
   // Animation du gabarit (.mov alpha converti) pour l'orientation de la vidéo.
   const anim = videoMeta ? animationFor(settings, template, orientationOf(videoMeta)) : null;
 
@@ -89,21 +103,69 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         setSettings(full);
         const list = availableTemplates(full);
         setTemplate((cur) => (list.some((t) => t.id === cur) ? cur : (list[1]?.id ?? "aucun")));
+        if (!contextsOf(full).length) return;
+        searchEventsForExpense("", new Date().toISOString().slice(0, 10))
+          .then((events) => {
+            const now = Date.now();
+            const current = events
+              .filter((e) => Math.abs(new Date(e.start).getTime() - now) < 8 * 3_600_000)
+              .sort((a, b) => Number(b.solicited) - Number(a.solicited));
+            for (const e of current) {
+              const found = contextFromEventTitle(full, e.title);
+              if (!found) continue;
+              setContext(found);
+              const first = full.custom.find((x) => x.context === found);
+              if (first) setTemplate(`custom:${first.id}`);
+              return;
+            }
+          })
+          .catch(() => undefined);
       })
       .catch(() => undefined);
   }, []);
 
+  /** Choisit un contexte et son premier gabarit dédié. */
+  const chooseContext = (c: string | null) => {
+    setContext(c);
+    const first = settings.custom.find((x) => c && x.context === c);
+    if (first) setTemplate(`custom:${first.id}`);
+  };
+
+  /** Doigt / souris sur l'aperçu : place le titre, ou fait glisser la photo (recadrage). */
+  const drag = {
+    onPointerDown: (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!dragMode) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      dragStart.current = { x: e.clientX, y: e.clientY, crop };
+      drag.onPointerMove(e);
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!dragMode || !dragStart.current) return;
+      const r = e.currentTarget.getBoundingClientRect();
+      const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+      if (dragMode === "title") {
+        setTitle((t) => ({ ...t, x: clamp((e.clientX - r.left) / r.width, 0.05, 0.95), y: clamp((e.clientY - r.top) / r.height, 0.04, 0.96) }));
+      } else {
+        const st = dragStart.current;
+        setCrop({ ...st.crop, dx: clamp(st.crop.dx + ((e.clientX - st.x) / r.width) * 2, -1, 1), dy: clamp(st.crop.dy + ((e.clientY - st.y) / r.height) * 2, -1, 1) });
+      }
+    },
+    onPointerUp: () => {
+      dragStart.current = null;
+    },
+  };
+
   // Aperçu de l'habillage, redessiné à chaque changement.
   useEffect(() => {
     if (step !== "habillage" || !bitmap || !canvasRef.current) return;
-    void renderHabillage(canvasRef.current, bitmap, { template, format, text, settings });
-  }, [step, bitmap, template, format, text, settings]);
+    void renderHabillage(canvasRef.current, bitmap, { template, format, text, settings, crop, title });
+  }, [step, bitmap, template, format, text, settings, crop, title]);
 
   // Aperçu du calque par-dessus la vidéo.
   useEffect(() => {
     if (step !== "habillage" || !videoHabillage || !videoMeta || !overlayRef.current) return;
-    void renderHabillage(overlayRef.current, null, { template, format, text, settings, overlaySize: overlaySizeFor(videoMeta), skipOverlayImage: !!anim });
-  }, [step, videoHabillage, videoMeta, template, format, text, settings, anim]);
+    void renderHabillage(overlayRef.current, null, { template, format, text, settings, overlaySize: overlaySizeFor(videoMeta), skipOverlayImage: !!anim, title });
+  }, [step, videoHabillage, videoMeta, template, format, text, settings, anim, title]);
 
   useEffect(
     () => () => {
@@ -151,7 +213,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
    */
   const habillerVideo = async (video: File, meta: { width: number; height: number }): Promise<File> => {
     const canvas = document.createElement("canvas");
-    await renderHabillage(canvas, null, { template, format, text, settings, overlaySize: overlaySizeFor(meta), skipOverlayImage: !!anim });
+    await renderHabillage(canvas, null, { template, format, text, settings, overlaySize: overlaySizeFor(meta), skipOverlayImage: !!anim, title });
     const overlay = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Calque impossible."))), "image/png"));
 
     setProgress("Envoi de la vidéo pour l'habillage…");
@@ -171,6 +233,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         videoPath: targets.video.path,
         overlayPath: targets.overlay.path,
         animation: anim ? { url: anim.url, mode: anim.mode } : null,
+        preroll: pre ? { url: pre.url, revealAt: pre.revealAt } : null,
       }),
     });
     const body = (await res.json().catch(() => ({}))) as { url?: string; path?: string; error?: string };
@@ -191,10 +254,10 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
       let media = isVideo && !file.type ? new File([file], file.name, { type: /\.mov$/i.test(file.name) ? "video/quicktime" : "video/mp4" }) : file;
       if (!isVideo && bitmap) {
         const canvas = document.createElement("canvas");
-        await renderHabillage(canvas, bitmap, { template, format, text, settings });
+        await renderHabillage(canvas, bitmap, { template, format, text, settings, crop, title });
         media = await canvasToFile(canvas, `publication-${Date.now()}.jpg`);
       }
-      if (videoHabillage && videoMeta && template !== "aucun") media = await habillerVideo(media, videoMeta);
+      if (videoHabillage && videoMeta && (template !== "aucun" || !!title.text.trim() || !!pre)) media = await habillerVideo(media, videoMeta);
       setProgress("Envoi du média…");
       const onProgress = (sent: number, total: number) => setProgress(`Envoi du média… ${Math.round((sent / Math.max(total, 1)) * 100)} %`);
       let fileIds: string[] = [];
@@ -314,7 +377,13 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                       // eslint-disable-next-line @next/next/no-img-element -- image distante du bucket, superposée à la vidéo
                       <img src={anim.preview} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-cover" />
                     )}
-                    {videoHabillage && template !== "aucun" && <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />}
+                    {videoHabillage && (
+                      <canvas
+                        ref={overlayRef}
+                        {...drag}
+                        className={`absolute inset-0 h-full w-full ${dragMode === "title" ? "cursor-move touch-none" : "pointer-events-none"}`}
+                      />
+                    )}
                   </div>
                 )}
                 {videoError && (
@@ -327,6 +396,21 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                 )}
                 {videoHabillage ? (
                   <div>
+                {contexts.length > 0 && (
+                  <div className="mb-3">
+                    <div className={label}>Je suis sur</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button onClick={() => chooseContext(null)} className={chip(!context)}>
+                        Général
+                      </button>
+                      {contexts.map((c) => (
+                        <button key={c} onClick={() => chooseContext(c)} className={chip(context === c)}>
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                     <div className={label}>Habillage</div>
                     <div className="flex flex-wrap gap-1.5">
                       {templates.map((t) => (
@@ -339,7 +423,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                       {anim
                         ? `Habillage animé (${anim.mode === "loop" ? "en boucle" : `${anim.duration} s au début`}) : l'aperçu montre une image clé.`
                         : "L'habillage est incrusté dans la vidéo au moment de publier."}{" "}
-                      Traitement : 1 à 3 minutes.
+                      {pre ? `Pré-roll ajouté au début (${pre.duration} s). ` : ""}Traitement : 1 à 3 minutes.
                     </p>
                   </div>
                 ) : (
@@ -352,8 +436,23 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
               </>
             ) : (
               <>
-                <canvas ref={canvasRef} className="w-full rounded-panel bg-subtle shadow-card" />
+                <canvas ref={canvasRef} {...drag} className={`w-full rounded-panel bg-subtle shadow-card ${dragMode ? "cursor-move touch-none" : ""}`} />
                 <div>
+                {contexts.length > 0 && (
+                  <div className="mb-3">
+                    <div className={label}>Je suis sur</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button onClick={() => chooseContext(null)} className={chip(!context)}>
+                        Général
+                      </button>
+                      {contexts.map((c) => (
+                        <button key={c} onClick={() => chooseContext(c)} className={chip(context === c)}>
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                   <div className={label}>Habillage</div>
                   <div className="flex flex-wrap gap-1.5">
                     {templates.map((t) => (
@@ -382,6 +481,51 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
               placeholder={isVideo && !videoHabillage ? "Texte de la publication" : "Texte de l'habillage (ex. « Rentrée de l'arbitrage 2026 »)"}
               className="w-full rounded-btn border border-line bg-card px-3 py-2 text-sm outline-none focus:border-link"
             />
+            {(isVideo ? videoHabillage : true) && (
+              <div className="space-y-3 rounded-panel border border-line p-3">
+                <div>
+                  <div className={label}>Titre (déplaçable)</div>
+                  <input
+                    value={title.text}
+                    onChange={(e) => setTitle((t) => ({ ...t, text: e.target.value }))}
+                    placeholder="Ex. « Victoire 2-1 ! »"
+                    className="w-full rounded-btn border border-line bg-card px-3 py-2 text-sm outline-none focus:border-link"
+                  />
+                </div>
+                {title.text.trim() && (
+                  <>
+                    <div className="flex items-center gap-2 text-xs text-ink-3">
+                      <span className="w-12 shrink-0">Taille</span>
+                      <input type="range" min={32} max={220} step={2} value={title.size} onChange={(e) => setTitle((t) => ({ ...t, size: Number(e.target.value) }))} className="flex-1" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {["#FFFFFF", "#E1141B", "#0B1D3C", "#FFD400", "#000000"].map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => setTitle((t) => ({ ...t, color: c }))}
+                          aria-label={`Couleur ${c}`}
+                          className={`h-7 w-7 rounded-full border-2 ${title.color === c ? "border-link" : "border-line"}`}
+                          style={{ background: c }}
+                        />
+                      ))}
+                      <button onClick={() => setDragMode((m) => (m === "title" ? null : "title"))} className={`ml-auto ${chip(dragMode === "title")}`}>
+                        {dragMode === "title" ? "Terminer" : "Placer le titre"}
+                      </button>
+                    </div>
+                  </>
+                )}
+                {!isVideo && (
+                  <div className="flex items-center gap-2 text-xs text-ink-3">
+                    <span className="w-12 shrink-0">Zoom</span>
+                    <input type="range" min={1} max={3} step={0.05} value={crop.zoom} onChange={(e) => setCrop((c) => ({ ...c, zoom: Number(e.target.value) }))} className="flex-1" />
+                    <button onClick={() => setDragMode((m) => (m === "crop" ? null : "crop"))} className={chip(dragMode === "crop")}>
+                      {dragMode === "crop" ? "Terminer" : "Recadrer"}
+                    </button>
+                  </div>
+                )}
+                {dragMode && <p className="text-[11px] text-link">Faites glisser sur l&rsquo;aperçu pour {dragMode === "title" ? "placer le titre" : "déplacer la photo"}.</p>}
+              </div>
+            )}
           </div>
         )}
 

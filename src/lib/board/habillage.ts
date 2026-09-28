@@ -20,7 +20,24 @@ export type CustomHabillage = {
   animations?: Partial<Record<VideoOrientation, HabillageAnimation>>;
   /** Animation jouée une fois au début de la vidéo, ou en boucle. */
   animationMode?: "once" | "loop";
+  /** Contexte d'usage (« R1 », « Coupe de France »…) proposé au moment de filmer. */
+  context?: string;
+  /** Mots-clés (séparés par des virgules) reconnus dans le titre de l'événement en cours. */
+  keywords?: string;
 };
+
+/** Pré-roll : transition (volet, fond, logo) jouée au début de chaque vidéo publiée. */
+export type Preroll = {
+  animations: Partial<Record<VideoOrientation, HabillageAnimation>>;
+  /** Instant (s) où la vidéo démarre sous le volet qui s'ouvre. */
+  revealAt: number;
+};
+
+/** Titre libre posé sur la photo ou la vidéo : position (fraction de la largeur / hauteur), taille, couleur. */
+export type FreeTitle = { text: string; x: number; y: number; size: number; color: string };
+/** Cadrage de la photo : zoom (≥ 1) et décalage (-1 à 1) dans la marge disponible. */
+export type PhotoCrop = { zoom: number; dx: number; dy: number };
+export const DEFAULT_CROP: PhotoCrop = { zoom: 1, dx: 0, dy: 0 };
 
 export type VideoOrientation = "vertical" | "horizontal";
 export type HabillageAnimation = { url: string; preview: string; duration: number };
@@ -49,6 +66,7 @@ export type HabillageSettings = {
   signature: string;
   builtins: Record<Exclude<BuiltinTemplate, "aucun">, boolean>;
   custom: CustomHabillage[];
+  preroll?: Preroll | null;
 };
 
 export const DEFAULT_HABILLAGE_SETTINGS: HabillageSettings = {
@@ -80,13 +98,49 @@ export const BUILTIN_TEMPLATES: { id: Exclude<BuiltinTemplate, "aucun">; label: 
   { id: "titre", label: "Titre", desc: "Gros titre en capitales en haut, soulignement rouge" },
 ];
 
-/** Gabarits proposés à l'utilisateur, selon les réglages de l'administrateur. */
-export function availableTemplates(settings: HabillageSettings): { id: HabillageTemplate; label: string }[] {
+/**
+ * Gabarits proposés à l'utilisateur, selon les réglages de l'administrateur. Avec un contexte
+ * (« R1 »…) : ses gabarits d'abord, puis les gabarits génériques (sans contexte).
+ */
+export function availableTemplates(settings: HabillageSettings, context: string | null = null): { id: HabillageTemplate; label: string }[] {
+  const custom = settings.custom
+    .filter((c) => !context || !c.context || c.context === context)
+    .sort((a, b) => Number(!!b.context && b.context === context) - Number(!!a.context && a.context === context));
   return [
     { id: "aucun", label: "Sans" },
+    ...custom.map((c) => ({ id: `custom:${c.id}` as HabillageTemplate, label: c.name })),
     ...BUILTIN_TEMPLATES.filter((t) => settings.builtins[t.id]).map((t) => ({ id: t.id as HabillageTemplate, label: t.label })),
-    ...settings.custom.map((c) => ({ id: `custom:${c.id}` as HabillageTemplate, label: c.name })),
   ];
+}
+
+/** Contextes définis par l'administrateur (R1, Coupe de France…). */
+export function contextsOf(settings: HabillageSettings): string[] {
+  return [...new Set(settings.custom.map((c) => c.context?.trim()).filter((c): c is string => !!c))];
+}
+
+const fold = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Contexte reconnu dans le titre d'un événement (contexte lui-même ou mots-clés du gabarit). */
+export function contextFromEventTitle(settings: HabillageSettings, title: string): string | null {
+  const t = ` ${fold(title)} `;
+  for (const c of settings.custom) {
+    if (!c.context) continue;
+    const words = [c.context, ...(c.keywords ?? "").split(",")].map((w) => fold(w.trim())).filter(Boolean);
+    if (words.some((w) => new RegExp(`(^|[^a-z0-9])${escapeRe(w)}([^a-z0-9]|$)`).test(t))) return c.context;
+  }
+  return null;
+}
+
+/** Pré-roll pour une vidéo de cette orientation (ou l'autre, à défaut). */
+export function prerollFor(settings: HabillageSettings, orientation: VideoOrientation) {
+  const p = settings.preroll;
+  const anim = p?.animations?.[orientation] ?? p?.animations?.[orientation === "vertical" ? "horizontal" : "vertical"];
+  return anim ? { ...anim, revealAt: Math.min(Math.max(p?.revealAt ?? anim.duration / 2, 0), anim.duration) } : null;
 }
 
 export const HABILLAGE_FORMATS: { id: HabillageFormat; label: string }[] = [
@@ -165,11 +219,22 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, 
   return { size: min, lines: wrap(ctx, text, maxWidth, maxLines) };
 }
 
-function drawCover(ctx: CanvasRenderingContext2D, img: CanvasImageSource & { width: number; height: number }, x: number, y: number, w: number, h: number) {
-  const scale = Math.max(w / img.width, h / img.height);
+function drawCover(
+  ctx: CanvasRenderingContext2D,
+  img: CanvasImageSource & { width: number; height: number },
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  crop: PhotoCrop = DEFAULT_CROP
+) {
+  const scale = Math.max(w / img.width, h / img.height) * Math.max(1, crop.zoom);
   const sw = w / scale;
   const sh = h / scale;
-  ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, x, y, w, h);
+  const clamp = (v: number) => Math.min(1, Math.max(-1, v));
+  const sx = ((img.width - sw) / 2) * (1 - clamp(crop.dx));
+  const sy = ((img.height - sh) / 2) * (1 - clamp(crop.dy));
+  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
 }
 
 /** Logo LGEF à sa hauteur réglée, proportions d'origine respectées ; renvoie sa largeur. */
@@ -191,23 +256,54 @@ function signature(ctx: CanvasRenderingContext2D, text: string, x: number, y: nu
   ctx.textBaseline = "alphabetic";
 }
 
+type RenderOptions = {
+  template: HabillageTemplate;
+  format: HabillageFormat;
+  text: string;
+  settings?: HabillageSettings;
+  /** Calque vidéo : dimensions de la vidéo finale (1080 px de large). */
+  overlaySize?: { width: number; height: number };
+  /** Vidéo avec animation : le calque PNG du gabarit n'est pas figé par-dessus (l'animation le remplace). */
+  skipOverlayImage?: boolean;
+  /** Cadrage de la photo (zoom, position). */
+  crop?: PhotoCrop;
+  /** Titre libre, placé et dimensionné par l'utilisateur, dessiné par-dessus le gabarit. */
+  title?: FreeTitle | null;
+};
+
 /**
  * Dessine l'habillage sur `canvas` (l'aperçu et l'export partagent le même rendu). Sans image
  * (`img` nul) et avec `overlaySize` : calque seul sur fond transparent, à incruster dans une vidéo.
  */
-export async function renderHabillage(
+export async function renderHabillage(canvas: HTMLCanvasElement, img: (CanvasImageSource & { width: number; height: number }) | null, opts: RenderOptions) {
+  await renderTemplate(canvas, img, opts);
+  const t = opts.title;
+  if (!t?.text.trim()) return;
+  const ctx = canvas.getContext("2d")!;
+  const W = canvas.width;
+  const H = canvas.height;
+  // Taille exprimée pour 1080 px de large ; texte centré sur (x, y), 90 % de la largeur au plus.
+  const size = Math.round(t.size * (W / WIDTH));
+  ctx.font = `800 ${size}px ${uiFont()}`;
+  const lines = wrap(ctx, t.text.trim(), W * 0.9, 4);
+  const lineH = size * 1.12;
+  const top = t.y * H - ((lines.length - 1) * lineH) / 2;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.shadowColor = "rgba(0,0,0,0.55)";
+  ctx.shadowBlur = size * 0.25;
+  ctx.shadowOffsetY = size * 0.06;
+  ctx.fillStyle = t.color;
+  lines.forEach((l, i) => ctx.fillText(l, t.x * W, top + i * lineH));
+  ctx.shadowColor = "transparent";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
+
+async function renderTemplate(
   canvas: HTMLCanvasElement,
   img: (CanvasImageSource & { width: number; height: number }) | null,
-  opts: {
-    template: HabillageTemplate;
-    format: HabillageFormat;
-    text: string;
-    settings?: HabillageSettings;
-    /** Calque vidéo : dimensions de la vidéo finale (1080 px de large). */
-    overlaySize?: { width: number; height: number };
-    /** Vidéo avec animation : le calque PNG du gabarit n'est pas figé par-dessus (l'animation le remplace). */
-    skipOverlayImage?: boolean;
-  }
+  opts: RenderOptions
 ) {
   const settings = opts.settings ?? DEFAULT_HABILLAGE_SETTINGS;
   const { width: W, height: H } = opts.overlaySize ?? outputSize(opts.format, img?.width ?? WIDTH, img?.height ?? 1350);
@@ -216,7 +312,7 @@ export async function renderHabillage(
   const ctx = canvas.getContext("2d")!;
   ctx.clearRect(0, 0, W, H);
   const photo = (x: number, y: number, w: number, h: number) => {
-    if (img) drawCover(ctx, img, x, y, w, h);
+    if (img) drawCover(ctx, img, x, y, w, h, opts.crop);
   };
   const logo = await loadImage("/lgef-logo.png");
   const text = opts.text.trim();
