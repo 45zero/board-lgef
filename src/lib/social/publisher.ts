@@ -437,7 +437,14 @@ export async function deletePublicationComment(client: Client, key: NetworkKey, 
     return;
   }
   const { account } = metaTarget(key);
-  await deleteComment(commentId, account.accessToken);
+  try {
+    await deleteComment(commentId, account.accessToken);
+  } catch (e) {
+    // Déjà retiré sur la plateforme (par son auteur, le filtre anti-spam d'Instagram, ou à la main) :
+    // le but est atteint. Meta renvoie alors « does not exist, cannot be loaded… » (code 100).
+    if (e instanceof Error && /does not exist|not found|cannot be loaded/i.test(e.message)) return;
+    throw e;
+  }
 }
 
 /** Répond à un commentaire au nom de la page / du compte (YouTube non géré : Edge Function sans cette action). */
