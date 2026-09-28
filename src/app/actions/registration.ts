@@ -193,34 +193,58 @@ export async function listCampaignRecipients(campaignId: string) {
   );
 }
 
+/** Recherche dans tous les annuaires du site (club, n°, nom, prénom, email, ville) — fiches joignables uniquement. */
 export async function searchClubContacts(query: string) {
   const { supabase } = await requireStaff();
+  const q = query.trim().replace(/[%,()*]/g, " ");
+  if (q.length < 2) return [];
   const { data, error } = await supabase
-    .from("quiz_annuaire_contacts")
-    .select("id, name, email, club")
-    .not("email", "is", null)
-    .ilike("club", `%${query}%`)
-    .limit(30);
+    .from("registration_contact_list_members")
+    .select("id, name, first_name, last_name, email, phone, club, club_number, city")
+    .or(["club", "club_number", "name", "first_name", "last_name", "email", "city"].map((c) => `${c}.ilike.%${q}%`).join(","))
+    .order("club", { ascending: true, nullsFirst: false })
+    .limit(80);
   if (error) throw new Error(error.message);
-  return data;
+  // Même club / même personne présents dans plusieurs annuaires : une seule proposition.
+  const seen = new Set<string>();
+  return (data ?? [])
+    .filter((m) => {
+      if (!m.email && !m.phone) return false;
+      const key = m.club_number ? `club:${m.club_number}` : `pers:${m.email ?? m.phone}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 30);
 }
 
-export async function addRecipientsFromContacts(
-  campaignId: string,
-  contacts: { id: string; name: string; email: string; club: string | null }[]
-) {
+/** Ajoute des fiches d'annuaire comme destinataires (copie complète : prénom, nom, mobile, email perso…), sans doublon. */
+export async function addRecipientsFromMembers(campaignId: string, memberIds: string[]) {
   const { supabase } = await requireStaff();
-  const { error } = await supabase.from("event_registration_recipients").insert(
-    contacts.map((c) => ({
-      campaign_id: campaignId,
-      contact_id: c.id,
-      name: c.name,
-      email: c.email,
-      club: c.club,
-      source: "invited" as const,
-    }))
-  );
+  const { data: members, error } = await supabase
+    .from("registration_contact_list_members")
+    .select("name, email, email_secondary, club, club_number, civility, first_name, last_name, phone")
+    .in("id", memberIds);
   if (error) throw new Error(error.message);
+  const { data: existing } = await supabase
+    .from("event_registration_recipients")
+    .select("email, phone")
+    .eq("campaign_id", campaignId)
+    .or(
+      [
+        ...(members ?? []).filter((m) => m.email).map((m) => `email.eq.${m.email}`),
+        ...(members ?? []).filter((m) => m.phone).map((m) => `phone.eq.${m.phone}`),
+      ].join(",") || "id.is.null"
+    );
+  const emails = new Set((existing ?? []).map((e) => e.email).filter(Boolean));
+  const phones = new Set((existing ?? []).map((e) => e.phone).filter(Boolean));
+  const toInsert = (members ?? []).filter((m) => (m.email ? !emails.has(m.email) : !!m.phone && !phones.has(m.phone)));
+  if (toInsert.length === 0) return { added: 0 };
+  const { error: insertError } = await supabase
+    .from("event_registration_recipients")
+    .insert(toInsert.map((m) => ({ campaign_id: campaignId, ...m, source: "invited" as const })));
+  if (insertError) throw new Error(insertError.message);
+  return { added: toInsert.length };
 }
 
 /** Ajout manuel : un email ou un mobile suffit (mobile seul = invitation WhatsApp uniquement). */

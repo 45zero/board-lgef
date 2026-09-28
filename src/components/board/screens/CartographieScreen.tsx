@@ -124,8 +124,10 @@ export function CartographieScreen() {
     mapRef.current = new google.maps.Map(mapDivRef.current, {
       center: { lat: 48.7, lng: 5.8 },
       zoom: 7,
-      mapTypeControl: false,
-      streetViewControl: false,
+      // Plan / Satellite ; le bonhomme Street View reste disponible pour explorer autour d'un club.
+      mapTypeControl: true,
+      mapTypeControlOptions: { mapTypeIds: ["roadmap", "hybrid"], position: google.maps.ControlPosition.TOP_RIGHT },
+      streetViewControl: true,
       fullscreenControl: true,
       clickableIcons: false,
       gestureHandling: "greedy",

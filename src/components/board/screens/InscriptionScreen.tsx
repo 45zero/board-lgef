@@ -49,7 +49,7 @@ import {
   updateCampaignBlockContent,
   listCampaignRecipients,
   searchClubContacts,
-  addRecipientsFromContacts,
+  addRecipientsFromMembers,
   addManualRecipient,
   removeRecipient,
   removeRecipients,
@@ -404,7 +404,7 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
   const [members, setMembers] = useState<ContactListMember[]>([]);
   const [newListName, setNewListName] = useState("");
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<{ id: string; name: string; email: string | null; club: string | null }[]>([]);
+  const [results, setResults] = useState<Awaited<ReturnType<typeof searchClubContacts>>>([]);
   const [manualName, setManualName] = useState("");
   const [manualEmail, setManualEmail] = useState("");
   const [manualClub, setManualClub] = useState("");
@@ -551,7 +551,7 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && runSearch()}
-                  placeholder="Rechercher un club dans l'annuaire fédéral…"
+                  placeholder="Rechercher dans les autres annuaires…"
                   className="flex-1 rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
                 />
                 <button onClick={runSearch} className="rounded-btn border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-2">
@@ -562,13 +562,19 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
                 <div className="mb-3 max-h-28 space-y-1 overflow-y-auto rounded-btn border border-line p-1.5">
                   {results.map((r) => (
                     <div key={r.id} className="flex items-center justify-between gap-2 rounded-btn px-2 py-1 hover:bg-hover">
-                      <span className="text-xs text-ink-2">
-                        {r.name} {r.club ? `· ${r.club}` : ""} · {r.email}
+                      <span className="min-w-0 truncate text-xs text-ink-2">
+                        <span className="font-semibold text-ink">{r.club || personName(r)}</span>
+                        {r.club && personName(r) && r.club !== personName(r) ? ` · ${personName(r)}` : ""}
+                        <span className="text-ink-4"> · {[r.email, formatFrPhone(r.phone)].filter(Boolean).join(" · ")}</span>
                       </span>
                       <button
                         onClick={async () => {
-                          if (!r.email) return;
-                          await addContactListMember(selected.id, { name: r.name, email: r.email, club: r.club ?? undefined });
+                          await addContactListMember(selected.id, {
+                            name: personName(r) || r.name,
+                            email: r.email,
+                            phone: r.phone ?? undefined,
+                            club: r.club ?? undefined,
+                          });
                           await refetchMembers(selected);
                           await refetchLists();
                           setResults((prev) => prev.filter((x) => x.id !== r.id));
@@ -653,7 +659,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   const [sendResult, setSendResult] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<{ id: string; name: string; email: string | null; club: string | null }[]>([]);
+  const [results, setResults] = useState<Awaited<ReturnType<typeof searchClubContacts>>>([]);
   const [manualName, setManualName] = useState("");
   const [manualEmail, setManualEmail] = useState("");
   const [manualClub, setManualClub] = useState("");
@@ -670,6 +676,8 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null); // id de ligne ou "bulk" pendant un envoi/suppression
   const [listMsg, setListMsg] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<"all" | "yes" | "no" | "waiting" | "unsent">("all");
+  const [listQuery, setListQuery] = useState("");
   const [qrOpen, setQrOpen] = useState(false);
 
   const refetch = async (c: Campaign) => {
@@ -732,9 +740,8 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
     setResults(await searchClubContacts(query.trim()));
   };
 
-  const addContact = async (c: { id: string; name: string; email: string | null; club: string | null }) => {
-    if (!c.email) return;
-    await addRecipientsFromContacts(campaign.id, [{ id: c.id, name: c.name, email: c.email, club: c.club }]);
+  const addContact = async (c: { id: string }) => {
+    await addRecipientsFromMembers(campaign.id, [c.id]);
     await refetch(campaign);
     setResults((prev) => prev.filter((r) => r.id !== c.id));
   };
@@ -771,6 +778,33 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   };
 
   const waPending = recipients.filter((r) => r.phone?.startsWith("+") && !r.whatsapp_sent_at).length;
+
+  const STATUS_FILTERS = [
+    { id: "all", label: "Tous", match: () => true },
+    { id: "yes", label: "Participe", match: (r: Recipient) => r.response === "yes" },
+    { id: "no", label: "Ne participe pas", match: (r: Recipient) => r.response === "no" },
+    { id: "waiting", label: "Sans réponse", match: (r: Recipient) => !r.response && (!!r.sent_at || !!r.whatsapp_sent_at) },
+    { id: "unsent", label: "Pas encore envoyé", match: (r: Recipient) => !r.response && !r.sent_at && !r.whatsapp_sent_at },
+  ] as const;
+  const lq = listQuery
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const statusMatch = STATUS_FILTERS.find((f) => f.id === statusFilter)!.match;
+  const visibleRecipients = recipients.filter(
+    (r) =>
+      statusMatch(r) &&
+      (!lq ||
+        [r.name, r.first_name, r.last_name, r.club, r.club_number, r.email, r.email_secondary, r.phone]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .includes(lq))
+  );
+  const allVisibleSelected = visibleRecipients.length > 0 && visibleRecipients.every((r) => selected.has(r.id));
 
   const toggleSelected = (id: string) =>
     setSelected((prev) => {
@@ -1061,7 +1095,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && runSearch()}
-                placeholder="Rechercher un club dans l'annuaire…"
+                placeholder="Rechercher dans les annuaires : club, n°, nom, ville, email…"
                 className="w-full text-sm outline-none"
               />
             </div>
@@ -1073,8 +1107,10 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
             <div className="mb-3 max-h-40 space-y-1 overflow-y-auto rounded-btn border border-line p-2">
               {results.map((r) => (
                 <div key={r.id} className="flex items-center justify-between gap-2 rounded-btn px-2 py-1.5 hover:bg-hover">
-                  <span className="text-xs text-ink-2">
-                    {r.name} {r.club ? `· ${r.club}` : ""} · {r.email}
+                  <span className="min-w-0 truncate text-xs text-ink-2">
+                    <span className="font-semibold text-ink">{r.club || personName(r)}</span>
+                    {r.club && personName(r) && r.club !== personName(r) ? ` · ${personName(r)}` : ""}
+                    <span className="text-ink-4"> · {[r.email, formatFrPhone(r.phone)].filter(Boolean).join(" · ")}</span>
                   </span>
                   <button onClick={() => addContact(r)} className="text-xs font-semibold text-link hover:underline">
                     Ajouter
@@ -1095,20 +1131,62 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
           </div>
 
           {recipients.length > 0 && (
+            <div className="mb-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-1">
+                {STATUS_FILTERS.map((f) => {
+                  const count = recipients.filter(f.match).length;
+                  const active = statusFilter === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => setStatusFilter(f.id)}
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                        active ? "border-navy bg-navy text-white" : "border-line text-ink-3 hover:bg-hover"
+                      }`}
+                    >
+                      {f.label} <span className={active ? "text-white/70" : "text-ink-4"}>{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-2 rounded-btn border border-line px-2.5 py-1.5">
+                <Search size={12} className="shrink-0 text-ink-4" />
+                <input
+                  value={listQuery}
+                  onChange={(e) => setListQuery(e.target.value)}
+                  placeholder="Filtrer la liste : club, nom, email…"
+                  className="w-full bg-transparent text-xs outline-none"
+                />
+                {listQuery && (
+                  <button onClick={() => setListQuery("")} className="text-ink-4 hover:text-ink">
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {recipients.length > 0 && (
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
               <label className="flex cursor-pointer items-center gap-2 font-semibold text-ink-3">
                 <input
                   type="checkbox"
-                  checked={selected.size > 0 && selected.size === recipients.length}
+                  checked={allVisibleSelected}
                   ref={(el) => {
-                    if (el) el.indeterminate = selected.size > 0 && selected.size < recipients.length;
+                    if (el) el.indeterminate = selected.size > 0 && !allVisibleSelected;
                   }}
                   onChange={() =>
-                    setSelected(selected.size === recipients.length ? new Set() : new Set(recipients.map((r) => r.id)))
+                    setSelected((prev) => {
+                      const next = new Set(prev);
+                      for (const r of visibleRecipients) {
+                        if (allVisibleSelected) next.delete(r.id);
+                        else next.add(r.id);
+                      }
+                      return next;
+                    })
                   }
                   className="h-3.5 w-3.5 accent-[var(--navy)]"
                 />
-                {selected.size > 0 ? `${selected.size} sélectionné(s)` : `Tout sélectionner (${recipients.length})`}
+                {selected.size > 0 ? `${selected.size} sélectionné(s)` : `Tout sélectionner (${visibleRecipients.length})`}
               </label>
               {selected.size > 0 && (
                 <>
@@ -1150,7 +1228,10 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
 
           <div className="divide-y divide-line rounded-btn border border-line">
             {recipients.length === 0 && <p className="p-3 text-xs italic text-ink-4">Aucun destinataire pour l&rsquo;instant.</p>}
-            {recipients.map((r) => (
+            {recipients.length > 0 && visibleRecipients.length === 0 && (
+              <p className="p-3 text-xs italic text-ink-4">Aucun destinataire ne correspond au filtre.</p>
+            )}
+            {visibleRecipients.slice(0, 500).map((r) => (
               <div key={r.id} className={`flex items-center gap-3 px-3 py-2 ${selected.has(r.id) ? "bg-hover" : ""}`}>
                 <input
                   type="checkbox"
@@ -1211,6 +1292,11 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
                 </button>
               </div>
             ))}
+            {visibleRecipients.length > 500 && (
+              <p className="p-3 text-center text-[10px] text-ink-4">
+                {visibleRecipients.length - 500} autre(s) — utilise les filtres ou la recherche pour les afficher.
+              </p>
+            )}
           </div>
         </div>
       </div>
