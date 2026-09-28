@@ -171,7 +171,7 @@ function Habillages() {
         >
           <Settings2 size={22} className="text-navy" />
           <span className="text-sm font-bold text-ink">Réglages généraux</span>
-          <span className="text-[11px] text-ink-4">Logo, texte, signature, gabarits intégrés, pré-roll par défaut</span>
+          <span className="text-[11px] text-ink-4">Logo, texte, signature, gabarits intégrés</span>
         </button>
       </div>
       {open && <HabillageAdminModal focus={open} onClose={() => setOpen(null)} onSaved={load} />}

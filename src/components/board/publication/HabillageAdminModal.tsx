@@ -349,15 +349,6 @@ export function HabillageAdminModal({
               </div>
             </section>
 
-            <section className="rounded-panel border border-line p-3">
-              <div className={label}>Pré-roll général (vidéos sans compétition)</div>
-              <p className="mb-2 text-xs text-ink-3">
-                Transition de 1 à 2 s en .mov avec couche alpha : l&rsquo;écran démarre couvert (fond, logo), puis le volet s&rsquo;ouvre et découvre la
-                vidéo. Chaque gabarit peut avoir le sien (compétition) ; celui-ci sert à défaut.
-              </p>
-              {prerollSlots(settings.preroll, (p) => update({ preroll: p }))}
-            </section>
-
             <section>
               <div className={label}>Gabarits intégrés proposés</div>
               <div className="space-y-1.5">
@@ -522,7 +513,10 @@ export function HabillageAdminModal({
                       </div>
                     </div>
                     <div className="rounded-btn bg-subtle/60 p-2">
-                      <div className="mb-1.5 text-xs font-bold text-ink-2">Pré-roll de ce gabarit (volet avant la vidéo)</div>
+                      <div className="text-xs font-bold text-ink-2">Pré-roll de cet environnement (volet avant la vidéo)</div>
+                      <p className="mb-1.5 text-[11px] text-ink-4">
+                        1 à 2 s en .mov avec couche alpha : l&rsquo;écran démarre couvert (fond, logo), puis le volet s&rsquo;ouvre et découvre la vidéo.
+                      </p>
                       {prerollSlots(c.preroll, (p) => updateCustom(c.id, { preroll: p }), c.id)}
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-ink-3">

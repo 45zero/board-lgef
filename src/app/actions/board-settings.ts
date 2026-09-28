@@ -80,14 +80,8 @@ export async function saveHabillageSettings(settings: HabillageSettings) {
     textMax: clamp(settings.textMax, 28, 120),
     signature: String(settings.signature ?? "").slice(0, 80),
     builtins: { bandeau: !!settings.builtins?.bandeau, cadre: !!settings.builtins?.cadre, titre: !!settings.builtins?.titre },
-    preroll: settings.preroll
-      ? {
-          animations: Object.fromEntries(
-            Object.entries(settings.preroll.animations ?? {}).filter(([k, a]) => (k === "vertical" || k === "horizontal") && isAnim(a))
-          ),
-          revealAt: Math.min(30, Math.max(0, Number(settings.preroll.revealAt) || 0)),
-        }
-      : null,
+    // Pas de pré-roll général : chaque environnement a le sien.
+    preroll: null,
     custom: (settings.custom ?? []).slice(0, 20).map((c) => ({
       id: String(c.id).slice(0, 40),
       name: String(c.name ?? "Habillage").slice(0, 40),
