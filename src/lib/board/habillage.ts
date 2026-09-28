@@ -24,6 +24,8 @@ export type CustomHabillage = {
   context?: string;
   /** Mots-clés (séparés par des virgules) reconnus dans le titre de l'événement en cours. */
   keywords?: string;
+  /** Pré-roll propre à ce gabarit (sa compétition) ; à défaut, le pré-roll général. */
+  preroll?: Preroll | null;
 };
 
 /** Pré-roll : transition (volet, fond, logo) jouée au début de chaque vidéo publiée. */
@@ -136,9 +138,13 @@ export function contextFromEventTitle(settings: HabillageSettings, title: string
   return null;
 }
 
-/** Pré-roll pour une vidéo de cette orientation (ou l'autre, à défaut). */
-export function prerollFor(settings: HabillageSettings, orientation: VideoOrientation) {
-  const p = settings.preroll;
+/**
+ * Pré-roll d'une vidéo : celui du gabarit choisi (sa compétition) s'il en a un, sinon le pré-roll
+ * général ; pour cette orientation, ou l'autre à défaut.
+ */
+export function prerollFor(settings: HabillageSettings, orientation: VideoOrientation, template?: HabillageTemplate) {
+  const own = settings.custom.find((c) => `custom:${c.id}` === template)?.preroll;
+  const p = own && Object.keys(own.animations ?? {}).length ? own : settings.preroll;
   const anim = p?.animations?.[orientation] ?? p?.animations?.[orientation === "vertical" ? "horizontal" : "vertical"];
   return anim ? { ...anim, revealAt: Math.min(Math.max(p?.revealAt ?? anim.duration / 2, 0), anim.duration) } : null;
 }

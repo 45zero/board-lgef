@@ -98,6 +98,12 @@ export async function saveHabillageSettings(settings: HabillageSettings) {
       textColor: /^#[0-9a-fA-F]{6}$/.test(c.textColor) ? c.textColor : "#FFFFFF",
       animationMode: c.animationMode === "loop" ? "loop" : "once",
       context: String(c.context ?? "").trim().slice(0, 40) || undefined,
+      preroll: c.preroll
+        ? {
+            animations: Object.fromEntries(Object.entries(c.preroll.animations ?? {}).filter(([k, a]) => (k === "vertical" || k === "horizontal") && isAnim(a))),
+            revealAt: Math.min(30, Math.max(0, Number(c.preroll.revealAt) || 0)),
+          }
+        : null,
       keywords: String(c.keywords ?? "").slice(0, 200) || undefined,
       animations: Object.fromEntries(
         Object.entries(c.animations ?? {}).filter(

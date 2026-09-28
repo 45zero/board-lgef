@@ -67,6 +67,9 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   const [crop, setCrop] = useState<PhotoCrop>(DEFAULT_CROP);
   const [dragMode, setDragMode] = useState<"title" | "crop" | null>(null);
   const dragStart = useRef<{ x: number; y: number; crop: PhotoCrop } | null>(null);
+  // Pincement à deux doigts sur l'aperçu : taille du titre.
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ dist: number; size: number } | null>(null);
   const [settings, setSettings] = useState<HabillageSettings>(() => withDefaults(null));
   const [format, setFormat] = useState<HabillageFormat>("portrait");
   const [text, setText] = useState("");
@@ -91,7 +94,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   const videoHabillage = isVideo && !videoError && !!videoMeta && videoMeta.duration <= VIDEO_HABILLAGE_MAX_SECONDS;
   const templates = availableTemplates(settings, context).filter((t) => !isVideo || t.id !== "cadre");
   const contexts = contextsOf(settings);
-  const pre = videoMeta ? prerollFor(settings, orientationOf(videoMeta)) : null;
+  const pre = videoMeta ? prerollFor(settings, orientationOf(videoMeta), template) : null;
   // Animation du gabarit (.mov alpha converti) pour l'orientation de la vidéo.
   const anim = videoMeta ? animationFor(settings, template, orientationOf(videoMeta)) : null;
 
@@ -136,10 +139,24 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
     onPointerDown: (e: React.PointerEvent<HTMLCanvasElement>) => {
       if (!dragMode) return;
       e.currentTarget.setPointerCapture(e.pointerId);
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.current.size === 2 && dragMode === "title") {
+        const [a, b] = [...pointers.current.values()];
+        pinch.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), size: title.size };
+        dragStart.current = null;
+        return;
+      }
       dragStart.current = { x: e.clientX, y: e.clientY, crop };
       drag.onPointerMove(e);
     },
     onPointerMove: (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch.current && pointers.current.size === 2) {
+        const [a, b] = [...pointers.current.values()];
+        const ratio = Math.hypot(a.x - b.x, a.y - b.y) / Math.max(pinch.current.dist, 1);
+        setTitle((t) => ({ ...t, size: Math.round(Math.min(220, Math.max(32, pinch.current!.size * ratio))) }));
+        return;
+      }
       if (!dragMode || !dragStart.current) return;
       const r = e.currentTarget.getBoundingClientRect();
       const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
@@ -150,9 +167,12 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         setCrop({ ...st.crop, dx: clamp(st.crop.dx + ((e.clientX - st.x) / r.width) * 2, -1, 1), dy: clamp(st.crop.dy + ((e.clientY - st.y) / r.height) * 2, -1, 1) });
       }
     },
-    onPointerUp: () => {
+    onPointerUp: (e: React.PointerEvent<HTMLCanvasElement>) => {
+      pointers.current.delete(e.pointerId);
+      if (pointers.current.size < 2) pinch.current = null;
       dragStart.current = null;
     },
+    onPointerCancel: (e: React.PointerEvent<HTMLCanvasElement>) => drag.onPointerUp(e),
   };
 
   // Aperçu de l'habillage, redessiné à chaque changement.
@@ -398,7 +418,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                   <div>
                 {contexts.length > 0 && (
                   <div className="mb-3">
-                    <div className={label}>Je suis sur</div>
+                    <div className={label}>Compétition</div>
                     <div className="flex flex-wrap gap-1.5">
                       <button onClick={() => chooseContext(null)} className={chip(!context)}>
                         Général
@@ -440,7 +460,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                 <div>
                 {contexts.length > 0 && (
                   <div className="mb-3">
-                    <div className={label}>Je suis sur</div>
+                    <div className={label}>Compétition</div>
                     <div className="flex flex-wrap gap-1.5">
                       <button onClick={() => chooseContext(null)} className={chip(!context)}>
                         Général
@@ -487,7 +507,12 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                   <div className={label}>Titre (déplaçable)</div>
                   <input
                     value={title.text}
-                    onChange={(e) => setTitle((t) => ({ ...t, text: e.target.value }))}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      // Premier caractère : on passe en mode « placer » — touchez l'aperçu pour poser le titre.
+                      if (!title.text.trim() && v.trim()) setDragMode("title");
+                      setTitle((t) => ({ ...t, text: v }));
+                    }}
                     placeholder="Ex. « Victoire 2-1 ! »"
                     className="w-full rounded-btn border border-line bg-card px-3 py-2 text-sm outline-none focus:border-link"
                   />
@@ -523,7 +548,13 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                     </button>
                   </div>
                 )}
-                {dragMode && <p className="text-[11px] text-link">Faites glisser sur l&rsquo;aperçu pour {dragMode === "title" ? "placer le titre" : "déplacer la photo"}.</p>}
+                {dragMode && (
+                  <p className="text-[11px] text-link">
+                    {dragMode === "title"
+                      ? "Touchez ou faites glisser l'aperçu pour placer le titre ; pincez à deux doigts pour changer sa taille."
+                      : "Faites glisser l'aperçu pour déplacer la photo."}
+                  </p>
+                )}
               </div>
             )}
           </div>

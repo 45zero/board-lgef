@@ -14,6 +14,7 @@ import {
   HABILLAGE_FORMATS,
   HABILLAGE_SIZES,
   HABILLAGE_VIDEO_SIZES,
+  type Preroll,
   type VideoOrientation,
   availableTemplates,
   loadBitmap,
@@ -142,16 +143,20 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
     return { url: body.url, preview: body.preview, duration: body.duration ?? 0 };
   };
 
-  /** Pré-roll (volet) : une animation par orientation. */
-  const uploadPreroll = async (orientation: VideoOrientation, file: File) => {
+  /** Pré-roll (volet) : une animation par orientation, générale ou propre à un gabarit (`customId`). */
+  const uploadPreroll = async (orientation: VideoOrientation, file: File, customId?: string) => {
     setMessage(null);
-    setBusy(`preroll:${orientation}`);
+    setBusy(`preroll:${customId ?? "general"}:${orientation}`);
     try {
       const anim = await convertAnimation(orientation, file);
+      const merge = (prev: Preroll | null | undefined): Preroll => {
+        const base = prev ?? { animations: {}, revealAt: Math.round((anim.duration / 2) * 10) / 10 };
+        return { ...base, animations: { ...base.animations, [orientation]: anim } };
+      };
       setSettings((st) => {
         if (!st) return st;
-        const prev = st.preroll ?? { animations: {}, revealAt: Math.round((anim.duration / 2) * 10) / 10 };
-        return { ...st, preroll: { ...prev, animations: { ...prev.animations, [orientation]: anim } } };
+        if (!customId) return { ...st, preroll: merge(st.preroll) };
+        return { ...st, custom: st.custom.map((x) => (x.id === customId ? { ...x, preroll: merge(x.preroll) } : x)) };
       });
       setMessage({ tone: "ok", text: "Pré-roll prêt. Réglez l'instant d'ouverture du volet, puis enregistrez." });
     } catch (e) {
@@ -184,6 +189,71 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
       setBusy(null);
     }
   };
+
+  /** Emplacements du pré-roll (général ou d'un gabarit) et instant où la vidéo démarre. */
+  const prerollSlots = (value: Preroll | null | undefined, onChange: (p: Preroll | null) => void, customId?: string) => (
+    <>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {(["vertical", "horizontal"] as const).map((o) => {
+          const a = value?.animations?.[o];
+          const size = HABILLAGE_VIDEO_SIZES[o];
+          const key = `preroll:${customId ?? "general"}:${o}`;
+          return (
+            <label key={o} className="flex cursor-pointer items-center gap-2 rounded-btn border border-dashed border-line bg-card px-2.5 py-2 text-xs hover:bg-hover">
+              {busy === key ? (
+                <Loader2 size={14} className="shrink-0 animate-spin" />
+              ) : a ? (
+                // eslint-disable-next-line @next/next/no-img-element -- image clé du pré-roll (bucket public)
+                <img src={a.preview} alt="" className="h-9 w-9 shrink-0 rounded bg-subtle object-contain" />
+              ) : (
+                <Upload size={14} className="shrink-0 text-ink-4" />
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="block font-bold text-ink-2">{o === "vertical" ? "Vertical 9:16" : "Horizontal 16:9"}</span>
+                <span className="block text-ink-4">
+                  {size.width} × {size.height} px · {busy === key ? "conversion…" : a ? `${a.duration} s — remplacer` : ".mov alpha"}
+                </span>
+              </span>
+              <input
+                type="file"
+                accept=".mov,video/quicktime,.webm"
+                hidden
+                disabled={!!busy}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) void uploadPreroll(o, f, customId);
+                }}
+              />
+            </label>
+          );
+        })}
+      </div>
+      {value && Object.keys(value.animations ?? {}).length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-3">
+          <span>La vidéo démarre à</span>
+          <input
+            type="number"
+            min={0}
+            max={30}
+            step={0.1}
+            value={value.revealAt}
+            onChange={(e) => onChange({ ...value, revealAt: Number(e.target.value) })}
+            className={`${input} w-20`}
+          />
+          <span>s (ouverture du volet)</span>
+          <button
+            onClick={() => {
+              if (confirm("Retirer ce pré-roll ?")) onChange(null);
+            }}
+            className="ml-auto text-xs font-semibold text-bad hover:underline"
+          >
+            Retirer
+          </button>
+        </div>
+      )}
+    </>
+  );
 
   const save = async () => {
     setBusy("save");
@@ -245,69 +315,12 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
             </section>
 
             <section className="rounded-panel border border-line p-3">
-              <div className={label}>Pré-roll vidéo (avant chaque vidéo)</div>
+              <div className={label}>Pré-roll général (vidéos sans compétition)</div>
               <p className="mb-2 text-xs text-ink-3">
                 Transition de 1 à 2 s en .mov avec couche alpha : l&rsquo;écran démarre couvert (fond, logo), puis le volet s&rsquo;ouvre et découvre la
-                vidéo. Appliqué à toutes les vidéos publiées depuis le mobile.
+                vidéo. Chaque gabarit peut avoir le sien (compétition) ; celui-ci sert à défaut.
               </p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {(["vertical", "horizontal"] as const).map((o) => {
-                  const a = settings.preroll?.animations?.[o];
-                  const size = HABILLAGE_VIDEO_SIZES[o];
-                  return (
-                    <label key={o} className="flex cursor-pointer items-center gap-2 rounded-btn border border-dashed border-line px-2.5 py-2 text-xs hover:bg-hover">
-                      {busy === `preroll:${o}` ? (
-                        <Loader2 size={14} className="shrink-0 animate-spin" />
-                      ) : a ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- image clé du pré-roll (bucket public)
-                        <img src={a.preview} alt="" className="h-9 w-9 shrink-0 rounded bg-subtle object-contain" />
-                      ) : (
-                        <Upload size={14} className="shrink-0 text-ink-4" />
-                      )}
-                      <span className="min-w-0 flex-1">
-                        <span className="block font-bold text-ink-2">{o === "vertical" ? "Vertical 9:16" : "Horizontal 16:9"}</span>
-                        <span className="block text-ink-4">
-                          {size.width} × {size.height} px · {busy === `preroll:${o}` ? "conversion…" : a ? `${a.duration} s — remplacer` : ".mov alpha"}
-                        </span>
-                      </span>
-                      <input
-                        type="file"
-                        accept=".mov,video/quicktime,.webm"
-                        hidden
-                        disabled={!!busy}
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          e.target.value = "";
-                          if (f) void uploadPreroll(o, f);
-                        }}
-                      />
-                    </label>
-                  );
-                })}
-              </div>
-              {settings.preroll && (
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-3">
-                  <span>La vidéo démarre à</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={30}
-                    step={0.1}
-                    value={settings.preroll.revealAt}
-                    onChange={(e) => update({ preroll: { ...settings.preroll!, revealAt: Number(e.target.value) } })}
-                    className={`${input} w-20`}
-                  />
-                  <span>s (moment où le volet commence à s&rsquo;ouvrir)</span>
-                  <button
-                    onClick={() => {
-                      if (confirm("Désactiver le pré-roll ?")) update({ preroll: null });
-                    }}
-                    className="ml-auto text-xs font-semibold text-bad hover:underline"
-                  >
-                    Désactiver
-                  </button>
-                </div>
-              )}
+              {prerollSlots(settings.preroll, (p) => update({ preroll: p }))}
             </section>
 
             <section>
@@ -457,6 +470,10 @@ export function HabillageAdminModal({ onClose }: { onClose: () => void }) {
                           );
                         })}
                       </div>
+                    </div>
+                    <div className="rounded-btn bg-subtle/60 p-2">
+                      <div className="mb-1.5 text-xs font-bold text-ink-2">Pré-roll de ce gabarit (volet avant la vidéo)</div>
+                      {prerollSlots(c.preroll, (p) => updateCustom(c.id, { preroll: p }), c.id)}
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-ink-3">
                       <span>Texte :</span>

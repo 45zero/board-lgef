@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGoogleAccountById, getValidGoogleAccessToken } from "@/lib/google/accounts";
-import { getBoardDriveAccountId } from "@/app/actions/board-settings";
+import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { verifyMediaStreamToken } from "@/lib/board/mediaStreamToken";
 
 /**
@@ -19,7 +19,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ file
     return NextResponse.json({ error: "Lien invalide ou expiré" }, { status: 403 });
   }
 
-  const boardDriveAccountId = await getBoardDriveAccountId();
+  // Appel sans session (Edge Functions) : la signature fait foi, le réglage est lu en service role
+  // (board_settings n'est lisible que par les utilisateurs connectés).
+  const { data: settings } = await createServiceClient().from("board_settings").select("drive_connected_account_id").eq("id", true).single();
+  const boardDriveAccountId = settings?.drive_connected_account_id ?? null;
   const account = boardDriveAccountId ? await getGoogleAccountById(boardDriveAccountId) : null;
   if (!account) {
     return NextResponse.json({ error: "Aucun Drive de board configuré" }, { status: 404 });
@@ -34,11 +37,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ file
     return NextResponse.json({ error: "Fichier introuvable sur Drive" }, { status: driveRes.status || 502 });
   }
 
-  return new NextResponse(driveRes.body, {
-    status: 200,
-    headers: {
-      "Content-Type": driveRes.headers.get("content-type") ?? "application/octet-stream",
-      "Content-Length": driveRes.headers.get("content-length") ?? "",
-    },
-  });
+  const headers: Record<string, string> = { "Content-Type": driveRes.headers.get("content-type") ?? "application/octet-stream" };
+  const length = driveRes.headers.get("content-length");
+  if (length) headers["Content-Length"] = length;
+  return new NextResponse(driveRes.body, { status: 200, headers });
 }
