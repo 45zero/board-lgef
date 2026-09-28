@@ -58,6 +58,9 @@ import {
 import { shareBoardDriveFile } from "@/app/actions/drive-share";
 import {
   publishSocial,
+  finishInstagram,
+  replySocialComment,
+  editSocialCaption,
   refreshSocialStats,
   getSocialComments,
   deleteSocialComment,
@@ -207,12 +210,17 @@ function threaded(comments: SocialComment[]): SocialComment[] {
   return tops.flatMap((t) => [t, ...comments.filter((c) => c.parentId === t.id)]);
 }
 
-/** Commentaires lus en direct sur la plateforme à l'ouverture (jamais stockés), supprimables depuis le board. */
+/** Commentaires lus en direct sur la plateforme à l'ouverture (jamais stockés) : réponse au nom de la page et suppression depuis le board. */
 function CommentsSection({ publicationId, networkKey, count }: { publicationId: string; networkKey: NetworkKey; count?: number }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [comments, setComments] = useState<SocialComment[] | null>(null);
+  const [replyTo, setReplyTo] = useState<SocialComment | null>(null);
+  const [reply, setReply] = useState("");
+  const [sending, setSending] = useState(false);
+  // YouTube : l'Edge Function youtube-manage n'a pas d'action de réponse.
+  const canReply = networkKey !== "youtube";
 
   const toggle = async () => {
     if (open) return setOpen(false);
@@ -232,6 +240,23 @@ function CommentsSection({ publicationId, networkKey, count }: { publicationId: 
     else setComments((prev) => prev?.filter((c) => c.id !== commentId) ?? null);
   };
 
+  const sendReply = async () => {
+    if (!replyTo || !reply.trim()) return;
+    setSending(true);
+    const res = await replySocialComment(networkKey, { id: replyTo.id, parentId: replyTo.parentId }, reply);
+    setSending(false);
+    if (res.error || !res.id) return setError(res.error ?? "Réponse non envoyée.");
+    setError(null);
+    // Affichée tout de suite sous le fil (Instagram rattache toujours la réponse au commentaire de premier niveau).
+    const parentId = replyTo.parentId ?? replyTo.id;
+    setComments((prev) => [
+      ...(prev ?? []),
+      { id: res.id!, author: networkKey === "instagram" ? "lgefofficiel" : "Page LGEF", text: reply.trim(), createdAt: new Date().toISOString(), parentId },
+    ]);
+    setReply("");
+    setReplyTo(null);
+  };
+
   return (
     <div>
       <button onClick={toggle} className="flex items-center gap-1 text-[11px] font-semibold text-link hover:underline">
@@ -244,20 +269,57 @@ function CommentsSection({ publicationId, networkKey, count }: { publicationId: 
           {error && <p className="text-[11px] text-bad">{error}</p>}
           {comments && comments.length === 0 && !loading && <p className="text-[11px] text-ink-4">Aucun commentaire.</p>}
           {threaded(comments ?? []).map((c) => (
-            <div
-              key={c.id}
-              className={`flex items-start justify-between gap-2 rounded-btn bg-subtle px-2.5 py-1.5 text-[11px] ${c.parentId ? "ml-5" : ""}`}
-            >
-              <span className="min-w-0 text-ink-2">
-                {c.parentId && <span className="text-ink-4">↳ réponse · </span>}
-                <strong className="text-ink">{c.author}</strong>
-                {c.createdAt && <span className="text-ink-4"> · {new Date(c.createdAt).toLocaleDateString("fr-FR")}</span>}
-                <br />
-                {c.text}
-              </span>
-              <button onClick={() => remove(c.id)} title="Supprimer" className="shrink-0 text-ink-4 hover:text-bad">
-                <Trash2 size={12} />
-              </button>
+            <div key={c.id} className={c.parentId ? "ml-5" : ""}>
+              <div className="flex items-start justify-between gap-2 rounded-btn bg-subtle px-2.5 py-1.5 text-[11px]">
+                <span className="min-w-0 text-ink-2">
+                  {c.parentId && <span className="text-ink-4">↳ réponse · </span>}
+                  <strong className="text-ink">{c.author}</strong>
+                  {c.createdAt && <span className="text-ink-4"> · {new Date(c.createdAt).toLocaleDateString("fr-FR")}</span>}
+                  <br />
+                  {c.text}
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  {canReply && (
+                    <button
+                      onClick={() => {
+                        setReplyTo(replyTo?.id === c.id ? null : c);
+                        setReply("");
+                      }}
+                      title="Répondre"
+                      className="font-semibold text-ink-4 hover:text-link"
+                    >
+                      Répondre
+                    </button>
+                  )}
+                  <button onClick={() => remove(c.id)} title="Supprimer" className="text-ink-4 hover:text-bad">
+                    <Trash2 size={12} />
+                  </button>
+                </span>
+              </div>
+              {replyTo?.id === c.id && (
+                <div className="mt-1 flex gap-1.5">
+                  <input
+                    autoFocus
+                    value={reply}
+                    onChange={(e) => setReply(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        sendReply();
+                      }
+                    }}
+                    placeholder={`Répondre à ${c.author}…`}
+                    className="min-w-0 flex-1 rounded-btn border border-line px-2.5 py-1 text-[11px] outline-none"
+                  />
+                  <button
+                    onClick={sendReply}
+                    disabled={sending || !reply.trim()}
+                    className="flex items-center gap-1 rounded-btn bg-navy px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+                  >
+                    <Send size={11} /> {sending ? "…" : "Envoyer"}
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -458,6 +520,92 @@ function FlaggedComments({ rows, onChanged }: { rows: ModerationRow[]; onChanged
 }
 
 /** Une pastille par réseau/page publié, avec vues et commentaires visibles sans clic — cliquer ouvre le détail. */
+/**
+ * Modification du texte d'une publication en ligne : pages Facebook uniquement (l'API Instagram ne
+ * permet pas de changer une légende, et l'Edge Function YouTube n'expose pas cette action).
+ */
+function CaptionEditor({ pub, onChanged }: { pub: MediaPublication; onChanged: () => void }) {
+  const fbKeys = publishedEntries(pub)
+    .map((e) => e.key)
+    .filter((k) => k !== "youtube" && k !== "instagram");
+  const others = publishedEntries(pub).filter((e) => e.key === "youtube" || e.key === "instagram");
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(pub.caption ?? "");
+  const [keys, setKeys] = useState<NetworkKey[]>(fbKeys);
+  const [saving, setSaving] = useState(false);
+
+  if (fbKeys.length === 0) return null;
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => {
+          setText(pub.caption ?? "");
+          setKeys(fbKeys);
+          setOpen(true);
+        }}
+        className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-link hover:underline"
+      >
+        <FileText size={11} /> Modifier le texte
+      </button>
+    );
+  }
+
+  const save = async () => {
+    if (keys.length === 0) return;
+    setSaving(true);
+    try {
+      const failures = describeFailures(await editSocialCaption(pub.id, keys, text));
+      if (failures) alert(failures);
+      setOpen(false);
+      onChanged();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 space-y-2 rounded-btn border border-line p-2.5">
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={4}
+        className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+      />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-2">
+        {fbKeys.map((k) => (
+          <label key={k} className="flex cursor-pointer items-center gap-1">
+            <input
+              type="checkbox"
+              checked={keys.includes(k)}
+              onChange={(e) => setKeys((prev) => (e.target.checked ? [...prev, k] : prev.filter((x) => x !== k)))}
+            />
+            <FacebookIcon size={11} /> {chipLabel(k)}
+          </label>
+        ))}
+      </div>
+      {others.length > 0 && (
+        <p className="text-[10px] text-ink-4">
+          {others.map((e) => chipLabel(e.key)).join(" et ")} : texte non modifiable depuis le board
+          {others.some((e) => e.key === "instagram") ? " — à changer dans l’app Instagram (« … » → Modifier)." : "."}
+        </p>
+      )}
+      <div className="flex justify-end gap-2">
+        <button onClick={() => setOpen(false)} className="rounded-btn border border-line px-3 py-1 text-[11px] text-ink-2">
+          Annuler
+        </button>
+        <button
+          onClick={save}
+          disabled={saving || keys.length === 0}
+          className="rounded-btn bg-navy px-3 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+        >
+          {saving ? "Enregistrement…" : "Enregistrer sur Facebook"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PublishedStatsRow({ pub, onChanged }: { pub: MediaPublication; onChanged: () => void }) {
   const [openKey, setOpenKey] = useState<NetworkKey | null>(null);
   const entries = publishedEntries(pub);
@@ -493,7 +641,19 @@ function PublishedStatsRow({ pub, onChanged }: { pub: MediaPublication; onChange
             </button>
           );
         })}
+        {pub.publish_info?.instagram?.pending && (
+          <span
+            title="Instagram traite encore la vidéo — mise en ligne automatique dès qu'elle est prête."
+            className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${CHIP_STYLES.instagram}`}
+          >
+            <NetworkIcon networkKey="instagram" size={11} /> Instagram
+            <span className="ml-0.5 flex items-center gap-0.5 font-semibold opacity-80">
+              · <RefreshCw size={10} className="animate-spin" /> en cours
+            </span>
+          </span>
+        )}
       </div>
+      <CaptionEditor pub={pub} onChanged={onChanged} />
       {pub.publish_info?.lastError && (
         <p className="mt-1.5 flex items-start gap-1 text-[11px] text-bad">
           <AlertTriangle size={12} className="mt-0.5 shrink-0" />
@@ -778,6 +938,7 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
       async ({ setProgress }) => {
         const failures: string[] = [];
         let anyOk = false;
+        let igPending = false;
         await persistFiles(snapshot.files);
         if (snapshot.targets.youtube) {
           setProgress(undefined, "Envoi de la vidéo à YouTube…");
@@ -805,6 +966,7 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
               fbMentions: snapshot.targets.fbMentions,
             });
             anyOk ||= results.some((r) => r.ok);
+            igPending = results.some((r) => r.key === "instagram" && r.pending);
             const socialFailures = describeFailures(results);
             if (socialFailures) failures.push(socialFailures);
             const warnings = describeWarnings(results);
@@ -816,6 +978,20 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
 
         if (!anyOk) throw new Error(failures.join("\n") || "Échec de la publication.");
         await markMediaPublished(pub.id, snapshot.caption, snapshot.targets);
+
+        // Reel encore en traitement chez Instagram : on attend ici (5 min max, la tâche reste en bas à
+        // droite) ; au-delà, le cron le met en ligne dès qu'il est prêt.
+        const igDeadline = Date.now() + 5 * 60_000;
+        while (igPending && Date.now() < igDeadline) {
+          setProgress(undefined, "Instagram traite la vidéo…");
+          const [res] = await finishInstagram([pub.id]).catch(() => []);
+          if (!res || res.state === "published") igPending = false;
+          else if (res.state === "failed") {
+            igPending = false;
+            failures.push(`Instagram : ${res.error ?? "échec"}`);
+          } else await new Promise((r) => setTimeout(r, 5000));
+        }
+        if (igPending) failures.push("Instagram : la vidéo est encore en traitement — elle sera mise en ligne automatiquement (quelques minutes).");
         return failures;
       },
       {
@@ -1525,6 +1701,9 @@ export function PublicationScreen() {
       if (tab !== "published") return;
       const stale = list.filter((p) => publishedEntries(p).some((e) => isStale(e.info))).slice(0, AUTO_REFRESH_LIMIT);
       refreshStats(stale.map((p) => p.id));
+      // Reels Instagram restés en traitement : on tente de les mettre en ligne maintenant.
+      const pendingIg = list.filter((p) => p.publish_info?.instagram?.pending).map((p) => p.id);
+      if (pendingIg.length) finishInstagram(pendingIg).then(() => refetch(true)).catch(() => {});
     });
   }, [tab]);
 

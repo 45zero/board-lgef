@@ -1,5 +1,5 @@
 import "server-only";
-import type { SocialComment, SocialStats } from "@/lib/social/targets";
+import type { InstagramPending, SocialComment, SocialStats } from "@/lib/social/targets";
 
 // Graph API v25.0 — même version et mêmes tokens de page que le projet IR2F (voir
 // ir2f/src/lib/social/graph.ts). Vérifié en réel sur la page Lorraine (septembre 2026) :
@@ -109,22 +109,19 @@ export async function deleteGraphObject(objectId: string, accessToken: string): 
   await graphFetch(`/${objectId}`, { access_token: accessToken }, "DELETE");
 }
 
-// Une image se traite en quelques secondes ; une vidéo (Reel) de 30s à 2min côté Meta. Le budget
-// vidéo (6 × 8s) tient sous le maxDuration de 60s déclaré sur src/app/page.tsx.
-const INSTAGRAM_IMAGE_POLL = { attempts: 5, delayMs: 1500 };
-const INSTAGRAM_VIDEO_POLL = { attempts: 6, delayMs: 8000 };
+// Une image se traite en quelques secondes ; une vidéo (Reel) de 30s à plusieurs minutes côté Meta.
+// On n'attend donc que brièvement dans la requête : au-delà, les conteneurs sont gardés dans
+// publish_info (`pending`) et la publication est terminée plus tard (board ouvert ou cron, voir
+// advanceInstagramPublish). Un conteneur Instagram reste publiable 24 h.
+const INSTAGRAM_POLL_MS = 4000;
 
-async function waitForInstagramContainer(containerId: string, accessToken: string, { attempts, delayMs }: { attempts: number; delayMs: number }) {
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const body = await graphFetch(`/${containerId}`, { fields: "status_code", access_token: accessToken });
-    if (body.status_code === "FINISHED") return;
-    if (body.status_code === "ERROR") throw new Error("Le traitement du média Instagram a échoué (format non supporté ?).");
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-  throw new Error("Le média Instagram n'a pas terminé son traitement à temps — réessayez, ou utilisez un fichier plus court.");
+type ContainerStatus = "FINISHED" | "IN_PROGRESS" | "ERROR" | "EXPIRED" | "PUBLISHED";
+
+async function containerStatus(containerId: string, accessToken: string): Promise<ContainerStatus> {
+  const body = await graphFetch(`/${containerId}`, { fields: "status_code", access_token: accessToken });
+  return (body.status_code as ContainerStatus) ?? "IN_PROGRESS";
 }
 
-/** Image (JPEG) ou Reel sur le compte Instagram pro — mécanique conteneur → attente → media_publish. */
 /**
  * Identifications de comptes sur une photo Instagram (`user_tags`) : positions réparties sur le bas
  * de l'image (x, y entre 0 et 1) — l'API exige des coordonnées, sans intérêt ici puisque la
@@ -140,33 +137,26 @@ function userTagsParam(usernames: string[] | undefined): Record<string, string> 
   return { user_tags: JSON.stringify(tags) };
 }
 
-export async function publishInstagramMedia(
-  igUserId: string,
-  accessToken: string,
-  { url, caption, kind, userTags }: { url: string; caption: string; kind: "image" | "video"; userTags?: string[] }
-) {
-  const params: Record<string, string> =
-    kind === "video"
-      ? { media_type: "REELS", video_url: url, caption, access_token: accessToken }
-      : { image_url: url, caption, access_token: accessToken, ...userTagsParam(userTags) };
-  const container = await graphFetch(`/${igUserId}/media`, params, "POST");
-  const containerId = String(container.id);
-
-  await waitForInstagramContainer(containerId, accessToken, kind === "video" ? INSTAGRAM_VIDEO_POLL : INSTAGRAM_IMAGE_POLL);
-
-  const published = await graphFetch(`/${igUserId}/media_publish`, { creation_id: containerId, access_token: accessToken }, "POST");
-  return { mediaId: String(published.id) };
-}
-
 /**
- * Carrousel Instagram (2 à 10 médias, photos JPEG et/ou vidéos) : un conteneur enfant par média,
- * puis un conteneur CAROUSEL qui les regroupe avec la légende, puis media_publish.
+ * Première étape d'une publication Instagram : crée le conteneur (photo JPEG ou Reel), ou pour un
+ * carrousel (2 à 10 médias) un conteneur enfant par média — le conteneur CAROUSEL qui porte la
+ * légende n'est créé qu'une fois les enfants traités.
  */
-export async function publishInstagramCarousel(
+export async function createInstagramContainers(
   igUserId: string,
   accessToken: string,
   { items, caption, userTags }: { items: { url: string; kind: "image" | "video" }[]; caption: string; userTags?: string[] }
-) {
+): Promise<InstagramPending> {
+  const since = new Date().toISOString();
+  if (items.length === 1) {
+    const [item] = items;
+    const params: Record<string, string> =
+      item.kind === "video"
+        ? { media_type: "REELS", video_url: item.url, caption, access_token: accessToken }
+        : { image_url: item.url, caption, access_token: accessToken, ...userTagsParam(userTags) };
+    const container = await graphFetch(`/${igUserId}/media`, params, "POST");
+    return { stage: "container", containers: [String(container.id)], caption, since };
+  }
   if (items.length < 2 || items.length > 10) throw new Error("Un carrousel Instagram contient de 2 à 10 médias.");
 
   const children: string[] = [];
@@ -178,20 +168,44 @@ export async function publishInstagramCarousel(
     const child = await graphFetch(`/${igUserId}/media`, params, "POST");
     children.push(String(child.id));
   }
-  const hasVideo = items.some((i) => i.kind === "video");
-  await Promise.all(
-    children.map((id) => waitForInstagramContainer(id, accessToken, hasVideo ? INSTAGRAM_VIDEO_POLL : INSTAGRAM_IMAGE_POLL))
-  );
+  return { stage: "children", containers: children, caption, since };
+}
 
-  const container = await graphFetch(
-    `/${igUserId}/media`,
-    { media_type: "CAROUSEL", children: children.join(","), caption, access_token: accessToken },
-    "POST"
-  );
-  await waitForInstagramContainer(String(container.id), accessToken, INSTAGRAM_IMAGE_POLL);
+/**
+ * Fait avancer une publication Instagram en attente, en attendant au plus `budgetMs` : conteneurs
+ * traités → (carrousel : création du conteneur CAROUSEL) → media_publish. Renvoie l'id du média
+ * publié, ou l'état en attente à reprendre plus tard. Lève une erreur si Instagram a refusé un média.
+ */
+export async function advanceInstagramPublish(
+  igUserId: string,
+  accessToken: string,
+  pending: InstagramPending,
+  budgetMs: number
+): Promise<{ mediaId: string } | { pending: InstagramPending }> {
+  const deadline = Date.now() + budgetMs;
+  let state = pending;
+  for (;;) {
+    const statuses = await Promise.all(state.containers.map((id) => containerStatus(id, accessToken)));
+    if (statuses.some((s) => s === "ERROR")) throw new Error("Le traitement du média Instagram a échoué (format non supporté ?).");
+    if (statuses.some((s) => s === "EXPIRED")) throw new Error("Le média Instagram a expiré avant sa mise en ligne (plus de 24 h) — republiez.");
 
-  const published = await graphFetch(`/${igUserId}/media_publish`, { creation_id: String(container.id), access_token: accessToken }, "POST");
-  return { mediaId: String(published.id) };
+    if (statuses.every((s) => s === "FINISHED")) {
+      if (state.stage === "children") {
+        const container = await graphFetch(
+          `/${igUserId}/media`,
+          { media_type: "CAROUSEL", children: state.containers.join(","), caption: state.caption, access_token: accessToken },
+          "POST"
+        );
+        state = { ...state, stage: "container", containers: [String(container.id)] };
+        continue;
+      }
+      const published = await graphFetch(`/${igUserId}/media_publish`, { creation_id: state.containers[0], access_token: accessToken }, "POST");
+      return { mediaId: String(published.id) };
+    }
+
+    if (Date.now() + INSTAGRAM_POLL_MS > deadline) return { pending: state };
+    await new Promise((resolve) => setTimeout(resolve, INSTAGRAM_POLL_MS));
+  }
 }
 
 /** Permalien public d'un média Instagram (non reconstructible à partir de son id). */
@@ -385,4 +399,39 @@ export async function setCommentHidden(plateforme: "FACEBOOK" | "INSTAGRAM", com
 /** Supprime un commentaire (Facebook ou Instagram, même appel) — irréversible. */
 export async function deleteComment(commentId: string, accessToken: string): Promise<void> {
   await graphFetch(`/${commentId}`, { access_token: accessToken }, "DELETE");
+}
+
+/**
+ * Répond à un commentaire au nom de la page / du compte. Facebook : sous-commentaire
+ * (/{comment}/comments). Instagram : /{comment}/replies — uniquement sur un commentaire de premier
+ * niveau, d'où `parentId` pour répondre à une réponse (même fil, comme dans l'app).
+ */
+export async function replyToComment(
+  plateforme: "FACEBOOK" | "INSTAGRAM",
+  commentId: string,
+  message: string,
+  accessToken: string
+): Promise<{ id: string }> {
+  const body =
+    plateforme === "FACEBOOK"
+      ? await graphFetch(`/${commentId}/comments`, { message, access_token: accessToken }, "POST")
+      : await graphFetch(`/${commentId}/replies`, { message, access_token: accessToken }, "POST");
+  return { id: String(body.id) };
+}
+
+/**
+ * Modifie le texte d'une publication Facebook déjà en ligne : `message` d'un post (photo, galerie,
+ * texte), `description` d'une vidéo. Instagram n'expose pas la modification de légende dans son API.
+ */
+export async function editFacebookPost(
+  { postId, videoId }: { postId?: string; videoId?: string },
+  message: string,
+  accessToken: string
+): Promise<void> {
+  if (videoId) {
+    await graphFetch(`/${videoId}`, { description: message, access_token: accessToken }, "POST");
+    return;
+  }
+  if (!postId) throw new Error("Id de la publication inconnu — rafraîchissez les stats puis réessayez.");
+  await graphFetch(`/${postId}`, { message, access_token: accessToken }, "POST");
 }

@@ -9,8 +9,10 @@ import {
   publishFacebookPhoto,
   publishFacebookText,
   publishFacebookGallery,
-  publishInstagramMedia,
-  publishInstagramCarousel,
+  createInstagramContainers,
+  advanceInstagramPublish,
+  replyToComment,
+  editFacebookPost,
   getFacebookVideoStats,
   getFacebookPostStats,
   getInstagramStats,
@@ -71,6 +73,9 @@ type EventFileRow = {
   storage_provider: string;
   drive_file_id: string | null;
 };
+
+/** Attente maximale du traitement Instagram dans la requête de publication (maxDuration : 60 s). */
+const INSTAGRAM_BUDGET_MS = 30_000;
 
 type MediaItem = { url: string; kind: "image" | "video"; contentType: string | null };
 
@@ -170,7 +175,7 @@ export async function publishPublicationToSocial(
   const at = new Date().toISOString();
 
   const settled = await Promise.all(
-    targets.map(async ({ key, caption }): Promise<{ key: SocialTargetKey; entry?: SocialPublishTarget; error?: string; warning?: string }> => {
+    targets.map(async ({ key, caption }): Promise<{ key: SocialTargetKey; entry?: SocialPublishTarget; error?: string; warning?: string; pending?: boolean }> => {
       const target = SOCIAL_TARGETS.find((t) => t.key === key);
       const account = target ? getSocialAccountById(target.accountId) : null;
       if (!target || !account) return { key, error: "Compte non configuré (SOCIAL_ACCOUNTS_JSON)." };
@@ -184,27 +189,31 @@ export async function publishPublicationToSocial(
             items.length === 0
               ? [{ url: signedTextCardUrl(caption), kind: "image" as const, contentType: "image/jpeg" }]
               : items.slice(0, 10).map((i) => (i.kind === "image" && !isJpeg(i.contentType) ? { ...i, url: signedJpegUrl(i.url) } : i));
-          const publishIg = (userTags?: string[]) =>
-            igItems.length > 1
-              ? publishInstagramCarousel(account.externalId, account.accessToken, { items: igItems, caption, userTags })
-              : publishInstagramMedia(account.externalId, account.accessToken, { url: igItems[0].url, caption, kind: igItems[0].kind, userTags });
+          const publishIg = async (userTags?: string[]) => {
+            const pending = await createInstagramContainers(account.externalId, account.accessToken, { items: igItems, caption, userTags });
+            return advanceInstagramPublish(account.externalId, account.accessToken, pending, INSTAGRAM_BUDGET_MS);
+          };
 
           let warning: string | undefined;
-          let mediaId: string;
+          let outcome: Awaited<ReturnType<typeof publishIg>>;
           const tags = igTags.length > 0 && igItems.some((i) => i.kind === "image") ? igTags : undefined;
           try {
-            ({ mediaId } = await publishIg(tags));
+            outcome = await publishIg(tags);
           } catch (e) {
             if (!tags) throw e;
             // Un compte identifié introuvable/privé fait échouer tout le conteneur : on republie sans
             // identification plutôt que de perdre la publication, et on le signale.
-            ({ mediaId } = await publishIg(undefined));
+            outcome = await publishIg(undefined);
             warning = `identifications ignorées (${e instanceof Error ? e.message : "compte introuvable"})`;
           }
           const mediaType = items.length === 0 ? "text" : igItems.length > 1 ? "gallery" : igItems[0].kind;
+          if ("pending" in outcome) {
+            // Reel encore en traitement chez Meta : mis en ligne plus tard (finishPendingInstagram).
+            return { key, warning, pending: true, entry: { published: false, at, by, mediaType, pending: outcome.pending } };
+          }
           // Lien public tout de suite (pour ouvrir/partager la publication depuis le board).
-          const permalink = await getInstagramPermalink(mediaId, account.accessToken).catch(() => undefined);
-          return { key, warning, entry: { published: true, at, by, postId: mediaId, mediaType, permalink } };
+          const permalink = await getInstagramPermalink(outcome.mediaId, account.accessToken).catch(() => undefined);
+          return { key, warning, entry: { published: true, at, by, postId: outcome.mediaId, mediaType, permalink } };
         }
 
         if (items.length === 0) {
@@ -235,7 +244,7 @@ export async function publishPublicationToSocial(
   if (successes.length > 0) {
     await savePublishInfo(client, pub, (current) => successes.reduce((acc, s) => withNetworkEntry(acc, s.key, s.entry!), current));
   }
-  return settled.map((s) => ({ key: s.key, ok: !!s.entry, error: s.error, warning: s.warning }));
+  return settled.map((s) => ({ key: s.key, ok: !!s.entry, error: s.error, warning: s.warning, pending: s.pending }));
 }
 
 /* ---------- YouTube (Edge Function youtube-manage) ---------- */
@@ -429,6 +438,95 @@ export async function deletePublicationComment(client: Client, key: NetworkKey, 
   }
   const { account } = metaTarget(key);
   await deleteComment(commentId, account.accessToken);
+}
+
+/** Répond à un commentaire au nom de la page / du compte (YouTube non géré : Edge Function sans cette action). */
+export async function replyToPublicationComment(key: NetworkKey, comment: { id: string; parentId?: string }, message: string): Promise<{ id: string }> {
+  if (key === "youtube") throw new Error("Répondre sur YouTube n'est pas encore possible depuis le board.");
+  if (!message.trim()) throw new Error("La réponse est vide.");
+  const { target, account } = metaTarget(key);
+  // Instagram n'accepte une réponse que sur un commentaire de premier niveau.
+  const replyTo = target.plateforme === "INSTAGRAM" && comment.parentId ? comment.parentId : comment.id;
+  return replyToComment(target.plateforme, replyTo, message.trim(), account.accessToken);
+}
+
+/* ---------- Instagram : mise en ligne différée ---------- */
+
+/**
+ * Termine les publications Instagram restées en traitement chez Meta (Reels surtout) : appelé par
+ * le board (après une publication, à l'ouverture de « Publiés ») et par le cron toutes les 5 min.
+ * `budgetMs` : attente maximale partagée entre les publications de l'appel.
+ */
+export async function finishPendingInstagram(client: Client, publicationIds: string[], budgetMs = 20_000): Promise<{ key: "instagram"; id: string; state: "published" | "pending" | "failed"; error?: string }[]> {
+  const { account } = metaTarget("instagram");
+  const deadline = Date.now() + budgetMs;
+  const out: { key: "instagram"; id: string; state: "published" | "pending" | "failed"; error?: string }[] = [];
+
+  for (const id of publicationIds.slice(0, 10)) {
+    const pub = await loadPublication(client, id).catch(() => null);
+    const entry = pub?.publish_info?.instagram;
+    if (!pub || !entry?.pending) continue;
+    try {
+      const outcome = await advanceInstagramPublish(account.externalId, account.accessToken, entry.pending, Math.max(0, deadline - Date.now()));
+      if ("pending" in outcome) {
+        if (outcome.pending.stage !== entry.pending.stage) {
+          await savePublishInfo(client, pub, (current) => withNetworkEntry(current, "instagram", { ...current.instagram!, pending: outcome.pending }));
+        }
+        out.push({ key: "instagram", id, state: "pending" });
+        continue;
+      }
+      const permalink = await getInstagramPermalink(outcome.mediaId, account.accessToken).catch(() => undefined);
+      await savePublishInfo(client, pub, (current) =>
+        withNetworkEntry(current, "instagram", {
+          ...current.instagram,
+          published: true,
+          at: new Date().toISOString(),
+          postId: outcome.mediaId,
+          permalink,
+          pending: undefined,
+        })
+      );
+      out.push({ key: "instagram", id, state: "published" });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Erreur inattendue.";
+      const next = await savePublishInfo(client, pub, (current) => ({
+        ...withNetworkEntry(current, "instagram", undefined),
+        lastError: { at: new Date().toISOString(), message: `Instagram : ${message}` },
+      }));
+      // Instagram était le seul réseau : la publication revient dans « À publier ».
+      if (!NETWORK_KEYS.some((k) => getNetworkEntry(next, k)?.published)) {
+        await client.from("media_publications").update({ status: "to_publish", published_at: null }).eq("id", pub.id);
+      }
+      out.push({ key: "instagram", id, state: "failed", error: message });
+    }
+  }
+  return out;
+}
+
+/* ---------- Modification du texte ---------- */
+
+/**
+ * Remplace le texte d'une publication déjà en ligne sur les pages Facebook demandées (mentions de
+ * Pages comprises) et dans le board. Instagram et YouTube ne sont pas modifiables d'ici.
+ */
+export async function editPublicationCaption(client: Client, publicationId: string, keys: NetworkKey[], caption: string): Promise<SocialPublishResult[]> {
+  const pub = await loadPublication(client, publicationId);
+  const mentions = (pub.targets as { fbMentions?: FacebookMention[] } | null)?.fbMentions;
+  const results = await Promise.all(
+    keys.map(async (key): Promise<SocialPublishResult> => {
+      const entry = getNetworkEntry(pub.publish_info, key);
+      const target = SOCIAL_TARGETS.find((t) => t.key === key);
+      if (!entry?.published || target?.plateforme !== "FACEBOOK") return { key, ok: false, error: "non modifiable depuis le board." };
+      try {
+        await editFacebookPost(entry, withFacebookMentions(caption, mentions), metaTarget(key as SocialTargetKey).account.accessToken);
+        return { key, ok: true };
+      } catch (e) {
+        return { key, ok: false, error: e instanceof Error ? e.message : "Erreur inattendue." };
+      }
+    })
+  );
+  if (results.some((r) => r.ok)) await client.from("media_publications").update({ caption }).eq("id", pub.id);
+  return results;
 }
 
 /* ---------- Suppression sur les réseaux ---------- */

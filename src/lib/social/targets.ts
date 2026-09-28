@@ -60,6 +60,19 @@ export interface SocialPublishTarget extends PublishTarget {
   permalink?: string;
   mediaType?: "video" | "image" | "gallery" | "text";
   stats?: SocialStats;
+  /** Instagram : média encore en traitement chez Meta (`published` reste false jusqu'à sa mise en ligne). */
+  pending?: InstagramPending;
+}
+
+/**
+ * Publication Instagram en cours : conteneurs créés, pas encore publiés. `children` : enfants d'un
+ * carrousel à traiter avant de créer le conteneur CAROUSEL ; `container` : conteneur final à publier.
+ */
+export interface InstagramPending {
+  stage: "children" | "container";
+  containers: string[];
+  caption: string;
+  since: string;
 }
 
 export interface PublishInfo {
@@ -122,7 +135,7 @@ export function withFacebookMentions(message: string, mentions: FacebookMention[
 export type SocialComment = { id: string; author: string; text: string; createdAt: string; parentId?: string };
 
 /** `warning` : publié, mais avec une réserve (ex. identifications Instagram ignorées). */
-export type SocialPublishResult = { key: NetworkKey; ok: boolean; error?: string; warning?: string };
+export type SocialPublishResult = { key: NetworkKey; ok: boolean; error?: string; warning?: string; pending?: boolean };
 
 /** Avertissements des publications réussies (null s'il n'y en a pas). */
 export function describeWarnings(results: SocialPublishResult[]): string | null {

@@ -6,6 +6,7 @@ import {
   publishPublicationToYoutubeServer,
   loadPublication,
   savePublishInfo,
+  finishPendingInstagram,
 } from "@/lib/social/publisher";
 import { FACEBOOK_REGIONS, describeFailures, type SocialPublishResult, type SocialTargetKey } from "@/lib/social/targets";
 import type { PublicationTargets } from "@/lib/board/mediaPublications";
@@ -84,5 +85,13 @@ export async function GET(request: Request) {
     report.push({ id: pub.id, ok: anyOk, failures });
   }
 
-  return NextResponse.json({ processed: report });
+  // Reels Instagram encore en traitement chez Meta au moment de la publication : mis en ligne dès qu'ils sont prêts.
+  const { data: pendingIg } = await client
+    .from("media_publications")
+    .select("id")
+    .not("publish_info->instagram->pending", "is", null)
+    .limit(10);
+  const instagram = pendingIg?.length ? await finishPendingInstagram(client, pendingIg.map((p) => p.id), 15_000) : [];
+
+  return NextResponse.json({ processed: report, instagram });
 }

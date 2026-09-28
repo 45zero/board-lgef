@@ -9,6 +9,9 @@ import {
   deletePublicationComment,
   deletePublicationPosts,
   setNetworkCommentHidden,
+  replyToPublicationComment,
+  finishPendingInstagram,
+  editPublicationCaption,
 } from "@/lib/social/publisher";
 import { getSocialAccountById } from "@/lib/social/accounts";
 import { resolveFacebookPage } from "@/lib/social/graph";
@@ -222,4 +225,31 @@ export async function detachFileFromPublications(eventFileId: string, deleteFrom
   }
 
   return results;
+}
+
+/** Répond à un commentaire au nom de la page / du compte Instagram. */
+export async function replySocialComment(
+  key: NetworkKey,
+  comment: { id: string; parentId?: string },
+  message: string
+): Promise<{ error: string | null; id: string | null }> {
+  try {
+    await requirePublisher();
+    const { id } = await replyToPublicationComment(key, comment, message);
+    return { error: null, id };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Erreur inattendue.", id: null };
+  }
+}
+
+/** Termine les publications Instagram encore en traitement chez Meta (voir finishPendingInstagram). */
+export async function finishInstagram(publicationIds: string[]) {
+  const supabase = await requireUser();
+  return finishPendingInstagram(supabase, publicationIds);
+}
+
+/** Modifie le texte d'une publication en ligne (pages Facebook) et dans le board. */
+export async function editSocialCaption(publicationId: string, keys: NetworkKey[], caption: string): Promise<SocialPublishResult[]> {
+  const supabase = await requirePublisher();
+  return editPublicationCaption(supabase, publicationId, keys, caption);
 }
