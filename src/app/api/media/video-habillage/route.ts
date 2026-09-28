@@ -126,6 +126,10 @@ export async function POST(request: Request) {
     if (upErr) throw new Error(upErr.message);
     const { data: signed } = await service.storage.from(BUCKET).createSignedUrl(resultPath, 3600);
     if (!signed) throw new Error("Lien du résultat indisponible.");
+    // Ménage : résultats jamais récupérés (appli fermée en cours de route) de plus de 24 h.
+    const { data: old } = await service.storage.from(BUCKET).list(userId, { limit: 100 });
+    const stale = (old ?? []).filter((f) => f.created_at && Date.now() - new Date(f.created_at).getTime() > 86_400_000).map((f) => `${userId}/${f.name}`);
+    if (stale.length) await service.storage.from(BUCKET).remove(stale);
     return NextResponse.json({ url: signed.signedUrl, path: resultPath });
   } catch (e) {
     console.error("[video-habillage]", e);
