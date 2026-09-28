@@ -79,18 +79,6 @@ export function publicationKind(pub: MediaPublication): PublicationKind {
   return kindFromContentTypes(pub.files.map((f) => f.content_type));
 }
 
-/** Ajoute automatiquement un média (photo/vidéo) fraîchement uploadé sur un événement à la file "à publier". */
-export async function queueMediaForPublication(eventFileId: string, eventId: string, contentType?: string | null) {
-  const supabase = createClient();
-  await supabase.from("media_publications").insert({
-    event_file_id: eventFileId,
-    event_id: eventId,
-    file_ids: [eventFileId],
-    kind: contentType ? kindFromContentTypes([contentType]) : null,
-    status: "to_publish",
-  });
-}
-
 export async function countMediaPublications(): Promise<Record<PublicationStatus, number>> {
   const supabase = createClient();
   const statuses: PublicationStatus[] = ["to_publish", "scheduled", "published"];

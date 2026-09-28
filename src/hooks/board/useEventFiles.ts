@@ -11,15 +11,11 @@ import {
   publishToFacebook,
   type EventFile,
 } from "@/lib/board/eventFiles";
-import { queueMediaForPublication } from "@/lib/board/mediaPublications";
 import { useBackgroundTasks } from "@/contexts/BackgroundTasksContext";
 
 function formatMb(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(bytes > 100 * 1024 * 1024 ? 0 : 1)} Mo`;
 }
-
-const isPublishableMedia = (f: EventFile) =>
-  (f.content_type ?? "").startsWith("image") || (f.content_type ?? "").startsWith("video");
 
 /** Pièces jointes d'un événement (photo/vidéo) + publication YouTube/Facebook. */
 export function useEventFiles(eventId: string | undefined, canManage: boolean) {
@@ -71,13 +67,9 @@ export function useEventFiles(eventId: string | undefined, canManage: boolean) {
           );
           const uploaded = results.filter((r) => r.ok && r.id);
           const updated = await listEventFiles(eventId);
+          // La mise en file « À publier » des photos/vidéos est faite par un trigger sur event_files
+          // (sql/2026-09-28_queue_event_media.sql), pour le board comme pour le calendrier.
           setFiles(updated);
-          // Chaque photo/vidéo envoyée rejoint la file « À publier » du centre de publication.
-          await Promise.all(
-            updated
-              .filter((f) => uploaded.some((u) => u.id === f.id) && isPublishableMedia(f))
-              .map((f) => queueMediaForPublication(f.id, eventId, f.content_type))
-          );
           const failed = results.filter((r) => !r.ok);
           if (failed.length === files.length) throw new Error(`Échec de l'envoi : ${failed.map((f) => f.name).join(", ")}`);
           return { ok: uploaded.length, failed: failed.map((f) => f.name) };
