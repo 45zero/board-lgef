@@ -12,6 +12,12 @@ export interface ClubContact {
   email: string | null;
   /** Second destinataire (email perso), s'il diffère de l'email principal. */
   emailSecondary: string | null;
+  /** Adresse (complément, voie, lieu-dit), code postal, ville — pour la cartographie. */
+  address: string | null;
+  postalCode: string | null;
+  city: string | null;
+  /** Colonnes du fichier non reconnues, gardées telles quelles (« Titre dans la commission », futures infos club…). */
+  extra: Record<string, string>;
 }
 
 function normalizeHeader(h: unknown) {
@@ -39,7 +45,15 @@ const COLUMNS = {
   phone: ["mobilepersonnel", "mobile", "telephone", "portable"],
   emailPerso: ["emailprincipal", "emailpersonnel", "mailperso"],
   emailClub: ["emailofficielclub", "emailclub", "mailclub"],
+  addressComplement: ["complementclub", "complement"],
+  addressStreet: ["voierueclub", "voierue", "adresse", "adresseclub", "rue"],
+  addressPlace: ["lieuditclub", "lieudit"],
+  postalCode: ["codepostalclub", "codepostal", "cp"],
+  city: ["bureaudistributeurclub", "bureaudistributeur", "ville", "commune", "villeclub"],
 } as const;
+
+/** Colonnes connues mais volontairement non reprises dans `extra` (le titre fédéral des présidents est toujours le même). */
+const IGNORED = new Set(["titrelibelle"]);
 
 /** Mobile français → E.164. Excel perd le 0 initial (612345678) : on le rétablit. */
 export function normalizeFrPhone(raw: unknown): string | null {
@@ -98,7 +112,7 @@ export function whatsappUrl(phone: string | null, text: string) {
 
 /**
  * Lit les lignes d'un export (1re ligne = en-têtes) : export clubs fédéral, ou annuaire des commissions
- * (« Nom commission » au lieu de « Club(nom) »). Ignore les lignes sans email ni mobile.
+ * (« Nom commission » au lieu de « Club(nom) »). Ignore les lignes sans email, sans mobile et sans numéro de club.
  * Une même personne présente sur plusieurs lignes (plusieurs commissions) est fusionnée : ses commissions
  * sont regroupées (« Arbitrage · Discipline »).
  */
@@ -118,6 +132,10 @@ export function parseClubExportRows(rows: unknown[][]): { contacts: ClubContact[
   }
 
   const at = (r: unknown[], i: number) => (i >= 0 ? cell(r[i]) : null);
+  const knownIdx = new Set(Object.values(col).filter((i) => i >= 0));
+  const extraCols = rows[0]
+    .map((h, i) => ({ label: cell(h), i }))
+    .filter((c): c is { label: string; i: number } => !!c.label && !knownIdx.has(c.i) && !IGNORED.has(normalizeHeader(c.label)));
   const byKey = new Map<string, ClubContact>();
   let skipped = 0;
   for (const r of rows.slice(1)) {
@@ -126,7 +144,8 @@ export function parseClubExportRows(rows: unknown[][]): { contacts: ClubContact[
     const emailPerso = at(r, col.emailPerso)?.toLowerCase() ?? null;
     const email = emailClub || emailPerso;
     const phone = normalizeFrPhone(col.phone >= 0 ? r[col.phone] : null);
-    if (!email && !phone) {
+    // Un club sans contact reste utile (cartographie de tous les clubs) ; une personne sans contact, non.
+    if (!email && !phone && !at(r, col.clubNumber)) {
       skipped += 1;
       continue;
     }
@@ -139,6 +158,13 @@ export function parseClubExportRows(rows: unknown[][]): { contacts: ClubContact[
       phone,
       email,
       emailSecondary: emailPerso && emailPerso !== email ? emailPerso : null,
+      address:
+        [at(r, col.addressComplement), at(r, col.addressStreet), at(r, col.addressPlace)].filter(Boolean).join(", ") || null,
+      postalCode: at(r, col.postalCode),
+      city: at(r, col.city),
+      extra: Object.fromEntries(
+        extraCols.map((c) => [c.label, at(r, c.i)] as const).filter((e): e is [string, string] => !!e[1])
+      ),
     };
 
     // Un club = une ligne (numéro de club) ; sans numéro, une personne = son email, à défaut son mobile.
@@ -153,6 +179,15 @@ export function parseClubExportRows(rows: unknown[][]): { contacts: ClubContact[
     }
     existing.phone ??= contact.phone;
     existing.emailSecondary ??= contact.emailSecondary;
+    existing.address ??= contact.address;
+    existing.postalCode ??= contact.postalCode;
+    existing.city ??= contact.city;
+    // Plusieurs lignes pour une même personne : valeurs différentes regroupées (« Membre · Président »).
+    for (const [k, v] of Object.entries(contact.extra)) {
+      const prev = existing.extra[k];
+      if (!prev) existing.extra[k] = v;
+      else if (!prev.split(" · ").includes(v)) existing.extra[k] = `${prev} · ${v}`;
+    }
   }
   return { contacts: [...byKey.values()], skipped };
 }

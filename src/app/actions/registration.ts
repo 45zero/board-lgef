@@ -329,8 +329,19 @@ export async function importClubContactsIntoList(listId: string, contacts: ClubC
 
   type MemberInsert = Database["public"]["Tables"]["registration_contact_list_members"]["Insert"];
   type MemberUpdate = Database["public"]["Tables"]["registration_contact_list_members"]["Update"];
-  type Member = { id: string; club_number: string | null; email: string | null; phone: string | null; first_name: string | null; last_name: string | null };
-  const cols = "id, club_number, email, phone, first_name, last_name";
+  type Member = {
+    id: string;
+    club_number: string | null;
+    email: string | null;
+    phone: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    address: string | null;
+    postal_code: string | null;
+    city: string | null;
+    extra: Json;
+  };
+  const cols = "id, club_number, email, phone, first_name, last_name, address, postal_code, city, extra";
   const clubNumbers = contacts.map((c) => c.clubNumber).filter((n): n is string => !!n);
   const emails = contacts.filter((c) => !c.clubNumber && c.email).map((c) => c.email!);
   const phones = contacts.filter((c) => !c.clubNumber && !c.email && c.phone).map((c) => c.phone!);
@@ -361,6 +372,9 @@ export async function importClubContactsIntoList(listId: string, contacts: ClubC
       first_name: c.firstName,
       last_name: c.lastName,
       phone: c.phone,
+      address: c.address,
+      postal_code: c.postalCode,
+      city: c.city,
     };
     const match = c.clubNumber
       ? byClub.get(c.clubNumber)
@@ -370,10 +384,19 @@ export async function importClubContactsIntoList(listId: string, contacts: ClubC
         list_id: listId,
         name: personName({ first_name: c.firstName, last_name: c.lastName }) || c.club || c.email || c.phone || "",
         ...fields,
+        extra: c.extra,
       });
       continue;
     }
     const patch: MemberUpdate = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== null && v !== ""));
+    if (Object.keys(c.extra).length > 0) {
+      patch.extra = { ...((match.extra as Record<string, string> | null) ?? {}), ...c.extra };
+    }
+    // Adresse modifiée : la position sur la carte sera recalculée.
+    const addressChanged = (["address", "postal_code", "city"] as const).some(
+      (k) => patch[k] !== undefined && patch[k] !== match[k]
+    );
+    if (addressChanged) Object.assign(patch, { lat: null, lng: null, geocoded_at: null });
     const first = c.firstName ?? match.first_name;
     const last = c.lastName ?? match.last_name;
     if (c.firstName || c.lastName) patch.name = personName({ first_name: first, last_name: last });
@@ -420,8 +443,9 @@ export async function importContactListIntoCampaign(campaignId: string, listId: 
   const existingEmails = new Set((existing ?? []).map((e) => e.email).filter(Boolean));
   const existingPhones = new Set((existing ?? []).map((e) => e.phone).filter(Boolean));
   // Membre déjà destinataire = même email, ou même mobile pour un contact sans email.
+  // Fiches sans email ni mobile (club gardé pour la cartographie) : pas invitables, non importées.
   const toInsert = members.filter((m) =>
-    m.email ? !existingEmails.has(m.email) : !(m.phone && existingPhones.has(m.phone))
+    m.email ? !existingEmails.has(m.email) : !!m.phone && !existingPhones.has(m.phone)
   );
   if (toInsert.length === 0) return { added: 0 };
 

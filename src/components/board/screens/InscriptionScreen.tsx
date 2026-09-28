@@ -449,7 +449,7 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
         updated += r.updated;
       }
       setImportMsg(
-        `${added} contact(s) ajouté(s), ${updated} complété(s)${skipped ? ` — ${skipped} ligne(s) sans email ni mobile ignorée(s)` : ""}.`
+        `${added} contact(s) ajouté(s), ${updated} complété(s)${skipped ? ` — ${skipped} ligne(s) sans aucun contact ignorée(s)` : ""}.`
       );
       await refetchMembers(list);
       await refetchLists();

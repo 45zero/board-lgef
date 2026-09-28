@@ -22,6 +22,7 @@ import {
   Plus,
   HardDrive,
   ClipboardCheck,
+  Map as MapIcon,
 } from "lucide-react";
 
 const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>> = {
@@ -40,6 +41,7 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>
   audiovisuel: Video,
   communication: Volume2,
   inscription: ClipboardCheck,
+  cartographie: MapIcon,
 };
 
 const PINNED = [
@@ -55,6 +57,7 @@ const PINNED = [
   "ged",
   "drive",
   "inscription",
+  "cartographie",
   "compta",
   "audiovisuel",
   "communication",

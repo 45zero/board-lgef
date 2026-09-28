@@ -1286,9 +1286,9 @@ export type Database = {
         Relationships: []
       }
       registration_contact_list_members: {
-        Row: { id: string; list_id: string; name: string; email: string | null; club: string | null; created_at: string; first_name: string | null; last_name: string | null; civility: string | null; phone: string | null; club_number: string | null; email_secondary: string | null }
-        Insert: { id?: string; list_id: string; name: string; email?: string | null; club?: string | null; created_at?: string; first_name?: string | null; last_name?: string | null; civility?: string | null; phone?: string | null; club_number?: string | null; email_secondary?: string | null }
-        Update: { id?: string; list_id?: string; name?: string; email?: string | null; club?: string | null; created_at?: string; first_name?: string | null; last_name?: string | null; civility?: string | null; phone?: string | null; club_number?: string | null; email_secondary?: string | null }
+        Row: { id: string; list_id: string; name: string; email: string | null; club: string | null; created_at: string; first_name: string | null; last_name: string | null; civility: string | null; phone: string | null; club_number: string | null; email_secondary: string | null; address: string | null; postal_code: string | null; city: string | null; lat: number | null; lng: number | null; geocoded_at: string | null; extra: Json }
+        Insert: { id?: string; list_id: string; name: string; email?: string | null; club?: string | null; created_at?: string; first_name?: string | null; last_name?: string | null; civility?: string | null; phone?: string | null; club_number?: string | null; email_secondary?: string | null; address?: string | null; postal_code?: string | null; city?: string | null; lat?: number | null; lng?: number | null; geocoded_at?: string | null; extra?: Json }
+        Update: { id?: string; list_id?: string; name?: string; email?: string | null; club?: string | null; created_at?: string; first_name?: string | null; last_name?: string | null; civility?: string | null; phone?: string | null; club_number?: string | null; email_secondary?: string | null; address?: string | null; postal_code?: string | null; city?: string | null; lat?: number | null; lng?: number | null; geocoded_at?: string | null; extra?: Json }
         Relationships: []
       }
       event_registration_campaigns: {

@@ -2,6 +2,7 @@
 
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useEffect, useState } from "react";
+import { DirectoryEmailInput } from "@/components/board/directory/DirectoryEmailInput";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { getCachedMail, loadMail, loadMailList, prefetchMails } from "@/lib/board/mailClient";
 import {
@@ -729,23 +730,23 @@ function ComposeModal({
           </button>
         </div>
         <div className="space-y-3">
-          <input
+          <DirectoryEmailInput
             placeholder="À"
             value={to}
-            onChange={(e) => setTo(e.target.value)}
+            onChange={setTo}
             className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
           />
           <div className="grid grid-cols-2 gap-3">
-            <input
+            <DirectoryEmailInput
               placeholder="Cc"
               value={cc}
-              onChange={(e) => setCc(e.target.value)}
+              onChange={setCc}
               className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
             />
-            <input
+            <DirectoryEmailInput
               placeholder="Cci"
               value={bcc}
-              onChange={(e) => setBcc(e.target.value)}
+              onChange={setBcc}
               className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
             />
           </div>
@@ -878,11 +879,11 @@ function ForwardModal({
           </button>
         </div>
         <div className="space-y-3">
-          <input
+          <DirectoryEmailInput
             autoFocus
             placeholder="À"
             value={to}
-            onChange={(e) => setTo(e.target.value)}
+            onChange={setTo}
             className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
           />
           <textarea

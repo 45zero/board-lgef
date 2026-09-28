@@ -23,6 +23,7 @@ import {
   LayoutGrid,
   HardDrive,
   ClipboardCheck,
+  Map as MapIcon,
   Receipt,
 } from "lucide-react";
 import { BOARD_APPS } from "@/lib/board/tokens";
@@ -46,6 +47,7 @@ const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   communication: Megaphone,
   administration: ShieldCheck,
   inscription: ClipboardCheck,
+  cartographie: MapIcon,
 };
 
 
