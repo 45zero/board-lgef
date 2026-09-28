@@ -64,6 +64,7 @@ import {
   removeContactListMember,
   importContactListIntoCampaign,
   importClubContactsIntoList,
+  prepareClubContactsImport,
 } from "@/app/actions/registration";
 import { uploadCampaignBlockAsset } from "@/lib/board/registrationAssets";
 import type { EmailBlock } from "@/lib/board/registrationEmail";
@@ -439,6 +440,10 @@ function ContactListsModal({ onClose }: { onClose: () => void }) {
     try {
       const { readSheet } = await import("read-excel-file/browser");
       const { contacts, skipped } = parseClubExportRows((await readSheet(file)) as unknown[][]);
+      await prepareClubContactsImport(list.id, {
+        clubNumbers: contacts.map((c) => c.clubNumber).filter((n): n is string => !!n),
+        emails: contacts.filter((c) => !c.clubNumber).map((c) => c.email),
+      });
       for (let i = 0; i < contacts.length; i += 500) {
         setImportMsg(`Import… ${i}/${contacts.length}`);
         await importClubContactsIntoList(list.id, contacts.slice(i, i + 500));

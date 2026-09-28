@@ -56,6 +56,24 @@ export async function getRegistrationContext(eventId: string, token: string) {
   return { campaign, recipient, event, cardHtml: buildCardHtml(campaign, event, greetingFor(personName(recipient))) };
 }
 
+/** Événement d'un destinataire à partir de son seul jeton (lien court WhatsApp). */
+export async function resolveRecipientEventId(token: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(token)) return null;
+  const supabase = createServiceClient();
+  const { data: recipient } = await supabase
+    .from("event_registration_recipients")
+    .select("campaign_id")
+    .eq("token", token)
+    .maybeSingle();
+  if (!recipient) return null;
+  const { data: campaign } = await supabase
+    .from("event_registration_campaigns")
+    .select("event_id")
+    .eq("id", recipient.campaign_id)
+    .maybeSingle();
+  return (campaign?.event_id as string | undefined) ?? null;
+}
+
 /** Contexte pour le lien générique (QR code / copié-collé) — pas de destinataire connu à l'avance. */
 export async function getPublicCampaignContext(eventId: string, publicToken: string) {
   const supabase = createServiceClient();

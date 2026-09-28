@@ -39,6 +39,20 @@ async function requireStaff() {
   return { supabase, userId: user.id };
 }
 
+/** PostgREST plafonne chaque réponse à 1000 lignes : lit toutes les pages (la requête doit avoir un ordre stable). */
+async function fetchAllRows<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  const PAGE = 1000;
+  const all: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await page(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    all.push(...(data ?? []));
+    if (!data || data.length < PAGE) return all;
+  }
+}
+
 function siteUrl() {
   return (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/+$/, "");
 }
@@ -64,9 +78,16 @@ export async function listRegistrationEvents() {
   const campaignByEvent = new Map((campaigns ?? []).map((c) => [c.event_id, c]));
   const campaignIds = (campaigns ?? []).map((c) => c.id);
 
-  const { data: recipients } = campaignIds.length
-    ? await supabase.from("event_registration_recipients").select("campaign_id, response").in("campaign_id", campaignIds)
-    : { data: [] as { campaign_id: string; response: string | null }[] };
+  const recipients = campaignIds.length
+    ? await fetchAllRows((from, to) =>
+        supabase
+          .from("event_registration_recipients")
+          .select("campaign_id, response")
+          .in("campaign_id", campaignIds)
+          .order("id")
+          .range(from, to)
+      )
+    : [];
 
   return events.map((ev) => {
     const campaign = campaignByEvent.get(ev.id);
@@ -147,13 +168,15 @@ export async function updateCampaignBlockContent(campaignId: string, blockId: st
 
 export async function listCampaignRecipients(campaignId: string) {
   const { supabase } = await requireStaff();
-  const { data, error } = await supabase
-    .from("event_registration_recipients")
-    .select("*")
-    .eq("campaign_id", campaignId)
-    .order("created_at", { ascending: true });
-  if (error) throw new Error(error.message);
-  return data;
+  return fetchAllRows((from, to) =>
+    supabase
+      .from("event_registration_recipients")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .order("created_at", { ascending: true })
+      .order("id")
+      .range(from, to)
+  );
 }
 
 export async function searchClubContacts(query: string) {
@@ -213,17 +236,18 @@ export async function listContactLists() {
   if (error) throw new Error(error.message);
   if (!lists || lists.length === 0) return [];
 
-  const { data: members } = await supabase
-    .from("registration_contact_list_members")
-    .select("list_id")
-    .in(
-      "list_id",
-      lists.map((l) => l.id)
-    );
-  const counts = new Map<string, number>();
-  for (const m of members ?? []) counts.set(m.list_id, (counts.get(m.list_id) ?? 0) + 1);
+  // Compte exact côté base (une liste de lignes serait tronquée à 1000).
+  const counts = await Promise.all(
+    lists.map(async (l) => {
+      const { count } = await supabase
+        .from("registration_contact_list_members")
+        .select("id", { count: "exact", head: true })
+        .eq("list_id", l.id);
+      return count ?? 0;
+    })
+  );
 
-  return lists.map((l) => ({ ...l, memberCount: counts.get(l.id) ?? 0 }));
+  return lists.map((l, i) => ({ ...l, memberCount: counts[i] }));
 }
 
 export async function createContactList(name: string) {
@@ -245,14 +269,16 @@ export async function deleteContactList(listId: string) {
 
 export async function listContactListMembers(listId: string) {
   const { supabase } = await requireStaff();
-  const { data, error } = await supabase
-    .from("registration_contact_list_members")
-    .select("*")
-    .eq("list_id", listId)
-    .order("club", { ascending: true, nullsFirst: false })
-    .order("name", { ascending: true });
-  if (error) throw new Error(error.message);
-  return data;
+  return fetchAllRows((from, to) =>
+    supabase
+      .from("registration_contact_list_members")
+      .select("*")
+      .eq("list_id", listId)
+      .order("club", { ascending: true, nullsFirst: false })
+      .order("name", { ascending: true })
+      .order("id")
+      .range(from, to)
+  );
 }
 
 export async function addContactListMember(
@@ -277,32 +303,37 @@ export async function removeContactListMember(memberId: string) {
 }
 
 /**
- * Import de l'export clubs (Excel lu côté navigateur, envoyé par lots). Un club déjà présent dans l'annuaire
- * (même numéro de club, à défaut même email) est remplacé par la ligne importée — réimporter l'export met à jour.
+ * Import de l'export clubs, étape 1 (une seule fois pour tout le fichier) : retire de l'annuaire les clubs
+ * présents dans le fichier (même numéro de club, à défaut même email) — réimporter l'export met donc à jour
+ * sans doublon. Fait avant les lots d'insertion pour qu'un lot n'efface pas ce qu'un lot précédent vient d'ajouter.
  */
+export async function prepareClubContactsImport(listId: string, keys: { clubNumbers: string[]; emails: string[] }) {
+  const { supabase } = await requireStaff();
+  const chunks = <T,>(arr: T[]) => Array.from({ length: Math.ceil(arr.length / 300) }, (_, i) => arr.slice(i * 300, i * 300 + 300));
+  for (const part of chunks(keys.clubNumbers)) {
+    const { error } = await supabase
+      .from("registration_contact_list_members")
+      .delete()
+      .eq("list_id", listId)
+      .in("club_number", part);
+    if (error) throw new Error(error.message);
+  }
+  for (const part of chunks(keys.emails)) {
+    const { error } = await supabase
+      .from("registration_contact_list_members")
+      .delete()
+      .eq("list_id", listId)
+      .is("club_number", null)
+      .in("email", part);
+    if (error) throw new Error(error.message);
+  }
+}
+
+/** Import de l'export clubs, étape 2 : insertion d'un lot (Excel lu côté navigateur, envoyé par lots de 500). */
 export async function importClubContactsIntoList(listId: string, contacts: ClubContact[]) {
   const { supabase } = await requireStaff();
   if (contacts.length === 0) return { added: 0 };
   if (contacts.length > 1000) throw new Error("Lot trop volumineux.");
-
-  const clubNumbers = contacts.map((c) => c.clubNumber).filter((n): n is string => !!n);
-  if (clubNumbers.length > 0) {
-    const { error } = await supabase
-      .from("registration_contact_list_members")
-      .delete()
-      .eq("list_id", listId)
-      .in("club_number", clubNumbers);
-    if (error) throw new Error(error.message);
-  }
-  const emailsWithoutNumber = contacts.filter((c) => !c.clubNumber).map((c) => c.email);
-  if (emailsWithoutNumber.length > 0) {
-    const { error } = await supabase
-      .from("registration_contact_list_members")
-      .delete()
-      .eq("list_id", listId)
-      .in("email", emailsWithoutNumber);
-    if (error) throw new Error(error.message);
-  }
 
   const { error } = await supabase.from("registration_contact_list_members").insert(
     contacts.map((c) => ({
@@ -325,17 +356,24 @@ export async function importClubContactsIntoList(listId: string, contacts: ClubC
 /** Importe tous les membres d'un annuaire comme destinataires de la campagne (copie ponctuelle, pas un lien synchronisé). */
 export async function importContactListIntoCampaign(campaignId: string, listId: string) {
   const { supabase } = await requireStaff();
-  const { data: members, error: membersError } = await supabase
-    .from("registration_contact_list_members")
-    .select("name, email, email_secondary, club, club_number, civility, first_name, last_name, phone")
-    .eq("list_id", listId);
-  if (membersError) throw new Error(membersError.message);
-  if (!members || members.length === 0) return { added: 0 };
+  const members = await fetchAllRows((from, to) =>
+    supabase
+      .from("registration_contact_list_members")
+      .select("name, email, email_secondary, club, club_number, civility, first_name, last_name, phone")
+      .eq("list_id", listId)
+      .order("id")
+      .range(from, to)
+  );
+  if (members.length === 0) return { added: 0 };
 
-  const { data: existing } = await supabase
-    .from("event_registration_recipients")
-    .select("email, phone")
-    .eq("campaign_id", campaignId);
+  const existing = await fetchAllRows((from, to) =>
+    supabase
+      .from("event_registration_recipients")
+      .select("email, phone")
+      .eq("campaign_id", campaignId)
+      .order("id")
+      .range(from, to)
+  );
   const existingEmails = new Set((existing ?? []).map((e) => e.email).filter(Boolean));
   const existingPhones = new Set((existing ?? []).map((e) => e.phone).filter(Boolean));
   // Membre déjà destinataire = même email, ou même mobile pour un contact sans email.
@@ -344,22 +382,23 @@ export async function importContactListIntoCampaign(campaignId: string, listId: 
   );
   if (toInsert.length === 0) return { added: 0 };
 
-  const { error } = await supabase.from("event_registration_recipients").insert(
-    toInsert.map((m) => ({
-      campaign_id: campaignId,
-      name: m.name,
-      email: m.email,
-      email_secondary: m.email_secondary,
-      club: m.club,
-      club_number: m.club_number,
-      civility: m.civility,
-      first_name: m.first_name,
-      last_name: m.last_name,
-      phone: m.phone,
-      source: "invited" as const,
-    }))
-  );
-  if (error) throw new Error(error.message);
+  const rows = toInsert.map((m) => ({
+    campaign_id: campaignId,
+    name: m.name,
+    email: m.email,
+    email_secondary: m.email_secondary,
+    club: m.club,
+    club_number: m.club_number,
+    civility: m.civility,
+    first_name: m.first_name,
+    last_name: m.last_name,
+    phone: m.phone,
+    source: "invited" as const,
+  }));
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await supabase.from("event_registration_recipients").insert(rows.slice(i, i + 500));
+    if (error) throw new Error(error.message);
+  }
   return { added: toInsert.length };
 }
 
@@ -434,12 +473,16 @@ export async function sendCampaign(campaignId: string) {
     .single();
   if (!campaign) throw new Error("Campagne introuvable.");
 
-  const { data: recipients } = await supabase
-    .from("event_registration_recipients")
-    .select("*")
-    .eq("campaign_id", campaignId)
-    .is("sent_at", null);
-  if (!recipients || recipients.length === 0) return { sent: 0, error: null as string | null };
+  const recipients = await fetchAllRows((from, to) =>
+    supabase
+      .from("event_registration_recipients")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .is("sent_at", null)
+      .order("id")
+      .range(from, to)
+  );
+  if (recipients.length === 0) return { sent: 0, error: null as string | null };
 
   const event = campaign.events as unknown as { title: string; start_date: string; location: string | null } | null;
   const eventTitle = event?.title ?? "Événement";
@@ -539,13 +582,17 @@ export async function sendCampaignWhatsApp(campaignId: string) {
   if (!campaign) throw new Error("Campagne introuvable.");
   const event = campaign.events as unknown as { title: string; start_date: string } | null;
 
-  const { data: recipients } = await supabase
-    .from("event_registration_recipients")
-    .select("id, token, first_name, last_name, name, phone")
-    .eq("campaign_id", campaignId)
-    .like("phone", "+%")
-    .is("whatsapp_sent_at", null);
-  if (!recipients || recipients.length === 0) return { sent: 0, failed: 0, firstError: null as string | null };
+  const recipients = await fetchAllRows((from, to) =>
+    supabase
+      .from("event_registration_recipients")
+      .select("id, token, first_name, last_name, name, phone")
+      .eq("campaign_id", campaignId)
+      .like("phone", "+%")
+      .is("whatsapp_sent_at", null)
+      .order("id")
+      .range(from, to)
+  );
+  if (recipients.length === 0) return { sent: 0, failed: 0, firstError: null as string | null };
 
   let sent = 0;
   let failed = 0;
@@ -554,13 +601,18 @@ export async function sendCampaignWhatsApp(campaignId: string) {
   for (let i = 0; i < recipients.length; i += CONCURRENCY) {
     await Promise.all(
       recipients.slice(i, i + CONCURRENCY).map(async (r) => {
+        // Ajout manuel = un seul champ « Nom » : on le découpe (1er mot = prénom), sinon le modèle affichait
+        // « Bonjour Madame, Monsieur Jean Dupont ».
+        const [nameFirst, ...nameRest] = (r.name ?? "").trim().split(/\s+/);
+        const hasSplitName = !!(r.first_name || r.last_name);
         const result = await sendWhatsAppEventInvite({
           to: r.phone!,
-          firstName: personName({ first_name: r.first_name }) || null,
-          lastName: personName({ last_name: r.last_name }) || (r.first_name ? null : r.name),
+          firstName: hasSplitName ? personName({ first_name: r.first_name }) || null : nameFirst || null,
+          lastName: hasSplitName ? personName({ last_name: r.last_name }) || null : nameRest.join(" ") || null,
           eventTitle: event?.title ?? "Événement",
           eventDateLabel: formatEventDateLabel(event?.start_date),
-          linkSuffix: `${campaign.event_id}/${r.token}`,
+          // Un seul segment : Meta encode le paramètre du bouton (« / » → %2F). Page /inscription/[jeton] qui redirige.
+          linkSuffix: r.token,
         });
         if (result.ok) {
           sent += 1;

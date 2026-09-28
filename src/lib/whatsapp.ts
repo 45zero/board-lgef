@@ -51,7 +51,7 @@ async function sendTemplate(to: string, templateName: string, components: Templa
   return { ok: true as const };
 }
 
-/** Invitation à un événement — `linkSuffix` = « {eventId}/{token} », complété par l'URL de base déclarée dans le modèle. */
+/** Invitation à un événement — `linkSuffix` = jeton du destinataire, complété par l'URL de base déclarée dans le modèle. */
 export async function sendWhatsAppEventInvite(p: {
   to: string;
   firstName: string | null;
@@ -66,8 +66,9 @@ export async function sendWhatsAppEventInvite(p: {
     {
       type: "body",
       parameters: [
+        // Sans prénom : « Bonjour Madame, Monsieur » ; sans nom : espace seul (Meta refuse un paramètre vide).
         param(p.firstName, "Madame, Monsieur"),
-        param(p.lastName, "-"),
+        p.lastName?.trim() ? param(p.lastName, " ") : { type: "text" as const, text: " " },
         param(p.eventTitle, "notre événement"),
         param(p.eventDateLabel, "prochainement"),
       ],
