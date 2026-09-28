@@ -52,6 +52,7 @@ import {
   addRecipientsFromContacts,
   addManualRecipient,
   removeRecipient,
+  removeRecipients,
   sendCampaign,
   sendCampaignWhatsApp,
   previewCampaignHtml,
@@ -68,7 +69,7 @@ import {
 } from "@/app/actions/registration";
 import { uploadCampaignBlockAsset } from "@/lib/board/registrationAssets";
 import type { EmailBlock } from "@/lib/board/registrationEmail";
-import { parseClubExportRows, personName, formatFrPhone, whatsappUrl } from "@/lib/board/clubContacts";
+import { parseClubExportRows, personName, formatFrPhone } from "@/lib/board/clubContacts";
 
 type RegistrationEvent = Awaited<ReturnType<typeof listRegistrationEvents>>[number];
 type Campaign = Awaited<ReturnType<typeof getOrCreateCampaign>>;
@@ -667,6 +668,9 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sendingWa, setSendingWa] = useState(false);
   const [waResult, setWaResult] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<string | null>(null); // id de ligne ou "bulk" pendant un envoi/suppression
+  const [listMsg, setListMsg] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
 
   const refetch = async (c: Campaign) => {
@@ -768,6 +772,54 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   };
 
   const waPending = recipients.filter((r) => r.phone?.startsWith("+") && !r.whatsapp_sent_at).length;
+
+  const toggleSelected = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  /** Envoi ou renvoi ciblé (une ligne ou la sélection), même si le destinataire a déjà reçu l'invitation. */
+  const sendTo = async (channel: "mail" | "wa", ids: string[], busyKey: string) => {
+    setBusy(busyKey);
+    setListMsg(null);
+    try {
+      if (channel === "mail") {
+        await saveSubject();
+        const { sent, error } = await sendCampaign(campaign.id, ids);
+        setListMsg(error ?? `${sent} email(s) envoyé(s).`);
+      } else {
+        const { sent, failed, firstError } = await sendCampaignWhatsApp(campaign.id, ids);
+        setListMsg(
+          sent === 0 && !failed && firstError
+            ? firstError
+            : `${sent} WhatsApp envoyé(s)${failed ? ` — ${failed} échec(s) : ${firstError}` : ""}.`
+        );
+      }
+      await refetch(campaign);
+    } catch (e) {
+      setListMsg(e instanceof Error ? e.message : "Échec de l'envoi.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Suppression de la sélection, ou de tous les destinataires sans `ids`. */
+  const deleteRecipients = async (ids?: string[]) => {
+    const n = ids ? ids.length : recipients.length;
+    if (!confirm(ids ? `Supprimer ${n} destinataire(s) sélectionné(s) ?` : `Supprimer les ${n} destinataires de cet événement ?`)) return;
+    setBusy("bulk");
+    setListMsg(null);
+    try {
+      await removeRecipients(campaign.id, ids);
+      setSelected(new Set());
+      await refetch(campaign);
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const sendWhatsApp = async () => {
     if (!confirm(`Envoyer l'invitation par WhatsApp à ${waPending} destinataire(s) ?`)) return;
@@ -1043,11 +1095,70 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
             </button>
           </div>
 
+          {recipients.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+              <label className="flex cursor-pointer items-center gap-2 font-semibold text-ink-3">
+                <input
+                  type="checkbox"
+                  checked={selected.size > 0 && selected.size === recipients.length}
+                  ref={(el) => {
+                    if (el) el.indeterminate = selected.size > 0 && selected.size < recipients.length;
+                  }}
+                  onChange={() =>
+                    setSelected(selected.size === recipients.length ? new Set() : new Set(recipients.map((r) => r.id)))
+                  }
+                  className="h-3.5 w-3.5 accent-[var(--navy)]"
+                />
+                {selected.size > 0 ? `${selected.size} sélectionné(s)` : `Tout sélectionner (${recipients.length})`}
+              </label>
+              {selected.size > 0 && (
+                <>
+                  <button
+                    onClick={() => sendTo("mail", [...selected], "bulk")}
+                    disabled={busy !== null}
+                    className="flex items-center gap-1 rounded-btn border border-line px-2 py-1 font-semibold text-ink-2 hover:bg-hover disabled:opacity-50"
+                  >
+                    <Mail size={11} /> Mail
+                  </button>
+                  <button
+                    onClick={() => sendTo("wa", [...selected], "bulk")}
+                    disabled={busy !== null}
+                    className="flex items-center gap-1 rounded-btn border border-line px-2 py-1 font-semibold text-good hover:bg-hover disabled:opacity-50"
+                  >
+                    <MessageCircle size={11} /> WhatsApp
+                  </button>
+                  <button
+                    onClick={() => deleteRecipients([...selected])}
+                    disabled={busy !== null}
+                    className="flex items-center gap-1 rounded-btn border border-line px-2 py-1 font-semibold text-red hover:bg-hover disabled:opacity-50"
+                  >
+                    <Trash2 size={11} /> Supprimer
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => deleteRecipients()}
+                disabled={busy !== null}
+                className="ml-auto flex items-center gap-1 font-semibold text-red hover:underline disabled:opacity-50"
+              >
+                <Trash2 size={11} /> Tout supprimer
+              </button>
+            </div>
+          )}
+          {(listMsg || busy === "bulk") && (
+            <p className="mb-2 text-xs font-semibold text-ink-2">{busy === "bulk" ? "En cours…" : listMsg}</p>
+          )}
+
           <div className="divide-y divide-line rounded-btn border border-line">
             {recipients.length === 0 && <p className="p-3 text-xs italic text-ink-4">Aucun destinataire pour l&rsquo;instant.</p>}
             {recipients.map((r) => (
-              <div key={r.id} className="flex items-center gap-3 px-3 py-2">
-                <Mail size={13} className="shrink-0 text-ink-4" />
+              <div key={r.id} className={`flex items-center gap-3 px-3 py-2 ${selected.has(r.id) ? "bg-hover" : ""}`}>
+                <input
+                  type="checkbox"
+                  checked={selected.has(r.id)}
+                  onChange={() => toggleSelected(r.id)}
+                  className="h-3.5 w-3.5 shrink-0 accent-[var(--navy)]"
+                />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-xs text-ink-2">
                     <span className="font-semibold text-ink">{personName(r) || "—"}</span>
@@ -1057,23 +1168,26 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
                     {[r.email, r.email_secondary, formatFrPhone(r.phone)].filter(Boolean).join(" · ")}
                   </div>
                 </div>
-                {(() => {
-                  const wa = whatsappUrl(
-                    r.phone,
-                    `Bonjour ${personName(r)}, la LGEF vous invite à « ${ev.title} » le ${format(new Date(ev.start_date), "EEEE d MMMM 'à' HH:mm", { locale: fr })}. Merci de nous indiquer votre présence : ${siteOrigin()}/inscription/${ev.id}/${r.token}`
-                  );
-                  return wa ? (
-                    <a
-                      href={wa}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={`Inviter par WhatsApp (${formatFrPhone(r.phone)})`}
-                      className="shrink-0 text-good hover:opacity-80"
-                    >
-                      <MessageCircle size={14} />
-                    </a>
-                  ) : null;
-                })()}
+                {r.email && (
+                  <button
+                    onClick={() => sendTo("mail", [r.id], r.id + ":mail")}
+                    disabled={busy !== null}
+                    title={r.sent_at ? "Renvoyer le mail" : "Envoyer le mail"}
+                    className="shrink-0 text-ink-4 hover:text-navy disabled:opacity-40"
+                  >
+                    {busy === r.id + ":mail" ? <span className="text-[10px]">…</span> : <Mail size={13} />}
+                  </button>
+                )}
+                {r.phone?.startsWith("+") && (
+                  <button
+                    onClick={() => sendTo("wa", [r.id], r.id + ":wa")}
+                    disabled={busy !== null}
+                    title={`${r.whatsapp_sent_at ? "Renvoyer" : "Envoyer"} le WhatsApp (${formatFrPhone(r.phone)})`}
+                    className="shrink-0 text-good hover:opacity-80 disabled:opacity-40"
+                  >
+                    {busy === r.id + ":wa" ? <span className="text-[10px]">…</span> : <MessageCircle size={13} />}
+                  </button>
+                )}
                 {r.response === "yes" && (
                   <span className="flex items-center gap-1 rounded-full bg-good-bg px-2 py-0.5 text-[10px] font-bold text-good">
                     <Check size={10} /> Participe{r.attendees ? ` (${r.attendees})` : ""}

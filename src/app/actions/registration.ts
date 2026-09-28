@@ -53,6 +53,20 @@ async function fetchAllRows<T>(
   }
 }
 
+/** Lignes d'une liste d'ids, par paquets (une URL avec 1500 ids dépasserait la longueur admise). */
+async function fetchRowsByIds<T>(
+  ids: string[],
+  page: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await page(ids.slice(i, i + 200));
+    if (error) throw new Error(error.message);
+    all.push(...(data ?? []));
+  }
+  return all;
+}
+
 function siteUrl() {
   return (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/+$/, "");
 }
@@ -408,6 +422,24 @@ export async function removeRecipient(recipientId: string) {
   if (error) throw new Error(error.message);
 }
 
+/** Suppression groupée : la sélection (`recipientIds`) ou, sans ids, tous les destinataires de la campagne. */
+export async function removeRecipients(campaignId: string, recipientIds?: string[]) {
+  const { supabase } = await requireStaff();
+  if (!recipientIds) {
+    const { error } = await supabase.from("event_registration_recipients").delete().eq("campaign_id", campaignId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  for (let i = 0; i < recipientIds.length; i += 200) {
+    const { error } = await supabase
+      .from("event_registration_recipients")
+      .delete()
+      .eq("campaign_id", campaignId)
+      .in("id", recipientIds.slice(i, i + 200));
+    if (error) throw new Error(error.message);
+  }
+}
+
 /** Envoie l'email d'invitation (via le compte Google du board) à tous les destinataires pas encore envoyés. */
 /** Rendu HTML de la campagne — identique à ce qui part réellement, avec des liens de réponse factices (pour l'aperçu). */
 export async function previewCampaignHtml(campaignId: string) {
@@ -463,7 +495,11 @@ export async function getCampaignEmbedHtml(campaignId: string) {
   });
 }
 
-export async function sendCampaign(campaignId: string) {
+/**
+ * Envoi par email. Sans `recipientIds` : tous ceux qui n'ont pas encore reçu le mail.
+ * Avec `recipientIds` (renvoi individuel ou sélection) : ces destinataires-là, même déjà envoyés.
+ */
+export async function sendCampaign(campaignId: string, recipientIds?: string[]) {
   const { supabase, userId } = await requireStaff();
 
   const { data: campaign } = await supabase
@@ -473,15 +509,19 @@ export async function sendCampaign(campaignId: string) {
     .single();
   if (!campaign) throw new Error("Campagne introuvable.");
 
-  const recipients = await fetchAllRows((from, to) =>
-    supabase
-      .from("event_registration_recipients")
-      .select("*")
-      .eq("campaign_id", campaignId)
-      .is("sent_at", null)
-      .order("id")
-      .range(from, to)
-  );
+  const recipients = recipientIds
+    ? await fetchRowsByIds(recipientIds, (chunk) =>
+        supabase.from("event_registration_recipients").select("*").eq("campaign_id", campaignId).in("id", chunk)
+      )
+    : await fetchAllRows((from, to) =>
+        supabase
+          .from("event_registration_recipients")
+          .select("*")
+          .eq("campaign_id", campaignId)
+          .is("sent_at", null)
+          .order("id")
+          .range(from, to)
+      );
   if (recipients.length === 0) return { sent: 0, error: null as string | null };
 
   const event = campaign.events as unknown as { title: string; start_date: string; location: string | null } | null;
@@ -563,7 +603,8 @@ export async function sendCampaign(campaignId: string) {
 }
 
 /** Invitations WhatsApp (API Meta, modèle approuvé) à tous les destinataires avec un mobile, pas encore invités par WhatsApp. */
-export async function sendCampaignWhatsApp(campaignId: string) {
+/** Même logique que `sendCampaign` : sans `recipientIds`, ceux pas encore invités ; avec, renvoi à ces destinataires. */
+export async function sendCampaignWhatsApp(campaignId: string, recipientIds?: string[]) {
   const { supabase } = await requireStaff();
   // Messages renvoyés plutôt que levés : en production Next masque le texte des erreurs serveur (500 générique).
   if (!isWhatsAppConfigured()) {
@@ -582,16 +623,25 @@ export async function sendCampaignWhatsApp(campaignId: string) {
   if (!campaign) throw new Error("Campagne introuvable.");
   const event = campaign.events as unknown as { title: string; start_date: string } | null;
 
-  const recipients = await fetchAllRows((from, to) =>
-    supabase
-      .from("event_registration_recipients")
-      .select("id, token, first_name, last_name, name, phone")
-      .eq("campaign_id", campaignId)
-      .like("phone", "+%")
-      .is("whatsapp_sent_at", null)
-      .order("id")
-      .range(from, to)
-  );
+  const recipients = recipientIds
+    ? await fetchRowsByIds(recipientIds, (chunk) =>
+        supabase
+          .from("event_registration_recipients")
+          .select("id, token, first_name, last_name, name, phone")
+          .eq("campaign_id", campaignId)
+          .like("phone", "+%")
+          .in("id", chunk)
+      )
+    : await fetchAllRows((from, to) =>
+        supabase
+          .from("event_registration_recipients")
+          .select("id, token, first_name, last_name, name, phone")
+          .eq("campaign_id", campaignId)
+          .like("phone", "+%")
+          .is("whatsapp_sent_at", null)
+          .order("id")
+          .range(from, to)
+      );
   if (recipients.length === 0) return { sent: 0, failed: 0, firstError: null as string | null };
 
   let sent = 0;
