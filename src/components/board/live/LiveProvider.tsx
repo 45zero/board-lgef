@@ -23,6 +23,8 @@ export const LIVE_TABLES = [
   "event_registration_recipients",
   "event_expenses",
   "expense_submissions",
+  "match_details",
+  "photo_missions",
 ] as const;
 export type LiveTable = (typeof LIVE_TABLES)[number] | "notifications" | "mails";
 

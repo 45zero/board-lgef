@@ -8,6 +8,7 @@ import { MobileCalendrierScreen } from "@/components/board/mobile/screens/Mobile
 import { MobileMailsScreen } from "@/components/board/mobile/screens/MobileMailsScreen";
 import { FraisScreen } from "@/components/board/screens/FraisScreen";
 import { AccueilScreen } from "@/components/board/screens/AccueilScreen";
+import { WeekendScreen } from "@/components/board/screens/WeekendScreen";
 import { MobileSettingsSheet, useCenterAction } from "@/components/board/mobile/MobileSettingsSheet";
 import { SocialCapture } from "@/components/board/publication/SocialCapture";
 
@@ -15,7 +16,7 @@ const TITLES: Record<MobileTab, { title: string; kicker: string }> = {
   calendrier: { title: "Calendrier", kicker: "EVENEMENTS" },
   accueil: { title: "Dashboard", kicker: "ESPACE DE TRAVAIL" },
   mails: { title: "Mails", kicker: "MESSAGERIE" },
-  trello: { title: "Trello", kicker: "TABLEAUX" },
+  weekend: { title: "Week-end", kicker: "MATCHS & RESEAU PHOTO" },
 };
 
 /** Coque mobile — même app Next.js, bascule vers cette coque sous ~768px (voir useIsMobile). */
@@ -80,9 +81,9 @@ export function MobileShell() {
             />
           </div>
         )}
-        {tab !== "calendrier" && tab !== "mails" && tab !== "accueil" && (
-          <div className="flex h-full items-center justify-center p-6 text-center text-sm text-ink-3">
-            Module « {title} » — bientôt sur mobile
+        {tab === "weekend" && (
+          <div className="h-full overflow-y-auto pb-20">
+            <WeekendScreen />
           </div>
         )}
       </main>

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
@@ -91,6 +92,9 @@ export default function LoginPage() {
         >
           {submitting ? "Connexion…" : "Se connecter"}
         </button>
+        <Link href="/demande-acces" className="mt-4 block text-center text-xs font-semibold text-ink-3 hover:underline">
+          Photographe, vidéaste ? Demander un accès
+        </Link>
       </form>
     </div>
   );

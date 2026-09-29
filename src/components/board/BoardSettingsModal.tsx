@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Sparkles, X, PanelLeft, LayoutGrid, LogOut } from "lucide-react";
+import { Sparkles, X, PanelLeft, LayoutGrid, LogOut, Users } from "lucide-react";
 import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 import { useUserRole } from "@/hooks/board/useUserRole";
@@ -14,6 +14,8 @@ import {
 } from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
 import { useAuth } from "@/contexts/AuthContext";
+import { listAccessRequests } from "@/app/actions/account-requests";
+import { UsersAdminModal } from "@/components/board/users/UsersAdminModal";
 
 /** Compte connecté : déconnexion puis retour à la page de connexion pour se connecter avec un autre compte. */
 /**
@@ -106,6 +108,39 @@ function HateAlertsSection({ notif }: { notif: ReturnType<typeof useNotification
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Administrateurs : comptes du board (rôle, statut, réseau photo, pôles) et demandes d'accès. */
+function UsersSection() {
+  const role = useUserRole();
+  const canManage = role.isAdmin || role.isSuperUser;
+  const [pending, setPending] = useState(0);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (canManage) listAccessRequests().then((r) => setPending(r.length)).catch(() => undefined);
+  }, [canManage, open]);
+
+  if (!canManage) return null;
+  return (
+    <div className="mt-5">
+      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Utilisateurs</div>
+      <button
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center gap-3 rounded-btn border border-line p-3 text-left hover:bg-hover"
+      >
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-btn bg-subtle text-ink-2">
+          <Users size={15} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold text-ink">Gérer les utilisateurs</span>
+          <span className="block text-xs text-ink-4">Rôle, statut, réseau photo, pôles, demandes d&rsquo;accès</span>
+        </span>
+        {pending > 0 && <span className="shrink-0 rounded-full bg-red px-1.5 text-[10px] font-bold text-white">{pending}</span>}
+      </button>
+      {open && <UsersAdminModal onClose={() => setOpen(false)} />}
     </div>
   );
 }
@@ -388,6 +423,8 @@ export function BoardSettingsModal({
             ))}
           </div>
         </div>
+
+        <UsersSection />
 
         <GoogleAccountsSection />
 

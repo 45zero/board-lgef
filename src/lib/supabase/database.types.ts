@@ -166,6 +166,75 @@ export type Database = {
         }
         Relationships: []
       }
+      match_details: {
+        Row: {
+          event_id: string
+          competition: string
+          home_team: string
+          home_level: string | null
+          away_team: string
+          away_level: string | null
+          regions: string[]
+          created_at: string
+        }
+        Insert: {
+          event_id: string
+          competition: string
+          home_team: string
+          home_level?: string | null
+          away_team: string
+          away_level?: string | null
+          regions?: string[]
+          created_at?: string
+        }
+        Update: {
+          event_id?: string
+          competition?: string
+          home_team?: string
+          home_level?: string | null
+          away_team?: string
+          away_level?: string | null
+          regions?: string[]
+          created_at?: string
+        }
+        Relationships: []
+      }
+      photo_missions: {
+        Row: {
+          id: string
+          event_id: string
+          status: string
+          photographer_id: string | null
+          publisher_id: string | null
+          taken_at: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          event_id: string
+          status?: string
+          photographer_id?: string | null
+          publisher_id?: string | null
+          taken_at?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          event_id?: string
+          status?: string
+          photographer_id?: string | null
+          publisher_id?: string | null
+          taken_at?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       media_publications: {
         Row: {
           id: string

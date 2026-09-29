@@ -61,7 +61,7 @@ function displayName(p: { first_name: string | null; last_name: string | null; e
 
 /**
  * Tous les techniciens (toute spécialité `tech-*`) et leur statut. Plusieurs statuts : le plus « interne »
- * l'emporte (salarié > prestataire > bénévole) ; aucun statut précisé : personnel de la Ligue (salarié).
+ * l'emporte (salarié > réseau > prestataire > bénévole) ; aucun statut précisé : personnel de la Ligue (salarié).
  */
 async function getStaffKinds(service: ReturnType<typeof createServiceClient>) {
   const { data: links } = await service.from("profile_specialties").select("user_id, specialties!inner(slug)").like("specialties.slug", "tech-%");

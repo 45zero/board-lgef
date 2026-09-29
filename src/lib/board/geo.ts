@@ -2,19 +2,21 @@
 
 export type LatLng = { lat: number; lng: number };
 
-/** Statut technique d'un utilisateur, d'après ses spécialités (tech-salarie / tech-prestataire / tech-benevole). */
-export type StaffKind = "salarie" | "prestataire" | "benevole";
+/** Statut technique d'un utilisateur, d'après ses spécialités (tech-salarie / tech-reseau / tech-prestataire / tech-benevole). */
+export type StaffKind = "salarie" | "reseau" | "prestataire" | "benevole";
 
 export const STAFF_SPECIALTY: Record<string, StaffKind> = {
   "tech-salarie": "salarie",
+  "tech-reseau": "reseau",
   "tech-prestataire": "prestataire",
   "tech-benevole": "benevole",
 };
 
-export const STAFF_KINDS: StaffKind[] = ["salarie", "prestataire", "benevole"];
+export const STAFF_KINDS: StaffKind[] = ["salarie", "reseau", "prestataire", "benevole"];
 
 export const STAFF_STYLES: Record<StaffKind, { label: string; letter: string; color: string }> = {
   salarie: { label: "Technicien salarié", letter: "S", color: "#111827" },
+  reseau: { label: "Réseau (frais)", letter: "R", color: "#7C3AED" },
   prestataire: { label: "Technicien prestataire", letter: "P", color: "#DB2777" },
   benevole: { label: "Bénévole", letter: "B", color: "#0891B2" },
 };

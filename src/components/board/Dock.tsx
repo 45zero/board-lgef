@@ -23,6 +23,7 @@ import {
   HardDrive,
   ClipboardCheck,
   Map as MapIcon,
+  Camera,
 } from "lucide-react";
 
 const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>> = {
@@ -31,6 +32,7 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>
   trello: Kanban,
   planning: ArrowLeftRight,
   calendrier: Calendar,
+  weekend: Camera,
   quiz: Gamepad2,
   pointage: Clock,
   formations: GraduationCap,
@@ -50,6 +52,7 @@ const PINNED = [
   "trello",
   "planning",
   "calendrier",
+  "weekend",
   "quiz",
   "pointage",
   "formations",

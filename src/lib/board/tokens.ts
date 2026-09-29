@@ -69,6 +69,7 @@ export const BOARD_APPS: BoardApp[] = [
   { id: "trello", label: "Trello", kicker: "TABLEAUX" },
   { id: "planning", label: "Planning", kicker: "POLES" },
   { id: "calendrier", label: "Calendrier", kicker: "EVENEMENTS" },
+  { id: "weekend", label: "Week-end", kicker: "MATCHS & RESEAU PHOTO" },
   { id: "quiz", label: "Quiz", kicker: "SESSIONS EN DIRECT" },
   { id: "pointage", label: "Pointage", kicker: "TEMPS DE TRAVAIL" },
   { id: "formations", label: "Formations", kicker: "PARCOURS" },

@@ -1,11 +1,11 @@
 "use client";
 
-import { Calendar, Home, Mail, Kanban } from "lucide-react";
+import { Calendar, Home, Mail, Camera } from "lucide-react";
 import { CENTER_ACTIONS, type CenterAction } from "@/components/board/mobile/MobileSettingsSheet";
 import { useAppBadges, type AppBadge } from "@/hooks/board/useAppBadges";
 import { AppBadgePills } from "@/components/board/AppBadgePills";
 
-export type MobileTab = "calendrier" | "accueil" | "mails" | "trello";
+export type MobileTab = "calendrier" | "accueil" | "mails" | "weekend";
 
 const SLOTS: { id: MobileTab; label: string; icon: typeof Calendar }[] = [
   { id: "calendrier", label: "Calendrier", icon: Calendar },
@@ -13,7 +13,7 @@ const SLOTS: { id: MobileTab; label: string; icon: typeof Calendar }[] = [
 ];
 const SLOTS_RIGHT: { id: MobileTab; label: string; icon: typeof Calendar }[] = [
   { id: "mails", label: "Mails", icon: Mail },
-  { id: "trello", label: "Trello", icon: Kanban },
+  { id: "weekend", label: "Week-end", icon: Camera },
 ];
 
 export function MobileBottomNav({

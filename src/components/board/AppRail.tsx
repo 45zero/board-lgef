@@ -25,6 +25,7 @@ import {
   ClipboardCheck,
   Map as MapIcon,
   Receipt,
+  Camera,
 } from "lucide-react";
 import { BOARD_APPS } from "@/lib/board/tokens";
 import type { NavLayout } from "./BoardShell";
@@ -36,6 +37,7 @@ const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   trello: Kanban,
   planning: CalendarRange,
   calendrier: Calendar,
+  weekend: Camera,
   quiz: Gamepad2,
   pointage: Clock,
   formations: GraduationCap,
