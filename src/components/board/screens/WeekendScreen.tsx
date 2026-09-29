@@ -34,6 +34,7 @@ import {
 } from "@/app/actions/weekend";
 import { listAccessRequests, type AccessRequest } from "@/app/actions/account-requests";
 import { AccessRequestCard } from "@/components/board/users/AccessRequestCard";
+import { unwrap, type ActionResult } from "@/lib/board/actionResult";
 import {
   buildRecap,
   COMPETITION_SUGGESTIONS,
@@ -135,11 +136,11 @@ function MatchRow({
   const mine = p?.status === "taken" && p.photographer?.id === viewer.id;
   const upcoming = new Date(match.start).getTime() > now;
 
-  const run = async (fn: () => Promise<unknown>) => {
+  const run = async (fn: () => Promise<ActionResult<unknown>>) => {
     setBusy(true);
     setError(null);
     try {
-      await fn();
+      unwrap(await fn());
       onChanged();
     } catch (e) {
       setError(errorMessage(e));
@@ -303,7 +304,7 @@ function MatchForm({
     setError(null);
     try {
       const start = new Date(`${form.date}T${form.time || "15:00"}`);
-      await saveMatch(
+      unwrap(await saveMatch(
         {
           ...form,
           start: start.toISOString(),
@@ -311,7 +312,7 @@ function MatchForm({
           publisherId: form.photo ? form.publisherId || null : null,
         },
         match?.eventId
-      );
+      ));
       onSaved();
       if (again) {
         // Enchaîner la saisie : même jour, compétition, pages et relais ; équipes et lieu vidés.
@@ -503,7 +504,7 @@ function NetworkModal({
     const q = query.trim();
     if (q.length < 2) return;
     const t = window.setTimeout(() => {
-      searchProfiles(q).then(setResults).catch((e) => setError(errorMessage(e)));
+      searchProfiles(q).then(unwrap).then(setResults).catch((e) => setError(errorMessage(e)));
     }, 250);
     return () => window.clearTimeout(t);
   }, [query]);
@@ -511,7 +512,7 @@ function NetworkModal({
   const toggle = async (id: string, trade: "photo" | "video", member: boolean) => {
     setError(null);
     try {
-      await setCoverageMember(id, trade, member);
+      unwrap(await setCoverageMember(id, trade, member));
       onChanged();
     } catch (e) {
       setError(errorMessage(e));
@@ -634,6 +635,7 @@ export function WeekendScreen() {
   const load = useCallback(
     () =>
       getWeekend(range.start.toISOString(), range.end.toISOString())
+        .then(unwrap)
         .then((d) => {
           setData(d);
           setError(null);
@@ -653,7 +655,7 @@ export function WeekendScreen() {
 
   // Demandes d'accès en attente (administrateurs) : pastille sur « Couverture match ».
   const isAdmin = !!data?.viewer.isAdmin;
-  const loadRequests = useCallback(() => listAccessRequests().then(setRequests).catch(() => setRequests(null)), []);
+  const loadRequests = useCallback(() => listAccessRequests().then(unwrap).then(setRequests).catch(() => setRequests(null)), []);
   useEffect(() => {
     if (isAdmin) void loadRequests();
   }, [isAdmin, loadRequests]);
@@ -695,7 +697,7 @@ export function WeekendScreen() {
   const send = async () => {
     setSending(true);
     try {
-      const n = await sendToNetwork(drafts.map((m) => m.eventId));
+      const n = unwrap(await sendToNetwork(drafts.map((m) => m.eventId)));
       setNotice(`${n} match${n > 1 ? "s" : ""} envoyé${n > 1 ? "s" : ""} aux photographes.`);
       await load();
     } catch (e) {

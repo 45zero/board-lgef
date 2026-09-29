@@ -1,5 +1,6 @@
 "use server";
 
+import { toResult } from "@/lib/board/actionResult";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 
@@ -38,7 +39,9 @@ async function requireManager() {
   return { userId, isAdmin: role === "admin" };
 }
 
-export async function listUsers(): Promise<{ users: AdminUser[]; specialties: SpecialtyOption[]; me: { id: string; isAdmin: boolean } }> {
+export type UsersList = { users: AdminUser[]; specialties: SpecialtyOption[]; me: { id: string; isAdmin: boolean } };
+
+async function listUsersImpl(): Promise<UsersList> {
   const { userId, isAdmin } = await requireManager();
   const service = createServiceClient();
   const [{ data: profiles, error }, { data: links }, { data: specialties }] = await Promise.all([
@@ -68,7 +71,7 @@ export async function listUsers(): Promise<{ users: AdminUser[]; specialties: Sp
 }
 
 /** Enregistre nom, rôle et spécialités (l'ensemble remplace les spécialités actuelles). */
-export async function updateUser(id: string, input: { firstName: string; lastName: string; role: UserRole; slugs: string[] }) {
+async function updateUserImpl(id: string, input: { firstName: string; lastName: string; role: UserRole; slugs: string[] }) {
   const { userId, isAdmin } = await requireManager();
   const service = createServiceClient();
   const { data: current } = await service.from("profiles").select("role").eq("id", id).single();
@@ -103,4 +106,14 @@ export async function updateUser(id: string, input: { firstName: string; lastNam
     const { error } = await service.from("profile_specialties").insert(toAdd.map((specialty_id) => ({ user_id: id, specialty_id })));
     if (error) throw new Error(error.message);
   }
+}
+
+/* ---------- Actions exportées : erreurs renvoyées, pas levées (voir actionResult.ts) ---------- */
+
+export async function listUsers() {
+  return toResult(() => listUsersImpl());
+}
+
+export async function updateUser(id: string, input: { firstName: string; lastName: string; role: UserRole; slugs: string[] }) {
+  return toResult(() => updateUserImpl(id, input));
 }

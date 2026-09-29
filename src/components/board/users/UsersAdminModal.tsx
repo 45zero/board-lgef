@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, ChevronLeft, Search, X } from "lucide-react";
-import { listUsers, updateUser, type AdminUser, type SpecialtyOption, type UserRole } from "@/app/actions/users-admin";
+import { listUsers, updateUser, type AdminUser, type SpecialtyOption, type UserRole, type UsersList } from "@/app/actions/users-admin";
+import { unwrap } from "@/lib/board/actionResult";
 import { listAccessRequests, type AccessRequest } from "@/app/actions/account-requests";
 import { AccessRequestCard } from "@/components/board/users/AccessRequestCard";
 
@@ -152,7 +153,7 @@ function UserEditor({
     setError(null);
     setSaved(false);
     try {
-      await updateUser(user.id, { firstName, lastName, role, slugs });
+      unwrap(await updateUser(user.id, { firstName, lastName, role, slugs }));
       setSaved(true);
       onSaved();
     } catch (e) {
@@ -272,7 +273,7 @@ function UserEditor({
 
 /** Paramètres → Utilisateurs : demandes d'accès, rôle, statut, réseau photo et pôles de chaque compte. */
 export function UsersAdminModal({ onClose }: { onClose: () => void }) {
-  const [data, setData] = useState<Awaited<ReturnType<typeof listUsers>> | null>(null);
+  const [data, setData] = useState<UsersList | null>(null);
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -284,8 +285,8 @@ export function UsersAdminModal({ onClose }: { onClose: () => void }) {
     () =>
       Promise.all([listUsers(), listAccessRequests()])
         .then(([users, reqs]) => {
-          setData(users);
-          setRequests(reqs);
+          setData(unwrap(users));
+          setRequests(unwrap(reqs));
         })
         .catch((e) => setError(errorMessage(e))),
     []

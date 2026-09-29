@@ -1,5 +1,6 @@
 "use server";
 
+import { toResult } from "@/lib/board/actionResult";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
@@ -98,7 +99,7 @@ async function requireAdmin() {
   return userId;
 }
 
-export async function listAccessRequests(): Promise<AccessRequest[]> {
+async function listAccessRequestsImpl(): Promise<AccessRequest[]> {
   await requireAdmin();
   const { data, error } = await createServiceClient()
     .from("account_requests")
@@ -142,7 +143,7 @@ async function sendMail(to: string, subject: string, paragraphs: string[], link?
  * vidéaste) avec son mode de paiement et envoie le lien pour choisir son mot de passe.
  * `network: null` : accès simple, hors Couverture match.
  */
-export async function approveAccessRequest(
+async function approveAccessRequestImpl(
   requestId: string,
   network: { photo: boolean; video: boolean; payment: PaymentMode } | null
 ): Promise<{ emailed: boolean; existingAccount: boolean }> {
@@ -203,7 +204,7 @@ export async function approveAccessRequest(
   return { emailed, existingAccount: type === "recovery" };
 }
 
-export async function rejectAccessRequest(requestId: string) {
+async function rejectAccessRequestImpl(requestId: string) {
   const reviewerId = await requireAdmin();
   const service = createServiceClient();
   const { data: req } = await service
@@ -218,4 +219,19 @@ export async function rejectAccessRequest(requestId: string) {
     `Bonjour ${req.first_name},`,
     "Votre demande d'accès au board de la Ligue Grand Est n'a pas été retenue. Pour toute question, répondez à la personne de la Ligue qui vous a orienté vers ce formulaire.",
   ]);
+}
+
+/* ---------- Actions exportées : erreurs renvoyées, pas levées (voir actionResult.ts) ---------- */
+
+export async function listAccessRequests() {
+  return toResult(() => listAccessRequestsImpl());
+}
+
+export async function approveAccessRequest(requestId: string,
+  network: { photo: boolean; video: boolean; payment: PaymentMode } | null) {
+  return toResult(() => approveAccessRequestImpl(requestId, network));
+}
+
+export async function rejectAccessRequest(requestId: string) {
+  return toResult(() => rejectAccessRequestImpl(requestId));
 }

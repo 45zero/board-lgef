@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Camera, Check, Video } from "lucide-react";
 import { approveAccessRequest, rejectAccessRequest, type AccessRequest, type PaymentMode } from "@/app/actions/account-requests";
+import { unwrap } from "@/lib/board/actionResult";
 
 const input = "w-full rounded-btn border border-line bg-card px-2.5 py-2 text-sm outline-none focus:border-navy";
 const btnSmall = "flex items-center gap-1 rounded-btn px-2.5 py-1.5 text-xs font-bold disabled:opacity-50";
@@ -48,7 +49,7 @@ export function AccessRequestCard({ request, onDone }: { request: AccessRequest;
   };
   const approve = () =>
     act(async () => {
-      const res = await approveAccessRequest(request.id, coverage ? { photo, video, payment } : null);
+      const res = unwrap(await approveAccessRequest(request.id, coverage ? { photo, video, payment } : null));
       const who = coverage ? `${name} ajouté à Couverture match` : `Accès accordé à ${name}`;
       return res.emailed ? `${who} — e-mail envoyé pour choisir son mot de passe.` : `${who} — l'e-mail n'a pas pu partir, prévenez-le.`;
     });
@@ -92,7 +93,7 @@ export function AccessRequestCard({ request, onDone }: { request: AccessRequest;
       <div className="flex flex-wrap justify-end gap-1.5">
         <button
           disabled={busy}
-          onClick={() => confirm(`Refuser la demande de ${name} ? Un e-mail lui sera envoyé.`) && void act(async () => (await rejectAccessRequest(request.id), `Demande de ${name} refusée.`))}
+          onClick={() => confirm(`Refuser la demande de ${name} ? Un e-mail lui sera envoyé.`) && void act(async () => (unwrap(await rejectAccessRequest(request.id)), `Demande de ${name} refusée.`))}
           className={`${btnSmall} border border-bad text-bad`}
         >
           Refuser

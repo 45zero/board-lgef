@@ -1,5 +1,6 @@
 "use server";
 
+import { toResult } from "@/lib/board/actionResult";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { FacebookRegion } from "@/lib/social/targets";
@@ -84,7 +85,7 @@ async function actorName(userId: string) {
 }
 
 /** Matchs du week-end [startISO, endISO[ : affiche, poste photo, vidéo, photos déposées. */
-export async function getWeekend(startISO: string, endISO: string): Promise<WeekendData> {
+async function getWeekendImpl(startISO: string, endISO: string): Promise<WeekendData> {
   const { supabase, userId, isAdmin, canCoordinate, isPhotographer } = await getViewer();
 
   const { data: events, error } = await supabase
@@ -206,7 +207,7 @@ function validate(input: MatchInput) {
 }
 
 /** Crée (eventId absent) ou modifie un match du week-end. Renvoie l'id de l'événement. */
-export async function saveMatch(input: MatchInput, eventId?: string): Promise<string> {
+async function saveMatchImpl(input: MatchInput, eventId?: string): Promise<string> {
   const { supabase, userId } = await requireCoordinator();
   validate(input);
 
@@ -290,7 +291,7 @@ export async function saveMatch(input: MatchInput, eventId?: string): Promise<st
   return id;
 }
 
-export async function deleteMatch(eventId: string) {
+async function deleteMatchImpl(eventId: string) {
   await requireCoordinator();
   // Service : un coordinateur peut retirer un match saisi par un autre (RLS events : créateur ou admin).
   const { error } = await createServiceClient().from("events").delete().eq("id", eventId).eq("event_type", "match_du_week_end");
@@ -298,7 +299,7 @@ export async function deleteMatch(eventId: string) {
 }
 
 /** Envoie au réseau photo les postes en brouillon des matchs donnés. Une notification par photographe. */
-export async function sendToNetwork(eventIds: string[]): Promise<number> {
+async function sendToNetworkImpl(eventIds: string[]): Promise<number> {
   const { supabase, userId } = await requireCoordinator();
   if (eventIds.length === 0) return 0;
   const { data, error } = await supabase
@@ -323,7 +324,7 @@ export async function sendToNetwork(eventIds: string[]): Promise<number> {
 }
 
 /** « Je prends » : le premier qui clique obtient le match. */
-export async function claimMission(missionId: string) {
+async function claimMissionImpl(missionId: string) {
   const { supabase, userId } = await getViewer();
   const { data, error } = await supabase.rpc("claim_photo_mission", { p_mission: missionId });
   if (error) throw new Error(error.message);
@@ -338,7 +339,7 @@ export async function claimMission(missionId: string) {
 }
 
 /** Le photographe se désiste avant le match : le poste repart au réseau. */
-export async function releaseMission(missionId: string) {
+async function releaseMissionImpl(missionId: string) {
   const { supabase, userId } = await getViewer();
   const { data, error } = await supabase.rpc("release_photo_mission", { p_mission: missionId });
   if (error) throw new Error(error.message);
@@ -355,7 +356,7 @@ export async function releaseMission(missionId: string) {
 /* ---------- Couverture match ---------- */
 
 /** Profils du board, pour ajouter quelqu'un à Couverture match (recherche nom / e-mail). */
-export async function searchProfiles(query: string): Promise<PersonLite[]> {
+async function searchProfilesImpl(query: string): Promise<PersonLite[]> {
   await requireCoordinator();
   const q = query.trim().replace(/[%,()]/g, " ");
   if (q.length < 2) return [];
@@ -368,7 +369,7 @@ export async function searchProfiles(query: string): Promise<PersonLite[]> {
 }
 
 /** Ajoute ou retire un photographe (photo) ou un vidéaste (video) du réseau Couverture match. */
-export async function setCoverageMember(profileId: string, trade: "photo" | "video", member: boolean) {
+async function setCoverageMemberImpl(profileId: string, trade: "photo" | "video", member: boolean) {
   await requireCoordinator();
   const service = createServiceClient();
   const specialtyId = await getSpecialtyId(service, trade === "photo" ? PHOTO_SLUG : VIDEO_SLUG);
@@ -376,4 +377,38 @@ export async function setCoverageMember(profileId: string, trade: "photo" | "vid
     ? await service.from("profile_specialties").upsert({ user_id: profileId, specialty_id: specialtyId })
     : await service.from("profile_specialties").delete().eq("user_id", profileId).eq("specialty_id", specialtyId);
   if (error) throw new Error(error.message);
+}
+
+/* ---------- Actions exportées : erreurs renvoyées, pas levées (voir actionResult.ts) ---------- */
+
+export async function getWeekend(startISO: string, endISO: string) {
+  return toResult(() => getWeekendImpl(startISO, endISO));
+}
+
+export async function saveMatch(input: MatchInput, eventId?: string) {
+  return toResult(() => saveMatchImpl(input, eventId));
+}
+
+export async function deleteMatch(eventId: string) {
+  return toResult(() => deleteMatchImpl(eventId));
+}
+
+export async function sendToNetwork(eventIds: string[]) {
+  return toResult(() => sendToNetworkImpl(eventIds));
+}
+
+export async function claimMission(missionId: string) {
+  return toResult(() => claimMissionImpl(missionId));
+}
+
+export async function releaseMission(missionId: string) {
+  return toResult(() => releaseMissionImpl(missionId));
+}
+
+export async function searchProfiles(query: string) {
+  return toResult(() => searchProfilesImpl(query));
+}
+
+export async function setCoverageMember(profileId: string, trade: "photo" | "video", member: boolean) {
+  return toResult(() => setCoverageMemberImpl(profileId, trade, member));
 }

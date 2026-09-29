@@ -15,6 +15,7 @@ import {
 import { Toggle } from "@/components/board/Toggle";
 import { useAuth } from "@/contexts/AuthContext";
 import { listAccessRequests } from "@/app/actions/account-requests";
+import { unwrap } from "@/lib/board/actionResult";
 import { UsersAdminModal } from "@/components/board/users/UsersAdminModal";
 
 /** Compte connecté : déconnexion puis retour à la page de connexion pour se connecter avec un autre compte. */
@@ -120,7 +121,7 @@ function UsersSection() {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (canManage) listAccessRequests().then((r) => setPending(r.length)).catch(() => undefined);
+    if (canManage) listAccessRequests().then(unwrap).then((r) => setPending(r.length)).catch(() => undefined);
   }, [canManage, open]);
 
   if (!canManage) return null;
