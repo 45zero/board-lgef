@@ -1,15 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Plus,
-  Search,
-  User,
-  X,
-  PanelLeftOpen,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Search, User, X, PanelLeftOpen, Camera, Video } from "lucide-react";
 import {
   addDays,
   addMonths,
@@ -30,6 +22,7 @@ import {
 import { fr } from "date-fns/locale";
 import { useCalendarEvents } from "@/hooks/board/useCalendarEvents";
 import { useSolicitedFilter } from "@/hooks/board/useSolicitedFilter";
+import { passesCoverageFilters, useCoverageFilters } from "@/hooks/board/useCoverageFilters";
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import { listMyCalendars, listMyEvents } from "@/app/actions/calendar";
@@ -132,6 +125,7 @@ export function CalendrierScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [hiddenOrgs, setHiddenOrgs] = useState<Set<OrgKey>>(() => new Set());
   const [mineOnly, setMineOnly] = useSolicitedFilter();
+  const [coverage, setCoverage] = useCoverageFilters();
 
   const toggleOrgVisibility = (key: OrgKey) => {
     setHiddenOrgs((prev) => {
@@ -179,11 +173,12 @@ export function CalendrierScreen() {
     const q = searchQuery.trim().toLowerCase();
     return events.filter((e) => {
       if (mineOnly && !e.solicited) return false;
+      if (!passesCoverageFilters(e, coverage)) return false;
       if (hiddenOrgs.has(e.org)) return false;
       if (q && !e.title.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [events, searchQuery, hiddenOrgs, mineOnly]);
+  }, [events, searchQuery, hiddenOrgs, mineOnly, coverage]);
 
   const eventsForDay = (day: Date) => visibleEvents.filter((e) => isSameDay(parseISO(e.start), day));
   const googleEventsForDay = (day: Date) =>
@@ -348,6 +343,28 @@ export function CalendrierScreen() {
             aria-pressed={mineOnly}
           >
             <User size={15} />
+          </button>
+          <button
+            onClick={() => setCoverage({ ...coverage, video: !coverage.video })}
+            className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-btn border ${
+              coverage.video ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3 hover:bg-hover"
+            }`}
+            title={coverage.video ? "CouvVidéo affichée — masquer les événements couverts en vidéo" : "CouvVidéo masquée — afficher les événements couverts en vidéo"}
+            aria-label="Événements couverts en vidéo"
+            aria-pressed={coverage.video}
+          >
+            <Video size={15} />
+          </button>
+          <button
+            onClick={() => setCoverage({ ...coverage, photo: !coverage.photo })}
+            className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-btn border ${
+              coverage.photo ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3 hover:bg-hover"
+            }`}
+            title={coverage.photo ? "CouvPhoto affichée — masquer les matchs couverts en photo" : "CouvPhoto masquée — afficher les matchs couverts en photo"}
+            aria-label="Matchs couverts en photo"
+            aria-pressed={coverage.photo}
+          >
+            <Camera size={15} />
           </button>
 
           <div className="flex items-center gap-0.5 rounded-btn border border-line bg-card p-0.5">

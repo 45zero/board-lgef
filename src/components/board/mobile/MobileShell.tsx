@@ -16,7 +16,7 @@ const TITLES: Record<MobileTab, { title: string; kicker: string }> = {
   calendrier: { title: "Calendrier", kicker: "EVENEMENTS" },
   accueil: { title: "Dashboard", kicker: "ESPACE DE TRAVAIL" },
   mails: { title: "Mails", kicker: "MESSAGERIE" },
-  weekend: { title: "Week-end", kicker: "MATCHS & RESEAU PHOTO" },
+  weekend: { title: "Week-end", kicker: "MATCHS & COUVERTURE" },
 };
 
 /** Coque mobile — même app Next.js, bascule vers cette coque sous ~768px (voir useIsMobile). */

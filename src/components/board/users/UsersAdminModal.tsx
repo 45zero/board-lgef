@@ -32,6 +32,7 @@ const STATUS_OPTIONS: { slug: string | null; label: string; hint: string }[] = [
 ];
 const STATUS_SLUGS = STATUS_OPTIONS.map((o) => o.slug).filter((s): s is string => !!s);
 const PHOTO_SLUG = "tech-photo";
+const VIDEO_SLUG = "tech-video";
 
 const STATUS_BADGE: Record<string, string> = {
   "tech-salarie": "Salarié",
@@ -39,13 +40,14 @@ const STATUS_BADGE: Record<string, string> = {
   "tech-prestataire": "Prestataire",
   "tech-benevole": "Bénévole",
   [PHOTO_SLUG]: "Photographe",
+  [VIDEO_SLUG]: "Vidéaste",
 };
 
-type Filter = "all" | "requests" | "photo" | "technician" | "organizer" | "comite" | "admin";
+type Filter = "all" | "requests" | "coverage" | "technician" | "organizer" | "comite" | "admin";
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "Tous" },
   { id: "requests", label: "Demandes" },
-  { id: "photo", label: "Réseau photo" },
+  { id: "coverage", label: "Couverture match" },
   { id: "technician", label: "Techniciens" },
   { id: "organizer", label: "Organisateurs" },
   { id: "comite", label: "Comité directeur" },
@@ -54,8 +56,8 @@ const FILTERS: { id: Filter; label: string }[] = [
 
 function matchesFilter(u: AdminUser, f: Filter) {
   switch (f) {
-    case "photo":
-      return u.slugs.includes(PHOTO_SLUG);
+    case "coverage":
+      return u.slugs.includes(PHOTO_SLUG) || u.slugs.includes(VIDEO_SLUG);
     case "technician":
       return u.role === "technician";
     case "organizer":
@@ -87,6 +89,28 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 
 /* ---------- Fiche d'un utilisateur ---------- */
 
+type Pole = { key: string; label: string; slugs: string[] };
+
+/**
+ * Pôles fusionnés. La base garde deux spécialités par pôle (org-formation pour un Organisateur,
+ * tech-formation pour un Technicien — héritage de calendrier-lgef) qui donnent exactement les mêmes
+ * droits : ouvrir les événements de ce type. Ici un pôle = une case, qui pose ou retire les deux.
+ */
+function buildPoles(specialties: SpecialtyOption[]): Pole[] {
+  const key = (slug: string) => slug.replace(/^(org|tech)-/, "").replace(/_/g, "-");
+  const poles = new Map<string, Pole>();
+  for (const s of specialties) {
+    if (!s.slug.startsWith("org-")) continue;
+    poles.set(key(s.slug), { key: key(s.slug), label: s.label, slugs: [s.slug] });
+  }
+  for (const s of specialties) {
+    if (s.domain !== "technician" || !s.slug.startsWith("tech-")) continue;
+    const pole = poles.get(key(s.slug));
+    if (pole) pole.slugs.push(s.slug);
+  }
+  return [...poles.values()].sort((a, b) => a.label.localeCompare(b.label, "fr"));
+}
+
 function UserEditor({
   user,
   specialties,
@@ -117,8 +141,10 @@ function UserEditor({
   const roleOptions = ROLE_ORDER.filter((r) => me.isAdmin || (r !== "admin" && r !== "super_user") || r === user.role);
   if (!roleOptions.includes(user.role)) roleOptions.push(user.role);
 
-  const organizerPoles = specialties.filter((s) => s.domain === "organizer");
-  const technicianPoles = specialties.filter((s) => s.domain === "technician" && !STATUS_SLUGS.includes(s.slug) && s.slug !== PHOTO_SLUG && s.slug !== "access-ged");
+  const poles = buildPoles(specialties);
+  const hasPole = (p: Pole) => p.slugs.some((slug) => slugs.includes(slug));
+  const togglePole = (p: Pole) =>
+    setSlugs((prev) => (hasPole(p) ? prev.filter((slug) => !p.slugs.includes(slug)) : [...prev.filter((slug) => !p.slugs.includes(slug)), ...p.slugs]));
   const ged = specialties.find((s) => s.slug === "access-ged");
 
   const save = async () => {
@@ -196,24 +222,38 @@ function UserEditor({
       </div>
 
       <div>
-        <div className={sectionTitle}>Réseaux</div>
-        <label className="flex items-center gap-2 text-sm text-ink-2">
-          <input type="checkbox" checked={slugs.includes(PHOTO_SLUG)} onChange={() => toggle(PHOTO_SLUG)} />
-          Réseau photo <span className="text-xs text-ink-4">— reçoit les matchs proposés, « Je prends »</span>
-        </label>
-        {ged && <div className="mt-1.5">{checkbox(ged, "Accès comptabilité (GED)")}</div>}
+        <div className={sectionTitle}>Couverture match</div>
+        <div className="space-y-1.5">
+          <label className="flex items-center gap-2 text-sm text-ink-2">
+            <input type="checkbox" checked={slugs.includes(PHOTO_SLUG)} onChange={() => toggle(PHOTO_SLUG)} />
+            Photographe <span className="text-xs text-ink-4">— reçoit les matchs à photographier, « Je prends »</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-ink-2">
+            <input type="checkbox" checked={slugs.includes(VIDEO_SLUG)} onChange={() => toggle(VIDEO_SLUG)} />
+            Vidéaste <span className="text-xs text-ink-4">— proposé pour les captations vidéo</span>
+          </label>
+        </div>
       </div>
 
-      {organizerPoles.length > 0 && (
+      {ged && (
         <div>
-          <div className={sectionTitle}>Pôles — organisateur</div>
-          <div className="grid grid-cols-2 gap-1.5">{organizerPoles.map((s) => checkbox(s))}</div>
+          <div className={sectionTitle}>Accès</div>
+          {checkbox(ged, "Accès comptabilité (GED)")}
         </div>
       )}
-      {technicianPoles.length > 0 && (
+
+      {poles.length > 0 && (
         <div>
-          <div className={sectionTitle}>Pôles — technicien</div>
-          <div className="grid grid-cols-2 gap-1.5">{technicianPoles.map((s) => checkbox(s))}</div>
+          <div className={sectionTitle}>Pôles</div>
+          <p className="mb-2 text-xs text-ink-4">Types d&apos;événements que la personne peut créer, voir et gérer dans le calendrier.</p>
+          <div className="grid grid-cols-2 gap-1.5">
+            {poles.map((p) => (
+              <label key={p.key} className="flex items-center gap-2 text-sm text-ink-2">
+                <input type="checkbox" checked={hasPole(p)} onChange={() => togglePole(p)} />
+                {p.label}
+              </label>
+            ))}
+          </div>
         </div>
       )}
 
@@ -338,7 +378,7 @@ export function UsersAdminModal({ onClose }: { onClose: () => void }) {
                       {u.slugs
                         .filter((s) => STATUS_BADGE[s])
                         .map((s) => (
-                          <span key={s} className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${s === PHOTO_SLUG ? "bg-good-bg text-good" : "bg-subtle text-ink-3"}`}>
+                          <span key={s} className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${s === PHOTO_SLUG || s === VIDEO_SLUG ? "bg-good-bg text-good" : "bg-subtle text-ink-3"}`}>
                             {STATUS_BADGE[s]}
                           </span>
                         ))}

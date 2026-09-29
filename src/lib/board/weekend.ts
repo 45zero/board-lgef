@@ -44,8 +44,10 @@ export interface WeekendMatch {
 export interface WeekendData {
   viewer: { id: string; canCoordinate: boolean; isPhotographer: boolean; isAdmin: boolean };
   matches: WeekendMatch[];
-  /** Réseau photo (coordinateurs uniquement). */
+  /** Photographes (coordinateurs uniquement). */
   photographers: PersonLite[];
+  /** Réseau Couverture match : photographes et vidéastes (coordinateurs uniquement). */
+  network: { person: PersonLite; photo: boolean; video: boolean }[];
   /** Relais de publication possibles (coordinateurs uniquement). */
   publishers: PersonLite[];
 }

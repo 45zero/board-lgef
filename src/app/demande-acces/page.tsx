@@ -8,8 +8,12 @@ const field = "w-full rounded-btn border border-line bg-card px-3 py-2.5 text-sm
 const label = "mb-1 block text-xs font-semibold text-ink-2";
 
 const KINDS: { id: AccessKind; label: string }[] = [
+  { id: "salarie", label: "Salarié" },
+  { id: "arbitre", label: "Arbitre" },
   { id: "photographe", label: "Photographe" },
   { id: "videaste", label: "Vidéaste" },
+  { id: "partenaire", label: "Partenaire" },
+  { id: "media", label: "Média" },
   { id: "autre", label: "Autre" },
 ];
 
@@ -49,7 +53,7 @@ export default function AccessRequestPage() {
         ) : (
           <form onSubmit={handleSubmit}>
             <h1 className="mt-2 text-xl font-extrabold text-ink">Demander un accès</h1>
-            <p className="mt-1 text-sm text-ink-3">Pour les photographes, vidéastes et intervenants extérieurs à la Ligue Grand Est de Football.</p>
+            <p className="mt-1 text-sm text-ink-3">Salariés, arbitres, photographes, vidéastes, partenaires, médias… Votre demande est examinée par la Ligue Grand Est de Football.</p>
 
             <div className="mt-6 space-y-3">
               <div className="grid grid-cols-2 gap-3">
@@ -98,7 +102,7 @@ export default function AccessRequestPage() {
                   value={form.reason}
                   onChange={(e) => set("reason", e.target.value)}
                   className={field}
-                  placeholder="Ex. : photographe bénévole dans le Bas-Rhin, je couvre déjà des matchs pour la Ligue…"
+                  placeholder="Ex. : photographe dans le Bas-Rhin, je couvre déjà des matchs pour la Ligue…"
                 />
               </div>
             </div>

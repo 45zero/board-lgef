@@ -30,7 +30,7 @@ import {
   saveMatch,
   searchProfiles,
   sendToNetwork,
-  setPhotographer,
+  setCoverageMember,
 } from "@/app/actions/weekend";
 import { listAccessRequests, type AccessRequest } from "@/app/actions/account-requests";
 import { AccessRequestCard } from "@/components/board/users/AccessRequestCard";
@@ -467,15 +467,29 @@ function MatchForm({
   );
 }
 
-/* ---------- Réseau photo ---------- */
+/* ---------- Couverture match ---------- */
+
+type NetworkMember = WeekendData["network"][number];
+
+function TradeToggle({ on, onClick, icon, label }: { on: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      title={on ? `Retirer : ${label}` : `Ajouter : ${label}`}
+      className={`flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${on ? "bg-good-bg text-good" : "bg-subtle text-ink-4 hover:bg-hover"}`}
+    >
+      {icon} {label}
+    </button>
+  );
+}
 
 function NetworkModal({
-  photographers,
+  network,
   requests,
   onClose,
   onChanged,
 }: {
-  photographers: PersonLite[];
+  network: NetworkMember[];
   requests: AccessRequest[] | null;
   onClose: () => void;
   onChanged: () => void;
@@ -494,27 +508,51 @@ function NetworkModal({
     return () => window.clearTimeout(t);
   }, [query]);
 
-  const toggle = async (id: string, member: boolean) => {
+  const toggle = async (id: string, trade: "photo" | "video", member: boolean) => {
     setError(null);
     try {
-      await setPhotographer(id, member);
+      await setCoverageMember(id, trade, member);
       onChanged();
     } catch (e) {
       setError(errorMessage(e));
     }
   };
 
-  const memberIds = new Set(photographers.map((p) => p.id));
+  const byId = new Map(network.map((m) => [m.person.id, m]));
+  const photoCount = network.filter((m) => m.photo).length;
+  const videoCount = network.filter((m) => m.video).length;
+  const trades = (id: string, name: string) => {
+    const m = byId.get(id);
+    return (
+      <div className="flex shrink-0 gap-1">
+        <TradeToggle
+          on={!!m?.photo}
+          icon={<Camera size={11} />}
+          label="Photo"
+          onClick={() => (!m?.photo || confirm(`Retirer ${name} des photographes ?`)) && void toggle(id, "photo", !m?.photo)}
+        />
+        <TradeToggle
+          on={!!m?.video}
+          icon={<Video size={11} />}
+          label="Vidéo"
+          onClick={() => (!m?.video || confirm(`Retirer ${name} des vidéastes ?`)) && void toggle(id, "video", !m?.video)}
+        />
+      </div>
+    );
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="flex max-h-[88vh] w-full max-w-md flex-col overflow-hidden rounded-modal bg-card shadow-modal" onClick={(e) => e.stopPropagation()}>
         <div className="flex shrink-0 items-start justify-between gap-3 bg-navy px-5 py-4 text-white">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-white/70">Réseau photo</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-white/70">Couverture match</div>
             <h3 className="mt-1 text-base font-extrabold">
-              {photographers.length} photographe{photographers.length > 1 ? "s" : ""}
+              {photoCount} photographe{photoCount > 1 ? "s" : ""} · {videoCount} vidéaste{videoCount > 1 ? "s" : ""}
             </h3>
-            <div className="mt-0.5 text-xs text-white/80">Ils reçoivent les matchs proposés et peuvent cliquer « Je prends ».</div>
+            <div className="mt-0.5 text-xs text-white/80">
+              Les photographes reçoivent les matchs proposés et cliquent « Je prends » ; les vidéastes sont proposés pour les captations.
+            </div>
           </div>
           <button onClick={onClose} className="rounded-full p-1 text-white/80 hover:bg-white/10">
             <X size={18} />
@@ -545,15 +583,9 @@ function NetworkModal({
               <div className="mt-1 overflow-hidden rounded-btn border border-line">
                 {results.length === 0 && <div className="px-3 py-2 text-xs text-ink-4">Aucun compte trouvé.</div>}
                 {results.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between border-b border-line px-3 py-2 last:border-b-0">
-                    <span className="text-sm text-ink">{p.name}</span>
-                    {memberIds.has(p.id) ? (
-                      <span className="text-xs text-ink-4">Déjà membre</span>
-                    ) : (
-                      <button onClick={() => void toggle(p.id, true)} className={`${btnSmall} bg-navy text-white`}>
-                        <Plus size={12} /> Ajouter
-                      </button>
-                    )}
+                  <div key={p.id} className="flex items-center justify-between gap-2 border-b border-line px-3 py-2 last:border-b-0">
+                    <span className="min-w-0 truncate text-sm text-ink">{p.name}</span>
+                    {trades(p.id, p.name)}
                   </div>
                 ))}
               </div>
@@ -561,17 +593,11 @@ function NetworkModal({
           </div>
           {error && <p className="text-sm text-bad">{error}</p>}
           <div className="overflow-hidden rounded-btn border border-line">
-            {photographers.length === 0 && <div className="px-3 py-3 text-sm text-ink-4">Personne dans le réseau pour l&apos;instant.</div>}
-            {photographers.map((p) => (
-              <div key={p.id} className="flex items-center justify-between border-b border-line px-3 py-2 last:border-b-0">
-                <span className="text-sm font-semibold text-ink">{p.name}</span>
-                <button
-                  onClick={() => confirm(`Retirer ${p.name} du réseau photo ?`) && void toggle(p.id, false)}
-                  className="rounded-btn p-1.5 text-ink-3 hover:bg-bad-bg hover:text-bad"
-                  title="Retirer du réseau"
-                >
-                  <X size={14} />
-                </button>
+            {network.length === 0 && <div className="px-3 py-3 text-sm text-ink-4">Personne dans Couverture match pour l&apos;instant.</div>}
+            {network.map(({ person }) => (
+              <div key={person.id} className="flex items-center justify-between gap-2 border-b border-line px-3 py-2 last:border-b-0">
+                <span className="min-w-0 truncate text-sm font-semibold text-ink">{person.name}</span>
+                {trades(person.id, person.name)}
               </div>
             ))}
           </div>
@@ -586,7 +612,7 @@ function NetworkModal({
 /**
  * Week-end : les matchs à couvrir, groupés par page régionale puis par jour (même lecture que le
  * récap envoyé jusqu'ici à la main, qui se génère maintenant d'un clic). Coordinateurs : saisie,
- * envoi au réseau photo, désignation. Photographes : « Je prends », dépôt des photos.
+ * envoi au réseau Couverture match, désignation. Photographes : « Je prends », dépôt des photos.
  */
 export function WeekendScreen() {
   const [range, setRange] = useState(() => weekendOf(new Date()));
@@ -625,7 +651,7 @@ export function WeekendScreen() {
   }, [load]);
   useLiveRefresh(["events", "coverage_requests", "media_publications", "photo_missions", "match_details"], () => void load());
 
-  // Demandes d'accès en attente (administrateurs) : pastille sur « Réseau photo ».
+  // Demandes d'accès en attente (administrateurs) : pastille sur « Couverture match ».
   const isAdmin = !!data?.viewer.isAdmin;
   const loadRequests = useCallback(() => listAccessRequests().then(setRequests).catch(() => setRequests(null)), []);
   useEffect(() => {
@@ -670,7 +696,7 @@ export function WeekendScreen() {
     setSending(true);
     try {
       const n = await sendToNetwork(drafts.map((m) => m.eventId));
-      setNotice(`${n} match${n > 1 ? "s" : ""} envoyé${n > 1 ? "s" : ""} au réseau photo.`);
+      setNotice(`${n} match${n > 1 ? "s" : ""} envoyé${n > 1 ? "s" : ""} aux photographes.`);
       await load();
     } catch (e) {
       setNotice(errorMessage(e));
@@ -701,7 +727,7 @@ export function WeekendScreen() {
         {canCoordinate && (
           <>
             <button onClick={() => setNetworkOpen(true)} className={btnGhost}>
-              <Users size={14} /> Réseau photo
+              <Users size={14} /> Couverture match
               {!!requests?.length && <span className="rounded-full bg-red px-1.5 text-[10px] font-bold text-white">{requests.length}</span>}
             </button>
             <button onClick={() => void copyRecap()} disabled={visible.length === 0} className={btnGhost}>
@@ -709,7 +735,7 @@ export function WeekendScreen() {
             </button>
             {drafts.length > 0 && (
               <button onClick={() => void send()} disabled={sending} className={`${btnPrimary} !bg-good`}>
-                <Send size={14} /> Envoyer au réseau ({drafts.length})
+                <Send size={14} /> Envoyer aux photographes ({drafts.length})
               </button>
             )}
             <button onClick={() => setEditing("new")} className={btnPrimary}>
@@ -753,8 +779,8 @@ export function WeekendScreen() {
           {canCoordinate
             ? "Aucun match saisi pour ce week-end. Ajoutez les matchs à couvrir avec « + Match »."
             : data.viewer.isPhotographer
-              ? "Aucun match proposé au réseau photo pour ce week-end."
-              : "Aucun match à afficher. Le module Week-end est réservé au réseau photo et à ses coordinateurs."}
+              ? "Aucun match proposé aux photographes pour ce week-end."
+              : "Aucun match à afficher. Le module Week-end est réservé au réseau Couverture match et à ses coordinateurs."}
         </div>
       )}
 
@@ -783,7 +809,7 @@ export function WeekendScreen() {
       )}
       {networkOpen && data && (
         <NetworkModal
-          photographers={data.photographers}
+          network={data.network}
           requests={requests}
           onClose={() => setNetworkOpen(false)}
           onChanged={() => {

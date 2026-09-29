@@ -7,10 +7,11 @@ import { isResendConfigured, sendResendBatch } from "@/lib/email/resend";
 
 // Demandes d'accès au board (table account_requests, partagée avec calendrier-lgef — même logique
 // que son Edge Function approve-account-request). Formulaire public /demande-acces ; validation par
-// un administrateur depuis Week-end → Réseau photo, qui crée le compte, affecte le réseau photo et
+// un administrateur (Paramètres → Utilisateurs, ou Week-end → Couverture match), qui crée le compte,
+// l'ajoute au besoin au réseau Couverture match (photographe / vidéaste) et
 // envoie par e-mail un lien pour choisir son mot de passe (/mot-de-passe).
 
-export type AccessKind = "photographe" | "videaste" | "autre";
+export type AccessKind = "salarie" | "arbitre" | "photographe" | "videaste" | "partenaire" | "media" | "autre";
 export type PaymentMode = "reseau" | "prestataire" | "benevole";
 
 export interface AccessRequest {
@@ -33,7 +34,7 @@ const requestSchema = z.object({
   email: z.string().trim().toLowerCase().email("Adresse e-mail invalide."),
   phone: z.string().trim().max(30).optional().default(""),
   organization: z.string().trim().max(120).optional().default(""),
-  kind: z.enum(["photographe", "videaste", "autre"]),
+  kind: z.enum(["salarie", "arbitre", "photographe", "videaste", "partenaire", "media", "autre"]),
   reason: z.string().trim().min(10, "Expliquez en quelques mots pourquoi vous souhaitez un accès.").max(2000),
 });
 
@@ -69,7 +70,7 @@ export async function submitAccessRequest(input: z.input<typeof requestSchema>):
         user_id: a.id,
         type: "account_request" as const,
         title: "Demande d'accès",
-        message: `${r.firstName} ${r.lastName} (${KIND_LABELS[r.kind]}) demande un accès au board — Week-end → Réseau photo.`,
+        message: `${r.firstName} ${r.lastName} (${KIND_LABELS[r.kind]}) demande un accès au board — Paramètres → Utilisateurs.`,
         data: { app: "weekend" },
       }))
     );
@@ -77,7 +78,15 @@ export async function submitAccessRequest(input: z.input<typeof requestSchema>):
   return { ok: true };
 }
 
-const KIND_LABELS: Record<AccessKind, string> = { photographe: "photographe", videaste: "vidéaste", autre: "autre" };
+const KIND_LABELS: Record<AccessKind, string> = {
+  salarie: "salarié",
+  arbitre: "arbitre",
+  photographe: "photographe",
+  videaste: "vidéaste",
+  partenaire: "partenaire",
+  media: "média",
+  autre: "autre",
+};
 
 async function requireAdmin() {
   const supabase = await createClient();
@@ -129,13 +138,15 @@ async function sendMail(to: string, subject: string, paragraphs: string[], link?
 
 /**
  * Accepte une demande : crée le compte (ou retrouve celui qui existe déjà — l'authentification est
- * partagée avec les autres outils LGEF), l'ajoute au réseau photo avec son mode de paiement et
- * envoie le lien pour choisir son mot de passe. `network: null` : accès simple, sans réseau photo.
+ * partagée avec les autres outils LGEF), l'ajoute au réseau Couverture match (photographe et/ou
+ * vidéaste) avec son mode de paiement et envoie le lien pour choisir son mot de passe.
+ * `network: null` : accès simple, hors Couverture match.
  */
 export async function approveAccessRequest(
   requestId: string,
-  network: { payment: PaymentMode } | null
+  network: { photo: boolean; video: boolean; payment: PaymentMode } | null
 ): Promise<{ emailed: boolean; existingAccount: boolean }> {
+  if (network && !network.photo && !network.video) network = null;
   const reviewerId = await requireAdmin();
   const service = createServiceClient();
   const { data: req, error: reqError } = await service.from("account_requests").select("*").eq("id", requestId).eq("status", "pending").single();
@@ -160,8 +171,9 @@ export async function approveAccessRequest(
   if (profileError) throw new Error(`Compte créé mais profil non enregistré : ${profileError.message}`);
 
   if (network) {
-    const { data: specs } = await service.from("specialties").select("id, slug").in("slug", ["tech-photo", PAYMENT_SLUG[network.payment]]);
-    if ((specs ?? []).length < 2) throw new Error("Spécialités du réseau photo introuvables.");
+    const slugs = [...(network.photo ? ["tech-photo"] : []), ...(network.video ? ["tech-video"] : []), PAYMENT_SLUG[network.payment]];
+    const { data: specs } = await service.from("specialties").select("id, slug").in("slug", slugs);
+    if ((specs ?? []).length < slugs.length) throw new Error("Spécialités Couverture match introuvables.");
     const { error } = await service.from("profile_specialties").upsert((specs ?? []).map((s) => ({ user_id: userId, specialty_id: s.id })));
     if (error) throw new Error(error.message);
   }
@@ -179,9 +191,11 @@ export async function approveAccessRequest(
     "Votre accès au board LGEF",
     [
       `Bonjour ${req.first_name},`,
-      network
-        ? "Votre demande d'accès est acceptée : vous faites maintenant partie du réseau photo de la Ligue Grand Est. Les matchs à photographier vous seront proposés dans le module Week-end ; le premier qui clique « Je prends » obtient le match."
-        : "Votre demande d'accès au board de la Ligue Grand Est est acceptée.",
+      network?.photo
+        ? "Votre demande d'accès est acceptée : vous faites maintenant partie du réseau Couverture match de la Ligue Grand Est. Les matchs à photographier vous seront proposés dans le module Week-end ; le premier qui clique « Je prends » obtient le match."
+        : network
+          ? "Votre demande d'accès est acceptée : vous faites maintenant partie du réseau Couverture match de la Ligue Grand Est. Les captations vidéo vous seront proposées depuis le calendrier du board."
+          : "Votre demande d'accès au board de la Ligue Grand Est est acceptée.",
       `Votre identifiant : ${req.email}. Choisissez votre mot de passe avec le lien ci-dessous (lien à usage unique).`,
     ],
     { href, label: "Choisir mon mot de passe" }

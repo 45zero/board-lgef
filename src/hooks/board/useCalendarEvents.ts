@@ -104,9 +104,10 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
 
     let coverageByEvent = new Map<string, CoverageRequestRow>();
     const publishedByEvent = new Map<string, PublishedMedia>();
+    let photoCovered = new Set<string>();
     const eventIds = rows.map((r) => r.id);
     if (eventIds.length > 0) {
-      const [{ data: coverageRows }, { data: publishedRows }] = await Promise.all([
+      const [{ data: coverageRows }, { data: publishedRows }, { data: photoRows }] = await Promise.all([
         supabase
           .from("coverage_requests")
           .select("event_id, status, coverage_symbol, technician_response")
@@ -114,7 +115,10 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
           .order("created_at", { ascending: false }),
         // Médias de l'événement publiés sur les réseaux → sigle entouré dans le calendrier.
         supabase.from("media_publications").select("event_id, kind").eq("status", "published").in("event_id", eventIds),
+        // Postes photo des matchs (filtre CouvPhoto).
+        supabase.from("photo_missions").select("event_id").in("event_id", eventIds),
       ]);
+      photoCovered = new Set((photoRows ?? []).map((p) => p.event_id));
       for (const p of publishedRows ?? []) {
         if (!p.event_id) continue;
         const kind: PublishedMedia = p.kind === "video" ? "video" : "photo";
@@ -132,6 +136,7 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
     const mapped = rows.map((row) => ({
       ...mapEventRow(row, coverageByEvent.get(row.id)),
       published: publishedByEvent.get(row.id) ?? null,
+      photoCoverage: photoCovered.has(row.id),
       solicited: solicited.has(row.id),
     }));
     setEvents(mapped);
@@ -154,6 +159,7 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       .on("postgres_changes", { event: "*", schema: "public", table: "events" }, () => fetchEvents())
       .on("postgres_changes", { event: "*", schema: "public", table: "coverage_requests" }, () => fetchEvents())
       .on("postgres_changes", { event: "*", schema: "public", table: "director_attendance" }, () => fetchEvents())
+      .on("postgres_changes", { event: "*", schema: "public", table: "photo_missions" }, () => fetchEvents())
       .subscribe();
     return () => {
       supabase.removeChannel(channel);

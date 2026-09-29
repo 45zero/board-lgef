@@ -1,14 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  ChevronDown,
-  User,
-  X,
-  Plus,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, User, X, Plus, Camera, Video } from "lucide-react";
 import {
   addDays,
   addMonths,
@@ -29,6 +22,7 @@ import {
 import { fr } from "date-fns/locale";
 import { useCalendarEvents } from "@/hooks/board/useCalendarEvents";
 import { useSolicitedFilter } from "@/hooks/board/useSolicitedFilter";
+import { passesCoverageFilters, useCoverageFilters } from "@/hooks/board/useCoverageFilters";
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
 import { CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
@@ -43,6 +37,7 @@ export function MobileCalendrierScreen() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [orgFilter, setOrgFilter] = useState<OrgKey | null>(null);
   const [mineOnly, setMineOnly] = useSolicitedFilter();
+  const [coverage, setCoverage] = useCoverageFilters();
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [editing, setEditing] = useState<CalendarEvent | "new" | null>(null);
 
@@ -77,9 +72,10 @@ export function MobileCalendrierScreen() {
     return events.filter((e) => {
       if (orgFilter && e.org !== orgFilter) return false;
       if (mineOnly && !e.solicited) return false;
+      if (!passesCoverageFilters(e, coverage)) return false;
       return true;
     });
-  }, [events, orgFilter, mineOnly]);
+  }, [events, orgFilter, mineOnly, coverage]);
 
   const eventsForDay = (day: Date) =>
     filtered.filter((e) => isSameDay(parseISO(e.start), day)).sort((a, b) => a.start.localeCompare(b.start));
@@ -170,6 +166,28 @@ export function MobileCalendrierScreen() {
             aria-label="Événements où je suis sollicité"
           >
             <User size={14} />
+          </button>
+          <button
+            onClick={() => setCoverage({ ...coverage, video: !coverage.video })}
+            className={`flex h-[26px] w-[26px] items-center justify-center rounded-btn border ${
+              coverage.video ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
+            }`}
+            title="CouvVidéo"
+            aria-label="Événements couverts en vidéo"
+            aria-pressed={coverage.video}
+          >
+            <Video size={14} />
+          </button>
+          <button
+            onClick={() => setCoverage({ ...coverage, photo: !coverage.photo })}
+            className={`flex h-[26px] w-[26px] items-center justify-center rounded-btn border ${
+              coverage.photo ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
+            }`}
+            title="CouvPhoto"
+            aria-label="Matchs couverts en photo"
+            aria-pressed={coverage.photo}
+          >
+            <Camera size={14} />
           </button>
         </div>
 

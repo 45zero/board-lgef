@@ -9,8 +9,10 @@ import { matchLabel, type MatchInput, type PersonLite, type PhotoStatus, type We
 // (match_details) et leur poste photo (photo_missions), voir sql/2026-09-29_reseau_photo.sql.
 // Coordinateurs (admins, super users, réseau salarié) : saisie des matchs, envoi au réseau,
 // désignation. Photographes (spécialité tech-photo) : « Je prends », premier arrivé premier servi.
+// Couverture match = photographes + vidéastes (tech-video, attribués par coverage_requests).
 
 const PHOTO_SLUG = "tech-photo";
+const VIDEO_SLUG = "tech-video";
 const MATCH_DURATION_MS = 2 * 60 * 60 * 1000;
 
 type Profile = { id: string; first_name: string | null; last_name: string | null; email: string | null };
@@ -41,17 +43,19 @@ async function requireCoordinator() {
   return viewer;
 }
 
-async function getPhotoSpecialtyId(service: ReturnType<typeof createServiceClient>) {
-  const { data } = await service.from("specialties").select("id").eq("slug", PHOTO_SLUG).single();
-  if (!data) throw new Error("Spécialité « Photographe » absente — migration sql/2026-09-29_reseau_photo.sql non appliquée.");
+async function getSpecialtyId(service: ReturnType<typeof createServiceClient>, slug: string) {
+  const { data } = await service.from("specialties").select("id").eq("slug", slug).single();
+  if (!data) throw new Error(`Spécialité ${slug} absente — migrations sql/2026-09-29_*.sql non appliquées.`);
   return data.id;
 }
 
-async function listPhotographerIds(service: ReturnType<typeof createServiceClient>) {
-  const specialtyId = await getPhotoSpecialtyId(service);
+async function listMemberIds(service: ReturnType<typeof createServiceClient>, slug: string) {
+  const specialtyId = await getSpecialtyId(service, slug);
   const { data } = await service.from("profile_specialties").select("user_id").eq("specialty_id", specialtyId);
   return (data ?? []).map((r) => r.user_id);
 }
+
+const listPhotographerIds = (service: ReturnType<typeof createServiceClient>) => listMemberIds(service, PHOTO_SLUG);
 
 async function notify(
   userIds: (string | null | undefined)[],
@@ -94,7 +98,7 @@ export async function getWeekend(startISO: string, endISO: string): Promise<Week
   const ids = (events ?? []).map((e) => e.id);
 
   const service = createServiceClient();
-  const [details, missions, coverage, files, publications, photographerIds, settings] = await Promise.all([
+  const [details, missions, coverage, files, publications, photographerIds, videographerIds, settings] = await Promise.all([
     ids.length ? supabase.from("match_details").select("*").in("event_id", ids) : Promise.resolve({ data: [] }),
     // RLS : les brouillons ne remontent que pour les coordinateurs.
     ids.length ? supabase.from("photo_missions").select("*").in("event_id", ids) : Promise.resolve({ data: [] }),
@@ -110,13 +114,18 @@ export async function getWeekend(startISO: string, endISO: string): Promise<Week
       ? supabase.from("media_publications").select("event_id").in("event_id", ids).in("kind", ["photo", "gallery"]).eq("status", "published")
       : Promise.resolve({ data: [] }),
     canCoordinate ? listPhotographerIds(service) : Promise.resolve([] as string[]),
+    canCoordinate ? listMemberIds(service, VIDEO_SLUG) : Promise.resolve([] as string[]),
     canCoordinate ? service.from("board_settings").select("publisher_ids").eq("id", true).single() : Promise.resolve({ data: null }),
   ]);
 
   const missionRows = (missions.data ?? []) as { id: string; event_id: string; status: PhotoStatus; photographer_id: string | null; publisher_id: string | null }[];
   const publisherIds = (settings.data as { publisher_ids: string[] } | null)?.publisher_ids ?? [];
   const personIds = [
-    ...new Set([...missionRows.flatMap((m) => [m.photographer_id, m.publisher_id]), ...photographerIds, ...publisherIds].filter((id): id is string => !!id)),
+    ...new Set(
+      [...missionRows.flatMap((m) => [m.photographer_id, m.publisher_id]), ...photographerIds, ...videographerIds, ...publisherIds].filter(
+        (id): id is string => !!id
+      )
+    ),
   ];
   const { data: profiles } = personIds.length
     ? await service.from("profiles").select("id, first_name, last_name, email").in("id", personIds)
@@ -181,6 +190,11 @@ export async function getWeekend(startISO: string, endISO: string): Promise<Week
     // Photographes : seulement les matchs proposés au réseau.
     matches: canCoordinate ? matches : matches.filter((m) => m.photo && m.photo.status !== "draft"),
     photographers: photographerIds.map((id) => people.get(id)).filter((p): p is PersonLite => !!p).sort(byName),
+    network: [...new Set([...photographerIds, ...videographerIds])]
+      .map((id) => people.get(id))
+      .filter((p): p is PersonLite => !!p)
+      .sort(byName)
+      .map((person) => ({ person, photo: photographerIds.includes(person.id), video: videographerIds.includes(person.id) })),
     publishers: publisherIds.map((id) => people.get(id)).filter((p): p is PersonLite => !!p).sort(byName),
   };
 }
@@ -301,7 +315,7 @@ export async function sendToNetwork(eventIds: string[]): Promise<number> {
       photographers.filter((id) => id !== userId),
       {
         title: "Matchs à photographier",
-        message: `${count} match${count > 1 ? "s" : ""} proposé${count > 1 ? "s" : ""} au réseau photo — premier arrivé, premier servi (module Week-end).`,
+        message: `${count} match${count > 1 ? "s" : ""} à photographier — premier arrivé, premier servi (module Week-end).`,
       }
     );
   }
@@ -338,9 +352,9 @@ export async function releaseMission(missionId: string) {
   });
 }
 
-/* ---------- Réseau photo ---------- */
+/* ---------- Couverture match ---------- */
 
-/** Profils du board, pour ajouter quelqu'un au réseau photo (recherche nom / e-mail). */
+/** Profils du board, pour ajouter quelqu'un à Couverture match (recherche nom / e-mail). */
 export async function searchProfiles(query: string): Promise<PersonLite[]> {
   await requireCoordinator();
   const q = query.trim().replace(/[%,()]/g, " ");
@@ -353,10 +367,11 @@ export async function searchProfiles(query: string): Promise<PersonLite[]> {
   return (data ?? []).map(toPerson);
 }
 
-export async function setPhotographer(profileId: string, member: boolean) {
+/** Ajoute ou retire un photographe (photo) ou un vidéaste (video) du réseau Couverture match. */
+export async function setCoverageMember(profileId: string, trade: "photo" | "video", member: boolean) {
   await requireCoordinator();
   const service = createServiceClient();
-  const specialtyId = await getPhotoSpecialtyId(service);
+  const specialtyId = await getSpecialtyId(service, trade === "photo" ? PHOTO_SLUG : VIDEO_SLUG);
   const { error } = member
     ? await service.from("profile_specialties").upsert({ user_id: profileId, specialty_id: specialtyId })
     : await service.from("profile_specialties").delete().eq("user_id", profileId).eq("specialty_id", specialtyId);

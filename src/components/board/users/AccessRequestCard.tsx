@@ -1,26 +1,40 @@
 "use client";
 
 import { useState } from "react";
-import { Camera } from "lucide-react";
+import { Camera, Check, Video } from "lucide-react";
 import { approveAccessRequest, rejectAccessRequest, type AccessRequest, type PaymentMode } from "@/app/actions/account-requests";
 
 const input = "w-full rounded-btn border border-line bg-card px-2.5 py-2 text-sm outline-none focus:border-navy";
 const btnSmall = "flex items-center gap-1 rounded-btn px-2.5 py-1.5 text-xs font-bold disabled:opacity-50";
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Une erreur est survenue.");
 
-const KIND_LABELS: Record<string, string> = { photographe: "Photographe", videaste: "Vidéaste", autre: "Autre" };
+export const KIND_LABELS: Record<string, string> = {
+  salarie: "Salarié",
+  arbitre: "Arbitre",
+  photographe: "Photographe",
+  videaste: "Vidéaste",
+  partenaire: "Partenaire",
+  media: "Média",
+  autre: "Autre",
+};
 const PAYMENT_LABELS: Record<PaymentMode, string> = {
   reseau: "Réseau — remboursement de frais",
   prestataire: "Prestataire — sur facture",
   benevole: "Bénévole — ni frais ni facture",
 };
 
-/** Demande d'accès en attente : accepter dans le réseau photo (avec mode de paiement) ou refuser. */
+/**
+ * Demande d'accès en attente : accepter (avec, au besoin, Couverture match — photographe et/ou
+ * vidéaste — et le mode de paiement) ou refuser. Les cases sont pré-cochées d'après « Vous êtes ».
+ */
 export function AccessRequestCard({ request, onDone }: { request: AccessRequest; onDone: (message: string) => void }) {
+  const [photo, setPhoto] = useState(request.kind === "photographe");
+  const [video, setVideo] = useState(request.kind === "videaste");
   const [payment, setPayment] = useState<PaymentMode>("reseau");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const name = `${request.firstName} ${request.lastName}`;
+  const coverage = photo || video;
 
   const act = async (fn: () => Promise<string>) => {
     setBusy(true);
@@ -32,10 +46,10 @@ export function AccessRequestCard({ request, onDone }: { request: AccessRequest;
       setBusy(false);
     }
   };
-  const approve = (network: boolean) =>
+  const approve = () =>
     act(async () => {
-      const res = await approveAccessRequest(request.id, network ? { payment } : null);
-      const who = network ? `${name} ajouté au réseau photo` : `Accès accordé à ${name}`;
+      const res = await approveAccessRequest(request.id, coverage ? { photo, video, payment } : null);
+      const who = coverage ? `${name} ajouté à Couverture match` : `Accès accordé à ${name}`;
       return res.emailed ? `${who} — e-mail envoyé pour choisir son mot de passe.` : `${who} — l'e-mail n'a pas pu partir, prévenez-le.`;
     });
 
@@ -51,13 +65,30 @@ export function AccessRequestCard({ request, onDone }: { request: AccessRequest;
         {request.organization && <> · {request.organization}</>}
       </div>
       {request.reason && <p className="whitespace-pre-line rounded-btn bg-subtle px-2.5 py-2 text-xs text-ink-2">{request.reason}</p>}
-      <select value={payment} onChange={(e) => setPayment(e.target.value as PaymentMode)} className={`${input} !py-1.5 text-xs`}>
-        {(Object.keys(PAYMENT_LABELS) as PaymentMode[]).map((p) => (
-          <option key={p} value={p}>
-            {PAYMENT_LABELS[p]}
-          </option>
-        ))}
-      </select>
+
+      <div className="space-y-2 rounded-btn border border-line p-2.5">
+        <div className="text-[11px] font-bold uppercase tracking-wide text-ink-4">Couverture match</div>
+        <div className="flex flex-wrap gap-4">
+          <label className="flex items-center gap-1.5 text-sm text-ink-2">
+            <input type="checkbox" checked={photo} onChange={(e) => setPhoto(e.target.checked)} />
+            <Camera size={13} /> Photographe
+          </label>
+          <label className="flex items-center gap-1.5 text-sm text-ink-2">
+            <input type="checkbox" checked={video} onChange={(e) => setVideo(e.target.checked)} />
+            <Video size={13} /> Vidéaste
+          </label>
+        </div>
+        {coverage && (
+          <select value={payment} onChange={(e) => setPayment(e.target.value as PaymentMode)} className={`${input} !py-1.5 text-xs`}>
+            {(Object.keys(PAYMENT_LABELS) as PaymentMode[]).map((p) => (
+              <option key={p} value={p}>
+                {PAYMENT_LABELS[p]}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
       <div className="flex flex-wrap justify-end gap-1.5">
         <button
           disabled={busy}
@@ -66,11 +97,8 @@ export function AccessRequestCard({ request, onDone }: { request: AccessRequest;
         >
           Refuser
         </button>
-        <button disabled={busy} onClick={() => void approve(false)} className={`${btnSmall} border border-line text-ink-2 hover:bg-hover`} title="Compte sans réseau photo">
-          Accès simple
-        </button>
-        <button disabled={busy} onClick={() => void approve(true)} className={`${btnSmall} bg-good text-white`}>
-          <Camera size={12} /> Accepter comme photographe
+        <button disabled={busy} onClick={() => void approve()} className={`${btnSmall} bg-good text-white`}>
+          <Check size={12} /> {coverage ? "Accepter dans Couverture match" : "Accepter (accès simple)"}
         </button>
       </div>
       {error && <p className="text-xs text-bad">{error}</p>}

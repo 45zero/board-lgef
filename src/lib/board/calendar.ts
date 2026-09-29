@@ -79,6 +79,8 @@ export interface CalendarEvent {
   updatedAt?: string | null;
   /** Médias de l'événement déjà publiés sur les réseaux (vidéo, photo ou les deux) — sigle entouré dans le calendrier. */
   published?: PublishedMedia | null;
+  /** Match avec un poste photo (réseau Couverture match, table photo_missions). */
+  photoCoverage?: boolean;
   /** L'utilisateur connecté est sollicité sur cet événement (voir src/lib/board/solicitation.ts). */
   solicited?: boolean;
   status: "pending" | "approved" | "rejected" | "completed" | null;

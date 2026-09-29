@@ -93,7 +93,7 @@ export default function LoginPage() {
           {submitting ? "Connexion…" : "Se connecter"}
         </button>
         <Link href="/demande-acces" className="mt-4 block text-center text-xs font-semibold text-ink-3 hover:underline">
-          Photographe, vidéaste ? Demander un accès
+          Pas encore de compte ? Demander un accès
         </Link>
       </form>
     </div>
