@@ -1,5 +1,5 @@
-import { notFound } from "next/navigation";
-import { getRegistrationContext, submitRegistrationResponse } from "@/app/actions/registration-public";
+import { notFound, redirect } from "next/navigation";
+import { getPublicLinkForEvent, getRegistrationContext, submitRegistrationResponse } from "@/app/actions/registration-public";
 import { RsvpCard } from "@/components/registration/RsvpCard";
 
 export default async function RsvpPage({
@@ -12,14 +12,20 @@ export default async function RsvpPage({
   const { eventId, token } = await params;
   const { r } = await searchParams;
   const context = await getRegistrationContext(eventId, token);
-  if (!context) notFound();
+  if (!context) {
+    // Destinataire retiré de la liste après l'envoi : on bascule sur le lien générique de l'événement
+    // (nom, prénom, club à saisir) plutôt que d'afficher une page morte.
+    const publicLink = await getPublicLinkForEvent(eventId);
+    if (publicLink) redirect(r === "yes" || r === "no" ? `${publicLink}?r=${r}` : publicLink);
+    notFound();
+  }
 
-  const { recipient, event, cardHtml } = context;
+  const { recipient, event, cardHtml, clubLimit } = context;
   const initialChoice = r === "yes" || r === "no" ? r : null;
 
   async function respond(response: "yes" | "no", attendees: number | null) {
     "use server";
-    await submitRegistrationResponse(token, response, attendees);
+    return submitRegistrationResponse(token, response, attendees);
   }
 
   return (
@@ -31,6 +37,7 @@ export default async function RsvpPage({
         cardHtml={cardHtml}
         initialChoice={initialChoice}
         alreadyResponded={recipient.response as "yes" | "no" | null}
+        clubLimit={clubLimit}
         onSubmit={respond}
       />
     </div>

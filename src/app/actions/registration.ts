@@ -135,7 +135,11 @@ export async function getOrCreateCampaign(eventId: string) {
   return created;
 }
 
-export async function updateCampaign(campaignId: string, patch: { subject?: string }) {
+/** `max_attendees_per_club` : plafond de personnes par club (ex. AG : 2), null = pas de limite. */
+export async function updateCampaign(
+  campaignId: string,
+  patch: { subject?: string; max_attendees_per_club?: number | null }
+) {
   const { supabase } = await requireStaff();
   const { error } = await supabase
     .from("event_registration_campaigns")

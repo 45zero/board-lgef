@@ -13,6 +13,7 @@ export function RsvpCard({
   initialChoice,
   alreadyResponded,
   extraFields,
+  clubLimit,
   onSubmit,
 }: {
   eventTitle: string;
@@ -23,26 +24,43 @@ export function RsvpCard({
   initialChoice?: "yes" | "no" | null;
   alreadyResponded?: "yes" | "no" | null;
   extraFields?: React.ReactNode;
-  /** `attendees` : nombre de personnes (1–99), renseigné seulement pour « Je participe ». */
-  onSubmit: (response: "yes" | "no", attendees: number | null) => Promise<void>;
+  /** Plafond de personnes par club de la campagne (ex. AG : 2) et places restantes pour ce club — absent = pas de limite. */
+  clubLimit?: { cap: number; remaining: number } | null;
+  /** `attendees` : nombre de personnes (1–99), renseigné seulement pour « Je participe ». Peut renvoyer `{ error }` (ex. limite par club atteinte). */
+  onSubmit: (response: "yes" | "no", attendees: number | null) => Promise<{ error: string | null } | void>;
 }) {
   const [choice, setChoice] = useState<"yes" | "no" | null>(initialChoice ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<"yes" | "no" | null>(alreadyResponded ?? null);
   const [error, setError] = useState<string | null>(null);
   const [attendees, setAttendees] = useState("1");
+  const maxAttendees = clubLimit ? clubLimit.remaining : 99;
+  const clubFull = !!clubLimit && clubLimit.remaining === 0;
+  const capLabel = clubLimit ? `${clubLimit.cap} personne${clubLimit.cap > 1 ? "s" : ""} maximum par club` : "";
 
   const confirm = async () => {
     if (!choice) return;
     const count = Number(attendees);
-    if (choice === "yes" && (!Number.isInteger(count) || count < 1 || count > 99)) {
-      setError("Indiquez un nombre de personnes entre 1 et 99.");
+    if (choice === "yes" && clubFull) {
+      setError(`Inscriptions limitées à ${capLabel} : votre club a déjà atteint ce nombre.`);
+      return;
+    }
+    if (choice === "yes" && (!Number.isInteger(count) || count < 1 || count > maxAttendees)) {
+      setError(
+        clubLimit
+          ? `Inscriptions limitées à ${capLabel} : indiquez entre 1 et ${maxAttendees} personne${maxAttendees > 1 ? "s" : ""}.`
+          : "Indiquez un nombre de personnes entre 1 et 99."
+      );
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(choice, choice === "yes" ? count : null);
+      const result = await onSubmit(choice, choice === "yes" ? count : null);
+      if (result?.error) {
+        setError(result.error);
+        return;
+      }
       setDone(choice);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Échec de l'envoi.");
@@ -111,14 +129,14 @@ export function RsvpCard({
               </button>
             </div>
 
-            {choice === "yes" && (
+            {choice === "yes" && !clubFull && (
               <label className="mt-4 flex items-center justify-between gap-3 rounded-btn border border-line px-3 py-2.5">
                 <span className="text-sm font-semibold text-ink-2">Nombre de personnes</span>
                 <input
                   type="number"
                   inputMode="numeric"
                   min={1}
-                  max={99}
+                  max={maxAttendees}
                   value={attendees}
                   onChange={(e) => setAttendees(e.target.value)}
                   className="w-20 rounded-btn border border-line px-2 py-1.5 text-center text-sm font-bold text-ink outline-none"
@@ -126,11 +144,21 @@ export function RsvpCard({
               </label>
             )}
 
+            {choice === "yes" && clubLimit && (
+              <p className={`mt-2 text-xs font-semibold ${clubFull ? "text-bad" : "text-ink-3"}`}>
+                {clubFull
+                  ? `Inscriptions limitées à ${capLabel} : votre club a déjà atteint ce nombre.`
+                  : clubLimit.remaining < clubLimit.cap
+                    ? `${capLabel} — il reste ${clubLimit.remaining} place${clubLimit.remaining > 1 ? "s" : ""} pour votre club.`
+                    : `${capLabel.charAt(0).toUpperCase()}${capLabel.slice(1)}.`}
+              </p>
+            )}
+
             {error && <p className="mt-3 text-xs font-semibold text-bad">{error}</p>}
 
             <button
               onClick={confirm}
-              disabled={!choice || submitting}
+              disabled={!choice || submitting || (choice === "yes" && clubFull)}
               className="mt-4 w-full rounded-btn bg-navy px-4 py-3 text-sm font-bold text-white disabled:opacity-50"
             >
               {submitting ? "Envoi…" : "Confirmer ma réponse"}

@@ -395,6 +395,7 @@ function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationE
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [subject, setSubject] = useState("");
+  const [clubCap, setClubCap] = useState("");
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<string | null>(null);
@@ -441,6 +442,7 @@ function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationE
       const c = await getOrCreateCampaign(ev.id);
       setCampaign(c);
       setSubject(c.subject || `Invitation — ${ev.title}`);
+      setClubCap(c.max_attendees_per_club ? String(c.max_attendees_per_club) : "");
       await refetch(c);
       setPreviewHtml(await previewCampaignHtml(c.id));
       setEmbedHtml(await getCampaignEmbedHtml(c.id));
@@ -464,6 +466,20 @@ function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationE
     setSaving(true);
     try {
       await updateCampaign(campaign.id, { subject });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveClubCap = async () => {
+    const n = Number(clubCap);
+    const value = clubCap.trim() && Number.isInteger(n) && n >= 1 && n <= 99 ? n : null;
+    setClubCap(value ? String(value) : "");
+    if (value === (campaign.max_attendees_per_club ?? null)) return;
+    setSaving(true);
+    try {
+      await updateCampaign(campaign.id, { max_attendees_per_club: value });
+      setCampaign({ ...campaign, max_attendees_per_club: value });
     } finally {
       setSaving(false);
     }
@@ -716,6 +732,23 @@ function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationE
             placeholder="Objet"
             className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
           />
+          <label className="flex items-center justify-between gap-3 rounded-btn border border-line px-3 py-2">
+            <span className="text-xs font-semibold text-ink-2">
+              Personnes max. par club
+              <span className="block text-[10px] font-normal text-ink-4">Vide = pas de limite</span>
+            </span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={99}
+              value={clubCap}
+              onChange={(e) => setClubCap(e.target.value)}
+              onBlur={saveClubCap}
+              placeholder="—"
+              className="w-16 rounded-btn border border-line px-2 py-1 text-center text-sm font-bold text-ink outline-none"
+            />
+          </label>
           {saving && <p className="text-[10px] text-ink-4">Enregistrement…</p>}
 
           <div className="space-y-2">

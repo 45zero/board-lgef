@@ -1417,6 +1417,7 @@ export type Database = {
           signatory_title: string | null
           signature_image_url: string | null
           blocks: Json
+          max_attendees_per_club: number | null
         }
         Insert: {
           id?: string
@@ -1441,6 +1442,7 @@ export type Database = {
           signatory_title?: string | null
           signature_image_url?: string | null
           blocks?: Json
+          max_attendees_per_club?: number | null
         }
         Update: {
           id?: string
@@ -1465,6 +1467,7 @@ export type Database = {
           signatory_title?: string | null
           signature_image_url?: string | null
           blocks?: Json
+          max_attendees_per_club?: number | null
         }
         Relationships: []
       }

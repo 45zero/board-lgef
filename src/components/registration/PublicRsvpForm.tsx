@@ -9,6 +9,7 @@ export function PublicRsvpForm({
   eventLocation,
   cardHtml,
   initialChoice,
+  clubCap,
   onSubmit,
 }: {
   eventTitle: string;
@@ -16,6 +17,8 @@ export function PublicRsvpForm({
   eventLocation: string | null;
   cardHtml?: string;
   initialChoice?: "yes" | "no" | null;
+  /** Plafond de personnes par club (ex. AG : 2) — le reste disponible est vérifié côté serveur selon le club saisi. */
+  clubCap?: number | null;
   onSubmit: (data: {
     firstName: string;
     lastName: string;
@@ -23,7 +26,7 @@ export function PublicRsvpForm({
     email: string;
     response: "yes" | "no";
     attendees: number | null;
-  }) => Promise<void>;
+  }) => Promise<{ error: string | null }>;
 }) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -37,6 +40,7 @@ export function PublicRsvpForm({
       eventLocation={eventLocation}
       cardHtml={cardHtml}
       initialChoice={initialChoice}
+      clubLimit={clubCap ? { cap: clubCap, remaining: clubCap } : null}
       extraFields={
         <div className="mt-4 space-y-2">
           <div className="flex gap-2">
@@ -71,7 +75,7 @@ export function PublicRsvpForm({
       onSubmit={async (response, attendees) => {
         if (!firstName.trim() || !lastName.trim()) throw new Error("Merci d'indiquer votre prénom et votre nom.");
         if (!club.trim()) throw new Error("Merci d'indiquer votre club.");
-        await onSubmit({
+        return onSubmit({
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           club: club.trim(),

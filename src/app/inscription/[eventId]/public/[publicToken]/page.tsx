@@ -26,7 +26,7 @@ export default async function PublicRsvpPage({
     attendees: number | null;
   }) {
     "use server";
-    await submitPublicResponse(campaign.id, data);
+    return submitPublicResponse(campaign.id, data);
   }
 
   return (
@@ -37,6 +37,7 @@ export default async function PublicRsvpPage({
         eventLocation={event.location}
         cardHtml={cardHtml}
         initialChoice={initialChoice}
+        clubCap={campaign.max_attendees_per_club}
         onSubmit={respond}
       />
     </div>
