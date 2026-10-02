@@ -95,11 +95,12 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
   });
 
   const eventItems: MyExpenseItem[] = (events ?? [])
-    // Événements à venir : seulement s'il y a déjà des frais (hôtel réservé à l'avance…).
-    .filter((e) => e.start_date <= now || totals.has(`event:${e.id}`) || subByEvent.has(e.id))
+    // Événements à venir où je suis sollicité : listés (frais anticipés, hôtel réservé…) mais pas
+    // « à déclarer » tant qu'ils n'ont pas eu lieu et qu'aucun frais n'est saisi.
     .map((e) => {
       const t = totals.get(`event:${e.id}`) ?? { total: 0, count: 0 };
       return {
+        upcoming: e.start_date > now && t.count === 0 && !subByEvent.has(e.id),
         key: `event:${e.id}`,
         eventId: e.id,
         month: null,

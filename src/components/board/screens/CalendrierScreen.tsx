@@ -349,8 +349,8 @@ export function CalendrierScreen() {
             className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-btn border ${
               coverage.video ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3 hover:bg-hover"
             }`}
-            title={coverage.video ? "CouvVidéo affichée — masquer les événements couverts en vidéo" : "CouvVidéo masquée — afficher les événements couverts en vidéo"}
-            aria-label="Événements couverts en vidéo"
+            title={coverage.video ? "Matchs du week-end en vidéo affichés — les masquer" : "Afficher les matchs du week-end couverts en vidéo"}
+            aria-label="Matchs du week-end couverts en vidéo"
             aria-pressed={coverage.video}
           >
             <Video size={15} />
@@ -360,8 +360,8 @@ export function CalendrierScreen() {
             className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-btn border ${
               coverage.photo ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3 hover:bg-hover"
             }`}
-            title={coverage.photo ? "CouvPhoto affichée — masquer les matchs couverts en photo" : "CouvPhoto masquée — afficher les matchs couverts en photo"}
-            aria-label="Matchs couverts en photo"
+            title={coverage.photo ? "Matchs du week-end en photo affichés — les masquer" : "Afficher les matchs du week-end couverts en photo"}
+            aria-label="Matchs du week-end couverts en photo"
             aria-pressed={coverage.photo}
           >
             <Camera size={15} />

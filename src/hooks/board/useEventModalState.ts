@@ -216,6 +216,7 @@ export function useEventModalState({
               event_id: newId,
               requester_id: user.id,
               assigned_technician_id: tech.id,
+              technician_id: tech.id,
               assigned_technician_name: tech.name,
               assigned_technician_email: tech.email,
               technician_response: "accepted",

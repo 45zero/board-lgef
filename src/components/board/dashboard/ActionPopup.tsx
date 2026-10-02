@@ -205,7 +205,7 @@ function DeclareList({ statuses, onChanged }: { statuses: MyExpenseItem["status"
   const [version, setVersion] = useState(0);
   useEffect(() => {
     getMyExpenses()
-      .then((all) => setItems(all.filter((i) => statuses.includes(i.status))))
+      .then((all) => setItems(all.filter((i) => statuses.includes(i.status) && !i.upcoming)))
       .catch(() => setItems([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version]);

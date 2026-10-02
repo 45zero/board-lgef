@@ -10,6 +10,7 @@ import { computeMyExpenses, lineMonth, personName, toStatus } from "@/lib/board/
 import {
   CATEGORY_META,
   EXPENSE_CATEGORIES,
+  lineParts,
   monthLabel,
   type ExpenseAmountColumn,
   type ExpenseCategory,
@@ -47,6 +48,8 @@ export type MyExpenseItem = {
   reviewedAt: string | null;
   reviewerName: string | null;
   reviewerComment: string | null;
+  /** Événement à venir sans frais saisis : affiché (« À venir ») mais pas encore à déclarer. */
+  upcoming?: boolean;
 };
 
 export type ExpenseAttachment = { url: string; name: string; type: string | null };
@@ -592,4 +595,85 @@ export async function getMyExpenseExport(month: string): Promise<ExpenseExport> 
     },
     lines,
   };
+}
+
+/** Justificatif de frais tel qu'archivé dans le Drive (onglet Drive du board). */
+export type ArchivedReceipt = {
+  key: string;
+  eventId: string | null;
+  eventTitle: string | null;
+  eventStart: string | null;
+  /** 'YYYY-MM' — mois de rangement des frais hors événement. */
+  month: string;
+  name: string;
+  url: string;
+  type: string | null;
+};
+
+/**
+ * Justificatifs visibles dans l'onglet Drive (24 derniers mois) : les miens et ceux des personnes
+ * dont je suis le N+1 ; tous pour un administrateur ou un gestionnaire des frais.
+ */
+export async function getArchivedReceipts(): Promise<ArchivedReceipt[]> {
+  const { userId, canManageValidators, service } = await currentUser();
+  let userIds: string[] | null = null;
+  if (!canManageValidators) {
+    const { data: reports } = await service.from("profiles").select("id").eq("expense_validator_id", userId);
+    userIds = [userId, ...(reports ?? []).map((r) => r.id)];
+  }
+
+  const since = new Date(Date.now() - 730 * 86_400_000).toISOString();
+  const { data: atts } = await service.from("event_expense_attachments").select("expense_id").gte("created_at", since);
+  const withFiles = [...new Set((atts ?? []).map((a) => a.expense_id).filter((id): id is string => !!id))];
+
+  let byFileUrl = service.from("event_expenses").select("*").not("file_url", "is", null).gte("created_at", since);
+  let byAttachment = service.from("event_expenses").select("*").in("id", withFiles.length ? withFiles : ["00000000-0000-0000-0000-000000000000"]);
+  if (userIds) {
+    byFileUrl = byFileUrl.in("user_id", userIds);
+    byAttachment = byAttachment.in("user_id", userIds);
+  }
+  const [{ data: a }, { data: b }] = await Promise.all([byFileUrl, byAttachment]);
+  const lines = [...new Map([...(a ?? []), ...(b ?? [])].map((l) => [l.id, l])).values()];
+  if (!lines.length) return [];
+
+  const full = await withAttachments(service, lines as Record<string, unknown>[]);
+  const personIds = [...new Set(lines.map((l) => l.user_id).filter((id): id is string => !!id))];
+  const eventIds = [...new Set(lines.map((l) => l.event_id).filter((id): id is string => !!id))];
+  const [{ data: people }, { data: events }] = await Promise.all([
+    service.from("profiles").select("id, first_name, last_name, email").in("id", personIds),
+    eventIds.length ? service.from("events").select("id, title, start_date").in("id", eventIds) : Promise.resolve({ data: [] as { id: string; title: string; start_date: string }[] }),
+  ]);
+  const personById = new Map((people ?? []).map((p) => [p.id, personName(p)]));
+  const eventById = new Map((events ?? []).map((e) => [e.id, e]));
+
+  const receipts: ArchivedReceipt[] = [];
+  for (const line of full) {
+    const raw = lines.find((l) => l.id === line.id)!;
+    const event = line.event_id ? eventById.get(line.event_id) : null;
+    const parts = lineParts(line).map((p) => p.label.replace(/ \(.*\)$/, ""));
+    const label = [
+      line.expense_date ?? raw.created_at.slice(0, 10),
+      personById.get(raw.user_id ?? "") ?? "—",
+      parts.join(", "),
+      raw.merchant_name ?? "",
+      `${Number(raw.total_amount ?? 0).toFixed(2).replace(".", ",")} €`,
+    ]
+      .filter(Boolean)
+      .join(" - ");
+    for (const [i, att] of line.attachments.entries()) {
+      const url = await readableUrl(service, att.url);
+      if (!url) continue;
+      receipts.push({
+        key: `${line.id}:${i}`,
+        eventId: event?.id ?? null,
+        eventTitle: event?.title ?? null,
+        eventStart: event?.start_date ?? null,
+        month: lineMonth(raw),
+        name: line.attachments.length > 1 ? `${label} (${i + 1})` : label,
+        url,
+        type: att.type,
+      });
+    }
+  }
+  return receipts.sort((x, y) => y.name.localeCompare(x.name));
 }

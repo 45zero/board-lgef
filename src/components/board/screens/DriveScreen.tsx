@@ -14,16 +14,21 @@ import {
   ExternalLink,
   ArrowLeft,
   CalendarDays,
+  Receipt,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { listEventFiles, getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
+import { getArchivedReceipts, type ArchivedReceipt } from "@/app/actions/expenses";
 
 interface ArchiveEvent {
+  /** Id de l'événement, ou « month:AAAA-MM » pour les frais hors événement du mois. */
   id: string;
   title: string;
   startDate: string;
   fileCount: number;
+  receipts: ArchivedReceipt[];
+  noEvent?: boolean;
 }
 
 interface MonthGroup {
@@ -37,15 +42,15 @@ function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/** Médias Drive des événements (event_files) + justificatifs de frais archivés, rangés comme dans le Drive. */
 async function listArchiveEvents(): Promise<ArchiveEvent[]> {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from("event_files")
-    .select("event_id, events(id, title, start_date)")
-    .eq("storage_provider", "drive");
-  if (error || !data) return [];
+  const [{ data }, receipts] = await Promise.all([
+    supabase.from("event_files").select("event_id, events(id, title, start_date)").eq("storage_provider", "drive"),
+    getArchivedReceipts().catch(() => [] as ArchivedReceipt[]),
+  ]);
   const map = new Map<string, ArchiveEvent>();
-  for (const row of data as unknown as {
+  for (const row of (data ?? []) as unknown as {
     event_id: string;
     events: { id: string; title: string; start_date: string } | null;
   }[]) {
@@ -53,9 +58,44 @@ async function listArchiveEvents(): Promise<ArchiveEvent[]> {
     if (!ev) continue;
     const existing = map.get(ev.id);
     if (existing) existing.fileCount += 1;
-    else map.set(ev.id, { id: ev.id, title: ev.title, startDate: ev.start_date, fileCount: 1 });
+    else map.set(ev.id, { id: ev.id, title: ev.title, startDate: ev.start_date, fileCount: 1, receipts: [] });
+  }
+  for (const r of receipts) {
+    const id = r.eventId ?? `month:${r.month}`;
+    if (!map.has(id)) {
+      map.set(
+        id,
+        r.eventId
+          ? { id, title: r.eventTitle ?? "Événement", startDate: r.eventStart ?? `${r.month}-01T12:00:00`, fileCount: 0, receipts: [] }
+          : { id, title: "Frais hors événement", startDate: `${r.month}-01T12:00:00`, fileCount: 0, receipts: [], noEvent: true }
+      );
+    }
+    map.get(id)!.receipts.push(r);
   }
   return Array.from(map.values()).sort((a, b) => b.startDate.localeCompare(a.startDate));
+}
+
+const docCount = (ev: ArchiveEvent) => {
+  const parts = [];
+  if (ev.fileCount) parts.push(`${ev.fileCount} média${ev.fileCount > 1 ? "s" : ""}`);
+  if (ev.receipts.length) parts.push(`${ev.receipts.length} justificatif${ev.receipts.length > 1 ? "s" : ""} de frais`);
+  return parts.join(" · ");
+};
+
+function ReceiptRow({ receipt }: { receipt: ArchivedReceipt }) {
+  return (
+    <div className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0 hover:bg-hover">
+      <Receipt size={16} className="shrink-0 text-ink-4" />
+      <span className="min-w-0 flex-1 truncate text-sm text-ink-2">{receipt.name}</span>
+      <a href={receipt.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[11px] font-semibold text-ink-3 hover:text-ink">
+        <ExternalLink size={12} /> Voir
+      </a>
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <div className="bg-subtle px-4 py-1.5 text-[11px] font-bold text-ink-3">{children}</div>;
 }
 
 
@@ -107,7 +147,10 @@ function FileRow({ file }: { file: EventFile }) {
   );
 }
 
-/** Archive lisible des médias d'événements (base de données = source de vérité, Drive = stockage). Même forme que GED. */
+/**
+ * Archive lisible des médias d'événements et des justificatifs de frais (base de données = source de
+ * vérité, Drive = stockage), rangée comme le Drive : année / mois / événement. Même forme que GED.
+ */
 export function DriveScreen() {
   const [events, setEvents] = useState<ArchiveEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -149,6 +192,10 @@ export function DriveScreen() {
 
   const openEvent = async (ev: ArchiveEvent) => {
     setSelectedEvent(ev);
+    if (ev.noEvent || ev.fileCount === 0) {
+      setFiles([]);
+      return;
+    }
     setFilesLoading(true);
     setFiles(await listEventFiles(ev.id));
     setFilesLoading(false);
@@ -234,15 +281,35 @@ export function DriveScreen() {
                 >
                   <ArrowLeft size={13} /> Retour
                 </button>
-                <span className="truncate text-sm font-bold text-ink">{selectedEvent.title}</span>
+                <span className="truncate text-sm font-bold text-ink">
+                  {selectedEvent.title}
+                  {selectedEvent.noEvent && ` · ${format(new Date(selectedEvent.startDate), "MMMM yyyy", { locale: fr })}`}
+                </span>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {filesLoading ? (
                   <div className="p-4 text-sm text-ink-4">Chargement…</div>
-                ) : files.length === 0 ? (
+                ) : files.length === 0 && selectedEvent.receipts.length === 0 ? (
                   <div className="p-4 text-sm text-ink-4">Aucun document.</div>
                 ) : (
-                  files.map((f) => <FileRow key={f.id} file={f} />)
+                  <>
+                    {files.length > 0 && (
+                      <>
+                        <SectionTitle>Médias</SectionTitle>
+                        {files.map((f) => (
+                          <FileRow key={f.id} file={f} />
+                        ))}
+                      </>
+                    )}
+                    {selectedEvent.receipts.length > 0 && (
+                      <>
+                        <SectionTitle>Frais</SectionTitle>
+                        {selectedEvent.receipts.map((r) => (
+                          <ReceiptRow key={r.key} receipt={r} />
+                        ))}
+                      </>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -260,15 +327,14 @@ export function DriveScreen() {
                   onClick={() => openEvent(ev)}
                   className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-hover"
                 >
-                  <CalendarDays size={16} className="shrink-0 text-ink-4" />
+                  {ev.noEvent ? <Receipt size={16} className="shrink-0 text-ink-4" /> : <CalendarDays size={16} className="shrink-0 text-ink-4" />}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-bold text-ink">{ev.title}</span>
                     <span className="block text-xs text-ink-4">
-                      {format(new Date(ev.startDate), "d MMMM yyyy", { locale: fr })} · {ev.fileCount} document
-                      {ev.fileCount > 1 ? "s" : ""}
+                      {ev.noEvent ? format(new Date(ev.startDate), "MMMM yyyy", { locale: fr }) : format(new Date(ev.startDate), "d MMMM yyyy", { locale: fr })} · {docCount(ev)}
                     </span>
                   </span>
-                  <EventArrow eventId={ev.id} />
+                  {!ev.noEvent && <EventArrow eventId={ev.id} />}
                 </button>
               ))}
             </div>

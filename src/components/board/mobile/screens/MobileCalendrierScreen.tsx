@@ -173,7 +173,7 @@ export function MobileCalendrierScreen() {
               coverage.video ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
             }`}
             title="CouvVidéo"
-            aria-label="Événements couverts en vidéo"
+            aria-label="Matchs du week-end couverts en vidéo"
             aria-pressed={coverage.video}
           >
             <Video size={14} />
@@ -184,7 +184,7 @@ export function MobileCalendrierScreen() {
               coverage.photo ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
             }`}
             title="CouvPhoto"
-            aria-label="Matchs couverts en photo"
+            aria-label="Matchs du week-end couverts en photo"
             aria-pressed={coverage.photo}
           >
             <Camera size={14} />

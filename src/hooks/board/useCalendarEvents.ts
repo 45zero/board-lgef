@@ -136,6 +136,7 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
     const mapped = rows.map((row) => ({
       ...mapEventRow(row, coverageByEvent.get(row.id)),
       published: publishedByEvent.get(row.id) ?? null,
+      weekendMatch: row.event_type === "match_du_week_end",
       photoCoverage: photoCovered.has(row.id),
       solicited: solicited.has(row.id),
     }));
@@ -160,6 +161,9 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       .on("postgres_changes", { event: "*", schema: "public", table: "coverage_requests" }, () => fetchEvents())
       .on("postgres_changes", { event: "*", schema: "public", table: "director_attendance" }, () => fetchEvents())
       .on("postgres_changes", { event: "*", schema: "public", table: "photo_missions" }, () => fetchEvents())
+      // Participants / assignations : l'icône « où je suis sollicité » suit sans rechargement.
+      .on("postgres_changes", { event: "*", schema: "public", table: "event_team_members" }, () => fetchEvents())
+      .on("postgres_changes", { event: "*", schema: "public", table: "event_assignments" }, () => fetchEvents())
       .subscribe();
     return () => {
       supabase.removeChannel(channel);

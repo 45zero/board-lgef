@@ -11,6 +11,14 @@ import type { Database } from "@/lib/supabase/database.types";
  * - photographe d'un match du week-end qu'il a pris.
  * Avoir simplement créé l'événement ne suffit PAS.
  */
+/**
+ * Filtre PostgREST « je suis le technicien de cette demande de captation ». Le technicien assigné
+ * fait foi ; l'ancienne colonne technician_id (appli calendrier-lgef) ne compte que s'il n'y en a
+ * pas — sinon l'ancien technicien d'une demande réassignée la voyait toujours.
+ */
+export const technicianFilter = (userId: string) =>
+  `assigned_technician_id.eq.${userId},and(assigned_technician_id.is.null,technician_id.eq.${userId})`;
+
 export type SolicitationRole = "Responsable" | "Membre" | "Assigné" | "Comité directeur" | "Comité directeur (à confirmer)" | "Captation";
 
 export async function getSolicitations(
@@ -25,7 +33,7 @@ export async function getSolicitations(
     client
       .from("coverage_requests")
       .select("event_id, technician_response")
-      .or(`assigned_technician_id.eq.${userId},technician_id.eq.${userId}`)
+      .or(technicianFilter(userId))
       .neq("status", "cancelled"),
     // Réseau photo : match pris (sql/2026-09-29_reseau_photo.sql) — frais déclarables comme une captation.
     client.from("photo_missions").select("event_id").eq("photographer_id", userId).eq("status", "taken"),

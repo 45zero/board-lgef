@@ -97,7 +97,7 @@ export async function GET(request: Request) {
       ? safe(
           async () => {
             const [mine, validator] = await Promise.all([getMyExpenses(), getMyValidatorScope()]);
-            return { toDeclare: mine.filter((m) => m.status === "a_declarer" || m.status === "rejected").length, toValidate: validator.pending };
+            return { toDeclare: mine.filter((m) => (m.status === "a_declarer" && !m.upcoming) || m.status === "rejected").length, toValidate: validator.pending };
           },
           { toDeclare: 0, toValidate: 0 }
         )

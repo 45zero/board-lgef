@@ -3,7 +3,7 @@ import { isPublisher } from "@/lib/board/publishers";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import { computeMyExpenses, countPendingForValidator } from "@/lib/board/expensesCore";
 import type { DbEventType } from "@/lib/board/calendar";
-import { getSolicitations } from "@/lib/board/solicitation";
+import { getSolicitations, technicianFilter } from "@/lib/board/solicitation";
 
 // Tableau de bord : ce que l'utilisateur a À FAIRE (actions, toutes échéances confondues) et son
 // PROGRAMME (événements où il est sollicité) sur la journée ou la semaine. Chaque bloc est calculé
@@ -82,7 +82,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
     // Frais à déclarer (moi) et à valider (mon équipe, en tant que N+1).
     safe(async () => {
       const [mine, pending] = await Promise.all([computeMyExpenses(service, userId), countPendingForValidator(service, userId)]);
-      const toDeclare = mine.filter((m) => m.status === "a_declarer").length;
+      const toDeclare = mine.filter((m) => m.status === "a_declarer" && !m.upcoming).length;
       const rejected = mine.filter((m) => m.status === "rejected").length;
       push({ id: "frais-valider", app: "frais", tone: "red", count: pending, title: "Notes de frais à valider", detail: "Votre équipe attend votre validation" });
       push({ id: "frais-refuses", app: "frais", tone: "red", count: rejected, title: "Frais refusés à corriger", detail: "Corriger et redéclarer, ou indiquer « pas de frais »" });
@@ -111,7 +111,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
       const { data: mineRows } = await service
         .from("coverage_requests")
         .select("id, event_id, details, events!inner(title, start_date, location)")
-        .or(`assigned_technician_id.eq.${userId},technician_id.eq.${userId}`)
+        .or(technicianFilter(userId))
         .or("technician_response.is.null,technician_response.eq.pending")
         .neq("status", "cancelled")
         .gte("events.start_date", now.toISOString())

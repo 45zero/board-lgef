@@ -4,6 +4,7 @@ import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Receipt, ShieldCheck, Users, X, Search, ChevronRight, Download } from "lucide-react";
 import {
+  declareExpenses,
   getMyExpenses,
   getMyValidatorScope,
   getSubmissionsToReview,
@@ -21,16 +22,17 @@ import { ExpenseImport } from "@/components/board/expenses/ExpenseImport";
 import { ExpenseExportModal } from "@/components/board/expenses/ExpenseExportModal";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { lineParts } from "@/lib/board/expenseCategories";
-import { ExpenseStatusBadge, EXPENSE_STATUS_META, formatEuros } from "@/components/board/expenses/ExpenseStatus";
+import { ExpenseStatusBadge, EXPENSE_STATUS_META, confirmNoExpense, formatEuros } from "@/components/board/expenses/ExpenseStatus";
 import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
 import { OpenEventButton } from "@/components/board/calendar/OpenEventButton";
 
 type Tab = "mine" | "validate" | "admin";
-type MineFilter = "a_declarer" | "pending" | "approved" | "rejected" | "all";
+type MineFilter = "a_declarer" | "upcoming" | "pending" | "approved" | "rejected" | "all";
 
 const MINE_FILTERS: { id: MineFilter; label: string }[] = [
   { id: "a_declarer", label: "À déclarer" },
+  { id: "upcoming", label: "À venir" },
   { id: "pending", label: "En attente" },
   { id: "approved", label: "Validés" },
   { id: "rejected", label: "Refusés" },
@@ -173,16 +175,23 @@ function MyExpenses() {
   const [month, setMonth] = useState("");
   const [open, setOpen] = useState<MyExpenseItem | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(() => getMyExpenses().then(setItems).catch(() => setItems([])), []);
   useEffect(() => {
     void load();
   }, [load]);
-  useLiveRefresh(["event_expenses", "expense_submissions", "notifications"], () => void load());
+  useLiveRefresh(
+    ["event_expenses", "expense_submissions", "notifications", "event_team_members", "event_assignments", "coverage_requests", "director_attendance", "photo_missions"],
+    () => void load()
+  );
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
-    for (const i of items ?? []) c[i.status] = (c[i.status] ?? 0) + 1;
+    for (const i of items ?? []) {
+      const k = i.upcoming ? "upcoming" : i.status;
+      c[k] = (c[k] ?? 0) + 1;
+    }
     return c;
   }, [items]);
   const months = useMemo(() => [...new Set((items ?? []).map((i) => monthKey(i.start)))].sort().reverse(), [items]);
@@ -190,7 +199,7 @@ function MyExpenses() {
   const exportMonths = useMemo(() => [...new Set((items ?? []).filter((i) => i.lineCount > 0).map((i) => monthKey(i.start)))].sort().reverse(), [items]);
   const q = normalize(query.trim());
   const visible = (items ?? []).filter(
-    (i) => (filter === "all" || i.status === filter) && (!month || monthKey(i.start) === month) && (!q || normalize(i.title).includes(q))
+    (i) => (filter === "all" || (filter === "upcoming" ? !!i.upcoming : !i.upcoming && i.status === filter)) && (!month || monthKey(i.start) === month) && (!q || normalize(i.title).includes(q))
   );
   // Regroupement par mois.
   const groups = new Map<string, MyExpenseItem[]>();
@@ -230,10 +239,18 @@ function MyExpenses() {
             <div key={key}>
               <GroupHeader label={monthLabel(key)} count={group.length} total={group.reduce((n, i) => n + i.total, 0)} />
               {group.map((i) => (
-                <button
+                <div
                   key={i.key}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setOpen(i)}
-                  className="flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setOpen(i);
+                    }
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -249,13 +266,32 @@ function MyExpenses() {
                   </div>
                   <span className="shrink-0 text-sm font-bold text-ink">{i.total > 0 ? formatEuros(i.total) : ""}</span>
                   {i.status === "a_declarer" || i.status === "rejected" ? (
-                    <span className="shrink-0 rounded-btn bg-red px-3 py-1.5 text-xs font-bold text-white shadow-btn-red">
-                      {i.status === "rejected" ? "Corriger" : "Déclarer"}
-                    </span>
+                    <>
+                      {i.eventId && (i.status === "rejected" || i.lineCount === 0) && (
+                        <button
+                          disabled={busy === i.key}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!confirmNoExpense(i.lineCount)) return;
+                            setBusy(i.key);
+                            const res = await declareExpenses({ eventId: i.eventId! }, true);
+                            setBusy(null);
+                            if (res.error) return alert(res.error);
+                            void load();
+                          }}
+                          className="shrink-0 rounded-btn border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover disabled:opacity-50"
+                        >
+                          Pas de frais
+                        </button>
+                      )}
+                      <span className="shrink-0 rounded-btn bg-red px-3 py-1.5 text-xs font-bold text-white shadow-btn-red">
+                        {i.status === "rejected" ? "Corriger" : "Déclarer"}
+                      </span>
+                    </>
                   ) : (
                     <ExpenseStatusBadge status={i.status} />
                   )}
-                </button>
+                </div>
               ))}
             </div>
           ))}

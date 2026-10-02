@@ -98,6 +98,7 @@ export function useEventCoverage(eventId?: string) {
     // d'acceptation du technicien (voir DirectAssignModal.tsx de calendrier-lgef).
     const payload = {
       assigned_technician_id: tech.id,
+      technician_id: tech.id,
       assigned_technician_name: tech.name,
       assigned_technician_email: tech.email,
       technician_response: "accepted",
@@ -138,6 +139,7 @@ export function useEventCoverage(eventId?: string) {
 
     const payload = {
       assigned_technician_id: tech.id,
+      technician_id: tech.id,
       assigned_technician_name: tech.name,
       assigned_technician_email: tech.email,
       technician_response: "pending",
