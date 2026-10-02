@@ -36,7 +36,7 @@ export type Engagement = {
   invoice: StaffInvoice | null;
 };
 
-export type StaffInvoice = { id: string; status: "pending" | "approved" | "rejected" | string | null; amountTtc: number | null; files: number };
+export type StaffInvoice = { id: string; status: "pending" | "approved" | "rejected" | string | null; amountTtc: number | null; files: number; comment: string | null };
 
 export const INVOICE_STATUS_LABELS: Record<string, string> = { pending: "À valider", approved: "Validée", rejected: "Refusée" };
 

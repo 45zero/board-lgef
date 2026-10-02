@@ -60,9 +60,9 @@ function FiltersRow({
 }: {
   query: string;
   onQuery: (v: string) => void;
-  months: string[];
-  month: string;
-  onMonth: (v: string) => void;
+  months?: string[];
+  month?: string;
+  onMonth?: (v: string) => void;
   people?: { id: string; name: string }[];
   person?: string;
   onPerson?: (v: string) => void;
@@ -74,14 +74,16 @@ function FiltersRow({
         <Search size={13} className="text-ink-4" />
         <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Rechercher…" className="w-full bg-transparent text-sm outline-none" />
       </div>
-      <select value={month} onChange={(e) => onMonth(e.target.value)} className="rounded-btn border border-line bg-card px-2 py-1.5 text-sm outline-none">
-        <option value="">Tous les mois</option>
-        {months.map((m) => (
-          <option key={m} value={m}>
-            {monthLabel(m)}
-          </option>
-        ))}
-      </select>
+      {months && onMonth && (
+        <select value={month} onChange={(e) => onMonth(e.target.value)} className="rounded-btn border border-line bg-card px-2 py-1.5 text-sm outline-none">
+          <option value="">Tous les mois</option>
+          {months.map((m) => (
+            <option key={m} value={m}>
+              {monthLabel(m)}
+            </option>
+          ))}
+        </select>
+      )}
       {people && onPerson && (
         <select value={person} onChange={(e) => onPerson(e.target.value)} className="max-w-[200px] rounded-btn border border-line bg-card px-2 py-1.5 text-sm outline-none">
           <option value="">Toutes les personnes</option>
@@ -94,6 +96,75 @@ function FiltersRow({
       )}
       {children}
     </div>
+  );
+}
+
+const MONTH_LONG = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
+const yearOf = (iso: string) => Number(iso.slice(0, 4));
+const monthIndexOf = (iso: string) => Number(iso.slice(5, 7)) - 1;
+
+/**
+ * Navigation commune de Frais, en colonne à gauche : l'année, puis ses mois (total et nombre de
+ * fiches de chacun) ; « Toute l'année » sans mois choisi.
+ */
+function YearMonthBar({
+  year,
+  onYear,
+  month,
+  onMonth,
+  stats,
+}: {
+  year: number;
+  onYear: (y: number) => void;
+  month: number | null;
+  onMonth: (m: number | null) => void;
+  stats: (m: number | null) => { count: number; total: number };
+}) {
+  const row = (active: boolean, empty: boolean) =>
+    `flex w-full items-center justify-between gap-2 rounded-btn px-3 py-2 text-left text-[13px] ${
+      active ? "bg-navy font-bold text-white" : empty ? "text-ink-4 hover:bg-hover" : "font-semibold text-ink-2 hover:bg-hover"
+    }`;
+  const figure = (active: boolean, st: { count: number; total: number }) => (
+    <span className={`shrink-0 text-right font-mono text-[10px] leading-tight ${active ? "text-white/80" : "text-ink-4"}`}>
+      {st.count ? (
+        <>
+          {formatEuros(st.total)}
+          <span className="block">
+            {st.count} fiche{st.count > 1 ? "s" : ""}
+          </span>
+        </>
+      ) : (
+        "—"
+      )}
+    </span>
+  );
+  const all = stats(null);
+  return (
+    <aside className="sticky top-0 w-[200px] shrink-0 self-start rounded-panel border border-line bg-card p-2">
+      <div className="mb-2 flex items-center justify-between rounded-btn bg-subtle px-1 py-1">
+        <button onClick={() => onYear(year - 1)} aria-label="Année précédente" className="rounded-md p-1 text-ink-3 hover:bg-hover">
+          <ChevronRight size={14} className="rotate-180" />
+        </button>
+        <span className="text-base font-extrabold text-ink">{year}</span>
+        <button onClick={() => onYear(year + 1)} aria-label="Année suivante" className="rounded-md p-1 text-ink-3 hover:bg-hover">
+          <ChevronRight size={14} />
+        </button>
+      </div>
+      <button onClick={() => onMonth(null)} className={row(month === null, all.count === 0)}>
+        <span>Toute l&rsquo;année</span>
+        {figure(month === null, all)}
+      </button>
+      <div className="my-1 border-t border-line" />
+      {MONTH_LONG.map((label, i) => {
+        const st = stats(i);
+        return (
+          <button key={label} onClick={() => onMonth(i)} className={row(month === i, st.count === 0)}>
+            <span>{label}</span>
+            {figure(month === i, st)}
+          </button>
+        );
+      })}
+    </aside>
   );
 }
 
@@ -172,7 +243,9 @@ function MyExpenses() {
   const [items, setItems] = useState<MyExpenseItem[] | null>(() => readCache<MyExpenseItem[]>(cacheKey) ?? null);
   const [filter, setFilter] = useState<MineFilter>("a_declarer");
   const [query, setQuery] = useState("");
-  const [month, setMonth] = useState("");
+  const [year, setYear] = useState(() => new Date().getFullYear());
+  const [monthIdx, setMonthIdx] = useState<number | null>(null);
+  const month = monthIdx === null ? "" : `${year}-${String(monthIdx + 1).padStart(2, "0")}`;
   const [open, setOpen] = useState<MyExpenseItem | null>(null);
   const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -203,13 +276,18 @@ function MyExpenses() {
     }
     return c;
   }, [items]);
-  const months = useMemo(() => [...new Set((items ?? []).map((i) => monthKey(i.start)))].sort().reverse(), [items]);
   // Mois exportables : ceux où des frais ont été saisis.
   const exportMonths = useMemo(() => [...new Set((items ?? []).filter((i) => i.lineCount > 0).map((i) => monthKey(i.start)))].sort().reverse(), [items]);
   const q = normalize(query.trim());
-  const visible = (items ?? []).filter(
-    (i) => (filter === "all" || (filter === "upcoming" ? !!i.upcoming : !i.upcoming && i.status === filter)) && (!month || monthKey(i.start) === month) && (!q || normalize(i.title).includes(q))
+  // Statut et recherche, puis l'année : base des compteurs de la barre des mois.
+  const inYear = (items ?? []).filter(
+    (i) => (filter === "all" || (filter === "upcoming" ? !!i.upcoming : !i.upcoming && i.status === filter)) && (!q || normalize(i.title).includes(q)) && yearOf(i.start) === year
   );
+  const visible = inYear.filter((i) => monthIdx === null || monthIndexOf(i.start) === monthIdx);
+  const monthStats = (m: number | null) => {
+    const list = m === null ? inYear : inYear.filter((i) => monthIndexOf(i.start) === m);
+    return { count: list.length, total: list.reduce((n, i) => n + i.total, 0) };
+  };
   // Regroupement par mois.
   const groups = new Map<string, MyExpenseItem[]>();
   for (const i of visible) groups.set(monthKey(i.start), [...(groups.get(monthKey(i.start)) ?? []), i]);
@@ -217,7 +295,9 @@ function MyExpenses() {
   if (!items) return <div className="p-6 text-sm text-ink-4">Chargement…</div>;
 
   return (
-    <div className="space-y-3">
+    <div className="flex items-start gap-4">
+      <YearMonthBar year={year} onYear={setYear} month={monthIdx} onMonth={setMonthIdx} stats={monthStats} />
+      <div className="min-w-0 flex-1 space-y-3">
       <ExpenseImport onAdded={() => void load()} />
       <div className="flex flex-wrap gap-1.5">
         {MINE_FILTERS.map((f) => (
@@ -227,7 +307,7 @@ function MyExpenses() {
           </FilterChip>
         ))}
       </div>
-      <FiltersRow query={query} onQuery={setQuery} months={months} month={month} onMonth={setMonth}>
+      <FiltersRow query={query} onQuery={setQuery}>
         <button
           onClick={() => setExporting(true)}
           disabled={!exportMonths.length}
@@ -325,6 +405,7 @@ function MyExpenses() {
           onChanged={() => void load()}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -452,9 +533,8 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
   const [subs, setSubs] = useState<SubmissionToReview[] | null>(null);
   const [open, setOpen] = useState<SubmissionToReview | null>(null);
   const [query, setQuery] = useState("");
-  const [month, setMonth] = useState("");
-  const [person, setPerson] = useState("");
-  const [groupBy, setGroupBy] = useState<"person" | "month">("person");
+  const [year, setYear] = useState(() => new Date().getFullYear());
+  const [monthIdx, setMonthIdx] = useState<number | null>(null);
 
   const load = useCallback(() => getSubmissionsToReview(status, "mine").then(setSubs).catch(() => setSubs([])), [status]);
   useEffect(() => {
@@ -465,29 +545,25 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
     onChanged();
   });
 
-  const months = useMemo(() => [...new Set((subs ?? []).map((s) => monthKey(s.event.start)))].sort().reverse(), [subs]);
-  const people = useMemo(
-    () => [...new Map((subs ?? []).map((s) => [s.person.id, { id: s.person.id, name: s.person.name }])).values()].sort((a, b) => a.name.localeCompare(b.name)),
-    [subs]
-  );
   const q = normalize(query.trim());
-  const visible = (subs ?? []).filter(
-    (s) =>
-      (!month || monthKey(s.event.start) === month) &&
-      (!person || s.person.id === person) &&
-      (!q || normalize(`${s.person.name} ${s.event.title}`).includes(q))
-  );
+  // Année → mois → utilisateurs.
+  const inYear = (subs ?? []).filter((s) => yearOf(s.event.start) === year && (!q || normalize(`${s.person.name} ${s.event.title}`).includes(q)));
+  const visible = inYear.filter((s) => monthIdx === null || monthIndexOf(s.event.start) === monthIdx);
+  const monthStats = (m: number | null) => {
+    const list = m === null ? inYear : inYear.filter((s) => monthIndexOf(s.event.start) === m);
+    return { count: list.length, total: list.reduce((n, s) => n + s.total, 0) };
+  };
   const groups = new Map<string, { label: string; items: SubmissionToReview[] }>();
-  for (const s of visible) {
-    const key = groupBy === "person" ? s.person.id : monthKey(s.event.start);
-    const label = groupBy === "person" ? s.person.name : monthLabel(key);
-    const g = groups.get(key) ?? { label, items: [] };
+  for (const s of [...visible].sort((a, b) => a.person.name.localeCompare(b.person.name) || a.event.start.localeCompare(b.event.start))) {
+    const g = groups.get(s.person.id) ?? { label: s.person.name, items: [] };
     g.items.push(s);
-    groups.set(key, g);
+    groups.set(s.person.id, g);
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex items-start gap-4">
+      <YearMonthBar year={year} onYear={setYear} month={monthIdx} onMonth={setMonthIdx} stats={monthStats} />
+      <div className="min-w-0 flex-1 space-y-3">
       <div className="flex flex-wrap items-center gap-1.5">
         {(["pending", "approved", "rejected"] as const).map((st) => (
           <FilterChip key={st} active={status === st} onClick={() => setStatus(st)}>
@@ -495,15 +571,7 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
           </FilterChip>
         ))}
       </div>
-      <FiltersRow query={query} onQuery={setQuery} months={months} month={month} onMonth={setMonth} people={people} person={person} onPerson={setPerson}>
-        <div className="flex rounded-full bg-subtle p-0.5 text-xs font-semibold">
-          {(["person", "month"] as const).map((g) => (
-            <button key={g} onClick={() => setGroupBy(g)} className={`rounded-full px-3 py-1 ${groupBy === g ? "bg-navy text-white" : "text-ink-3"}`}>
-              {g === "person" ? "Par personne" : "Par mois"}
-            </button>
-          ))}
-        </div>
-      </FiltersRow>
+      <FiltersRow query={query} onQuery={setQuery} />
 
       {!subs ? (
         <div className="p-6 text-sm text-ink-4">Chargement…</div>
@@ -524,11 +592,10 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <span className="truncate text-sm font-bold text-ink">{groupBy === "person" ? s.event.title : s.person.name}</span>
+                      <span className="truncate text-sm font-bold text-ink">{s.event.title}</span>
                       {s.event.id && <EventArrow eventId={s.event.id} className="h-6 w-6" />}
                     </div>
                     <div className="truncate text-[11px] text-ink-4">
-                      {groupBy === "person" ? "" : `${s.event.title} · `}
                       {fmtDate(s.event.start)}
                       {s.submittedAt && ` · déclaré le ${new Date(s.submittedAt).toLocaleDateString("fr-FR")}`}
                     </div>
@@ -553,6 +620,7 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
           }}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -578,7 +646,7 @@ export function FraisScreen() {
   ];
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-4">
+    <div className="mx-auto max-w-6xl space-y-4 p-4">
       <div className="flex flex-wrap items-center gap-2">
         {tabs
           .filter((t) => t.show)

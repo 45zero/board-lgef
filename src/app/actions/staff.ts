@@ -5,6 +5,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { KM_RATE, STAFF_STATUSES, type Engagement, type EngagementRole, type StaffInvoice, type StaffOverview, type StaffPerson, type StaffStatus } from "@/lib/board/staff";
 import { travelToEvent } from "@/lib/board/travel";
+import { createInvoiceToken } from "@/lib/board/invoiceToken";
+import { getBoardDriveAccount } from "@/lib/board/teamDrive";
+import { archiveSubFolder, eventArchiveFolder } from "@/lib/google/archiveFolders";
+import { uploadFile } from "@/lib/google/drive";
+import { isResendConfigured, sendResendBatch } from "@/lib/email/resend";
 
 // Effectif (sql/2026-10-03_staff_costs.sql) : mes N-1 (profiles.expense_validator_id = moi), tout le
 // monde pour un administrateur. Le coût d'une personne = son forfait par intervention (staff_rates) —
@@ -168,11 +173,11 @@ async function invoices(service: Service, list: { userId: string; eventId: strin
   const eventIds = [...new Set(list.map((e) => e.eventId))];
   const userIds = [...new Set(list.map((e) => e.userId))];
   if (!eventIds.length) return out;
-  const rows: { id: string; event_id: string | null; user_id: string | null; status: string | null; amount_ttc: number | null; file_url: string | null; created_at: string | null }[] = [];
+  const rows: { id: string; event_id: string | null; user_id: string | null; status: string | null; amount_ttc: number | null; file_url: string | null; created_at: string | null; admin_comment: string | null }[] = [];
   for (let i = 0; i < eventIds.length; i += 200) {
     const { data } = await service
       .from("event_invoices")
-      .select("id, event_id, user_id, status, amount_ttc, file_url, created_at")
+      .select("id, event_id, user_id, status, amount_ttc, file_url, created_at, admin_comment")
       .in("event_id", eventIds.slice(i, i + 200))
       .in("user_id", userIds)
       .order("created_at");
@@ -189,6 +194,7 @@ async function invoices(service: Service, list: { userId: string; eventId: strin
       status: r.status,
       amountTtc: r.amount_ttc === null ? null : Number(r.amount_ttc),
       files: (r.file_url ? 1 : 0) + (attCount.get(r.id) ?? 0),
+      comment: r.admin_comment,
     });
   }
   return out;
@@ -355,4 +361,188 @@ export const listReportCandidates = async () =>
     return (data ?? [])
       .filter((p) => p.id !== v.userId && p.expense_validator_id !== v.userId)
       .map((p) => ({ id: p.id, name: personName(p), email: p.email, managerName: p.expense_validator_id ? (names.get(p.expense_validator_id) ?? null) : null }));
+  });
+
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+/**
+ * Réclame sa facture à un prestataire (intervention sans facture) : e-mail avec l'événement, la date,
+ * le lieu, son rôle, le montant convenu, et un bouton qui ouvre /facture/<jeton> pour la déposer
+ * directement, sans compte. La réponse à l'e-mail arrive au demandeur.
+ */
+export const requestInvoice = async (eventId: string, personId: string) =>
+  toResult(async (): Promise<{ email: string }> => {
+    const v = await viewer();
+    await requireCanManage(v, personId);
+    if (!isResendConfigured()) throw new Error("L'envoi d'e-mails n'est pas configuré (Resend).");
+    const [{ data: person }, { data: me }, { data: event }] = await Promise.all([
+      v.service.from("profiles").select("first_name, last_name, email").eq("id", personId).single(),
+      v.service.from("profiles").select("first_name, last_name, email").eq("id", v.userId).single(),
+      v.service.from("events").select("title, start_date, location").eq("id", eventId).single(),
+    ]);
+    if (!person?.email) throw new Error("Cette personne n'a pas d'adresse e-mail.");
+    if (!event) throw new Error("Événement introuvable.");
+    const [engagement] = await loadEngagements(v.service, [personId], new Date(new Date(event.start_date).getTime() - 1000).toISOString(), new Date(new Date(event.start_date).getTime() + 1000).toISOString(), [eventId]);
+
+    const site = (process.env.NEXT_PUBLIC_SITE_URL || "https://board.lgef.fr").replace(/\/$/, "");
+    const link = `${site}/facture/${createInvoiceToken({ eventId, userId: personId, requesterId: v.userId })}`;
+    const first = person.first_name?.trim() || personName(person);
+    const requester = me ? personName(me) : "Votre responsable";
+    const date = new Date(event.start_date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" });
+    const time = new Date(event.start_date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" });
+    const amount = engagement?.amount ? engagement.amount.toLocaleString("fr-FR", { style: "currency", currency: "EUR" }) : null;
+    const rows: [string, string][] = [
+      ["Événement", event.title],
+      ["Date", `${date} à ${time}`],
+      ...(event.location ? ([["Lieu", event.location]] as [string, string][]) : []),
+      ...(engagement?.roles.length ? ([["Intervention", engagement.roles.join(", ")]] as [string, string][]) : []),
+      ...(amount ? ([["Montant convenu", amount]] as [string, string][]) : []),
+      ["Demandé par", `${requester}${me?.email ? ` (${me.email})` : ""}`],
+    ];
+
+    const html = `<!doctype html><html><body style="margin:0;background:#f2f5fb;font-family:Arial,Helvetica,sans-serif;color:#07172e">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5fb;padding:24px 0"><tr><td align="center">
+<table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden">
+<tr><td style="background:#0b1d3c;padding:22px 28px;color:#ffffff">
+<div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.7">Ligue du Grand Est de Football</div>
+<div style="font-size:20px;font-weight:bold;margin-top:6px">Facture à déposer</div></td></tr>
+<tr><td style="padding:24px 28px;font-size:15px;line-height:1.55">
+<p style="margin:0 0 14px">Bonjour ${esc(first)},</p>
+<p style="margin:0 0 18px">Sauf erreur de notre part, nous n'avons pas encore reçu votre facture pour l'intervention suivante :</p>
+<table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e3e9f4;border-radius:12px;font-size:14px">
+${rows.map(([k, val], i) => `<tr><td style="padding:10px 14px;color:#525e77;width:38%;${i ? "border-top:1px solid #e3e9f4;" : ""}">${esc(k)}</td><td style="padding:10px 14px;font-weight:bold;${i ? "border-top:1px solid #e3e9f4;" : ""}">${esc(val)}</td></tr>`).join("")}
+</table>
+<p style="margin:22px 0 8px">Vous pouvez la déposer directement, sans vous connecter :</p>
+<p style="margin:0 0 22px"><a href="${link}" style="display:inline-block;background:#e1141b;color:#ffffff;text-decoration:none;font-weight:bold;padding:13px 22px;border-radius:12px">Déposer ma facture</a></p>
+<p style="margin:0;font-size:12px;color:#79859a">PDF ou photo, 15 Mo maximum. Lien personnel valable 45 jours. Pour toute question, répondez simplement à cet e-mail.</p>
+</td></tr></table></td></tr></table></body></html>`;
+    const text = [
+      `Bonjour ${first},`,
+      "",
+      "Sauf erreur de notre part, nous n'avons pas encore reçu votre facture pour l'intervention suivante :",
+      ...rows.map(([k, val]) => `- ${k} : ${val}`),
+      "",
+      `Déposez-la directement, sans vous connecter : ${link}`,
+      "",
+      "PDF ou photo, 15 Mo maximum. Lien valable 45 jours. Pour toute question, répondez à cet e-mail.",
+    ].join("\n");
+
+    const { errors } = await sendResendBatch(
+      [{ to: [person.email], subject: `Facture à déposer — ${event.title} (${new Date(event.start_date).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" })})`, html, text, replyTo: me?.email ?? null }],
+      async () => {}
+    );
+    if (errors.length) throw new Error(`Envoi impossible : ${errors[0]}`);
+    return { email: person.email };
+  });
+
+/**
+ * Copie des fichiers d'une facture validée dans le Drive du board, avec ceux de l'événement :
+ *   LGEF Drive / AAAA / MM - Mois / JJ - Événement / Factures / <date - personne - Facture - montant>
+ * Au mieux : sans Drive connecté ou en cas d'erreur, la facture reste dans le stockage (rien de perdu).
+ */
+async function archiveInvoice(service: Service, invoice: { id: string; file_url: string | null; amount_ttc: number | null }, person: string, event: { title: string; start_date: string }) {
+  const account = await getBoardDriveAccount();
+  if (!account) return 0;
+  const { data: atts } = await service.from("event_invoice_attachments").select("file_url, custom_name").eq("invoice_id", invoice.id).order("created_at");
+  const paths = [invoice.file_url, ...(atts ?? []).map((a) => a.file_url)].filter((p): p is string => !!p && !/^https?:\/\//.test(p));
+  if (!paths.length) return 0;
+  const cache = new Map();
+  const folder = await archiveSubFolder(account, await eventArchiveFolder(account, { title: event.title, start: new Date(event.start_date) }, cache), "Factures", cache);
+  const day = event.start_date.slice(0, 10);
+  const amount = invoice.amount_ttc !== null ? ` - ${Number(invoice.amount_ttc).toFixed(2).replace(".", ",")} €` : "";
+  let archived = 0;
+  for (const [i, path] of paths.entries()) {
+    try {
+      const { data: blob } = await service.storage.from("invoices").download(path);
+      if (!blob) continue;
+      const ext = path.includes(".") ? path.slice(path.lastIndexOf(".")) : "";
+      const name = `${day} - ${person} - Facture${paths.length > 1 ? ` ${i + 1}` : ""}${amount}${ext}`.replace(/[/\\:*?"<>|]+/g, " ");
+      await uploadFile(account, {
+        name,
+        parentId: folder.id,
+        mimeType: blob.type || "application/octet-stream",
+        data: Buffer.from(await blob.arrayBuffer()),
+        description: `Facture de ${person} pour « ${event.title} » — validée le ${new Date().toLocaleDateString("fr-FR")}`,
+      });
+      archived++;
+    } catch (e) {
+      console.error("[staff.archiveInvoice]", e);
+    }
+  }
+  return archived;
+}
+
+/**
+ * Le N+1 (ou un administrateur) valide ou refuse une facture. Le prestataire est prévenu (board et
+ * e-mail) ; en cas de refus, l'e-mail donne le motif et un nouveau lien de dépôt. Validée : copiée
+ * dans le Drive du board avec l'événement.
+ */
+export const reviewInvoice = async (invoiceId: string, decision: "approved" | "rejected", comment?: string) =>
+  toResult(async (): Promise<{ archived: number }> => {
+    const v = await viewer();
+    const { data: invoice } = await v.service.from("event_invoices").select("id, user_id, event_id, file_url, amount_ttc, status").eq("id", invoiceId).maybeSingle();
+    if (!invoice?.user_id || !invoice.event_id) throw new Error("Facture introuvable.");
+    await requireCanManage(v, invoice.user_id);
+    const motive = comment?.trim() ?? "";
+    if (decision === "rejected" && !motive) throw new Error("Indiquez le motif du refus.");
+
+    const { error } = await v.service
+      .from("event_invoices")
+      .update({ status: decision, admin_comment: motive || null, updated_at: new Date().toISOString() })
+      .eq("id", invoiceId);
+    if (error) throw new Error(error.message);
+
+    const [{ data: person }, { data: me }, { data: event }] = await Promise.all([
+      v.service.from("profiles").select("first_name, last_name, email").eq("id", invoice.user_id).single(),
+      v.service.from("profiles").select("first_name, last_name, email").eq("id", v.userId).single(),
+      v.service.from("events").select("title, start_date").eq("id", invoice.event_id).single(),
+    ]);
+    const who = person ? personName(person) : "—";
+    const reviewer = me ? personName(me) : "Votre responsable";
+    const eventTitle = event?.title ?? "l'événement";
+    const amount = invoice.amount_ttc !== null ? Number(invoice.amount_ttc).toLocaleString("fr-FR", { style: "currency", currency: "EUR" }) : null;
+
+    await v.service.rpc("create_notification", {
+      p_user_id: invoice.user_id,
+      p_type: decision === "approved" ? "expense_approved" : "expense_rejected",
+      p_title: decision === "approved" ? "Facture validée" : "Facture refusée",
+      p_message:
+        decision === "approved"
+          ? `Votre facture pour « ${eventTitle} »${amount ? ` (${amount})` : ""} a été validée.`
+          : `Votre facture pour « ${eventTitle} » a été refusée : ${motive}`,
+      p_actor_name: reviewer,
+      p_data: { event_id: invoice.event_id, kind: "invoice_reviewed", decision },
+    });
+
+    if (person?.email && isResendConfigured()) {
+      const first = person.first_name?.trim() || who;
+      const link =
+        decision === "rejected"
+          ? `${(process.env.NEXT_PUBLIC_SITE_URL || "https://board.lgef.fr").replace(/\/$/, "")}/facture/${createInvoiceToken({ eventId: invoice.event_id, userId: invoice.user_id, requesterId: v.userId })}`
+          : null;
+      const lines =
+        decision === "approved"
+          ? [`Votre facture pour « ${eventTitle} »${amount ? ` (${amount})` : ""} a été validée par ${reviewer}.`, "Elle sera transmise pour paiement."]
+          : [`Votre facture pour « ${eventTitle} » a été refusée par ${reviewer}.`, `Motif : ${motive}`, "Vous pouvez déposer une facture corrigée avec le bouton ci-dessous."];
+      const html = `<!doctype html><html><body style="margin:0;background:#f2f5fb;font-family:Arial,Helvetica,sans-serif;color:#07172e">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5fb;padding:24px 0"><tr><td align="center">
+<table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden">
+<tr><td style="background:${decision === "approved" ? "#146447" : "#0b1d3c"};padding:22px 28px;color:#ffffff">
+<div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.7">Ligue du Grand Est de Football</div>
+<div style="font-size:20px;font-weight:bold;margin-top:6px">${decision === "approved" ? "Facture validée" : "Facture refusée"}</div></td></tr>
+<tr><td style="padding:24px 28px;font-size:15px;line-height:1.55">
+<p style="margin:0 0 14px">Bonjour ${esc(first)},</p>
+${lines.map((l) => `<p style="margin:0 0 12px">${esc(l)}</p>`).join("")}
+${link ? `<p style="margin:18px 0"><a href="${link}" style="display:inline-block;background:#e1141b;color:#ffffff;text-decoration:none;font-weight:bold;padding:13px 22px;border-radius:12px">Déposer une facture corrigée</a></p>` : ""}
+<p style="margin:12px 0 0;font-size:12px;color:#79859a">Pour toute question, répondez simplement à cet e-mail.</p>
+</td></tr></table></td></tr></table></body></html>`;
+      const text = [`Bonjour ${first},`, "", ...lines, ...(link ? ["", `Déposer une facture corrigée : ${link}`] : []), "", "Pour toute question, répondez à cet e-mail."].join("\n");
+      await sendResendBatch(
+        [{ to: [person.email], subject: `${decision === "approved" ? "Facture validée" : "Facture refusée"} — ${eventTitle}`, html, text, replyTo: me?.email ?? null }],
+        async () => {}
+      ).catch((e) => console.error("[staff.reviewInvoice.mail]", e));
+    }
+
+    const archived = decision === "approved" && event ? await archiveInvoice(v.service, invoice, who, event).catch((e) => (console.error("[staff.reviewInvoice.archive]", e), 0)) : 0;
+    return { archived };
   });

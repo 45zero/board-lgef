@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowUpRight, ChevronLeft, ChevronRight, FileText, Loader2, RotateCcw, Search, UserPlus, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Check, ChevronLeft, ChevronRight, FileText, Loader2, Mail, RotateCcw, Search, UserPlus, Users, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { Popover } from "@/components/board/team/TeamUi";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useOpenEvent } from "@/components/board/calendar/EventOpener";
-import { addMyReport, getInvoiceFiles, getStaffOverview, listReportCandidates, setEventCostAdjustment, setStaffRate } from "@/app/actions/staff";
+import { addMyReport, getInvoiceFiles, getStaffOverview, listReportCandidates, requestInvoice, reviewInvoice, setEventCostAdjustment, setStaffRate } from "@/app/actions/staff";
 import { unwrap } from "@/lib/board/actionResult";
 import {
   INVOICE_STATUS_LABELS,
@@ -502,7 +502,7 @@ function InterventionList({
               </button>
             )}
           </div>
-          {person.status === "tech-prestataire" && <InvoiceLine engagement={e} status={person.status} onError={onError} />}
+          {person.status === "tech-prestataire" && <InvoiceLine engagement={e} status={person.status} onChanged={onChanged} onError={onError} />}
           {e.adjusted && base(e) !== null && <p className="mt-1 text-[10px] text-ink-4">Montant ajusté pour cet événement (calculé : {euros(base(e)!)}).</p>}
           {e.km === null && person.status === "tech-reseau" && <p className="mt-1 text-[10px] text-ink-4">Kilomètres inconnus (domicile ou lieu non renseigné) : saisissez le montant.</p>}
         </li>
@@ -573,14 +573,54 @@ function MissingInvoices({ count }: { count: number }) {
 }
 
 /** Facture d'une intervention de prestataire : bouton pour la consulter, ou signal si elle manque. */
-function InvoiceLine({ engagement: e, status, onError }: { engagement: Engagement; status: StaffPerson["status"]; onError: (m: string) => void }) {
+function InvoiceLine({
+  engagement: e,
+  status,
+  onChanged,
+  onError,
+}: {
+  engagement: Engagement;
+  status: StaffPerson["status"];
+  onChanged: () => Promise<void>;
+  onError: (m: string) => void;
+}) {
   const [busy, setBusy] = useState(false);
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState(false);
+  const [motive, setMotive] = useState("");
+  const [reviewing, setReviewing] = useState<"approved" | "rejected" | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   if (!e.invoice) {
     if (!invoiceMissing(e, status)) return null;
+    // Réclamer : e-mail au prestataire avec les infos de l'intervention et un lien pour déposer la facture.
+    const claim = async () => {
+      setBusy(true);
+      const res = await requestInvoice(e.eventId, e.userId);
+      setBusy(false);
+      if (!res.ok) return onError(res.error);
+      setSentTo(res.data.email);
+    };
     return (
-      <p className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-bad">
-        <AlertTriangle size={12} /> Facture non déposée
-      </p>
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        <span className="flex items-center gap-1 text-[11px] font-semibold text-bad">
+          <AlertTriangle size={12} /> Facture non déposée
+        </span>
+        {sentTo ? (
+          <span className="flex items-center gap-1 text-[11px] font-semibold text-good">
+            <Check size={12} /> Réclamée à {sentTo}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void claim()}
+            disabled={busy}
+            title="Envoie un e-mail avec les infos de l'intervention et un lien pour déposer la facture directement"
+            className="flex items-center gap-1 rounded-btn border border-bad/40 px-2 py-0.5 text-[11px] font-bold text-bad hover:bg-bad-bg disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={11} className="animate-spin" /> : <Mail size={11} />} Réclamer
+          </button>
+        )}
+      </div>
     );
   }
   const inv = e.invoice;
@@ -599,8 +639,20 @@ function InvoiceLine({ engagement: e, status, onError }: { engagement: Engagemen
     for (const f of res.data.slice(1)) window.open(f.url, "_blank");
   };
   const tone = inv.status === "approved" ? "bg-good-bg text-good" : inv.status === "rejected" ? "bg-bad-bg text-bad" : "bg-warn-bg text-warn";
+  // Décision du N+1 : prestataire prévenu (board + e-mail) ; validée → copiée dans le Drive.
+  const review = async (decision: "approved" | "rejected") => {
+    setReviewing(decision);
+    const res = await reviewInvoice(inv.id, decision, decision === "rejected" ? motive : undefined);
+    setReviewing(null);
+    if (!res.ok) return onError(res.error);
+    setRejecting(false);
+    setMotive("");
+    setNotice(decision === "approved" ? (res.data.archived ? "Validée et archivée dans le Drive." : "Validée.") : "Refusée — le prestataire a reçu le motif et un lien pour en déposer une nouvelle.");
+    await onChanged();
+  };
   return (
-    <div className="mt-1.5 flex items-center gap-2">
+    <div className="mt-1.5 space-y-1.5">
+    <div className="flex flex-wrap items-center gap-2">
       <button
         type="button"
         onClick={() => void view()}
@@ -616,6 +668,52 @@ function InvoiceLine({ engagement: e, status, onError }: { engagement: Engagemen
           {euros(inv.amountTtc)} TTC
         </span>
       )}
+      {inv.status === "pending" && !rejecting && (
+        <>
+          <button
+            type="button"
+            onClick={() => void review("approved")}
+            disabled={!!reviewing}
+            className="flex items-center gap-1 rounded-btn bg-good px-2 py-1 text-[11px] font-bold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {reviewing === "approved" ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />} Valider
+          </button>
+          <button
+            type="button"
+            onClick={() => setRejecting(true)}
+            disabled={!!reviewing}
+            className="rounded-btn border border-bad/40 px-2 py-1 text-[11px] font-bold text-bad hover:bg-bad-bg disabled:opacity-50"
+          >
+            Refuser
+          </button>
+        </>
+      )}
+    </div>
+    {rejecting && (
+      <div className="flex items-start gap-2">
+        <input
+          autoFocus
+          value={motive}
+          onChange={(ev) => setMotive(ev.target.value)}
+          onKeyDown={(ev) => ev.key === "Enter" && motive.trim() && void review("rejected")}
+          placeholder="Motif du refus (envoyé au prestataire)"
+          className="min-w-0 flex-1 rounded-btn border border-line px-2 py-1 text-[12px] outline-none focus:border-line-strong"
+        />
+        <button
+          type="button"
+          onClick={() => void review("rejected")}
+          disabled={!motive.trim() || !!reviewing}
+          className="flex items-center gap-1 rounded-btn bg-bad px-2 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+        >
+          {reviewing === "rejected" && <Loader2 size={11} className="animate-spin" />} Refuser
+        </button>
+        <button type="button" onClick={() => setRejecting(false)} aria-label="Annuler" className="rounded-md p-1 text-ink-4 hover:bg-hover">
+          <X size={12} />
+        </button>
+      </div>
+    )}
+    {inv.status === "rejected" && inv.comment && <p className="text-[11px] text-bad">Motif du refus : {inv.comment}</p>}
+    {notice && <p className="text-[11px] font-semibold text-good">{notice}</p>}
     </div>
   );
 }
