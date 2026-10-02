@@ -97,6 +97,7 @@ import { useBackgroundTasks } from "@/contexts/BackgroundTasksContext";
 import { pdfToJpegFiles } from "@/lib/board/pdfToImages";
 import { createClient } from "@/lib/supabase/client";
 import { personName } from "@/components/board/calendar/EventTabs";
+import { useOversizedVideo } from "@/hooks/board/useOversizedVideo";
 import { AlbumEditor } from "@/components/board/publication/AlbumEditor";
 import { YoutubeIcon, FacebookIcon, TiktokIcon, InstagramIcon } from "@/components/board/publication/BrandIcons";
 
@@ -631,6 +632,7 @@ function PublishElsewhere({ pub, onChanged }: { pub: MediaPublication; onChanged
 
   const contentTypes = pub.media.length > 0 ? pub.media.map((m) => m.content_type ?? "") : pub.files.map((f) => f.content_type ?? "");
   const rules = networkRules(contentTypes);
+  const oversized = useOversizedVideo(pub.files, pub.media, open);
   const done = new Set(publishedEntries(pub).map((e) => e.key));
   const available = NETWORK_KEYS.filter((k) => {
     if (done.has(k)) return false;
@@ -722,16 +724,23 @@ function PublishElsewhere({ pub, onChanged }: { pub: MediaPublication; onChanged
       <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Publier aussi sur</div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-ink-2">
         {available.map((k) => (
-          <label key={k} className="flex cursor-pointer items-center gap-1">
+          <label key={k} className={`flex items-center gap-1 ${k === "instagram" && oversized ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
             <input
               type="checkbox"
-              checked={selected.includes(k)}
+              disabled={k === "instagram" && !!oversized}
+              checked={selected.includes(k) && !(k === "instagram" && oversized)}
               onChange={(e) => setSelected((prev) => (e.target.checked ? [...prev, k] : prev.filter((x) => x !== k)))}
             />
             <NetworkIcon networkKey={k} size={11} /> {chipLabel(k)}
           </label>
         ))}
       </div>
+      {oversized && (
+        <p className="text-[10px] text-bad">
+          Instagram : vidéo trop grande ({oversized.width}×{oversized.height}, « {oversized.name} ») — Instagram accepte 1920 px max.
+          Exportez-la en 1080p puis ajoutez-la à la publication.
+        </p>
+      )}
       {selected.includes("instagram") && rules.count > 10 && (
         <p className="text-[10px] text-ink-4">Instagram : les 10 premiers médias de l&rsquo;album seulement.</p>
       )}
@@ -1060,11 +1069,16 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
 
   // Types des médias réellement publiés (galerie composée ici pour une publication d'événement).
   const contentTypes = pub.media.length > 0 ? pub.media.map((m) => m.content_type ?? "") : files.map((f) => f.content_type ?? "");
-  const { count, videos, canYoutube, canFacebook, canInstagram } = networkRules(contentTypes);
+  const { count, videos, canYoutube, canFacebook, canInstagram: igFormatOk } = networkRules(contentTypes);
+  // Vidéo filmée en 4K (ou plus) : refusée par l'API Instagram, inutile d'attendre l'échec.
+  const oversized = useOversizedVideo(files, pub.media);
+  const canInstagram = igFormatOk && !oversized;
   const kindLabel = count === 0 ? "Texte" : count > 1 ? `Galerie (${count})` : videos ? "Vidéo" : "Photo";
 
   const fbReason = !canFacebook ? "Galerie : photos uniquement" : null;
-  const igReason = !canInstagram ? "Format non pris en charge (HEIC)" : count > 10 ? "Les 10 premiers seulement" : count === 0 ? "Visuel généré depuis le texte" : null;
+  const igReason = oversized
+    ? `Vidéo ${oversized.width}×${oversized.height} : 1920 px max — exportez en 1080p`
+    : !canInstagram ? "Format non pris en charge (HEIC)" : count > 10 ? "Les 10 premiers seulement" : count === 0 ? "Visuel généré depuis le texte" : null;
   const ytReason = !canYoutube ? "Une seule vidéo" : null;
 
   const anyTarget = (canYoutube && youtube) || (canFacebook && (fb.lorraine || fb.champagne_ardenne || fb.alsace)) || (canInstagram && instagram);

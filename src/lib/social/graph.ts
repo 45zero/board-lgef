@@ -117,9 +117,18 @@ const INSTAGRAM_POLL_MS = 4000;
 
 type ContainerStatus = "FINISHED" | "IN_PROGRESS" | "ERROR" | "EXPIRED" | "PUBLISHED";
 
-async function containerStatus(containerId: string, accessToken: string): Promise<ContainerStatus> {
-  const body = await graphFetch(`/${containerId}`, { fields: "status_code", access_token: accessToken });
-  return (body.status_code as ContainerStatus) ?? "IN_PROGRESS";
+/** `detail` : explication d'Instagram en cas d'échec (champ `status`, ex. « … 2207026 »). */
+async function containerStatus(containerId: string, accessToken: string): Promise<{ code: ContainerStatus; detail?: string }> {
+  const body = await graphFetch(`/${containerId}`, { fields: "status_code,status", access_token: accessToken });
+  return { code: (body.status_code as ContainerStatus) ?? "IN_PROGRESS", detail: typeof body.status === "string" ? body.status : undefined };
+}
+
+/** Message d'échec Instagram : le détail renvoyé par Meta, avec une consigne pour le cas le plus courant (vidéo hors normes). */
+function instagramFailure(detail: string | undefined): string {
+  const hint = /2207026/.test(detail ?? "")
+    ? "vidéo hors normes Instagram : 1920 px max de large, H.264, 60 i/s max — exportez-la en 1080p"
+    : "format non supporté ?";
+  return `Le traitement du média Instagram a échoué — ${hint}${detail ? ` (${detail})` : ""}.`;
 }
 
 /**
@@ -186,10 +195,11 @@ export async function advanceInstagramPublish(
   let state = pending;
   for (;;) {
     const statuses = await Promise.all(state.containers.map((id) => containerStatus(id, accessToken)));
-    if (statuses.some((s) => s === "ERROR")) throw new Error("Le traitement du média Instagram a échoué (format non supporté ?).");
-    if (statuses.some((s) => s === "EXPIRED")) throw new Error("Le média Instagram a expiré avant sa mise en ligne (plus de 24 h) — republiez.");
+    const failed = statuses.find((s) => s.code === "ERROR");
+    if (failed) throw new Error(instagramFailure(failed.detail));
+    if (statuses.some((s) => s.code === "EXPIRED")) throw new Error("Le média Instagram a expiré avant sa mise en ligne (plus de 24 h) — republiez.");
 
-    if (statuses.every((s) => s === "FINISHED")) {
+    if (statuses.every((s) => s.code === "FINISHED")) {
       if (state.stage === "children") {
         const container = await graphFetch(
           `/${igUserId}/media`,
