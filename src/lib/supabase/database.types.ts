@@ -166,6 +166,39 @@ export type Database = {
         }
         Relationships: []
       }
+      module_access: {
+        Row: {
+          module_id: string
+          everyone: boolean
+          roles: string[]
+          specialty_slugs: string[]
+          include_user_ids: string[]
+          exclude_user_ids: string[]
+          updated_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          module_id: string
+          everyone?: boolean
+          roles?: string[]
+          specialty_slugs?: string[]
+          include_user_ids?: string[]
+          exclude_user_ids?: string[]
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          module_id?: string
+          everyone?: boolean
+          roles?: string[]
+          specialty_slugs?: string[]
+          include_user_ids?: string[]
+          exclude_user_ids?: string[]
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       match_details: {
         Row: {
           event_id: string

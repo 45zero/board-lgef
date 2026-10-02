@@ -25,6 +25,7 @@ export const LIVE_TABLES = [
   "expense_submissions",
   "match_details",
   "photo_missions",
+  "module_access",
 ] as const;
 export type LiveTable = (typeof LIVE_TABLES)[number] | "notifications" | "mails";
 

@@ -3,14 +3,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 
 /**
- * Habilité à publier : administrateur, ou personne désignée dans le centre de publication
- * (board_settings.publisher_ids). Seuls eux voient le centre et reçoivent « Média à publier ».
+ * Habilité à publier = voit le centre de publication (module « audiovisuel ») : administrateur,
+ * ou personne désignée par la règle d'accès du module (sql/2026-09-29_module_access.sql). Ces
+ * personnes reçoivent aussi « Média à publier ».
  */
 export async function isPublisher(client: SupabaseClient<Database>, userId: string): Promise<boolean> {
-  const [{ data: profile }, { data: settings }] = await Promise.all([
-    client.from("profiles").select("role").eq("id", userId).single(),
-    client.from("board_settings").select("publisher_ids").eq("id", true).single(),
-  ]);
-  if (profile?.role === "admin" || profile?.role === "super_user") return true;
-  return (settings?.publisher_ids ?? []).includes(userId);
+  const { data, error } = await client.rpc("can_see_module", { uid: userId, p_module: "audiovisuel" });
+  if (error) {
+    console.error("[isPublisher]", error);
+    return false;
+  }
+  return data === true;
 }

@@ -85,9 +85,12 @@ export function StaffEventsMap({
   events: eventsProp,
   focusEventId = null,
   onOpenEvent,
+  sidebar = false,
   className = "h-full",
 }: {
   events: MapEvent[];
+  /** Panneau à droite : liste des événements de la période et techniciens au plus près (vue Carte du planning). */
+  sidebar?: boolean;
   /** Événement sélectionné d'emblée (fiche événement, demande de captation). */
   focusEventId?: string | null;
   onOpenEvent?: (eventId: string) => void;
@@ -288,14 +291,12 @@ export function StaffEventsMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [travel, travelLoading, selectedId]);
 
-  const nearest = useMemo(
-    () =>
-      staff
-        .filter((p) => travel[p.id] && !hiddenKinds.has(p.kind))
-        .sort((a, b) => travel[a.id].minutes - travel[b.id].minutes)
-        .slice(0, 8),
-    [staff, travel, hiddenKinds]
-  );
+  // Panneau latéral : tous les techniciens (ceux sans trajet calculable à la fin) ; encart flottant : les 8 plus proches.
+  const nearest = useMemo(() => {
+    const shown = staff.filter((p) => !hiddenKinds.has(p.kind));
+    const withRoute = shown.filter((p) => travel[p.id]).sort((a, b) => travel[a.id].minutes - travel[b.id].minutes);
+    return sidebar ? [...withRoute, ...shown.filter((p) => !travel[p.id]).sort((a, b) => a.name.localeCompare(b.name))] : withRoute.slice(0, 8);
+  }, [staff, travel, hiddenKinds, sidebar]);
 
   const focusStaff = (p: StaffPin) => {
     const marker = staffMarkersRef.current.get(p.id);
@@ -304,10 +305,55 @@ export function StaffEventsMap({
     google.maps.event.trigger(marker, "click");
   };
 
+  /** Depuis la liste : sélectionne l'événement, centre la carte dessus et ouvre sa bulle. */
+  const focusEvent = (id: string) => {
+    const marker = eventMarkersRef.current.get(id);
+    setSelectedId(id);
+    if (!marker || !positions[id]) return;
+    mapRef.current?.panTo(positions[id]);
+    if ((mapRef.current?.getZoom() ?? 0) < 9) mapRef.current?.setZoom(9);
+    google.maps.event.trigger(marker, "click");
+  };
+
+  // Événements par ordre chronologique, avec l'en-tête du jour sur le premier de chaque journée.
+  const eventRows = useMemo(() => {
+    const sorted = [...events].sort((a, b) => (a.start ?? "").localeCompare(b.start ?? ""));
+    return sorted.map((e, i) => {
+      const day = e.start ? format(parseISO(e.start), "EEEE d MMMM", { locale: fr }) : "";
+      const prev = i > 0 && sorted[i - 1].start ? format(parseISO(sorted[i - 1].start!), "EEEE d MMMM", { locale: fr }) : null;
+      return { e, header: day && day !== prev ? day : null };
+    });
+  }, [events]);
   const withoutPlace = events.length - Object.keys(positions).length;
 
-  return (
-    <div className={`relative overflow-hidden rounded-panel border border-line bg-subtle ${className}`}>
+  const staffRows = (
+    <>
+      {travelLoading && (
+        <div className="flex items-center gap-1 px-3 py-1.5 text-[11px] text-ink-4">
+          <Loader2 size={11} className="animate-spin" /> Calcul des trajets…
+        </div>
+      )}
+      {!travelLoading && nearest.length === 0 && <div className="px-3 py-1.5 text-[11px] text-ink-4">Aucun technicien à afficher.</div>}
+      {nearest.map((p) => (
+        <button key={p.id} onClick={() => focusStaff(p)} className="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-hover">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] text-[8px] font-bold text-white" style={{ background: STAFF_STYLES[p.kind].color }}>
+            {initials(p.name)}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[12px] text-ink-2">{p.name}</span>
+          {travel[p.id] ? (
+            <span className="flex shrink-0 items-center gap-0.5 font-mono text-[10px] text-ink-3">
+              <Car size={10} /> {formatTravel(travel[p.id])}
+            </span>
+          ) : (
+            !travelLoading && <span className="shrink-0 text-[10px] text-ink-4">—</span>
+          )}
+        </button>
+      ))}
+    </>
+  );
+
+  const mapPane = (
+    <div className={`relative overflow-hidden rounded-panel border border-line bg-subtle ${sidebar ? "min-h-[360px] flex-1" : className}`}>
       <div ref={mapDivRef} className="absolute inset-0" />
       {!loaded && (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-ink-4">
@@ -358,34 +404,88 @@ export function StaffEventsMap({
         </div>
       </div>
 
-      {/* Techniciens les plus proches de l'événement sélectionné */}
-      {selectedEvent && staff.length > 0 && (
+      {/* Encart flottant (petites cartes) : techniciens les plus proches de l'événement sélectionné */}
+      {!sidebar && selectedEvent && staff.length > 0 && (
         <div className="absolute right-2 top-2 z-[1] w-60 max-w-[calc(100%-1rem)] rounded-btn border border-line bg-card/95 shadow-card">
           <div className="border-b border-line px-3 py-2">
             <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-4">Au plus près de</div>
             <div className="truncate text-xs font-bold text-ink">{selectedEvent.title}</div>
           </div>
-          <div className="max-h-56 overflow-y-auto py-1">
-            {travelLoading && (
-              <div className="flex items-center gap-1 px-3 py-1.5 text-[11px] text-ink-4">
-                <Loader2 size={11} className="animate-spin" /> Calcul des trajets…
-              </div>
-            )}
-            {!travelLoading && nearest.length === 0 && <div className="px-3 py-1.5 text-[11px] text-ink-4">Aucun trajet calculable.</div>}
-            {nearest.map((p) => (
-              <button key={p.id} onClick={() => focusStaff(p)} className="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-hover">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] text-[8px] font-bold text-white" style={{ background: STAFF_STYLES[p.kind].color }}>
-                  {initials(p.name)}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-[12px] text-ink-2">{p.name}</span>
-                <span className="flex shrink-0 items-center gap-0.5 font-mono text-[10px] text-ink-3">
-                  <Car size={10} /> {formatTravel(travel[p.id])}
-                </span>
-              </button>
-            ))}
-          </div>
+          <div className="max-h-56 overflow-y-auto py-1">{staffRows}</div>
         </div>
       )}
+    </div>
+  );
+
+  if (!sidebar) return mapPane;
+
+  // Grand écran : carte à gauche ; à droite les événements de la période puis les techniciens au plus près.
+  return (
+    <div className={`flex min-h-0 flex-col gap-3 lg:flex-row ${className}`}>
+      {mapPane}
+      <aside className="flex min-h-0 w-full shrink-0 flex-col gap-3 lg:w-80">
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-panel border border-line bg-card">
+          <div className="flex items-center justify-between border-b border-line px-3 py-2">
+            <div className="text-xs font-bold text-ink">Événements</div>
+            <div className="font-mono text-[10px] text-ink-4">{events.length}</div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto py-1">
+            {events.length === 0 && <div className="px-3 py-2 text-[11px] text-ink-4">Aucun événement sur cette période.</div>}
+            {eventRows.map(({ e, header }) => {
+              const color = ORG_COLORS[e.org];
+              const onMap = !!positions[e.id];
+              const selected = e.id === selectedId;
+              return (
+                <div key={e.id}>
+                  {header && <div className="px-3 pb-0.5 pt-2 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-4">{header}</div>}
+                  <button
+                    onClick={() => focusEvent(e.id)}
+                    className={`flex w-full items-start gap-2 border-l-2 px-3 py-1.5 text-left ${selected ? "bg-sel-bg" : "hover:bg-hover"}`}
+                    style={{ borderLeftColor: selected ? color.base : "transparent" }}
+                  >
+                    <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color.base, opacity: onMap ? 1 : 0.35 }} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12px] font-semibold text-ink">{e.title}</span>
+                      <span className="block truncate text-[10.5px] text-ink-4">
+                        {e.start && format(parseISO(e.start), "HH:mm")}
+                        {e.location ? ` · ${e.location}` : ""}
+                        {!onMap && !loadingPositions && " · pas sur la carte"}
+                      </span>
+                    </span>
+                    {onOpenEvent && selected && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          onOpenEvent(e.id);
+                        }}
+                        className="shrink-0 self-center rounded-full border border-line px-1.5 py-px text-[10px] font-semibold text-link hover:border-link"
+                      >
+                        Ouvrir
+                      </span>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {staff.length > 0 && (
+          <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-panel border border-line bg-card">
+            <div className="border-b border-line px-3 py-2">
+              <div className="text-xs font-bold text-ink">Au plus près</div>
+              <div className="truncate text-[10.5px] text-ink-4">
+                {selectedEvent ? `de ${selectedEvent.title} · aller simple en voiture` : "Sélectionnez un événement pour classer les techniciens"}
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto py-1">
+              {selectedEvent ? staffRows : <div className="px-3 py-2 text-[11px] text-ink-4">Cliquez un événement dans la liste ou sur la carte.</div>}
+            </div>
+          </section>
+        )}
+      </aside>
     </div>
   );
 }

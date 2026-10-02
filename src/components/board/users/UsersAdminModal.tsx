@@ -6,6 +6,9 @@ import { listUsers, updateUser, type AdminUser, type SpecialtyOption, type UserR
 import { unwrap } from "@/lib/board/actionResult";
 import { listAccessRequests, type AccessRequest } from "@/app/actions/account-requests";
 import { AccessRequestCard } from "@/components/board/users/AccessRequestCard";
+import { buildPoles, type Pole } from "@/lib/board/poles";
+import { getUserModules } from "@/app/actions/module-access";
+import { CONFIGURABLE_MODULES } from "@/lib/board/modules";
 
 const input = "w-full rounded-btn border border-line bg-card px-2.5 py-2 text-sm outline-none focus:border-navy";
 const sectionTitle = "mb-1.5 text-[11px] font-bold uppercase tracking-wide text-ink-4";
@@ -90,28 +93,6 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 
 /* ---------- Fiche d'un utilisateur ---------- */
 
-type Pole = { key: string; label: string; slugs: string[] };
-
-/**
- * Pôles fusionnés. La base garde deux spécialités par pôle (org-formation pour un Organisateur,
- * tech-formation pour un Technicien — héritage de calendrier-lgef) qui donnent exactement les mêmes
- * droits : ouvrir les événements de ce type. Ici un pôle = une case, qui pose ou retire les deux.
- */
-function buildPoles(specialties: SpecialtyOption[]): Pole[] {
-  const key = (slug: string) => slug.replace(/^(org|tech)-/, "").replace(/_/g, "-");
-  const poles = new Map<string, Pole>();
-  for (const s of specialties) {
-    if (!s.slug.startsWith("org-")) continue;
-    poles.set(key(s.slug), { key: key(s.slug), label: s.label, slugs: [s.slug] });
-  }
-  for (const s of specialties) {
-    if (s.domain !== "technician" || !s.slug.startsWith("tech-")) continue;
-    const pole = poles.get(key(s.slug));
-    if (pole) pole.slugs.push(s.slug);
-  }
-  return [...poles.values()].sort((a, b) => a.label.localeCompare(b.label, "fr"));
-}
-
 function UserEditor({
   user,
   specialties,
@@ -132,6 +113,12 @@ function UserEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // Modules visibles d'après les règles d'accès (état enregistré ; relu après chaque enregistrement).
+  const [modules, setModules] = useState<string[] | null>(null);
+  const loadModules = useCallback(() => getUserModules(user.id).then((r) => setModules(r.ok ? r.data : null)), [user.id]);
+  useEffect(() => {
+    void loadModules();
+  }, [loadModules]);
 
   const status = STATUS_SLUGS.find((s) => slugs.includes(s)) ?? null;
   const setStatus = (slug: string | null) => setSlugs((prev) => [...prev.filter((s) => !STATUS_SLUGS.includes(s)), ...(slug ? [slug] : [])]);
@@ -156,6 +143,7 @@ function UserEditor({
       unwrap(await updateUser(user.id, { firstName, lastName, role, slugs }));
       setSaved(true);
       onSaved();
+      void loadModules();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -257,6 +245,25 @@ function UserEditor({
           </div>
         </div>
       )}
+
+      <div>
+        <div className={sectionTitle}>Modules visibles</div>
+        <p className="mb-2 text-xs text-ink-4">Calculé d&apos;après l&apos;accès de chaque module (Paramètres → Accès aux modules).</p>
+        {modules === null ? (
+          <span className="text-xs text-ink-4">…</span>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {CONFIGURABLE_MODULES.map((m) => (
+              <span
+                key={m.id}
+                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${modules.includes(m.id) ? "bg-good-bg text-good" : "bg-subtle text-ink-4 line-through"}`}
+              >
+                {m.label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
 
       {error && <p className="text-sm text-bad">{error}</p>}
       <div className="flex items-center justify-end gap-3">

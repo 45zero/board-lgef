@@ -22,6 +22,9 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useBoardPreferences } from "@/hooks/board/useBoardPreferences";
 import { BOARD_APPS } from "@/lib/board/tokens";
 import { BackgroundTasksPanel } from "./BackgroundTasksPanel";
+import { ModuleAccessModal } from "./modules/ModuleAccessModal";
+import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
+import { useUserRole } from "@/hooks/board/useUserRole";
 
 export type NavLayout = "rail" | "list";
 export type Theme = "light" | "dark";
@@ -59,7 +62,13 @@ function renderScreen(id: string, props: { punchedIn: boolean; onTogglePunch: ()
 }
 
 export function BoardShell() {
-  const [app, setApp] = useState("accueil");
+  const [selectedApp, setApp] = useState("accueil");
+  // Module masqué (règle d'accès modifiée pendant qu'il était ouvert) : retour à l'accueil.
+  const visible = useVisibleModules();
+  const app = canShowModule(visible, selectedApp) ? selectedApp : "accueil";
+  const role = useUserRole();
+  const canManageAccess = role.isAdmin || role.isSuperUser;
+  const [accessOpen, setAccessOpen] = useState(false);
   const [mounted, setMounted] = useState<Set<string>>(() => new Set(["accueil"]));
 
   // Module ouvert → monté pour de bon ; les modules les plus consultés sont préchargés dès que le
@@ -105,6 +114,7 @@ export function BoardShell() {
           theme={theme}
           onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
           onOpenSettings={() => setSettingsOpen((o) => !o)}
+          onOpenModuleAccess={canManageAccess && app !== "accueil" ? () => setAccessOpen(true) : undefined}
         />
 
         <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
@@ -115,7 +125,7 @@ export function BoardShell() {
           {/* Les modules déjà ouverts restent montés (masqués quand inactifs) : y revenir est
               instantané, avec leurs données et leur position de défilement, comme une appli native. */}
           <main className="relative flex-1 overflow-hidden rounded-panel">
-            {KEEP_ALIVE_APPS.filter((id) => mounted.has(id)).map((id) => (
+            {KEEP_ALIVE_APPS.filter((id) => mounted.has(id) && canShowModule(visible, id)).map((id) => (
               <div key={id} className={app === id ? "h-full overflow-y-auto" : "hidden"}>
                 {renderScreen(id, { punchedIn, onTogglePunch: () => setPunchedIn((p) => !p), onNavigate: selectApp })}
               </div>
@@ -158,6 +168,8 @@ export function BoardShell() {
       </div>
 
       <BackgroundTasksPanel />
+
+      {accessOpen && <ModuleAccessModal initialModuleId={app} onClose={() => setAccessOpen(false)} />}
 
       {settingsOpen && (
         <BoardSettingsModal

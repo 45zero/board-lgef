@@ -1,6 +1,7 @@
 "use server";
 
 import { toResult } from "@/lib/board/actionResult";
+import { ruleMatches } from "@/lib/board/modules";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { FacebookRegion } from "@/lib/social/targets";
@@ -58,6 +59,32 @@ async function listMemberIds(service: ReturnType<typeof createServiceClient>, sl
 
 const listPhotographerIds = (service: ReturnType<typeof createServiceClient>) => listMemberIds(service, PHOTO_SLUG);
 
+/**
+ * Relais de publication possibles : les personnes que désigne la règle d'accès du centre de
+ * publication (hors passe-droit des administrateurs), voir sql/2026-09-29_module_access.sql.
+ */
+async function listPublisherIds(service: ReturnType<typeof createServiceClient>) {
+  const [{ data: rule }, { data: profiles }, { data: links }] = await Promise.all([
+    service.from("module_access").select("everyone, roles, specialty_slugs, include_user_ids, exclude_user_ids").eq("module_id", "audiovisuel").maybeSingle(),
+    service.from("profiles").select("id, role"),
+    service.from("profile_specialties").select("user_id, specialties(slug)"),
+  ]);
+  if (!rule) return [];
+  const slugsBy = new Map<string, string[]>();
+  for (const l of (links ?? []) as unknown as { user_id: string; specialties: { slug: string } | null }[]) {
+    if (l.specialties) slugsBy.set(l.user_id, [...(slugsBy.get(l.user_id) ?? []), l.specialties.slug]);
+  }
+  const moduleRule = {
+    moduleId: "audiovisuel",
+    everyone: rule.everyone,
+    roles: rule.roles,
+    specialtySlugs: rule.specialty_slugs,
+    includeUserIds: rule.include_user_ids,
+    excludeUserIds: rule.exclude_user_ids,
+  };
+  return (profiles ?? []).filter((p) => ruleMatches(moduleRule, { id: p.id, role: p.role ?? "user", slugs: slugsBy.get(p.id) ?? [] })).map((p) => p.id);
+}
+
 async function notify(
   userIds: (string | null | undefined)[],
   params: { title: string; message: string; eventId?: string | null; type?: "coverage_request" | "coverage_assignment" | "coverage_accepted_admin" }
@@ -99,7 +126,7 @@ async function getWeekendImpl(startISO: string, endISO: string): Promise<Weekend
   const ids = (events ?? []).map((e) => e.id);
 
   const service = createServiceClient();
-  const [details, missions, coverage, files, publications, photographerIds, videographerIds, settings] = await Promise.all([
+  const [details, missions, coverage, files, publications, photographerIds, videographerIds, publisherIds] = await Promise.all([
     ids.length ? supabase.from("match_details").select("*").in("event_id", ids) : Promise.resolve({ data: [] }),
     // RLS : les brouillons ne remontent que pour les coordinateurs.
     ids.length ? supabase.from("photo_missions").select("*").in("event_id", ids) : Promise.resolve({ data: [] }),
@@ -116,11 +143,10 @@ async function getWeekendImpl(startISO: string, endISO: string): Promise<Weekend
       : Promise.resolve({ data: [] }),
     canCoordinate ? listPhotographerIds(service) : Promise.resolve([] as string[]),
     canCoordinate ? listMemberIds(service, VIDEO_SLUG) : Promise.resolve([] as string[]),
-    canCoordinate ? service.from("board_settings").select("publisher_ids").eq("id", true).single() : Promise.resolve({ data: null }),
+    canCoordinate ? listPublisherIds(service) : Promise.resolve([] as string[]),
   ]);
 
   const missionRows = (missions.data ?? []) as { id: string; event_id: string; status: PhotoStatus; photographer_id: string | null; publisher_id: string | null }[];
-  const publisherIds = (settings.data as { publisher_ids: string[] } | null)?.publisher_ids ?? [];
   const personIds = [
     ...new Set(
       [...missionRows.flatMap((m) => [m.photographer_id, m.publisher_id]), ...photographerIds, ...videographerIds, ...publisherIds].filter(

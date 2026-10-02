@@ -4,6 +4,7 @@ import { Calendar, Home, Mail, Camera } from "lucide-react";
 import { CENTER_ACTIONS, type CenterAction } from "@/components/board/mobile/MobileSettingsSheet";
 import { useAppBadges, type AppBadge } from "@/hooks/board/useAppBadges";
 import { AppBadgePills } from "@/components/board/AppBadgePills";
+import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
 
 export type MobileTab = "calendrier" | "accueil" | "mails" | "weekend";
 
@@ -29,6 +30,7 @@ export function MobileBottomNav({
   center?: CenterAction;
 }) {
   const badges = useAppBadges();
+  const visible = useVisibleModules();
   const action = CENTER_ACTIONS.find((a) => a.id === center) ?? CENTER_ACTIONS[0];
   const CenterIcon = action.icon;
   return (
@@ -37,7 +39,7 @@ export function MobileBottomNav({
       style={{ boxShadow: "0 -10px 30px rgba(11,29,60,0.10)" }}
     >
       <div className={`grid h-16 items-center px-1 ${center === "off" ? "grid-cols-4" : "grid-cols-[1fr_1fr_1.1fr_1fr_1fr]"}`}>
-        {SLOTS.map((slot) => (
+        {SLOTS.filter((slot) => canShowModule(visible, slot.id)).map((slot) => (
           <NavSlot key={slot.id} slot={slot} badges={badges[slot.id]} active={active === slot.id} onClick={() => onSelect(slot.id)} />
         ))}
 
@@ -55,7 +57,7 @@ export function MobileBottomNav({
           </div>
         )}
 
-        {SLOTS_RIGHT.map((slot) => (
+        {SLOTS_RIGHT.filter((slot) => canShowModule(visible, slot.id)).map((slot) => (
           <NavSlot key={slot.id} slot={slot} badges={badges[slot.id]} active={active === slot.id} onClick={() => onSelect(slot.id)} />
         ))}
       </div>

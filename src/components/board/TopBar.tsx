@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { Search, Moon, Sun, ChevronRight, Settings } from "lucide-react";
+import { Search, Moon, Sun, ChevronRight, Settings, Lock } from "lucide-react";
 import { NotificationBell } from "@/components/board/live/NotificationBell";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -43,11 +43,14 @@ export function TopBar({
   theme,
   onToggleTheme,
   onOpenSettings,
+  onOpenModuleAccess,
 }: {
   currentApp: BoardApp;
   theme: Theme;
   onToggleTheme: () => void;
   onOpenSettings: () => void;
+  /** Administrateurs : régler qui voit le module ouvert. */
+  onOpenModuleAccess?: () => void;
 }) {
   const { name, initials } = useCurrentProfile();
 
@@ -69,6 +72,16 @@ export function TopBar({
         {currentApp.label}
         <ChevronRight size={11} className="text-ink-4" />
         <span className="text-ink-3">{currentApp.kicker}</span>
+        {onOpenModuleAccess && (
+          <button
+            onClick={onOpenModuleAccess}
+            title={`Qui voit « ${currentApp.label} »`}
+            aria-label={`Accès au module ${currentApp.label}`}
+            className="ml-1 rounded-full p-0.5 text-ink-4 hover:bg-hover hover:text-ink"
+          >
+            <Lock size={11} />
+          </button>
+        )}
       </div>
 
       <div className="ml-2 flex flex-1 items-center gap-2 rounded-btn border border-line bg-subtle px-3 py-2 text-ink-3">

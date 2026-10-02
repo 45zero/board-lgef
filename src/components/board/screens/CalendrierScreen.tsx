@@ -408,7 +408,8 @@ export function CalendrierScreen() {
             </div>
           </div>
           <StaffEventsMap
-            events={visibleEvents.filter((e) => !e.onlineMeeting && e.location)}
+            sidebar
+            events={visibleEvents.filter((e) => !e.onlineMeeting)}
             onOpenEvent={(id) => {
               const ev = visibleEvents.find((e) => e.id === id);
               if (ev) setEditingInternal(ev);

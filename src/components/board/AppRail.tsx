@@ -1,6 +1,6 @@
 "use client";
 
-import { useCanPublish } from "@/hooks/board/useCanPublish";
+import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
 import { useAppBadges } from "@/hooks/board/useAppBadges";
 import { AppBadgePills } from "@/components/board/AppBadgePills";
 import type { ComponentType } from "react";
@@ -66,7 +66,7 @@ export function AppRail({
 }) {
   // Compteurs réels (mails non lus, à publier, inscriptions…) — voir /api/badges.
   const badges = useAppBadges();
-  const canPublish = useCanPublish();
+  const visible = useVisibleModules();
   return (
     <aside
       className={`flex min-h-0 shrink-0 flex-col justify-between gap-2 rounded-panel border border-line bg-card/70 py-3 shadow-bar backdrop-blur ${
@@ -88,7 +88,7 @@ export function AppRail({
           {nav === "rail" ? <List size={16} /> : <LayoutGrid size={16} />}
         </button>
 
-        {BOARD_APPS.filter((item) => item.id !== "audiovisuel" || canPublish).map((item) => {
+        {BOARD_APPS.filter((item) => canShowModule(visible, item.id)).map((item) => {
           const Icon = APP_ICONS[item.id] ?? Home;
           const isActive = item.id === activeApp;
           const itemBadges = badges[item.id];
