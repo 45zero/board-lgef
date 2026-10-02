@@ -79,12 +79,14 @@ export function AccueilScreen({
   }
 
   return (
-    <div className="flex h-full flex-col gap-5 overflow-y-auto rounded-panel p-1">
-      <section className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Accueil · Mon tableau de bord</div>
-          <h1 className="mt-1 text-[22px] font-extrabold tracking-[-0.45px] text-ink">Ce qui vous attend</h1>
-        </div>
+    <div className="relative h-full overflow-hidden rounded-panel">
+      {/* Filigrane : logo LGEF en fond, opacité réduite, fixe pendant le défilement. */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        {/* eslint-disable-next-line @next/next/no-img-element -- simple décor, pas d'optimisation utile */}
+        <img src="/lgef-logo.png" alt="" className="w-[min(42%,380px)] opacity-[0.06]" />
+      </div>
+      <div className="relative flex h-full flex-col gap-5 overflow-y-auto p-1">
+      <section className="flex justify-end">
         <div className="flex rounded-full bg-subtle p-1">
           {(["day", "week"] as const).map((p) => (
             <button
@@ -209,6 +211,7 @@ export function AccueilScreen({
           onChanged={() => setReloadKey((k) => k + 1)}
         />
       )}
+      </div>
     </div>
   );
 }
