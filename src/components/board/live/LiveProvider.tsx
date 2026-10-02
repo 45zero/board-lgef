@@ -26,6 +26,12 @@ export const LIVE_TABLES = [
   "match_details",
   "photo_missions",
   "module_access",
+  "team_boards",
+  "team_lists",
+  "team_cards",
+  "team_card_members",
+  "team_checklist_items",
+  "team_card_comments",
 ] as const;
 export type LiveTable = (typeof LIVE_TABLES)[number] | "notifications" | "mails";
 
@@ -38,6 +44,7 @@ export type BoardNotification = {
   created_at: string;
   event_id: string | null;
   actor_name: string | null;
+  data: { team_card_id?: string } | null;
 };
 
 type Listener = { tables: Set<LiveTable> | null; fn: () => void };
@@ -55,7 +62,7 @@ const LiveContext = createContext<LiveContextValue | null>(null);
 
 const MAILS_EVERY_MS = 30_000;
 const DB_FALLBACK_MS = 120_000;
-const NOTIF_FIELDS = "id, type, title, message, read, created_at, event_id, actor_name";
+const NOTIF_FIELDS = "id, type, title, message, read, created_at, event_id, actor_name, data";
 
 export function LiveProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();

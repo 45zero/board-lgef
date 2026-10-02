@@ -1180,7 +1180,13 @@ function AttachmentRow({
   );
 }
 
-/** Pièces jointes (photo/vidéo) + publication YouTube/Facebook — disponible après création de l'événement. */
+const isMediaFile = (f: EventFile) => /^(image|video)\//.test(f.content_type ?? "");
+
+/**
+ * Pièces jointes de l'événement — documents (joints seulement) et médias (photos/vidéos, mis en file
+ * « À publier » par un trigger sur event_files) — + publication YouTube/Facebook. Disponible après
+ * création de l'événement.
+ */
 export function AttachmentsField({
   eventId,
   eventTitle,
@@ -1208,16 +1214,30 @@ export function AttachmentsField({
       {hook.files.length === 0 && !hook.loading && (
         <p className="text-xs italic text-ink-4">Aucune pièce jointe pour l&rsquo;instant.</p>
       )}
-      {hook.files.map((f) => (
-        <AttachmentRow
-          key={f.id}
-          file={f}
-          canManage={canManage}
-          canPublish={canPublish}
-          onRemove={() => askRemove(f)}
-          onPublishClick={() => setPublishingFileId(f.id)}
-        />
-      ))}
+      {/* Documents : joints à l'événement seulement. Médias : rejoignent aussi « À publier » du centre. */}
+      {[
+        { title: "Documents", files: hook.files.filter((f) => !isMediaFile(f)), hint: null },
+        { title: "Médias", files: hook.files.filter(isMediaFile), hint: "envoyés au centre de publication" },
+      ]
+        .filter((g) => g.files.length > 0)
+        .map((g) => (
+          <div key={g.title} className="space-y-1.5">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-ink-4">
+              {g.title} · {g.files.length}
+              {g.hint && <span className="ml-1 font-normal normal-case tracking-normal">— {g.hint}</span>}
+            </p>
+            {g.files.map((f) => (
+              <AttachmentRow
+                key={f.id}
+                file={f}
+                canManage={canManage}
+                canPublish={canPublish}
+                onRemove={() => askRemove(f)}
+                onPublishClick={() => setPublishingFileId(f.id)}
+              />
+            ))}
+          </div>
+        ))}
 
       {canManage && (
         <>
@@ -1225,7 +1245,6 @@ export function AttachmentsField({
             ref={inputRef}
             type="file"
             multiple
-            accept="image/*,video/*"
             className="hidden"
             onChange={(e) => {
               // Envoi en tâche de fond : progression en bas à droite, on peut fermer l'événement.
@@ -1238,7 +1257,7 @@ export function AttachmentsField({
             onClick={() => inputRef.current?.click()}
             className="flex items-center gap-1.5 rounded-btn border border-dashed border-line px-3 py-2 text-xs font-semibold text-ink-3 hover:bg-hover"
           >
-            <Paperclip size={13} /> Ajouter une pièce jointe (photo, vidéo)
+            <Paperclip size={13} /> Ajouter un document, une photo ou une vidéo
           </button>
           {hook.uploading && (
             <p className="text-[11px] text-ink-4">

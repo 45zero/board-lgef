@@ -3,34 +3,42 @@
 import { useState } from "react";
 import type { CalendarEvent } from "@/lib/board/calendar";
 
-// v2 : les filtres ne portent plus que sur les matchs du week-end (anciens réglages ignorés).
-const KEY = "lgef-board:calendar-coverage-v2";
+// Réglage « par défaut » (clic droit sur l'icône) mémorisé dans le navigateur ; le clic simple
+// n'agit que sur la session en cours. v2 : ancien réglage unique, repris comme valeur par défaut.
+const DEFAULTS_KEY = "lgef-board:calendar-coverage-defaults";
+const LEGACY_KEY = "lgef-board:calendar-coverage-v2";
 
 export type CoverageFilters = { video: boolean; photo: boolean };
 
+function readDefaults(): CoverageFilters {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DEFAULTS_KEY) ?? localStorage.getItem(LEGACY_KEY) ?? "null") as Partial<CoverageFilters> | null;
+    return { video: saved?.video ?? false, photo: saved?.photo ?? false };
+  } catch {
+    return { video: false, photo: false };
+  }
+}
+
 /**
- * Filtres « CouvVidéo » / « CouvPhoto » du calendrier (ordinateur et mobile), mémorisés dans le
- * navigateur. Ils affichent les matchs du week-end couverts en vidéo / en photo ; désactivés par
- * défaut : une trentaine de matchs par week-end encombreraient la grille.
+ * Filtres « CouvVidéo » / « CouvPhoto » du calendrier (ordinateur et mobile). Ils affichent les
+ * matchs du week-end couverts en vidéo / en photo. Chacun a un réglage par défaut (masqué tant
+ * qu'on ne l'a pas changé : une trentaine de matchs par week-end encombreraient la grille) ;
+ * le clic simple affiche ou masque pour la session sans toucher au défaut.
  */
-export function useCoverageFilters(): [CoverageFilters, (next: CoverageFilters) => void] {
-  const [filters, setFilters] = useState<CoverageFilters>(() => {
+export function useCoverageFilters(): [CoverageFilters, (next: CoverageFilters) => void, CoverageFilters, (kind: keyof CoverageFilters, on: boolean) => void] {
+  const [defaults, setDefaults] = useState<CoverageFilters>(readDefaults);
+  const [filters, setFilters] = useState<CoverageFilters>(defaults);
+  const setDefault = (kind: keyof CoverageFilters, on: boolean) => {
+    const next = { ...defaults, [kind]: on };
+    setDefaults(next);
+    setFilters((f) => ({ ...f, [kind]: on }));
     try {
-      const saved = JSON.parse(localStorage.getItem(KEY) ?? "null") as Partial<CoverageFilters> | null;
-      return { video: saved?.video ?? false, photo: saved?.photo ?? false };
-    } catch {
-      return { video: false, photo: false };
-    }
-  });
-  const set = (next: CoverageFilters) => {
-    setFilters(next);
-    try {
-      localStorage.setItem(KEY, JSON.stringify(next));
+      localStorage.setItem(DEFAULTS_KEY, JSON.stringify(next));
     } catch {
       // stockage indisponible : le choix vaut pour la session
     }
   };
-  return [filters, set];
+  return [filters, setFilters, defaults, setDefault];
 }
 
 /**

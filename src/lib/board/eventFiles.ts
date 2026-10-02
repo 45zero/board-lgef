@@ -99,7 +99,7 @@ const CHUNK_SIZE = 3 * 1024 * 1024; // 3 Mio — multiple de 256 Kio (requis par
 /** Progression d'un envoi : octets envoyés / total, et nom du fichier en cours. */
 export type UploadProgress = (sentBytes: number, totalBytes: number, currentFile: string) => void;
 
-async function putFileToDriveViaRelay(
+export async function putFileToDriveViaRelay(
   chunkEndpoint: string,
   uploadUrl: string,
   file: File,
@@ -132,7 +132,7 @@ async function putFileToDriveViaRelay(
   throw new Error("Échec de l'envoi vers Drive (fichier vide).");
 }
 
-async function uploadEventFilesToDrive(eventId: string, files: File[], onProgress?: UploadProgress) {
+async function uploadEventFilesToDrive(eventId: string, files: File[], onProgress?: UploadProgress, teamCardId?: string) {
   const results: UploadResult[] = [];
   const total = files.reduce((n, f) => n + f.size, 0);
   let done = 0;
@@ -142,7 +142,7 @@ async function uploadEventFilesToDrive(eventId: string, files: File[], onProgres
       const initRes = await fetch(`/api/events/${eventId}/attachments/drive`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: file.name, mimeType: file.type }),
+        body: JSON.stringify({ filename: file.name, mimeType: file.type, teamCardId }),
       });
       const initJson = await initRes.json();
       if (!initRes.ok || !initJson.ok) {
@@ -191,8 +191,9 @@ async function uploadEventFilesToDrive(eventId: string, files: File[], onProgres
  * compte Google désigné en réglages (board_settings), pas celui de l'uploadeur.
  * Repli automatique sur Supabase Storage tant qu'aucun Drive de board n'est connecté.
  */
-export async function uploadEventFiles(eventId: string, files: File[], onProgress?: UploadProgress) {
-  return uploadEventFilesToDrive(eventId, files, onProgress);
+/** `teamCardId` : envoi depuis une carte de l'Espace Team liée à l'événement (le fichier est étiqueté pour la carte). */
+export async function uploadEventFiles(eventId: string, files: File[], onProgress?: UploadProgress, teamCardId?: string) {
+  return uploadEventFilesToDrive(eventId, files, onProgress, teamCardId);
 }
 
 /**

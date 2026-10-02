@@ -25,6 +25,7 @@ import {
   ClipboardCheck,
   Map as MapIcon,
   Receipt,
+  Wallet,
   Camera,
 } from "lucide-react";
 import { BOARD_APPS } from "@/lib/board/tokens";
@@ -32,6 +33,7 @@ import type { NavLayout } from "./BoardShell";
 
 const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   frais: Receipt,
+  effectif: Wallet,
   accueil: Home,
   mails: Mail,
   trello: Kanban,

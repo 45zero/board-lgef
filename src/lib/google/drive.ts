@@ -172,7 +172,7 @@ export async function uploadFile(
  */
 export async function createResumableUploadSession(
   account: ConnectedAccount,
-  params: { name: string; parentId?: string; mimeType: string; description?: string }
+  params: { name: string; parentId?: string; mimeType: string; description?: string; appProperties?: Record<string, string> }
 ): Promise<{ uploadUrl: string }> {
   const accessToken = await getValidGoogleAccessToken(account);
   const res = await fetch(
@@ -188,6 +188,7 @@ export async function createResumableUploadSession(
         name: params.name,
         parents: [params.parentId ?? "root"],
         description: params.description,
+        appProperties: params.appProperties,
       }),
     }
   );
@@ -227,4 +228,142 @@ export async function trashFile(account: ConnectedAccount, fileId: string) {
 export async function ensurePublicViewAccess(account: ConnectedAccount, fileId: string) {
   const drive = await driveClient(account);
   await drive.permissions.create({ fileId, requestBody: { role: "reader", type: "anyone" } });
+}
+
+/* ---------- Dossiers étiquetés (pièces jointes de l'Espace Team) ---------- */
+
+/** Fichier avec ses propriétés d'application et sa date de création (pièces jointes). */
+export type DriveTaggedFile = DriveFileItem & { createdTime: string; appProperties: Record<string, string> };
+
+const TAGGED_FIELDS = `${FILE_FIELDS}, createdTime, appProperties, parents`;
+
+const toTagged = (f: drive_v3.Schema$File): DriveTaggedFile => ({
+  ...mapFile(f),
+  createdTime: f.createdTime ?? "",
+  appProperties: (f.appProperties as Record<string, string> | undefined) ?? {},
+});
+
+/** Premier dossier (non supprimé) portant cette propriété d'application, avec ses parents. */
+export async function findFolderByAppProperty(account: ConnectedAccount, key: string, value: string) {
+  const drive = await driveClient(account);
+  const { data } = await drive.files.list({
+    q: `mimeType = '${FOLDER_MIME_TYPE}' and trashed = false and appProperties has { key='${key}' and value='${value.replace(/'/g, "\\'")}' }`,
+    fields: "files(id, name, parents)",
+    pageSize: 1,
+  });
+  const f = data.files?.[0];
+  return f?.id ? { id: f.id, name: f.name ?? "", parents: f.parents ?? [] } : null;
+}
+
+export async function createTaggedFolder(account: ConnectedAccount, params: { name: string; parentId: string; appProperties: Record<string, string> }) {
+  const drive = await driveClient(account);
+  const { data } = await drive.files.create({
+    requestBody: { name: params.name, mimeType: FOLDER_MIME_TYPE, parents: [params.parentId], appProperties: params.appProperties },
+    fields: "id, name, parents",
+  });
+  return { id: data.id!, name: data.name ?? params.name, parents: data.parents ?? [params.parentId] };
+}
+
+/** Range un fichier/dossier sous un autre parent (et/ou le renomme). */
+export async function moveFile(account: ConnectedAccount, fileId: string, params: { fromParents: string[]; toParent?: string; name?: string }) {
+  const drive = await driveClient(account);
+  const moving = params.toParent && !params.fromParents.includes(params.toParent);
+  await drive.files.update({
+    fileId,
+    addParents: moving ? params.toParent : undefined,
+    removeParents: moving ? params.fromParents.join(",") : undefined,
+    requestBody: params.name ? { name: params.name } : {},
+  });
+}
+
+export async function listFolderTagged(account: ConnectedAccount, folderId: string): Promise<DriveTaggedFile[]> {
+  const drive = await driveClient(account);
+  const { data } = await drive.files.list({
+    q: `'${folderId}' in parents and trashed = false`,
+    fields: `files(${TAGGED_FIELDS})`,
+    orderBy: "createdTime desc",
+    pageSize: 200,
+  });
+  return (data.files ?? []).map(toTagged);
+}
+
+export async function getFileParents(account: ConnectedAccount, fileId: string) {
+  const drive = await driveClient(account);
+  const { data } = await drive.files.get({ fileId, fields: "id, name, mimeType, parents, trashed, appProperties" });
+  return {
+    name: data.name ?? "fichier",
+    mimeType: data.mimeType ?? "",
+    parents: data.parents ?? [],
+    trashed: !!data.trashed,
+    appProperties: (data.appProperties as Record<string, string> | undefined) ?? {},
+  };
+}
+
+/** Fichiers (hors dossiers, non supprimés) portant cette propriété d'application, où qu'ils soient. */
+export async function listFilesByAppProperty(account: ConnectedAccount, key: string, value: string): Promise<DriveTaggedFile[]> {
+  const drive = await driveClient(account);
+  const { data } = await drive.files.list({
+    q: `mimeType != '${FOLDER_MIME_TYPE}' and trashed = false and appProperties has { key='${key}' and value='${value.replace(/'/g, "\\'")}' }`,
+    fields: `files(${TAGGED_FIELDS})`,
+    orderBy: "createdTime desc",
+    pageSize: 200,
+  });
+  return (data.files ?? []).map(toTagged);
+}
+
+/** Recherche dans tout le Drive (fichiers seulement), les plus récents d'abord. */
+export async function searchFiles(account: ConnectedAccount, query: string): Promise<DriveFileItem[]> {
+  const drive = await driveClient(account);
+  const clauses = ["trashed = false", `mimeType != '${FOLDER_MIME_TYPE}'`];
+  if (query.trim()) clauses.push(`name contains '${query.trim().replace(/'/g, "\\'")}'`);
+  const { data } = await drive.files.list({ q: clauses.join(" and "), fields: `files(${FILE_FIELDS})`, orderBy: "modifiedTime desc", pageSize: 30 });
+  return (data.files ?? []).map(mapFile);
+}
+
+const GOOGLE_EXPORTS: Record<string, { mime: string; ext: string }> = {
+  "application/vnd.google-apps.document": { mime: "application/pdf", ext: ".pdf" },
+  "application/vnd.google-apps.spreadsheet": { mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ext: ".xlsx" },
+  "application/vnd.google-apps.presentation": { mime: "application/pdf", ext: ".pdf" },
+  "application/vnd.google-apps.drawing": { mime: "application/pdf", ext: ".pdf" },
+};
+
+/** Contenu d'un fichier ; les documents Google sont exportés (PDF, ou XLSX pour les feuilles). */
+export async function readFileContent(account: ConnectedAccount, fileId: string, maxBytes: number) {
+  const drive = await driveClient(account);
+  const { data: meta } = await drive.files.get({ fileId, fields: "name, mimeType, size" });
+  const mimeType = meta.mimeType ?? "application/octet-stream";
+  if (meta.size && Number(meta.size) > maxBytes) throw new Error(`Fichier trop lourd (max ${Math.round(maxBytes / 1048576)} Mo).`);
+  const exp = GOOGLE_EXPORTS[mimeType];
+  if (mimeType.startsWith("application/vnd.google-apps.") && !exp) throw new Error("Ce type de document Google ne peut pas être joint.");
+  const res = exp
+    ? await drive.files.export({ fileId, mimeType: exp.mime }, { responseType: "arraybuffer" })
+    : await drive.files.get({ fileId, alt: "media" }, { responseType: "arraybuffer" });
+  const data = Buffer.from(res.data as ArrayBuffer);
+  if (data.length > maxBytes) throw new Error(`Fichier trop lourd (max ${Math.round(maxBytes / 1048576)} Mo).`);
+  const name = meta.name ?? "fichier";
+  return { data, mimeType: exp?.mime ?? mimeType, name: exp && !name.toLowerCase().endsWith(exp.ext) ? `${name}${exp.ext}` : name };
+}
+
+export async function uploadTaggedFile(
+  account: ConnectedAccount,
+  params: { name: string; parentId: string; mimeType: string; data: Buffer; description?: string; appProperties?: Record<string, string> }
+) {
+  const drive = await driveClient(account);
+  const { data } = await drive.files.create({
+    requestBody: { name: params.name, parents: [params.parentId], description: params.description, appProperties: params.appProperties },
+    media: { mimeType: params.mimeType, body: Readable.from(params.data) },
+    fields: TAGGED_FIELDS,
+  });
+  return toTagged(data);
+}
+
+/** Partage un fichier en lecture avec une adresse e-mail : Google envoie l'invitation (message facultatif). */
+export async function shareFileWithEmail(account: ConnectedAccount, fileId: string, email: string, message?: string) {
+  const drive = await driveClient(account);
+  await drive.permissions.create({
+    fileId,
+    sendNotificationEmail: true,
+    emailMessage: message || undefined,
+    requestBody: { role: "reader", type: "user", emailAddress: email },
+  });
 }

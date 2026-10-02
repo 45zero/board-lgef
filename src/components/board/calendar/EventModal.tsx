@@ -1,5 +1,7 @@
 "use client";
 
+import { EventCosts } from "@/components/board/calendar/EventCosts";
+import { EventTeamCards } from "@/components/board/team/TeamCardOpener";
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -345,6 +347,10 @@ export function EventModal({
                   <DirectorAttendanceSection director={m.director} eventId={event!.id} />
                 </div>
               )}
+
+              {isEditing && <EventTeamCards eventId={event!.id} />}
+
+              {isEditing && <EventCosts eventId={event!.id} />}
 
               {isEditing && (
                 <div>

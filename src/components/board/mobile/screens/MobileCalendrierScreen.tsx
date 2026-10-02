@@ -300,7 +300,7 @@ export function MobileCalendrierScreen() {
                             >
                               {ev.title}
                             </span>
-                            <CoverageGlyph coverage={ev.coverage} published={ev.published} size={9} />
+                            <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={9} />
                           </span>
                         ))}
                       </button>
@@ -320,7 +320,7 @@ export function MobileCalendrierScreen() {
                     >
                       <span className="h-1 w-1 shrink-0 rounded-full" style={{ background: ORG_COLORS[ev.org].base }} />
                       <span className="min-w-0 flex-1 truncate text-left text-[10.5px] font-bold">{ev.title}</span>
-                      <CoverageGlyph coverage={ev.coverage} published={ev.published} size={10} />
+                      <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
                     </button>
                   ))}
                 </div>
@@ -352,7 +352,7 @@ export function MobileCalendrierScreen() {
                       <span className="h-2 w-2 rounded-full" style={{ background: ORG_COLORS[ev.org].base }} />
                       <span className="font-mono text-[10px] text-ink-4">{format(parseISO(ev.start), "HH:mm")}</span>
                       <span className="min-w-0 flex-1 truncate font-semibold text-ink-2">{ev.title}</span>
-                      <CoverageGlyph coverage={ev.coverage} published={ev.published} size={11} />
+                      <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={11} />
                     </div>
                   ))}
                 </div>
@@ -441,7 +441,7 @@ function DayPanel({
                 <span className="font-mono text-[10px]" style={{ color: ORG_COLORS[ev.org].ink }}>
                   {format(parseISO(ev.start), "HH:mm")}
                 </span>
-                <CoverageGlyph coverage={ev.coverage} published={ev.published} size={13} />
+                <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={13} />
               </div>
               <div className="text-sm font-bold" style={{ color: ORG_COLORS[ev.org].ink }}>
                 {ev.title}

@@ -50,7 +50,16 @@ async function modulesVisibleTo(userId: string) {
 
 async function getMyVisibleModulesImpl(): Promise<string[]> {
   const { userId } = await currentUser();
-  return modulesVisibleTo(userId);
+  const modules = await modulesVisibleTo(userId);
+  if (!modules.includes("effectif")) return modules;
+  // Effectif : en plus de la règle d'accès, seulement pour les administrateurs et les N+1.
+  const service = createServiceClient();
+  const [{ data: me }, { count }] = await Promise.all([
+    service.from("profiles").select("role").eq("id", userId).single(),
+    service.from("profiles").select("id", { count: "exact", head: true }).eq("expense_validator_id", userId).neq("id", userId),
+  ]);
+  const allowed = me?.role === "admin" || me?.role === "super_user" || (count ?? 0) > 0;
+  return allowed ? modules : modules.filter((m) => m !== "effectif");
 }
 
 export type ModuleAccessAdmin = {

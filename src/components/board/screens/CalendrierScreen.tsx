@@ -1,5 +1,7 @@
 "use client";
 
+import { CoverageToggle } from "@/components/board/calendar/CoverageToggle";
+import { TeamCardGlyph, useEventTeamCards } from "@/components/board/team/TeamCardOpener";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, Search, User, X, PanelLeftOpen, Camera, Video } from "lucide-react";
 import {
@@ -125,7 +127,7 @@ export function CalendrierScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [hiddenOrgs, setHiddenOrgs] = useState<Set<OrgKey>>(() => new Set());
   const [mineOnly, setMineOnly] = useSolicitedFilter();
-  const [coverage, setCoverage] = useCoverageFilters();
+  const [coverage, setCoverage, coverageDefaults, setCoverageDefault] = useCoverageFilters();
 
   const toggleOrgVisibility = (key: OrgKey) => {
     setHiddenOrgs((prev) => {
@@ -180,6 +182,7 @@ export function CalendrierScreen() {
     });
   }, [events, searchQuery, hiddenOrgs, mineOnly, coverage]);
 
+  const teamCards = useEventTeamCards(visibleEvents.map((e) => e.id));
   const eventsForDay = (day: Date) => visibleEvents.filter((e) => isSameDay(parseISO(e.start), day));
   const googleEventsForDay = (day: Date) =>
     googleEvents.filter((e) => !e.allDay && isSameDay(parseISO(e.start), day));
@@ -344,28 +347,22 @@ export function CalendrierScreen() {
           >
             <User size={15} />
           </button>
-          <button
-            onClick={() => setCoverage({ ...coverage, video: !coverage.video })}
-            className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-btn border ${
-              coverage.video ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3 hover:bg-hover"
-            }`}
-            title={coverage.video ? "Matchs du week-end en vidéo affichés — les masquer" : "Afficher les matchs du week-end couverts en vidéo"}
-            aria-label="Matchs du week-end couverts en vidéo"
-            aria-pressed={coverage.video}
-          >
-            <Video size={15} />
-          </button>
-          <button
-            onClick={() => setCoverage({ ...coverage, photo: !coverage.photo })}
-            className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-btn border ${
-              coverage.photo ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3 hover:bg-hover"
-            }`}
-            title={coverage.photo ? "Matchs du week-end en photo affichés — les masquer" : "Afficher les matchs du week-end couverts en photo"}
-            aria-label="Matchs du week-end couverts en photo"
-            aria-pressed={coverage.photo}
-          >
-            <Camera size={15} />
-          </button>
+          <CoverageToggle
+            icon={Video}
+            label="en vidéo"
+            on={coverage.video}
+            isDefault={coverageDefaults.video}
+            onToggle={() => setCoverage({ ...coverage, video: !coverage.video })}
+            onSetDefault={(on) => setCoverageDefault("video", on)}
+          />
+          <CoverageToggle
+            icon={Camera}
+            label="en photo"
+            on={coverage.photo}
+            isDefault={coverageDefaults.photo}
+            onToggle={() => setCoverage({ ...coverage, photo: !coverage.photo })}
+            onSetDefault={(on) => setCoverageDefault("photo", on)}
+          />
 
           <div className="flex items-center gap-0.5 rounded-btn border border-line bg-card p-0.5">
             {VIEW_MODES.map((m) => (
@@ -463,14 +460,15 @@ export function CalendrierScreen() {
                         <button
                           key={ev.id}
                           onClick={() => setEditingInternal(ev)}
-                          className="absolute left-0.5 right-0.5 overflow-hidden rounded-chip border-l-4 px-1.5 py-1 text-left shadow-sm"
+                          className={`absolute left-0.5 right-0.5 overflow-hidden rounded-chip border-l-4 px-1.5 py-1 text-left shadow-sm ${ev.awaitingMyAnswer ? "ring-2 ring-red" : ""}`}
                           style={{ top, height, background: color.bg, borderLeftColor: color.base }}
                         >
                           <div className="flex items-center gap-1">
                             <span className="truncate text-[11.5px] font-bold" style={{ color: color.ink }}>
                               {ev.title}
                             </span>
-                            <CoverageGlyph coverage={ev.coverage} published={ev.published} size={10} />
+                            <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
+                            <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
                           </div>
                           <div className="font-mono text-[10px]" style={{ color: color.ink }}>
                             {format(parseISO(ev.start), "HH:mm")}
@@ -553,11 +551,12 @@ export function CalendrierScreen() {
                             e.stopPropagation();
                             setEditingInternal(ev);
                           }}
-                          className="flex items-center gap-1 rounded-[4px] border-l-2 px-1 py-0.5 text-left text-[10px] font-semibold"
+                          className={`flex items-center gap-1 rounded-[4px] border-l-2 px-1 py-0.5 text-left text-[10px] font-semibold ${ev.awaitingMyAnswer ? "ring-2 ring-red" : ""}`}
                           style={{ background: color.bg, borderLeftColor: color.base, color: color.ink }}
                         >
                           <span className="min-w-0 flex-1 truncate">{ev.title}</span>
-                          <CoverageGlyph coverage={ev.coverage} published={ev.published} size={10} />
+                          <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
+                            <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
                         </button>
                       );
                     })}

@@ -85,6 +85,8 @@ export interface CalendarEvent {
   photoCoverage?: boolean;
   /** L'utilisateur connecté est sollicité sur cet événement (voir src/lib/board/solicitation.ts). */
   solicited?: boolean;
+  /** L'utilisateur connecté est désigné sur la couverture et doit encore accepter ou refuser. */
+  awaitingMyAnswer?: boolean;
   status: "pending" | "approved" | "rejected" | "completed" | null;
 }
 
@@ -113,6 +115,7 @@ export interface CoverageRequestRow {
   status: "pending" | "approved" | "rejected" | null;
   coverage_symbol: string | null;
   technician_response: string | null;
+  assigned_technician_id?: string | null;
 }
 
 /**
@@ -126,7 +129,7 @@ function deriveCoverageState(
   request: CoverageRequestRow | undefined
 ): CoverageState | null {
   if (!requiresCoverage) return null;
-  if (!request || request.status === "pending") return "wait";
+  if (!request) return "wait";
   if (request.status === "rejected") return "no";
   if (request.status === "approved" && request.technician_response === "accepted") {
     const symbol = request.coverage_symbol ?? "";
@@ -136,6 +139,8 @@ function deriveCoverageState(
     if (hasPhoto) return "photo";
     return "video";
   }
+  // Demande traitée : quelqu'un est désigné, sa réponse est attendue.
+  if (request.assigned_technician_id && request.technician_response !== "rejected") return "assigned";
   return "wait";
 }
 

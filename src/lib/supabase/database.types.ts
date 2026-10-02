@@ -991,6 +991,33 @@ export type Database = {
         }
         Relationships: []
       }
+      event_cost_adjustments: {
+        Row: {
+          event_id: string
+          user_id: string
+          amount_eur: number
+          note: string | null
+          updated_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          event_id: string
+          user_id: string
+          amount_eur: number
+          note?: string | null
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          event_id?: string
+          user_id?: string
+          amount_eur?: number
+          note?: string | null
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       event_comments: {
         Row: {
           id: string
@@ -3781,6 +3808,204 @@ export type Database = {
         Update: {
           specialty_slug?: string
           event_type?: Database["public"]["Enums"]["event_type"]
+        }
+        Relationships: []
+      }
+      staff_rates: {
+        Row: {
+          user_id: string
+          amount_eur: number
+          updated_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          amount_eur: number
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          amount_eur?: number
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      team_boards: {
+        Row: {
+          id: string
+          owner_id: string
+          title: string
+          position: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          owner_id: string
+          title: string
+          position?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          owner_id?: string
+          title?: string
+          position?: number
+          created_at?: string
+        }
+        Relationships: []
+      }
+      team_card_comments: {
+        Row: {
+          id: string
+          card_id: string
+          user_id: string
+          content: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          card_id: string
+          user_id: string
+          content: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          card_id?: string
+          user_id?: string
+          content?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      team_card_members: {
+        Row: {
+          card_id: string
+          user_id: string
+          assigned_by: string | null
+          assigned_at: string
+          seen_at: string | null
+        }
+        Insert: {
+          card_id: string
+          user_id: string
+          assigned_by?: string | null
+          assigned_at?: string
+          seen_at?: string | null
+        }
+        Update: {
+          card_id?: string
+          user_id?: string
+          assigned_by?: string | null
+          assigned_at?: string
+          seen_at?: string | null
+        }
+        Relationships: []
+      }
+      team_cards: {
+        Row: {
+          id: string
+          board_id: string
+          list_id: string
+          title: string
+          description: string
+          color: string | null
+          labels: Json
+          due_at: string | null
+          event_id: string | null
+          position: number
+          created_by: string | null
+          created_at: string
+          updated_at: string
+          archived_at: string | null
+        }
+        Insert: {
+          id?: string
+          board_id: string
+          list_id: string
+          title: string
+          description?: string
+          color?: string | null
+          labels?: Json
+          due_at?: string | null
+          event_id?: string | null
+          position?: number
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+          archived_at?: string | null
+        }
+        Update: {
+          id?: string
+          board_id?: string
+          list_id?: string
+          title?: string
+          description?: string
+          color?: string | null
+          labels?: Json
+          due_at?: string | null
+          event_id?: string | null
+          position?: number
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+          archived_at?: string | null
+        }
+        Relationships: []
+      }
+      team_checklist_items: {
+        Row: {
+          id: string
+          card_id: string
+          content: string
+          done: boolean
+          position: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          card_id: string
+          content: string
+          done?: boolean
+          position?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          card_id?: string
+          content?: string
+          done?: boolean
+          position?: number
+          created_at?: string
+        }
+        Relationships: []
+      }
+      team_lists: {
+        Row: {
+          id: string
+          board_id: string
+          title: string
+          is_done: boolean
+          position: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          board_id: string
+          title: string
+          is_done?: boolean
+          position?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          board_id?: string
+          title?: string
+          is_done?: boolean
+          position?: number
+          created_at?: string
         }
         Relationships: []
       }

@@ -2,20 +2,15 @@
 
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Receipt, ShieldCheck, Users, X, Search, ChevronRight, Download } from "lucide-react";
+import { Receipt, ShieldCheck, X, Search, ChevronRight, Download } from "lucide-react";
 import {
   declareExpenses,
   getMyExpenses,
   getMyValidatorScope,
   getSubmissionsToReview,
   reviewSubmission,
-  getValidatorAssignments,
-  setExpenseValidator,
-  getExpenseManagers,
-  setExpenseManagers,
   type MyExpenseItem,
   type SubmissionToReview,
-  type ValidatorAssignment,
 } from "@/app/actions/expenses";
 import { ExpenseLinesEditor, AttachmentLinks } from "@/components/board/expenses/ExpenseLinesEditor";
 import { ExpenseImport } from "@/components/board/expenses/ExpenseImport";
@@ -27,7 +22,7 @@ import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
 import { OpenEventButton } from "@/components/board/calendar/OpenEventButton";
 
-type Tab = "mine" | "validate" | "admin";
+type Tab = "mine" | "validate";
 type MineFilter = "a_declarer" | "upcoming" | "pending" | "approved" | "rejected" | "all";
 
 const MINE_FILTERS: { id: MineFilter; label: string }[] = [
@@ -548,156 +543,11 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
   );
 }
 
-/* ---------- Administration ---------- */
-
-/** Choix d'une personne avec recherche (plutôt qu'une longue liste déroulante). */
-function PersonPicker({
-  people,
-  value,
-  onChange,
-  placeholder = "Rechercher…",
-}: {
-  people: { id: string; name: string; email: string | null }[];
-  value: string | null;
-  onChange: (id: string | null) => void;
-  placeholder?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const current = people.find((p) => p.id === value);
-  const nq = normalize(q.trim());
-  const matches = people.filter((p) => !nq || normalize(`${p.name} ${p.email ?? ""}`).includes(nq)).slice(0, 8);
-  return (
-    <div className="relative w-[240px]">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`flex w-full items-center justify-between gap-2 rounded-btn border px-2.5 py-1.5 text-left text-sm ${current ? "border-line text-ink" : "border-warn text-ink-4"}`}
-      >
-        <span className="truncate">{current?.name ?? "— Aucun —"}</span>
-        <ChevronRight size={13} className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
-      </button>
-      {open && (
-        <div className="absolute right-0 z-20 mt-1 w-full rounded-btn border border-line bg-card p-1.5 shadow-modal">
-          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} className="mb-1 w-full rounded-btn border border-line px-2 py-1 text-sm outline-none" />
-          <button
-            onClick={() => {
-              onChange(null);
-              setOpen(false);
-            }}
-            className="block w-full rounded-btn px-2 py-1 text-left text-xs text-ink-4 hover:bg-hover"
-          >
-            — Aucun —
-          </button>
-          {matches.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => {
-                onChange(p.id);
-                setOpen(false);
-                setQ("");
-              }}
-              className="block w-full truncate rounded-btn px-2 py-1 text-left text-sm text-ink-2 hover:bg-hover"
-            >
-              {p.name} <span className="text-[11px] text-ink-4">{p.email}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ValidatorsAdmin({ isAdmin }: { isAdmin: boolean }) {
-  const [rows, setRows] = useState<ValidatorAssignment[] | null>(null);
-  const [managers, setManagers] = useState<string[]>([]);
-  const [query, setQuery] = useState("");
-  const [onlyMissing, setOnlyMissing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    getValidatorAssignments()
-      .then(setRows)
-      .catch((e: Error) => setError(e.message));
-    if (isAdmin) getExpenseManagers().then(setManagers).catch(() => undefined);
-  }, [isAdmin]);
-
-  const change = async (personId: string, validatorId: string | null) => {
-    setRows((prev) => prev?.map((r) => (r.id === personId ? { ...r, validatorId } : r)) ?? null);
-    const res = await setExpenseValidator(personId, validatorId);
-    if (res.error) setError(res.error);
-  };
-  const saveManagers = async (ids: string[]) => {
-    setManagers(ids);
-    const res = await setExpenseManagers(ids);
-    if (res.error) setError(res.error);
-  };
-
-  if (error) return <p className="text-sm text-bad">{error}</p>;
-  if (!rows) return <div className="p-6 text-sm text-ink-4">Chargement…</div>;
-
-  const q = normalize(query.trim());
-  const visible = rows.filter((r) => (!q || normalize(`${r.name} ${r.email ?? ""}`).includes(q)) && (!onlyMissing || !r.validatorId));
-  const withoutValidator = rows.filter((r) => !r.validatorId).length;
-
-  return (
-    <div className="space-y-4">
-      {isAdmin && (
-        <div className="space-y-2 rounded-panel border border-line bg-card p-4">
-          <div className="text-sm font-bold text-ink">Qui peut régler les responsables N+1</div>
-          <p className="text-xs text-ink-4">Les administrateurs y ont toujours accès. Ajoutez ici d&rsquo;autres personnes (RH, direction…).</p>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {managers.map((id) => {
-              const p = rows.find((r) => r.id === id);
-              return (
-                <span key={id} className="flex items-center gap-1 rounded-full bg-sel-bg px-2.5 py-1 text-xs font-semibold text-link">
-                  {p?.name ?? "—"}
-                  <button onClick={() => saveManagers(managers.filter((m) => m !== id))} className="hover:text-bad">
-                    <X size={11} />
-                  </button>
-                </span>
-              );
-            })}
-            <PersonPicker
-              people={rows.filter((r) => !managers.includes(r.id))}
-              value={null}
-              onChange={(id) => id && saveManagers([...managers, id])}
-              placeholder="Ajouter une personne…"
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-btn border border-line bg-card px-2.5 py-1.5">
-          <Search size={13} className="text-ink-4" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher une personne…" className="w-full bg-transparent text-sm outline-none" />
-        </div>
-        <FilterChip active={onlyMissing} onClick={() => setOnlyMissing((v) => !v)}>
-          Sans N+1 ({withoutValidator})
-        </FilterChip>
-      </div>
-      <div className="overflow-visible rounded-panel border border-line bg-card">
-        {visible.map((r) => (
-          <div key={r.id} className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold text-ink">{r.name}</div>
-              <div className="truncate text-[11px] text-ink-4">{r.email}</div>
-            </div>
-            <span className="text-xs text-ink-3">N+1</span>
-            <PersonPicker people={rows.filter((v) => v.id !== r.id)} value={r.validatorId} onChange={(id) => change(r.id, id)} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /* ---------- Écran ---------- */
 
 /**
  * Frais : « Mes frais » (événements où je suis sollicité → déclarer), « À valider » (si je suis N+1
- * de quelqu'un, ou admin) et « Responsables N+1 » (admin : qui valide les frais de qui).
+ * de quelqu'un, ou admin). Le N+1 de chacun se règle dans Administration → Utilisateurs.
  */
 export function FraisScreen() {
   const [tab, setTab] = useState<Tab>("mine");
@@ -711,7 +561,6 @@ export function FraisScreen() {
   const tabs: { id: Tab; label: string; icon: typeof Receipt; badge?: number; show: boolean }[] = [
     { id: "mine", label: "Mes frais", icon: Receipt, show: true },
     { id: "validate", label: "À valider", icon: ShieldCheck, badge: scope?.pending, show: !!scope?.isValidator },
-    { id: "admin", label: "Responsables N+1", icon: Users, show: !!scope?.canManageValidators },
   ];
 
   return (
@@ -738,7 +587,6 @@ export function FraisScreen() {
 
       {tab === "mine" && <MyExpenses />}
       {tab === "validate" && <ToValidate onChanged={() => void loadScope()} />}
-      {tab === "admin" && <ValidatorsAdmin isAdmin={!!scope?.isAdmin} />}
     </div>
   );
 }

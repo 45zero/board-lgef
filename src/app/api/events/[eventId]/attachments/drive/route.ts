@@ -8,8 +8,14 @@ import { createResumableUploadSession } from "@/lib/google/drive";
 import { archiveSubFolder, eventArchiveFolder } from "@/lib/google/archiveFolders";
 
 const MEDIA_FOLDER_NAME = "Médias";
+/** Pièces jointes qui ne sont ni photo ni vidéo : rangées à part, jamais proposées à la publication. */
+const DOCUMENTS_FOLDER_NAME = "Documents";
 
-/** N'accepte que les métadonnées (nom, type) — le fichier lui-même part directement du navigateur vers Google. */
+/**
+ * N'accepte que les métadonnées (nom, type) — le fichier lui-même part directement du navigateur vers Google.
+ * `teamCardId` : fichier déposé depuis une carte de l'Espace Team liée à l'événement — étiqueté pour
+ * que la carte le retrouve (voir src/app/actions/team-attachments.ts).
+ */
 export async function POST(request: Request, { params }: { params: Promise<{ eventId: string }> }) {
   const { eventId } = await params;
 
@@ -27,9 +33,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
     return NextResponse.json({ ok: false, reason: "no_drive" }, { status: 200 });
   }
 
-  const { filename, mimeType } = (await request.json()) as { filename?: string; mimeType?: string };
+  const { filename, mimeType, teamCardId } = (await request.json()) as { filename?: string; mimeType?: string; teamCardId?: string };
   if (!filename) {
     return NextResponse.json({ ok: false, error: "Nom de fichier manquant" }, { status: 400 });
+  }
+
+  // Carte d'où vient le fichier : doit être visible par l'utilisateur et liée à cet événement.
+  if (teamCardId) {
+    const { data: card } = await supabase.from("team_cards").select("event_id").eq("id", teamCardId).maybeSingle();
+    if (card?.event_id !== eventId) return NextResponse.json({ ok: false, error: "Carte non liée à cet événement." }, { status: 403 });
   }
 
   const [{ data: event }, { data: profile }] = await Promise.all([
@@ -46,7 +58,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
   try {
     const cache = new Map();
     const eventFolder = await eventArchiveFolder(account, { title: eventTitle, start: eventDateObj }, cache);
-    const mediaFolder = await archiveSubFolder(account, eventFolder, MEDIA_FOLDER_NAME, cache);
+    const isMedia = /^(image|video)\//.test(mimeType ?? "");
+    const mediaFolder = await archiveSubFolder(account, eventFolder, isMedia ? MEDIA_FOLDER_NAME : DOCUMENTS_FOLDER_NAME, cache);
 
     const description = [
       `Événement : ${eventTitle}`,
@@ -60,6 +73,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
       parentId: mediaFolder.id,
       mimeType: mimeType || "application/octet-stream",
       description,
+      appProperties: teamCardId
+        ? { teamCardId, uploadedById: user.id, uploadedByName: uploaderName.slice(0, 100), source: "upload" }
+        : undefined,
     });
 
     return NextResponse.json({ ok: true, uploadUrl });

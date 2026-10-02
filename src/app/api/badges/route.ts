@@ -16,6 +16,8 @@ export type AppBadges = {
   audiovisuel: number;
   /** Frais : mes événements à déclarer / déclarations de mon équipe à valider (N+1). */
   frais: { toDeclare: number; toValidate: number };
+  /** Espace Team : cartes qui m'ont été assignées et que je n'ai pas encore ouvertes. */
+  trello: number;
 };
 
 /**
@@ -48,7 +50,7 @@ export async function GET(request: Request) {
     }
   };
 
-  const [mails, calendrier, inscription, audiovisuel, frais] = await Promise.all([
+  const [mails, calendrier, inscription, audiovisuel, frais, trello] = await Promise.all([
     withMails
       ? safe(async () => {
           const accounts = await prisma.connectedAccount.findMany({ where: { user_id: userId, provider: "google" } });
@@ -102,8 +104,20 @@ export async function GET(request: Request) {
           { toDeclare: 0, toValidate: 0 }
         )
       : undefined,
+    withDb
+      ? safe(async () => {
+          const { count } = await supabase
+            .from("team_card_members")
+            .select("card_id, team_cards!inner(archived_at)", { count: "exact", head: true })
+            .eq("user_id", userId)
+            .is("seen_at", null)
+            .neq("assigned_by", userId)
+            .is("team_cards.archived_at", null);
+          return count ?? 0;
+        }, 0)
+      : undefined,
   ]);
 
-  const body: Partial<AppBadges> = { mails, calendrier, inscription, audiovisuel, frais };
+  const body: Partial<AppBadges> = { mails, calendrier, inscription, audiovisuel, frais, trello };
   return NextResponse.json(body, { headers: { "Cache-Control": "private, no-store" } });
 }

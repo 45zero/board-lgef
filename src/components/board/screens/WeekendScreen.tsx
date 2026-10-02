@@ -1,5 +1,7 @@
 "use client";
 
+import { getPeriodCosts } from "@/app/actions/staff";
+import { euros } from "@/lib/board/staff";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
@@ -253,10 +255,17 @@ function emptyForm(weekendStart: Date, previous?: FormState): FormState {
     photographerId: "",
     publisherId: previous?.publisherId ?? "",
     video: false,
+    videographerId: "",
   };
 }
 
-type FormState = Omit<MatchInput, "start" | "photographerId" | "publisherId"> & { date: string; time: string; photographerId: string; publisherId: string };
+type FormState = Omit<MatchInput, "start" | "photographerId" | "publisherId" | "videographerId"> & {
+  date: string;
+  time: string;
+  photographerId: string;
+  publisherId: string;
+  videographerId: string;
+};
 
 function formFromMatch(m: WeekendMatch): FormState {
   const { date, time } = toLocalInput(m.start);
@@ -274,6 +283,7 @@ function formFromMatch(m: WeekendMatch): FormState {
     photographerId: m.photo?.status === "taken" ? m.photo.photographer?.id ?? "" : "",
     publisherId: m.photo?.publisher?.id ?? "",
     video: !!m.video,
+    videographerId: m.video && m.video.state !== "no" ? m.video.technicianId ?? "" : "",
   };
 }
 
@@ -310,6 +320,7 @@ function MatchForm({
           start: start.toISOString(),
           photographerId: form.photo ? form.photographerId || null : null,
           publisherId: form.photo ? form.publisherId || null : null,
+          videographerId: form.video ? form.videographerId || null : null,
         },
         match?.eventId
       ));
@@ -433,8 +444,33 @@ function MatchForm({
             <label className="flex items-center gap-2 text-sm font-semibold text-ink">
               <input type="checkbox" checked={form.video} disabled={!!match?.video} onChange={(e) => set("video", e.target.checked)} />
               <Video size={14} /> Demande vidéo
-              {match?.video && <span className="text-xs font-normal text-ink-4">(à gérer depuis l&apos;événement)</span>}
             </label>
+            {form.video && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className={label}>Vidéaste</label>
+                  <select value={form.videographerId} onChange={(e) => set("videographerId", e.target.value)} className={input}>
+                    <option value="">Proposer au réseau</option>
+                    {data.videographers.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {match?.video && (
+                  <p className="self-end pb-2 text-xs text-ink-4">
+                    {match.video.state === "accepted"
+                      ? `Confirmé par ${match.video.technician}`
+                      : match.video.state === "pending"
+                        ? `Demande envoyée à ${match.video.technician}, réponse attendue`
+                        : match.video.state === "no"
+                          ? "Demande refusée — choisissez un autre vidéaste"
+                          : "Personne de désigné pour l'instant"}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <datalist id="weekend-competitions">
@@ -651,7 +687,23 @@ export function WeekendScreen() {
   useEffect(() => {
     void load();
   }, [load]);
-  useLiveRefresh(["events", "coverage_requests", "media_publications", "photo_missions", "match_details"], () => void load());
+  // Coût du week-end pour un N+1 (ses N-1) ou un administrateur (tout le monde) : null pour les autres.
+  const [cost, setCost] = useState<{ key: string; value: { confirmed: number; pending: number; people: number } | null } | null>(null);
+  const loadCost = useCallback(async () => {
+    const res = await getPeriodCosts(range.start.toISOString(), range.end.toISOString());
+    setCost({ key: rangeKey, value: res.ok ? res.data : null });
+  }, [range, rangeKey]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- l'état n'est posé qu'à la réponse du serveur
+    void loadCost();
+  }, [loadCost]);
+  const weekendCost = cost?.key === rangeKey ? cost.value : null;
+  useLiveRefresh(["events", "coverage_requests", "media_publications", "photo_missions", "match_details"], () => {
+    void load();
+    void loadCost();
+  });
+
+
 
   // Demandes d'accès en attente (administrateurs) : pastille sur « Couverture match ».
   const isAdmin = !!data?.viewer.isAdmin;
@@ -767,6 +819,13 @@ export function WeekendScreen() {
           <div className="text-xs text-ink-3">
             {stats.total} match{stats.total > 1 ? "s" : ""} · <span className="font-semibold text-good">{stats.covered} photographe{stats.covered > 1 ? "s" : ""} confirmé{stats.covered > 1 ? "s" : ""}</span>
             {stats.open > 0 && <> · <span className="font-semibold text-warn">{stats.open} à prendre</span></>}
+            {weekendCost && (weekendCost.confirmed > 0 || weekendCost.pending > 0) && (
+              <span title="Intervenants dont vous êtes le N+1 (tous pour un administrateur), d'après leur forfait — détail dans Effectif">
+                {" · "}
+                <span className="font-semibold text-ink">Coût {euros(weekendCost.confirmed)}</span>
+                {weekendCost.pending > 0 && <span className="text-warn"> + {euros(weekendCost.pending)} prévisionnel</span>}
+              </span>
+            )}
           </div>
         )}
       </div>

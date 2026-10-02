@@ -13,6 +13,7 @@ export function useAppBadges(): Record<string, AppBadge[]> {
   const calendrier = data.calendrier ?? 0;
   const inscription = data.inscription ?? { sent: 0, pending: 0 };
   const audiovisuel = data.audiovisuel ?? 0;
+  const trello = data.trello ?? 0;
   const badges: Record<string, AppBadge[]> = {
     mails: [{ count: mails, tone: "red", title: `${mails} mail(s) non lu(s)` }],
     calendrier: [{ count: calendrier, tone: "navy", title: `${calendrier} événement(s) aujourd'hui` }],
@@ -21,6 +22,7 @@ export function useAppBadges(): Record<string, AppBadge[]> {
       { count: inscription.pending, tone: "orange", title: `${inscription.pending} invitation(s) en attente d'envoi` },
     ],
     audiovisuel: [{ count: audiovisuel, tone: "red", title: `${audiovisuel} publication(s) à publier` }],
+    trello: [{ count: trello, tone: "red", title: `${trello} nouvelle(s) carte(s) assignée(s)` }],
     frais: [
       { count: data.frais?.toValidate ?? 0, tone: "red", title: `${data.frais?.toValidate ?? 0} note(s) de frais à valider` },
       { count: data.frais?.toDeclare ?? 0, tone: "orange", title: `${data.frais?.toDeclare ?? 0} note(s) de frais à déclarer` },

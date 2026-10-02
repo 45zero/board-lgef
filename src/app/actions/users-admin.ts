@@ -18,6 +18,8 @@ export interface AdminUser {
   role: UserRole;
   slugs: string[];
   createdAt: string | null;
+  /** N+1 : valide ses frais, ses pointages et ses factures, voit ses coûts (profiles.expense_validator_id). */
+  managerId: string | null;
 }
 
 export interface SpecialtyOption {
@@ -45,7 +47,7 @@ async function listUsersImpl(): Promise<UsersList> {
   const { userId, isAdmin } = await requireManager();
   const service = createServiceClient();
   const [{ data: profiles, error }, { data: links }, { data: specialties }] = await Promise.all([
-    service.from("profiles").select("id, first_name, last_name, email, role, created_at").order("last_name"),
+    service.from("profiles").select("id, first_name, last_name, email, role, created_at, expense_validator_id").order("last_name"),
     service.from("profile_specialties").select("user_id, specialties(slug)"),
     service.from("specialties").select("slug, label, domain").order("label"),
   ]);
@@ -64,6 +66,7 @@ async function listUsersImpl(): Promise<UsersList> {
       role: (p.role ?? "user") as UserRole,
       slugs: slugsBy.get(p.id) ?? [],
       createdAt: p.created_at,
+      managerId: p.expense_validator_id,
     })),
     specialties: (specialties ?? []) as SpecialtyOption[],
     me: { id: userId, isAdmin },
@@ -71,7 +74,9 @@ async function listUsersImpl(): Promise<UsersList> {
 }
 
 /** Enregistre nom, rôle et spécialités (l'ensemble remplace les spécialités actuelles). */
-async function updateUserImpl(id: string, input: { firstName: string; lastName: string; role: UserRole; slugs: string[] }) {
+type UserInput = { firstName: string; lastName: string; role: UserRole; slugs: string[] };
+
+async function updateUserImpl(id: string, input: UserInput) {
   const { userId, isAdmin } = await requireManager();
   const service = createServiceClient();
   const { data: current } = await service.from("profiles").select("role").eq("id", id).single();
@@ -114,6 +119,16 @@ export async function listUsers() {
   return toResult(() => listUsersImpl());
 }
 
-export async function updateUser(id: string, input: { firstName: string; lastName: string; role: UserRole; slugs: string[] }) {
+export async function updateUser(id: string, input: UserInput) {
   return toResult(() => updateUserImpl(id, input));
+}
+
+/** N+1 d'un compte (null : aucun) — enregistré dès qu'il est choisi dans la fiche. */
+export async function setUserManager(id: string, managerId: string | null) {
+  return toResult(async () => {
+    await requireManager();
+    if (managerId === id) throw new Error("Une personne ne peut pas être son propre N+1.");
+    const { error } = await createServiceClient().from("profiles").update({ expense_validator_id: managerId }).eq("id", id);
+    if (error) throw new Error(error.message);
+  });
 }

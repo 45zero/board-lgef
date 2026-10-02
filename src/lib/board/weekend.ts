@@ -34,7 +34,7 @@ export interface WeekendMatch {
    * Captation vidéo (coverage_requests) ; nulle si aucune demande. open : personne de désigné ;
    * pending : vidéaste proposé, réponse attendue ; accepted : confirmé ; no : demande refusée.
    */
-  video: { state: "open" | "pending" | "accepted" | "no"; technician: string | null } | null;
+  video: { state: "open" | "pending" | "accepted" | "no"; technician: string | null; technicianId: string | null } | null;
   /** Photos déposées sur l'événement. */
   photoCount: number;
   /** Un album photo de l'événement est publié. */
@@ -46,6 +46,8 @@ export interface WeekendData {
   matches: WeekendMatch[];
   /** Photographes (coordinateurs uniquement). */
   photographers: PersonLite[];
+  /** Vidéastes (coordinateurs uniquement). */
+  videographers: PersonLite[];
   /** Réseau Couverture match : photographes et vidéastes (coordinateurs uniquement). */
   network: { person: PersonLite; photo: boolean; video: boolean }[];
   /** Relais de publication possibles (coordinateurs uniquement). */
@@ -67,6 +69,8 @@ export interface MatchInput {
   photographerId: string | null;
   publisherId: string | null;
   video: boolean;
+  /** Vidéaste à qui la captation est demandée (il accepte ou refuse) ; nul : proposée au réseau. */
+  videographerId: string | null;
 }
 
 /** Compétitions proposées à la saisie (texte libre accepté). */

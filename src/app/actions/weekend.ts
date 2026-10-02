@@ -133,7 +133,7 @@ async function getWeekendImpl(startISO: string, endISO: string): Promise<Weekend
     ids.length
       ? supabase
           .from("coverage_requests")
-          .select("event_id, status, technician_response, assigned_technician_name")
+          .select("event_id, status, technician_response, assigned_technician_id, assigned_technician_name")
           .in("event_id", ids)
           .neq("status", "cancelled")
       : Promise.resolve({ data: [] }),
@@ -161,7 +161,7 @@ async function getWeekendImpl(startISO: string, endISO: string): Promise<Weekend
 
   const detailsBy = new Map(((details.data ?? []) as { event_id: string; competition: string; home_team: string; home_level: string | null; away_team: string; away_level: string | null; regions: string[] }[]).map((d) => [d.event_id, d]));
   const missionBy = new Map(missionRows.map((m) => [m.event_id, m]));
-  const coverageBy = new Map(((coverage.data ?? []) as { event_id: string; status: string | null; technician_response: string | null; assigned_technician_name: string | null }[]).map((c) => [c.event_id, c]));
+  const coverageBy = new Map(((coverage.data ?? []) as { event_id: string; status: string | null; technician_response: string | null; assigned_technician_id: string | null; assigned_technician_name: string | null }[]).map((c) => [c.event_id, c]));
   const photoCount = new Map<string, number>();
   for (const f of (files.data ?? []) as { event_id: string }[]) photoCount.set(f.event_id, (photoCount.get(f.event_id) ?? 0) + 1);
   const published = new Set(((publications.data ?? []) as { event_id: string }[]).map((p) => p.event_id));
@@ -204,6 +204,7 @@ async function getWeekendImpl(startISO: string, endISO: string): Promise<Weekend
                     ? "pending"
                     : "open",
             technician: c.assigned_technician_name,
+            technicianId: c.assigned_technician_id,
           }
         : null,
       photoCount: photoCount.get(e.id) ?? 0,
@@ -217,6 +218,7 @@ async function getWeekendImpl(startISO: string, endISO: string): Promise<Weekend
     // Photographes : seulement les matchs proposés au réseau.
     matches: canCoordinate ? matches : matches.filter((m) => m.photo && m.photo.status !== "draft"),
     photographers: photographerIds.map((id) => people.get(id)).filter((p): p is PersonLite => !!p).sort(byName),
+    videographers: videographerIds.map((id) => people.get(id)).filter((p): p is PersonLite => !!p).sort(byName),
     network: [...new Set([...photographerIds, ...videographerIds])]
       .map((id) => people.get(id))
       .filter((p): p is PersonLite => !!p)
@@ -307,12 +309,50 @@ async function saveMatchImpl(input: MatchInput, eventId?: string): Promise<strin
   }
 
   if (input.video) {
-    const { data: request } = await supabase.from("coverage_requests").select("id").eq("event_id", id).maybeSingle();
-    if (!request) {
-      const { error } = await supabase.from("coverage_requests").insert({ event_id: id, requester_id: userId, status: "pending" });
+    const { data: request } = await supabase
+      .from("coverage_requests")
+      .select("id, assigned_technician_id, technician_response")
+      .eq("event_id", id)
+      .maybeSingle();
+    // Demande d'assignation à un vidéaste : il la reçoit en notification et l'accepte ou la refuse
+    // (même flux que « Assigner » depuis la fiche événement). Sans vidéaste : proposée au réseau.
+    const designated = input.videographerId;
+    const changed = designated ? designated !== request?.assigned_technician_id || request?.technician_response === "rejected" : false;
+    let assignment = {};
+    if (changed && designated) {
+      const { data: tech } = await createServiceClient().from("profiles").select("id, first_name, last_name, email").eq("id", designated).single();
+      if (!tech) throw new Error("Vidéaste introuvable.");
+      assignment = {
+        assigned_technician_id: tech.id,
+        technician_id: tech.id,
+        assigned_technician_name: toPerson(tech).name,
+        assigned_technician_email: tech.email,
+        technician_response: "pending",
+        status: "pending",
+        coverage_symbol: null,
+      };
+    } else if (!designated && request?.assigned_technician_id && request.technician_response !== "accepted") {
+      // Retour au réseau : on retire la demande faite à un vidéaste qui n'a pas encore accepté.
+      assignment = { assigned_technician_id: null, technician_id: null, assigned_technician_name: null, assigned_technician_email: null, technician_response: null, status: "pending" };
+    }
+    if (request) {
+      if (Object.keys(assignment).length) {
+        const { error } = await supabase.from("coverage_requests").update(assignment).eq("id", request.id);
+        if (error) throw new Error(error.message);
+      }
+    } else {
+      const { error } = await supabase.from("coverage_requests").insert({ event_id: id, requester_id: userId, status: "pending", ...assignment });
       if (error) throw new Error(error.message);
     }
     await supabase.from("events").update({ requires_coverage: true }).eq("id", id);
+    if (changed && designated) {
+      await notify([designated], {
+        type: "coverage_assignment",
+        title: "Match à filmer",
+        message: `${await actorName(userId)} vous demande la captation vidéo : ${eventFields.title}. Acceptez ou refusez depuis l'événement.`,
+        eventId: id,
+      });
+    }
   }
   return id;
 }

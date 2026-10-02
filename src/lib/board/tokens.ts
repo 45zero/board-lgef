@@ -39,13 +39,15 @@ export const ORG_COLORS: Record<OrgKey, { base: string; bg: string; ink: string 
   perso: { base: "#7A3FD9", bg: "#EAE2FA", ink: "#4A2585" },
 };
 
-export type CoverageState = "photo" | "video" | "both" | "wait" | "no";
+/** wait : personne de désigné ; assigned : quelqu'un est désigné, sa réponse est attendue. */
+export type CoverageState = "photo" | "video" | "both" | "wait" | "assigned" | "no";
 
 export const COVERAGE_LABELS: Record<CoverageState, { long: string; short: string }> = {
   photo: { long: "Photo confirmée", short: "Photo" },
   video: { long: "Vidéo confirmée", short: "Vidéo" },
   both: { long: "Photo + vidéo", short: "Photo + vidéo" },
-  wait: { long: "En attente de couverture", short: "En attente" },
+  wait: { long: "En attente de couverture — personne de désigné", short: "En attente" },
+  assigned: { long: "Désigné — réponse attendue", short: "Désigné" },
   no: { long: "Couverture refusée", short: "Refusée" },
 };
 
@@ -54,6 +56,7 @@ export const COVERAGE_COLORS: Record<CoverageState, { ink: string; bg: string }>
   video: { ink: "#125F41", bg: "#DCF0E6" },
   both: { ink: "#125F41", bg: "#DCF0E6" },
   wait: { ink: "#7A4E06", bg: "#FCEDD5" },
+  assigned: { ink: "#22397C", bg: "#E2E8FA" },
   no: { ink: "#A50E15", bg: "#FBDFE1" },
 };
 
@@ -66,7 +69,7 @@ export interface BoardApp {
 export const BOARD_APPS: BoardApp[] = [
   { id: "accueil", label: "Accueil", kicker: "ESPACE DE TRAVAIL" },
   { id: "mails", label: "Mails", kicker: "MESSAGERIE" },
-  { id: "trello", label: "Trello", kicker: "TABLEAUX" },
+  { id: "trello", label: "Espace Team", kicker: "TABLEAUX" },
   { id: "planning", label: "Planning", kicker: "POLES" },
   { id: "calendrier", label: "Calendrier", kicker: "EVENEMENTS" },
   { id: "weekend", label: "Week-end", kicker: "MATCHS & COUVERTURE" },
@@ -79,6 +82,7 @@ export const BOARD_APPS: BoardApp[] = [
   { id: "inscription", label: "Inscription", kicker: "RSVP CLUBS" },
   { id: "cartographie", label: "Cartographie", kicker: "CLUBS DU GRAND EST" },
   { id: "frais", label: "Frais", kicker: "NOTES DE FRAIS" },
+  { id: "effectif", label: "Effectif", kicker: "N-1 & COÛTS" },
   { id: "compta", label: "Compta", kicker: "FACTURATION" },
   { id: "audiovisuel", label: "Audiovisuel", kicker: "COUVERTURE MEDIA" },
   { id: "communication", label: "Communication", kicker: "PLAN DE COM" },

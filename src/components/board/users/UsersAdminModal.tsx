@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, ChevronLeft, Search, X } from "lucide-react";
-import { listUsers, updateUser, type AdminUser, type SpecialtyOption, type UserRole, type UsersList } from "@/app/actions/users-admin";
+import { listUsers, setUserManager, updateUser, type AdminUser, type SpecialtyOption, type UserRole, type UsersList } from "@/app/actions/users-admin";
 import { unwrap } from "@/lib/board/actionResult";
 import { listAccessRequests, type AccessRequest } from "@/app/actions/account-requests";
 import { AccessRequestCard } from "@/components/board/users/AccessRequestCard";
@@ -95,12 +95,15 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 
 function UserEditor({
   user,
+  users,
   specialties,
   me,
   onSaved,
   onBack,
 }: {
   user: AdminUser;
+  /** Tous les comptes : choix du N+1. */
+  users: AdminUser[];
   specialties: SpecialtyOption[];
   me: { id: string; isAdmin: boolean };
   onSaved: () => void;
@@ -110,6 +113,24 @@ function UserEditor({
   const [lastName, setLastName] = useState(user.lastName);
   const [role, setRole] = useState<UserRole>(user.role);
   const [slugs, setSlugs] = useState<string[]>(user.slugs);
+  const [managerId, setManagerId] = useState<string>(user.managerId ?? "");
+  const [managerState, setManagerState] = useState<"idle" | "saving" | "saved">("idle");
+  // Le N+1 s'enregistre dès qu'il est choisi (pas besoin du bouton « Enregistrer »).
+  const changeManager = async (next: string) => {
+    const previous = managerId;
+    setManagerId(next);
+    setManagerState("saving");
+    setError(null);
+    try {
+      unwrap(await setUserManager(user.id, next || null));
+      setManagerState("saved");
+      onSaved();
+    } catch (e) {
+      setManagerId(previous);
+      setManagerState("idle");
+      setError(errorMessage(e));
+    }
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -208,6 +229,24 @@ function UserEditor({
             </button>
           ))}
         </div>
+      </div>
+
+      <div>
+        <div className={sectionTitle}>N+1 (responsable)</div>
+        <select value={managerId} disabled={managerState === "saving"} onChange={(e) => void changeManager(e.target.value)} className={`${input} disabled:opacity-60`}>
+          <option value="">Aucun</option>
+          {users
+            .filter((u) => u.id !== user.id)
+            .map((u) => (
+              <option key={u.id} value={u.id}>
+                {fullName(u)}
+              </option>
+            ))}
+        </select>
+        <p className="mt-1 text-[11px] text-ink-4">
+          {managerState === "saving" ? "Enregistrement…" : managerState === "saved" ? "✓ N+1 enregistré. " : "Enregistré dès qu'il est choisi. "}
+          Valide ses frais (et bientôt ses pointages et factures) ; voit ses interventions et leur coût dans Effectif.
+        </p>
       </div>
 
       <div>
@@ -400,6 +439,7 @@ export function UsersAdminModal({ onClose }: { onClose: () => void }) {
                 <UserEditor
                   key={selected.id}
                   user={selected}
+                  users={data.users}
                   specialties={data.specialties}
                   me={data.me}
                   onSaved={() => void load()}

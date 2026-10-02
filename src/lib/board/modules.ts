@@ -20,7 +20,7 @@ export const CONFIGURABLE_MODULES = BOARD_APPS.filter((a) => a.id !== "accueil")
 export const ALL_MODULE_IDS = BOARD_APPS.map((a) => a.id);
 
 /** Modules déjà disponibles dans le board (les autres sont « à venir »). */
-export const BUILT_MODULES = new Set(["accueil", "mails", "calendrier", "weekend", "ged", "drive", "inscription", "cartographie", "frais", "audiovisuel"]);
+export const BUILT_MODULES = new Set(["accueil", "trello", "effectif", "mails", "calendrier", "weekend", "ged", "drive", "inscription", "cartographie", "frais", "audiovisuel"]);
 
 export const defaultRule = (moduleId: string): ModuleRule => ({
   moduleId,

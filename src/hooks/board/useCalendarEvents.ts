@@ -110,7 +110,7 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       const [{ data: coverageRows }, { data: publishedRows }, { data: photoRows }] = await Promise.all([
         supabase
           .from("coverage_requests")
-          .select("event_id, status, coverage_symbol, technician_response")
+          .select("event_id, status, coverage_symbol, technician_response, assigned_technician_id")
           .in("event_id", eventIds)
           .order("created_at", { ascending: false }),
         // Médias de l'événement publiés sur les réseaux → sigle entouré dans le calendrier.
@@ -139,6 +139,10 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       weekendMatch: row.event_type === "match_du_week_end",
       photoCoverage: photoCovered.has(row.id),
       solicited: solicited.has(row.id),
+      awaitingMyAnswer: (() => {
+        const c = coverageByEvent.get(row.id);
+        return !!c && c.assigned_technician_id === user.id && c.status !== "rejected" && c.technician_response !== "accepted" && c.technician_response !== "rejected";
+      })(),
     }));
     setEvents(mapped);
     writeCache(cacheKey, mapped);
