@@ -34,7 +34,6 @@ import {
   AlignCenter,
   AlignRight,
   Code2,
-  FileSpreadsheet,
   MessageCircle,
 } from "lucide-react";
 import { useUserRole } from "@/hooks/board/useUserRole";
@@ -59,16 +58,12 @@ import {
   getCampaignEmbedHtml,
   listContactLists,
   createContactList,
-  deleteContactList,
-  listContactListMembers,
-  addContactListMember,
-  removeContactListMember,
   importContactListIntoCampaign,
-  importClubContactsIntoList,
 } from "@/app/actions/registration";
 import { uploadCampaignBlockAsset } from "@/lib/board/registrationAssets";
 import type { EmailBlock } from "@/lib/board/registrationEmail";
-import { parseClubExportRows, personName, formatFrPhone } from "@/lib/board/clubContacts";
+import { DirectoryManager } from "@/components/board/directory/DirectoryManager";
+import { personName, formatFrPhone } from "@/lib/board/clubContacts";
 
 type RegistrationEvent = Awaited<ReturnType<typeof listRegistrationEvents>>[number];
 type Campaign = Awaited<ReturnType<typeof getOrCreateCampaign>>;
@@ -395,262 +390,8 @@ function BlockEditor({
 }
 
 type ContactList = Awaited<ReturnType<typeof listContactLists>>[number];
-type ContactListMember = Awaited<ReturnType<typeof listContactListMembers>>[number];
 
-/** Gestion des annuaires réutilisables — créer/supprimer une liste, gérer ses membres (recherche club ou saisie manuelle). */
-function ContactListsModal({ onClose }: { onClose: () => void }) {
-  const [lists, setLists] = useState<ContactList[]>([]);
-  const [selected, setSelected] = useState<ContactList | null>(null);
-  const [members, setMembers] = useState<ContactListMember[]>([]);
-  const [newListName, setNewListName] = useState("");
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Awaited<ReturnType<typeof searchClubContacts>>>([]);
-  const [manualName, setManualName] = useState("");
-  const [manualEmail, setManualEmail] = useState("");
-  const [manualClub, setManualClub] = useState("");
-  const [manualPhone, setManualPhone] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [importMsg, setImportMsg] = useState<string | null>(null);
-
-  const refetchLists = async () => setLists(await listContactLists());
-  const refetchMembers = async (list: ContactList) => setMembers(await listContactListMembers(list.id));
-
-  useEffect(() => {
-    refetchLists();
-  }, []);
-
-  const createList = async () => {
-    if (!newListName.trim()) return;
-    const list = await createContactList(newListName.trim());
-    setNewListName("");
-    await refetchLists();
-    setSelected({ ...list, memberCount: 0 });
-    setMembers([]);
-  };
-
-  const runSearch = async () => {
-    if (!query.trim()) return setResults([]);
-    setResults(await searchClubContacts(query.trim()));
-  };
-
-  /** Export clubs (.xlsx) lu dans le navigateur, envoyé par lots de 500 (limite de taille des actions serveur). */
-  const importExcel = async (list: ContactList, file: File) => {
-    setImporting(true);
-    setImportMsg(null);
-    try {
-      const { readSheet } = await import("read-excel-file/browser");
-      const { contacts, skipped } = parseClubExportRows((await readSheet(file)) as unknown[][]);
-      let added = 0;
-      let updated = 0;
-      for (let i = 0; i < contacts.length; i += 500) {
-        setImportMsg(`Import… ${i}/${contacts.length}`);
-        const r = await importClubContactsIntoList(list.id, contacts.slice(i, i + 500));
-        added += r.added;
-        updated += r.updated;
-      }
-      setImportMsg(
-        `${added} contact(s) ajouté(s), ${updated} complété(s)${skipped ? ` — ${skipped} ligne(s) sans aucun contact ignorée(s)` : ""}.`
-      );
-      await refetchMembers(list);
-      await refetchLists();
-    } catch (e) {
-      setImportMsg(e instanceof Error ? e.message : "Échec de l'import.");
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div
-        className="flex h-[70vh] w-full max-w-3xl overflow-hidden rounded-modal border border-line bg-card shadow-modal"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex w-[220px] shrink-0 flex-col border-r border-line">
-          <div className="flex items-center justify-between border-b border-line px-3 py-2.5">
-            <span className="text-xs font-bold text-ink">Annuaires</span>
-            <button onClick={onClose} className="text-ink-4 hover:text-ink">
-              <X size={14} />
-            </button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {lists.map((l) => (
-              <button
-                key={l.id}
-                onClick={() => {
-                  setSelected(l);
-                  refetchMembers(l);
-                }}
-                className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs font-semibold ${
-                  selected?.id === l.id ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"
-                }`}
-              >
-                <span className="truncate">{l.name}</span>
-                <span className={selected?.id === l.id ? "text-white/70" : "text-ink-4"}>{l.memberCount}</span>
-              </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-1 border-t border-line p-2">
-            <input
-              value={newListName}
-              onChange={(e) => setNewListName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && createList()}
-              placeholder="Nouvel annuaire…"
-              className="min-w-0 flex-1 rounded-btn border border-line px-2 py-1.5 text-xs outline-none"
-            />
-            <button onClick={createList} className="shrink-0 text-ink-3 hover:text-ink">
-              <Plus size={14} />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex min-w-0 flex-1 flex-col p-4">
-          {!selected ? (
-            <div className="flex h-full items-center justify-center text-sm text-ink-4">
-              Choisis ou crée un annuaire à gauche.
-            </div>
-          ) : (
-            <>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-ink">{selected.name}</h3>
-                <label
-                  title="Export clubs : Civilité, Nom, Prénom, Club(numéro), Club(nom), Mobile personnel, Email principal, Email officiel club"
-                  className={`ml-auto mr-3 flex cursor-pointer items-center gap-1 text-xs font-semibold text-link hover:underline ${
-                    importing ? "pointer-events-none opacity-50" : ""
-                  }`}
-                >
-                  <FileSpreadsheet size={12} /> {importing ? "Import…" : "Importer un fichier Excel (.xlsx)"}
-                  <input
-                    type="file"
-                    accept=".xlsx"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = "";
-                      if (file) importExcel(selected, file);
-                    }}
-                  />
-                </label>
-                <button
-                  onClick={async () => {
-                    if (!confirm(`Supprimer l'annuaire « ${selected.name} » ?`)) return;
-                    await deleteContactList(selected.id);
-                    setSelected(null);
-                    await refetchLists();
-                  }}
-                  className="flex items-center gap-1 text-xs font-semibold text-red hover:underline"
-                >
-                  <Trash2 size={12} /> Supprimer l&rsquo;annuaire
-                </button>
-              </div>
-              {importMsg && <p className="mb-3 text-xs font-semibold text-ink-2">{importMsg}</p>}
-
-              <div className="mb-3 flex items-center gap-2">
-                <Search size={13} className="text-ink-4" />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && runSearch()}
-                  placeholder="Rechercher dans les autres annuaires…"
-                  className="flex-1 rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
-                />
-                <button onClick={runSearch} className="rounded-btn border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-2">
-                  Chercher
-                </button>
-              </div>
-              {results.length > 0 && (
-                <div className="mb-3 max-h-28 space-y-1 overflow-y-auto rounded-btn border border-line p-1.5">
-                  {results.map((r) => (
-                    <div key={r.id} className="flex items-center justify-between gap-2 rounded-btn px-2 py-1 hover:bg-hover">
-                      <span className="min-w-0 truncate text-xs text-ink-2">
-                        <span className="font-semibold text-ink">{r.club || personName(r)}</span>
-                        {r.club && personName(r) && r.club !== personName(r) ? ` · ${personName(r)}` : ""}
-                        <span className="text-ink-4"> · {[r.email, formatFrPhone(r.phone)].filter(Boolean).join(" · ")}</span>
-                      </span>
-                      <button
-                        onClick={async () => {
-                          await addContactListMember(selected.id, {
-                            name: personName(r) || r.name,
-                            email: r.email,
-                            phone: r.phone ?? undefined,
-                            club: r.club ?? undefined,
-                          });
-                          await refetchMembers(selected);
-                          await refetchLists();
-                          setResults((prev) => prev.filter((x) => x.id !== r.id));
-                        }}
-                        className="text-xs font-semibold text-link hover:underline"
-                      >
-                        Ajouter
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Nom" className="rounded-btn border border-line px-2 py-1.5 text-xs outline-none" />
-                <input value={manualEmail} onChange={(e) => setManualEmail(e.target.value)} placeholder="Email" className="rounded-btn border border-line px-2 py-1.5 text-xs outline-none" />
-                <input value={manualClub} onChange={(e) => setManualClub(e.target.value)} placeholder="Club" className="rounded-btn border border-line px-2 py-1.5 text-xs outline-none" />
-                <input value={manualPhone} onChange={(e) => setManualPhone(e.target.value)} type="tel" placeholder="Mobile (WhatsApp)" className="rounded-btn border border-line px-2 py-1.5 text-xs outline-none" />
-                <button
-                  onClick={async () => {
-                    if (!manualName.trim() || (!manualEmail.trim() && !manualPhone.trim())) return;
-                    await addContactListMember(selected.id, {
-                      name: manualName.trim(),
-                      email: manualEmail.trim(),
-                      phone: manualPhone.trim(),
-                      club: manualClub.trim(),
-                    });
-                    await refetchMembers(selected);
-                    await refetchLists();
-                    setManualName("");
-                    setManualEmail("");
-                    setManualClub("");
-                    setManualPhone("");
-                  }}
-                  className="flex items-center gap-1 rounded-btn border border-dashed border-line px-2 py-1.5 text-xs font-semibold text-ink-3 hover:bg-hover"
-                >
-                  <Plus size={11} /> Ajouter
-                </button>
-              </div>
-
-              <div className="min-h-0 flex-1 divide-y divide-line overflow-y-auto rounded-btn border border-line">
-                {members.length === 0 && <p className="p-3 text-xs italic text-ink-4">Aucun membre pour l&rsquo;instant.</p>}
-                {members.map((m) => (
-                  <div key={m.id} className="flex items-center gap-2 px-3 py-1.5">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs text-ink-2">
-                        <span className="font-semibold text-ink">{personName(m)}</span>
-                        {m.club ? ` · ${m.club}` : ""}
-                        {m.club_number ? <span className="text-ink-4"> ({m.club_number})</span> : null}
-                      </div>
-                      <div className="truncate text-[10px] text-ink-4">
-                        {[m.email, m.email_secondary, formatFrPhone(m.phone)].filter(Boolean).join(" · ")}
-                      </div>
-                    </div>
-                    <button
-                      onClick={async () => {
-                        await removeContactListMember(m.id);
-                        await refetchMembers(selected);
-                        await refetchLists();
-                      }}
-                      className="text-ink-4 hover:text-red"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => void }) {
+function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationEvent; onBack: () => void; onManageDirectories: () => void }) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [subject, setSubject] = useState("");
@@ -666,7 +407,6 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
   const [manualPhone, setManualPhone] = useState("");
   const [previewHtml, setPreviewHtml] = useState("");
   const [embedHtml, setEmbedHtml] = useState("");
-  const [listsModalOpen, setListsModalOpen] = useState(false);
   const [contactLists, setContactLists] = useState<ContactList[]>([]);
   const [importingListId, setImportingListId] = useState("");
   const [importResult, setImportResult] = useState<string | null>(null);
@@ -1058,7 +798,7 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
           <div className="mb-2 flex items-center justify-between">
             <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Destinataires</div>
             <button
-              onClick={() => setListsModalOpen(true)}
+              onClick={onManageDirectories}
               className="flex items-center gap-1 text-xs font-semibold text-link hover:underline"
             >
               <BookUser size={12} /> Gérer les annuaires
@@ -1321,30 +1061,33 @@ function CampaignEditor({ ev, onBack }: { ev: RegistrationEvent; onBack: () => v
         </div>
       )}
 
-      {listsModalOpen && (
-        <ContactListsModal
-          onClose={async () => {
-            setListsModalOpen(false);
-            setContactLists(await listContactLists());
-          }}
-        />
-      )}
     </div>
   );
 }
 
+type InscriptionView = { kind: "event"; id: string } | { kind: "list"; id: string } | null;
+
+/**
+ * Inscriptions : barre latérale avec les événements à inscription puis les annuaires ; la partie
+ * droite affiche la campagne de l'événement ou la gestion complète de l'annuaire choisi. Sur
+ * téléphone, la barre latérale est l'écran d'accueil et le contenu s'ouvre à sa place.
+ */
 export function InscriptionScreen() {
   const role = useUserRole();
   const [events, setEvents] = useState<RegistrationEvent[]>([]);
+  const [lists, setLists] = useState<ContactList[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<RegistrationEvent | null>(null);
+  const [view, setView] = useState<InscriptionView>(null);
+  const [newListName, setNewListName] = useState("");
 
   const canAccess = role.isAdmin || role.isSuperUser || role.isTechSalarie;
+  const refetchLists = () => listContactLists().then(setLists);
 
   useEffect(() => {
     if (!canAccess) return;
-    listRegistrationEvents().then((evs) => {
+    Promise.all([listRegistrationEvents(), listContactLists()]).then(([evs, ls]) => {
       setEvents(evs);
+      setLists(ls);
       setLoading(false);
     });
   }, [canAccess]);
@@ -1352,6 +1095,14 @@ export function InscriptionScreen() {
   useLiveRefresh(["event_registration_recipients", "event_registration_campaigns", "events"], () => {
     if (canAccess) void listRegistrationEvents().then(setEvents);
   });
+
+  const createList = async () => {
+    if (!newListName.trim()) return;
+    const list = await createContactList(newListName.trim());
+    setNewListName("");
+    await refetchLists();
+    setView({ kind: "list", id: list.id });
+  };
 
   if (role.loading) return null;
   if (!canAccess) {
@@ -1362,56 +1113,99 @@ export function InscriptionScreen() {
     );
   }
 
-  if (selected) return <CampaignEditor ev={selected} onBack={() => setSelected(null)} />;
+  const selectedEvent = view?.kind === "event" ? events.find((e) => e.id === view.id) : undefined;
+  const selectedList = view?.kind === "list" ? lists.find((l) => l.id === view.id) : undefined;
+  const section = "px-3 pb-1 pt-3 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4";
+  const item = (active: boolean) =>
+    `flex w-full items-center gap-2 px-3 py-2 text-left text-xs ${active ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"}`;
 
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
-      <h2 className="text-lg font-extrabold text-ink">Inscriptions</h2>
-      <p className="text-xs text-ink-4">
-        Événements du calendrier avec les inscriptions activées — active « Inscriptions » depuis la modal d&rsquo;un
-        événement pour qu&rsquo;il apparaisse ici.
-      </p>
-
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-panel border border-line bg-card">
-        {loading ? (
-          <div className="flex h-full items-center justify-center text-sm text-ink-4">Chargement…</div>
-        ) : events.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-sm text-ink-4">
-            Aucun événement avec inscriptions activées.
-          </div>
-        ) : (
-          <div className="divide-y divide-line">
-            {events.map((ev) => (
-              <button
-                key={ev.id}
-                onClick={() => setSelected(ev)}
-                className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-hover"
-              >
+    <div className="flex h-full min-h-0">
+      <aside className={`${view ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col border-r border-line bg-card md:w-64`}>
+        <h2 className="px-3 pt-4 text-lg font-extrabold text-ink">Inscriptions</h2>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className={section}>Événements à inscription</div>
+          {loading && <p className="px-3 py-2 text-xs text-ink-4">Chargement…</p>}
+          {!loading && events.length === 0 && (
+            <p className="px-3 py-2 text-[11px] text-ink-4">
+              Aucun — active « Inscriptions » depuis la modal d&rsquo;un événement du calendrier.
+            </p>
+          )}
+          {events.map((ev) => {
+            const active = view?.kind === "event" && view.id === ev.id;
+            return (
+              <button key={ev.id} onClick={() => setView({ kind: "event", id: ev.id })} className={item(active)}>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-bold text-ink">{ev.title}</span>
-                  <span className="block text-xs text-ink-4">
-                    {format(new Date(ev.start_date), "d MMMM yyyy", { locale: fr })}
-                    {ev.location ? ` · ${ev.location}` : ""}
+                  <span className="block truncate font-bold">{ev.title}</span>
+                  <span className={`block truncate text-[10px] ${active ? "text-white/70" : "text-ink-4"}`}>
+                    {format(new Date(ev.start_date), "d MMM yyyy", { locale: fr })}
+                    {ev.totalRecipients > 0 ? ` · ${ev.yesCount} oui · ${ev.noCount} non` : ""}
                   </span>
                 </span>
-                <EventArrow eventId={ev.id} />
                 <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                    ev.campaignStatus === "sent" ? "bg-good-bg text-good" : "bg-subtle text-ink-3"
+                  className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                    ev.campaignStatus === "sent" ? "bg-good-bg text-good" : active ? "bg-white/20 text-white" : "bg-subtle text-ink-3"
                   }`}
                 >
                   {ev.campaignStatus === "sent" ? "Envoyée" : "Brouillon"}
                 </span>
-                {ev.totalRecipients > 0 && (
-                  <span className="shrink-0 text-xs text-ink-4">
-                    {ev.yesCount} oui · {ev.noCount} non
-                  </span>
-                )}
               </button>
-            ))}
+            );
+          })}
+
+          <div className={`${section} mt-2 flex items-center gap-1 border-t border-line`}>
+            <BookUser size={11} /> Annuaires
+          </div>
+          {lists.map((l) => {
+            const active = view?.kind === "list" && view.id === l.id;
+            return (
+              <button key={l.id} onClick={() => setView({ kind: "list", id: l.id })} className={item(active)}>
+                <span className="min-w-0 flex-1 truncate font-semibold">{l.name}</span>
+                <span className={active ? "text-white/70" : "text-ink-4"}>{l.memberCount}</span>
+              </button>
+            );
+          })}
+          <div className="flex items-center gap-1 px-3 py-2">
+            <input
+              value={newListName}
+              onChange={(e) => setNewListName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && createList()}
+              placeholder="Nouvel annuaire…"
+              className="min-w-0 flex-1 rounded-btn border border-line px-2 py-1.5 text-xs outline-none"
+            />
+            <button onClick={createList} title="Créer l'annuaire" className="shrink-0 text-ink-3 hover:text-ink">
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <main className={`${view ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col`}>
+        {selectedEvent ? (
+          <CampaignEditor
+            key={selectedEvent.id}
+            ev={selectedEvent}
+            onBack={() => setView(null)}
+            onManageDirectories={() => lists[0] && setView({ kind: "list", id: lists[0].id })}
+          />
+        ) : selectedList ? (
+          <>
+            <button onClick={() => setView(null)} className="flex w-fit items-center gap-1.5 px-4 pt-3 text-xs font-semibold text-ink-3 hover:text-ink md:hidden">
+              <ArrowLeft size={13} /> Retour
+            </button>
+            <div className="min-h-0 flex-1">
+              <DirectoryManager key={selectedList.id} list={selectedList} onChanged={refetchLists} onDeleted={() => {
+                setView(null);
+                void refetchLists();
+              }} />
+            </div>
+          </>
+        ) : (
+          <div className="flex h-full items-center justify-center p-6 text-center text-sm text-ink-4">
+            Choisis un événement pour préparer ses inscriptions, ou un annuaire pour gérer ses contacts.
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }

@@ -334,6 +334,80 @@ export async function addContactListMember(
   if (error) throw new Error(error.message);
 }
 
+export async function renameContactList(listId: string, name: string) {
+  const { supabase } = await requireStaff();
+  if (!name.trim()) throw new Error("Nom vide.");
+  const { error } = await supabase.from("registration_contact_lists").update({ name: name.trim() }).eq("id", listId);
+  if (error) throw new Error(error.message);
+}
+
+/** Fiche complète d'un contact d'annuaire, telle que saisie dans la gestion des annuaires (Inscriptions). */
+export type ContactMemberInput = {
+  civility?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  club?: string | null;
+  club_number?: string | null;
+  email?: string | null;
+  email_secondary?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  postal_code?: string | null;
+  city?: string | null;
+};
+
+function memberRow(input: ContactMemberInput) {
+  const clean = (v: string | null | undefined) => (v ?? "").trim() || null;
+  const first = clean(input.first_name);
+  const last = clean(input.last_name);
+  return {
+    civility: clean(input.civility),
+    first_name: first,
+    last_name: last,
+    // `name` (obligatoire en base) : la personne, à défaut le club.
+    name: [first, last].filter(Boolean).join(" ") || clean(input.club) || clean(input.email) || "Sans nom",
+    club: clean(input.club),
+    club_number: clean(input.club_number),
+    email: clean(input.email)?.toLowerCase() ?? null,
+    email_secondary: clean(input.email_secondary)?.toLowerCase() ?? null,
+    phone: normalizeFrPhone(clean(input.phone)),
+    address: clean(input.address),
+    postal_code: clean(input.postal_code),
+    city: clean(input.city),
+  };
+}
+
+export async function createContactListMember(listId: string, input: ContactMemberInput) {
+  const { supabase } = await requireStaff();
+  const { error } = await supabase.from("registration_contact_list_members").insert({ list_id: listId, ...memberRow(input) });
+  if (error) throw new Error(error.message);
+}
+
+/** Modifie une fiche ; une adresse changée est re-localisée par la Cartographie (coordonnées remises à zéro). */
+export async function updateContactListMember(memberId: string, input: ContactMemberInput) {
+  const { supabase } = await requireStaff();
+  const row = memberRow(input);
+  const { data: before } = await supabase
+    .from("registration_contact_list_members")
+    .select("address, postal_code, city")
+    .eq("id", memberId)
+    .single();
+  const moved = !before || before.address !== row.address || before.postal_code !== row.postal_code || before.city !== row.city;
+  const { error } = await supabase
+    .from("registration_contact_list_members")
+    .update({ ...row, ...(moved ? { lat: null, lng: null, geocoded_at: null } : {}) })
+    .eq("id", memberId);
+  if (error) throw new Error(error.message);
+}
+
+export async function removeContactListMembers(memberIds: string[]) {
+  const { supabase } = await requireStaff();
+  for (let i = 0; i < memberIds.length; i += 200) {
+    const { error } = await supabase.from("registration_contact_list_members").delete().in("id", memberIds.slice(i, i + 200));
+    if (error) throw new Error(error.message);
+  }
+}
+
 export async function removeContactListMember(memberId: string) {
   const { supabase } = await requireStaff();
   const { error } = await supabase.from("registration_contact_list_members").delete().eq("id", memberId);
