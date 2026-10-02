@@ -3,7 +3,7 @@
 import { toResult } from "@/lib/board/actionResult";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
-import { KM_RATE, STAFF_STATUSES, type Engagement, type EngagementRole, type StaffOverview, type StaffPerson, type StaffStatus } from "@/lib/board/staff";
+import { KM_RATE, STAFF_STATUSES, type Engagement, type EngagementRole, type StaffInvoice, type StaffOverview, type StaffPerson, type StaffStatus } from "@/lib/board/staff";
 import { travelToEvent } from "@/lib/board/travel";
 
 // Effectif (sql/2026-10-03_staff_costs.sql) : mes N-1 (profiles.expense_validator_id = moi), tout le
@@ -107,7 +107,7 @@ async function loadEngagements(service: Service, userIds: string[] | null, fromI
   ]);
   const rateBy = new Map((rates ?? []).map((r) => [r.user_id, Number(r.amount_eur)]));
   const adjBy = new Map(adjustments.map((a) => [`${a.user_id}|${a.event_id}`, a]));
-  const kmBy = await mileage(service, list);
+  const [kmBy, invoiceBy] = await Promise.all([mileage(service, list), invoices(service, list)]);
 
   return list
     .map((e) => {
@@ -126,6 +126,7 @@ async function loadEngagements(service: Service, userIds: string[] | null, fromI
         adjusted: !!adj,
         note: adj?.note ?? null,
         km,
+        invoice: invoiceBy.get(`${e.userId}|${e.eventId}`) ?? null,
       };
     })
     .sort((a, b) => a.start.localeCompare(b.start));
@@ -157,6 +158,38 @@ async function mileage(service: Service, list: { userId: string; eventId: string
         }
       })
     );
+  }
+  return out;
+}
+
+/** Factures déposées (event_invoices) pour ces interventions (clé « user|event ») ; la plus récente. */
+async function invoices(service: Service, list: { userId: string; eventId: string }[]) {
+  const out = new Map<string, StaffInvoice>();
+  const eventIds = [...new Set(list.map((e) => e.eventId))];
+  const userIds = [...new Set(list.map((e) => e.userId))];
+  if (!eventIds.length) return out;
+  const rows: { id: string; event_id: string | null; user_id: string | null; status: string | null; amount_ttc: number | null; file_url: string | null; created_at: string | null }[] = [];
+  for (let i = 0; i < eventIds.length; i += 200) {
+    const { data } = await service
+      .from("event_invoices")
+      .select("id, event_id, user_id, status, amount_ttc, file_url, created_at")
+      .in("event_id", eventIds.slice(i, i + 200))
+      .in("user_id", userIds)
+      .order("created_at");
+    rows.push(...(data ?? []));
+  }
+  const ids = rows.map((r) => r.id);
+  const { data: atts } = ids.length ? await service.from("event_invoice_attachments").select("invoice_id").in("invoice_id", ids) : { data: [] };
+  const attCount = new Map<string, number>();
+  for (const a of atts ?? []) if (a.invoice_id) attCount.set(a.invoice_id, (attCount.get(a.invoice_id) ?? 0) + 1);
+  for (const r of rows) {
+    if (!r.event_id || !r.user_id) continue;
+    out.set(`${r.user_id}|${r.event_id}`, {
+      id: r.id,
+      status: r.status,
+      amountTtc: r.amount_ttc === null ? null : Number(r.amount_ttc),
+      files: (r.file_url ? 1 : 0) + (attCount.get(r.id) ?? 0),
+    });
   }
   return out;
 }
@@ -274,4 +307,52 @@ export const getPeriodCosts = async (fromISO: string, toISO: string) =>
       pending: engagements.filter((e) => !e.confirmed).reduce((n, e) => n + e.amount, 0),
       people: new Set(engagements.map((e) => e.userId)).size,
     };
+  });
+
+/** Fichiers d'une facture (stockage privé « invoices ») : liens temporaires, pour le N+1 ou un administrateur. */
+export const getInvoiceFiles = async (invoiceId: string) =>
+  toResult(async (): Promise<{ name: string; url: string }[]> => {
+    const v = await viewer();
+    const { data: invoice } = await v.service.from("event_invoices").select("id, user_id, file_url").eq("id", invoiceId).maybeSingle();
+    if (!invoice?.user_id) throw new Error("Facture introuvable.");
+    await requireCanManage(v, invoice.user_id);
+    const { data: atts } = await v.service.from("event_invoice_attachments").select("file_url, custom_name").eq("invoice_id", invoiceId).order("created_at");
+    const paths = [
+      ...(invoice.file_url ? [{ path: invoice.file_url, name: "Facture" }] : []),
+      ...(atts ?? []).filter((a) => a.file_url).map((a) => ({ path: a.file_url!, name: a.custom_name || "Pièce jointe" })),
+    ];
+    const out: { name: string; url: string }[] = [];
+    for (const p of paths) {
+      // Chemins enregistrés tels quels par l'appli calendrier : « prestataire_invoices/<user>/<fichier> », ou une URL complète.
+      if (/^https?:\/\//.test(p.path)) {
+        out.push({ name: p.name, url: p.path });
+        continue;
+      }
+      const { data } = await v.service.storage.from("invoices").createSignedUrl(p.path, 600);
+      if (data?.signedUrl) out.push({ name: p.name === "Facture" ? decodeURIComponent(p.path.split("/").pop() ?? "Facture") : p.name, url: data.signedUrl });
+    }
+    if (!out.length) throw new Error("Aucun fichier joint à cette facture.");
+    return out;
+  });
+
+/** Administrateur : me désigne comme N+1 de cette personne (bouton « Ajouter un N-1 » de l'Effectif). */
+export const addMyReport = async (personId: string) =>
+  toResult(async () => {
+    const v = await viewer();
+    if (!v.isAdmin) throw new Error("Réservé aux administrateurs (le N+1 se règle dans Administration → Utilisateurs).");
+    if (personId === v.userId) throw new Error("Vous ne pouvez pas être votre propre N+1.");
+    const { error } = await v.service.from("profiles").update({ expense_validator_id: v.userId }).eq("id", personId);
+    if (error) throw new Error(error.message);
+  });
+
+/** Comptes qui pourraient devenir mes N-1 (tous sauf moi et mes N-1 actuels). */
+export const listReportCandidates = async () =>
+  toResult(async (): Promise<{ id: string; name: string; email: string | null; managerName: string | null }[]> => {
+    const v = await viewer();
+    if (!v.isAdmin) return [];
+    const { data } = await v.service.from("profiles").select("id, first_name, last_name, email, expense_validator_id").order("last_name");
+    const names = new Map((data ?? []).map((p) => [p.id, personName(p)]));
+    return (data ?? [])
+      .filter((p) => p.id !== v.userId && p.expense_validator_id !== v.userId)
+      .map((p) => ({ id: p.id, name: personName(p), email: p.email, managerName: p.expense_validator_id ? (names.get(p.expense_validator_id) ?? null) : null }));
   });

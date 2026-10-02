@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, Check, ChevronDown, Inbox, Kanban, MoreHorizontal, Plus, Search, Users, X } from "lucide-react";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
+import { useAuth } from "@/contexts/AuthContext";
+import { readCache, writeCache } from "@/lib/board/localCache";
 import { unwrap } from "@/lib/board/actionResult";
 import {
   createTeamBoard,
@@ -38,7 +40,10 @@ const navItem = (active: boolean) =>
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 
 export function TeamScreen() {
-  const [ws, setWs] = useState<TeamWorkspace | null>(null);
+  const { user } = useAuth();
+  // Dernier état connu affiché tout de suite (navigateur), puis remplacé par le frais.
+  const cacheKey = `team:${user?.id ?? ""}`;
+  const [ws, setWs] = useState<TeamWorkspace | null>(() => readCache<TeamWorkspace>(cacheKey) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>({ kind: "mine" });
   const [openCardId, setOpenCardId] = useState<string | null>(null);
@@ -47,11 +52,13 @@ export function TeamScreen() {
 
   const load = useCallback(async () => {
     try {
-      setWs(unwrap(await getTeamWorkspace()));
+      const fresh = unwrap(await getTeamWorkspace());
+      setWs(fresh);
+      writeCache(cacheKey, fresh);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Chargement impossible.");
     }
-  }, []);
+  }, [cacheKey]);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- chargement initial, l'état n'est posé qu'à la réponse
     void load();

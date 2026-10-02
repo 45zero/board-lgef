@@ -1,5 +1,6 @@
 "use client";
 
+import { readCache, writeCache } from "@/lib/board/localCache";
 import { getPeriodCosts } from "@/app/actions/staff";
 import { euros } from "@/lib/board/staff";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -674,6 +675,7 @@ export function WeekendScreen() {
         .then(unwrap)
         .then((d) => {
           setData(d);
+          writeCache(`weekend:${range.start.toISOString()}`, d);
           setError(null);
         })
         .catch((e) => setError(errorMessage(e)))
@@ -685,8 +687,15 @@ export function WeekendScreen() {
   );
 
   useEffect(() => {
+    // Week-end déjà vu : affiché tout de suite (navigateur), puis rafraîchi.
+    const cached = readCache<WeekendData>(`weekend:${range.start.toISOString()}`);
+    if (cached) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- version connue d'abord, puis le réseau
+      setData(cached);
+      setLoadedKey(range.start.toISOString());
+    }
     void load();
-  }, [load]);
+  }, [load, range]);
   // Coût du week-end pour un N+1 (ses N-1) ou un administrateur (tout le monde) : null pour les autres.
   const [cost, setCost] = useState<{ key: string; value: { confirmed: number; pending: number; people: number } | null } | null>(null);
   const loadCost = useCallback(async () => {

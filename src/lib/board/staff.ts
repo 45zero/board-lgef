@@ -32,7 +32,17 @@ export type Engagement = {
   note: string | null;
   /** Réseau : kilomètres aller-retour domicile → événement (indemnités à KM_RATE), null sinon ou inconnus. */
   km: number | null;
+  /** Facture déposée par la personne pour cet événement (event_invoices, appli calendrier). */
+  invoice: StaffInvoice | null;
 };
+
+export type StaffInvoice = { id: string; status: "pending" | "approved" | "rejected" | string | null; amountTtc: number | null; files: number };
+
+export const INVOICE_STATUS_LABELS: Record<string, string> = { pending: "À valider", approved: "Validée", rejected: "Refusée" };
+
+/** Facture attendue mais absente : prestataire, intervention confirmée, événement passé. */
+export const invoiceMissing = (e: Engagement, status: StaffStatus) =>
+  status === "tech-prestataire" && e.confirmed && !e.invoice && new Date(e.start).getTime() < Date.now();
 
 /** Indemnité kilométrique du réseau, en euros par kilomètre. */
 export const KM_RATE = 0.45;

@@ -1,12 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, ChevronLeft, ChevronRight, Loader2, RotateCcw, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, ChevronLeft, ChevronRight, FileText, Loader2, RotateCcw, Search, UserPlus, Users, X } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { readCache, writeCache } from "@/lib/board/localCache";
+import { Popover } from "@/components/board/team/TeamUi";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useOpenEvent } from "@/components/board/calendar/EventOpener";
-import { getStaffOverview, setEventCostAdjustment, setStaffRate } from "@/app/actions/staff";
+import { addMyReport, getInvoiceFiles, getStaffOverview, listReportCandidates, setEventCostAdjustment, setStaffRate } from "@/app/actions/staff";
 import { unwrap } from "@/lib/board/actionResult";
-import { KM_RATE, STAFF_STATUS_LABELS, costTotals, euros, formatKm, type Engagement, type StaffOverview, type StaffPerson } from "@/lib/board/staff";
+import {
+  INVOICE_STATUS_LABELS,
+  KM_RATE,
+  STAFF_STATUS_LABELS,
+  costTotals,
+  euros,
+  formatKm,
+  invoiceMissing,
+  type Engagement,
+  type StaffOverview,
+  type StaffPerson,
+} from "@/lib/board/staff";
 import { AmountInput } from "@/components/board/staff/AmountInput";
 
 // Effectif : mes N-1 (tout l'effectif pour un administrateur), le forfait des prestataires, leurs
@@ -30,7 +44,11 @@ export function EffectifScreen() {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [scope, setScope] = useState<"mine" | "all">("mine");
-  const [data, setData] = useState<StaffOverview | null>(null);
+  const { user } = useAuth();
+  // Dernière version connue affichée tout de suite (navigateur), puis remplacée par la fraîche.
+  const cacheKey = `effectif:${user?.id ?? ""}:${year}:${scope}`;
+  const [data, setData] = useState<StaffOverview | null>(() => readCache<StaffOverview>(cacheKey) ?? null);
+  const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   // Popup des interventions d'une personne (clic sur un chiffre) : un mois, et éventuellement engagé / prévisionnel.
@@ -38,16 +56,20 @@ export function EffectifScreen() {
 
   const load = useCallback(async () => {
     try {
-      setData(unwrap(await getStaffOverview(year, scope)));
+      const fresh = unwrap(await getStaffOverview(year, scope));
+      setData(fresh);
+      writeCache(cacheKey, fresh);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Chargement impossible.");
     }
-  }, [year, scope]);
+  }, [year, scope, cacheKey]);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- l'état n'est posé qu'à la réponse du serveur
+    const cached = readCache<StaffOverview>(cacheKey);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- changement d'année / de vue : version connue d'abord, puis le réseau
+    if (cached) setData(cached);
     void load();
-  }, [load]);
+  }, [load, cacheKey]);
   useLiveRefresh(["event_team_members", "event_assignments", "photo_missions", "events"], () => void load(), 1500);
 
   const toast = (m: string) => {
@@ -84,6 +106,8 @@ export function EffectifScreen() {
   const totals = costTotals(monthEngagements);
   const yearTotals = costTotals(data.engagements);
   const person = selected ? people.find((p) => p.id === selected) : undefined;
+  const needle = query.trim().toLowerCase();
+  const shown = needle ? people.filter((p) => `${p.name} ${p.email ?? ""}`.toLowerCase().includes(needle)) : people;
 
   return (
     <div className="flex h-full min-h-0 gap-4">
@@ -97,6 +121,16 @@ export function EffectifScreen() {
               {yearTotals.pending > 0 && ` · ${euros(yearTotals.pending)} prévisionnels`}
             </p>
           </div>
+          <div className="flex w-[220px] items-center gap-2 rounded-btn border border-line bg-panel px-3 py-2">
+            <Search size={14} className="text-ink-4" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher une personne…" className="min-w-0 flex-1 bg-transparent text-[13px] outline-none" />
+            {query && (
+              <button onClick={() => setQuery("")} aria-label="Effacer">
+                <X size={13} className="text-ink-4" />
+              </button>
+            )}
+          </div>
+          {viewer.isAdmin && <AddReport onAdded={load} onError={toast} />}
           {viewer.isAdmin && (
             <div className="flex rounded-btn border border-line bg-panel p-0.5 text-xs font-semibold">
               {(["mine", "all"] as const).map((s) => (
@@ -166,7 +200,7 @@ export function EffectifScreen() {
                   </tr>
                 </thead>
                 <tbody>
-                  {people.map((p) => {
+                  {shown.map((p) => {
                     const t = costTotals((byPerson.get(p.id) ?? []).filter((e) => monthOf(e.start) === month));
                     return (
                       <tr key={p.id} onClick={() => setSelected(p.id)} className={`cursor-pointer border-t border-line hover:bg-hover ${selected === p.id ? "bg-sel-bg" : ""}`}>
@@ -204,6 +238,7 @@ export function EffectifScreen() {
                           <Figure onClick={() => setPopup({ personId: p.id, month, filter: "confirmed" })} disabled={!t.confirmedCount}>
                             {t.confirmed ? euros(t.confirmed) : "—"}
                           </Figure>
+                          <MissingInvoices count={(byPerson.get(p.id) ?? []).filter((e) => monthOf(e.start) === month && invoiceMissing(e, p.status)).length} />
                         </td>
                         <td className="px-4 py-2.5 text-right text-warn">
                           <Figure onClick={() => setPopup({ personId: p.id, month, filter: "pending" })} disabled={!t.pendingCount}>
@@ -213,7 +248,7 @@ export function EffectifScreen() {
                       </tr>
                     );
                   })}
-                  {people.length === 0 && (
+                  {shown.length === 0 && (
                     <tr>
                       <td colSpan={7} className="px-4 py-6 text-center text-sm text-ink-4">
                         Personne à afficher.
@@ -242,7 +277,7 @@ export function EffectifScreen() {
                   </tr>
                 </thead>
                 <tbody>
-                  {people
+                  {shown
                     .filter((p) => (byPerson.get(p.id) ?? []).some((e) => e.amount > 0))
                     .map((p) => {
                       const list = byPerson.get(p.id) ?? [];
@@ -467,6 +502,7 @@ function InterventionList({
               </button>
             )}
           </div>
+          {person.status === "tech-prestataire" && <InvoiceLine engagement={e} status={person.status} onError={onError} />}
           {e.adjusted && base(e) !== null && <p className="mt-1 text-[10px] text-ink-4">Montant ajusté pour cet événement (calculé : {euros(base(e)!)}).</p>}
           {e.km === null && person.status === "tech-reseau" && <p className="mt-1 text-[10px] text-ink-4">Kilomètres inconnus (domicile ou lieu non renseigné) : saisissez le montant.</p>}
         </li>
@@ -521,6 +557,121 @@ function InterventionsModal({
         </div>
         <InterventionList person={person} engagements={engagements} onChanged={onChanged} onError={onError} />
       </div>
+    </div>
+  );
+}
+
+/** Pastille « factures manquantes » d'une ligne du tableau. */
+function MissingInvoices({ count }: { count: number }) {
+  if (!count) return null;
+  return (
+    <span title={`${count} facture${count > 1 ? "s" : ""} manquante${count > 1 ? "s" : ""} (interventions passées)`} className="ml-1 inline-flex items-center gap-0.5 align-middle text-[10px] font-bold text-bad">
+      <AlertTriangle size={12} />
+      {count}
+    </span>
+  );
+}
+
+/** Facture d'une intervention de prestataire : bouton pour la consulter, ou signal si elle manque. */
+function InvoiceLine({ engagement: e, status, onError }: { engagement: Engagement; status: StaffPerson["status"]; onError: (m: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  if (!e.invoice) {
+    if (!invoiceMissing(e, status)) return null;
+    return (
+      <p className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-bad">
+        <AlertTriangle size={12} /> Facture non déposée
+      </p>
+    );
+  }
+  const inv = e.invoice;
+  const view = async () => {
+    // Fenêtre ouverte tout de suite (sinon bloquée par le navigateur), remplie à la réponse.
+    const win = window.open("", "_blank");
+    setBusy(true);
+    const res = await getInvoiceFiles(inv.id);
+    setBusy(false);
+    if (!res.ok || !res.data.length) {
+      win?.close();
+      onError(res.ok ? "Aucun fichier joint à cette facture." : res.error);
+      return;
+    }
+    if (win) win.location.href = res.data[0].url;
+    for (const f of res.data.slice(1)) window.open(f.url, "_blank");
+  };
+  const tone = inv.status === "approved" ? "bg-good-bg text-good" : inv.status === "rejected" ? "bg-bad-bg text-bad" : "bg-warn-bg text-warn";
+  return (
+    <div className="mt-1.5 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => void view()}
+        disabled={busy || inv.files === 0}
+        className="flex items-center gap-1 rounded-btn border border-line px-2 py-1 text-[11px] font-bold text-link hover:border-link hover:bg-sel-bg disabled:opacity-50"
+      >
+        {busy ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />} Consulter la facture
+        {inv.files > 1 && <span className="font-normal text-ink-4">({inv.files} fichiers)</span>}
+      </button>
+      <span className={`rounded-chip px-1.5 py-0.5 text-[10px] font-bold ${tone}`}>{INVOICE_STATUS_LABELS[inv.status ?? ""] ?? inv.status ?? "—"}</span>
+      {inv.amountTtc !== null && (
+        <span className={`text-[11px] ${inv.amountTtc !== e.amount ? "font-bold text-warn" : "text-ink-4"}`} title={inv.amountTtc !== e.amount ? "Montant facturé différent du montant prévu" : undefined}>
+          {euros(inv.amountTtc)} TTC
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Administrateur : se désigner N+1 d'une personne depuis l'Effectif. */
+function AddReport({ onAdded, onError }: { onAdded: () => Promise<void>; onError: (m: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [list, setList] = useState<{ id: string; name: string; email: string | null; managerName: string | null }[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const toggle = async () => {
+    setOpen((o) => !o);
+    if (!list) {
+      const res = await listReportCandidates();
+      setList(res.ok ? res.data : []);
+    }
+  };
+  const needle = q.trim().toLowerCase();
+  const found = (list ?? []).filter((p) => !needle || `${p.name} ${p.email ?? ""}`.toLowerCase().includes(needle)).slice(0, 40);
+  return (
+    <div className="relative">
+      <button onClick={() => void toggle()} className="flex items-center gap-1.5 rounded-btn bg-navy px-3 py-2 text-xs font-bold text-white hover:bg-navy-600">
+        <UserPlus size={14} /> Ajouter un N-1
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} align="right" width={320}>
+        <p className={`${label} mb-2`}>Je deviens le N+1 de…</p>
+        <div className="mb-2 flex items-center gap-1.5 rounded-btn border border-line px-2 py-1.5">
+          <Search size={13} className="text-ink-4" />
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher une personne…" className="min-w-0 flex-1 text-[13px] outline-none" />
+        </div>
+        <div className="max-h-72 overflow-y-auto">
+          {list === null && <p className="px-1.5 py-2 text-xs text-ink-4">Chargement…</p>}
+          {found.map((p) => (
+            <button
+              key={p.id}
+              disabled={!!busy}
+              onClick={async () => {
+                setBusy(p.id);
+                const res = await addMyReport(p.id);
+                setBusy(null);
+                if (!res.ok) return onError(res.error);
+                setList((l) => (l ?? []).filter((x) => x.id !== p.id));
+                setOpen(false);
+                await onAdded();
+              }}
+              className="flex w-full items-center gap-2 rounded-btn px-1.5 py-1.5 text-left hover:bg-hover disabled:opacity-50"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-semibold text-ink-2">{p.name}</span>
+                <span className="block truncate text-[10px] text-ink-4">{p.managerName ? `N+1 actuel : ${p.managerName}` : (p.email ?? "")}</span>
+              </span>
+              {busy === p.id && <Loader2 size={13} className="animate-spin text-ink-4" />}
+            </button>
+          ))}
+        </div>
+      </Popover>
     </div>
   );
 }

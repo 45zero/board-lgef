@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@/contexts/AuthContext";
+import { readCache, writeCache } from "@/lib/board/localCache";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Receipt, ShieldCheck, X, Search, ChevronRight, Download } from "lucide-react";
@@ -164,7 +166,10 @@ export function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpens
 }
 
 function MyExpenses() {
-  const [items, setItems] = useState<MyExpenseItem[] | null>(null);
+  const { user } = useAuth();
+  // Dernière liste connue affichée tout de suite (navigateur), puis rafraîchie.
+  const cacheKey = `frais:mine:${user?.id ?? ""}`;
+  const [items, setItems] = useState<MyExpenseItem[] | null>(() => readCache<MyExpenseItem[]>(cacheKey) ?? null);
   const [filter, setFilter] = useState<MineFilter>("a_declarer");
   const [query, setQuery] = useState("");
   const [month, setMonth] = useState("");
@@ -172,7 +177,16 @@ function MyExpenses() {
   const [exporting, setExporting] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const load = useCallback(() => getMyExpenses().then(setItems).catch(() => setItems([])), []);
+  const load = useCallback(
+    () =>
+      getMyExpenses()
+        .then((fresh) => {
+          setItems(fresh);
+          writeCache(cacheKey, fresh);
+        })
+        .catch(() => setItems((prev) => prev ?? [])),
+    [cacheKey]
+  );
   useEffect(() => {
     void load();
   }, [load]);

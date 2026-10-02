@@ -3,6 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Kanban, Loader2 } from "lucide-react";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
+import { useAuth } from "@/contexts/AuthContext";
+import { readCache, writeCache } from "@/lib/board/localCache";
 import { getTeamWorkspace, listTeamCardsForEvents } from "@/app/actions/team";
 import { unwrap } from "@/lib/board/actionResult";
 import type { TeamCard, TeamWorkspace } from "@/lib/board/team";
@@ -35,7 +37,10 @@ export function useOpenTeamCard() {
 /** Fiche carte en popup — à monter sous l'EventOpenerProvider (la fiche ouvre l'événement lié). */
 export function TeamCardOpenerHost() {
   const ctx = useContext(TeamCardOpenerContext);
-  const [ws, setWs] = useState<TeamWorkspace | null>(null);
+  const { user } = useAuth();
+  // Même cache que l'écran Espace Team : la carte s'affiche sans attendre le réseau.
+  const cacheKey = `team:${user?.id ?? ""}`;
+  const [ws, setWs] = useState<TeamWorkspace | null>(() => readCache<TeamWorkspace>(cacheKey) ?? null);
   const [error, setError] = useState<string | null>(null);
   const cardId = ctx?.current ?? null;
   const setLoadingId = ctx?.setLoadingId;
@@ -43,11 +48,13 @@ export function TeamCardOpenerHost() {
 
   const load = useCallback(async () => {
     try {
-      setWs(unwrap(await getTeamWorkspace()));
+      const fresh = unwrap(await getTeamWorkspace());
+      setWs(fresh);
+      writeCache(cacheKey, fresh);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Carte indisponible.");
     }
-  }, []);
+  }, [cacheKey]);
 
   useEffect(() => {
     if (!cardId) return;
