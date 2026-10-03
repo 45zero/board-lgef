@@ -54,9 +54,18 @@ function mapEvent(calendarId: string, e: calendar_v3.Schema$Event): CalendarEven
   };
 }
 
+/**
+ * Agendas du compte. La connexion n'accorde que calendar.events (pas la liste des agendas) : Google
+ * refuse alors calendarList (403 « insufficient scopes ») — on se rabat sur l'agenda principal.
+ */
 export async function listCalendars(account: ConnectedAccount): Promise<CalendarListItem[]> {
   const calendar = await calendarClient(account);
-  const { data } = await calendar.calendarList.list();
+  const primaryOnly = [{ id: "primary", summary: account.email ?? "Agenda principal", primary: true, backgroundColor: "#4285F4" }];
+  const { data } = await calendar.calendarList.list().catch((e: { code?: number }) => {
+    if (e.code === 403) return { data: { items: null } };
+    throw e;
+  });
+  if (!data.items) return primaryOnly;
   return (data.items ?? []).map((c) => ({
     id: c.id!,
     summary: c.summaryOverride || c.summary || c.id!,
