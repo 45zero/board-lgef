@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, CalendarDays, ChevronRight, MapPin, SquareKanban } from "lucide-react";
+import { Bell, CalendarDays, ChevronRight, MapPin, SquareKanban, X } from "lucide-react";
 import type { ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import type { Recap } from "@/app/api/dashboard/recap/route";
 import { useLive, useLiveRefresh } from "@/components/board/live/LiveProvider";
@@ -47,7 +47,7 @@ export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidget
   const [reloadKey, setReloadKey] = useState(0);
   // Heure de référence (« En cours », « En retard »), mise à jour à chaque relecture.
   const [now, setNow] = useState(() => Date.now());
-  const { notifications } = useLive();
+  const { notifications, removeNotifications } = useLive();
   const { open: openEvent } = useOpenEvent();
   const { open: openCard } = useOpenTeamCard();
   // Une carte, un événement ou une notification qui change : récapitulatif relu.
@@ -157,16 +157,23 @@ export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidget
 
       {widgets.activity && (
         <div>
-          <Title>Activité</Title>
+          <div className="flex items-start justify-between">
+            <Title>Activité</Title>
+            {activity.length > 0 && (
+              <button onClick={() => void removeNotifications()} className="text-[10px] font-semibold text-ink-4 hover:text-bad hover:underline">
+                Tout effacer
+              </button>
+            )}
+          </div>
           {activity.length === 0 ? (
             <Empty icon={Bell}>Aucune activité récente.</Empty>
           ) : (
             <div className="flex flex-col gap-3">
               {activity.map((n) => (
+                <div key={n.id} className="group relative">
                 <button
-                  key={n.id}
                   onClick={() => (n.data?.team_card_id ? openCard(n.data.team_card_id) : n.event_id ? void openEvent(n.event_id) : undefined)}
-                  className="flex gap-2 text-left"
+                  className="flex w-full gap-2 pr-5 text-left"
                 >
                   <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${n.read ? "bg-line-strong" : "bg-red"}`} />
                   <span className="min-w-0 text-xs text-ink-2">
@@ -178,6 +185,15 @@ export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidget
                     </span>
                   </span>
                 </button>
+                <button
+                  onClick={() => void removeNotifications([n.id])}
+                  title="Supprimer"
+                  aria-label="Supprimer cette activité"
+                  className="absolute right-0 top-0 rounded-full p-0.5 text-ink-4 opacity-0 hover:bg-hover hover:text-bad group-hover:opacity-100"
+                >
+                  <X size={12} />
+                </button>
+                </div>
               ))}
             </div>
           )}

@@ -131,6 +131,8 @@ function deriveCoverageState(
   if (!requiresCoverage) return null;
   if (!request) return "wait";
   if (request.status === "rejected") return "no";
+  // La personne désignée a refusé : signalé (rouge) tant que personne d'autre n'est désigné.
+  if (request.technician_response === "rejected" && request.status !== "approved") return "no";
   if (request.status === "approved" && request.technician_response === "accepted") {
     const symbol = request.coverage_symbol ?? "";
     const hasPhoto = symbol.includes("📷");

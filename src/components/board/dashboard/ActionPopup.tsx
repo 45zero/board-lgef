@@ -337,7 +337,9 @@ function AssignRow({ item, technicians, onDone }: { item: DashboardActionItem; t
         {item.eventId && <EventArrow eventId={item.eventId} className="h-6 w-6" />}
       </div>
       <WhenWhere date={item.date} location={item.location} title={item.title} />
-      {details && <div className="truncate text-[11px] text-ink-4">{details}</div>}
+      {/* Couverture refusée : qui a refusé (et pourquoi), en rouge au-dessus de la demande d'origine. */}
+      {item.detail?.startsWith("Refusée") && <div className="text-[11px] font-semibold text-bad">{item.detail}</div>}
+      {details && details !== item.detail && <div className="truncate text-[11px] text-ink-4">{details}</div>}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <select
           value={techId}
@@ -457,6 +459,7 @@ export function ActionPopup({
       body = items.length ? items.map((i) => <AttendanceRow key={i.id} item={i} onDone={() => removeItem(i.id)} />) : null;
       break;
     case "captation-attribuer":
+    case "couverture-refusee":
       body = items.length ? <AssignList items={items} onDone={removeItem} /> : null;
       break;
     case "cartes":

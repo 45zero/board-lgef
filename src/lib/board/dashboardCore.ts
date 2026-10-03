@@ -144,6 +144,27 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
         return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date, location: ev.location, detail: c.details ?? undefined };
       });
       push({ id: "captation-repondre", app: "calendrier", tone: "red", count: mineItems.length, items: mineItems, title: "Captations à accepter", detail: "Des événements vous sont proposés" });
+
+      // Couvertures refusées par la personne désignée : à réattribuer (admins, et le demandeur).
+      let refusedQuery = service
+        .from("coverage_requests")
+        .select("id, event_id, details, refused_by_name, assigned_technician_name, technician_response_notes, events!inner(title, start_date, location, event_type)")
+        .eq("technician_response", "rejected")
+        .eq("status", "pending")
+        .gte("events.start_date", now.toISOString())
+        .order("updated_at", { ascending: false })
+        .limit(30);
+      if (!isAdmin) refusedQuery = refusedQuery.eq("requester_id", userId);
+      const { data: refusedRows } = await refusedQuery;
+      const refused = (refusedRows ?? []).map((c) => {
+        const ev = c.events as unknown as { title: string; start_date: string; location: string | null; event_type: DbEventType | null };
+        const who = c.refused_by_name || c.assigned_technician_name || "La personne désignée";
+        const why = c.technician_response_notes?.trim();
+        return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date, location: ev.location, eventType: ev.event_type, detail: `Refusée par ${who}${why ? ` : « ${why} »` : ""}` };
+      });
+      push({ id: "couverture-refusee", app: "calendrier", tone: "red", count: refused.length, items: refused, title: "Couvertures refusées", detail: "La personne désignée a refusé : à réattribuer" });
+      const refusedIds = new Set(refused.map((r) => r.id));
+
       if (isAdmin) {
         const { data: toAssign, count: toAssignCount } = await service
           .from("coverage_requests")
@@ -152,11 +173,11 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
           .gte("events.start_date", now.toISOString())
           .order("created_at")
           .limit(30);
-        const assignItems = (toAssign ?? []).map((c) => {
+        const assignItems = (toAssign ?? []).filter((c) => !refusedIds.has(c.id)).map((c) => {
           const ev = c.events as unknown as { title: string; start_date: string; location: string | null; event_type: DbEventType | null };
           return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date, location: ev.location, eventType: ev.event_type, detail: c.details ?? undefined };
         });
-        push({ id: "captation-attribuer", app: "calendrier", tone: "orange", count: toAssignCount ?? assignItems.length, items: assignItems, title: "Demandes de captation à traiter", detail: "À valider et attribuer à un technicien" });
+        push({ id: "captation-attribuer", app: "calendrier", tone: "orange", count: Math.max(0, (toAssignCount ?? assignItems.length) - refusedIds.size), items: assignItems, title: "Demandes de captation à traiter", detail: "À valider et attribuer à un technicien" });
       }
     }, undefined),
 

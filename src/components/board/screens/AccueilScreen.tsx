@@ -10,6 +10,7 @@ import {
   Camera,
   CheckCircle2,
   ChevronLeft,
+  CircleX,
   ChevronRight,
   Clock,
   ImageIcon,
@@ -47,6 +48,7 @@ function ActionIcon({ id, size, strokeWidth }: { id: string; size: number; strok
   const props = { size, strokeWidth };
   if (id.startsWith("frais")) return <Receipt {...props} />;
   if (id.startsWith("captation")) return <Camera {...props} />;
+  if (id === "couverture-refusee") return <CircleX {...props} />;
   if (id === "presence") return <CalendarCheck {...props} />;
   if (id === "publier") return <ImageIcon {...props} />;
   if (id === "commentaires") return <MessageSquareWarning {...props} />;

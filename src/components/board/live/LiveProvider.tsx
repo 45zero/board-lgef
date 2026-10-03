@@ -56,6 +56,8 @@ type LiveContextValue = {
   unread: number;
   markRead: (id: string) => Promise<void>;
   markAllRead: () => Promise<void>;
+  /** Supprime des notifications (is_deleted) : toutes si `ids` est absent. */
+  removeNotifications: (ids?: string[]) => Promise<void>;
 };
 
 const LiveContext = createContext<LiveContextValue | null>(null);
@@ -172,6 +174,20 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     await createClient().from("notifications").update({ read: true }).eq("user_id", userId).eq("read", false);
   }, [userId]);
 
+  const removeNotifications = useCallback(
+    async (ids?: string[]) => {
+      if (!userId) return;
+      const gone = new Set(ids ?? notifications.map((n) => n.id));
+      const unreadGone = notifications.filter((n) => gone.has(n.id) && !n.read).length;
+      setNotifications((prev) => prev.filter((n) => !gone.has(n.id)));
+      setUnread((u) => Math.max(0, u - unreadGone));
+      let query = createClient().from("notifications").update({ is_deleted: true, read: true }).eq("user_id", userId);
+      if (ids) query = query.in("id", ids);
+      await query;
+    },
+    [notifications, userId]
+  );
+
   /* ---------- Canal temps réel ---------- */
 
   useEffect(() => {
@@ -209,8 +225,8 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   }, [userId, emit, scheduleDbBadges, loadNotifications]);
 
   const value = useMemo(
-    () => ({ subscribe, badges, notifications, unread, markRead, markAllRead }),
-    [subscribe, badges, notifications, unread, markRead, markAllRead]
+    () => ({ subscribe, badges, notifications, unread, markRead, markAllRead, removeNotifications }),
+    [subscribe, badges, notifications, unread, markRead, markAllRead, removeNotifications]
   );
   return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>;
 }

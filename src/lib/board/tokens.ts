@@ -48,7 +48,7 @@ export const COVERAGE_LABELS: Record<CoverageState, { long: string; short: strin
   both: { long: "Photo + vidéo", short: "Photo + vidéo" },
   wait: { long: "En attente de couverture — personne de désigné", short: "En attente" },
   assigned: { long: "Désigné — réponse attendue", short: "Désigné" },
-  no: { long: "Couverture refusée", short: "Refusée" },
+  no: { long: "Couverture refusée — à réattribuer", short: "Refusée" },
 };
 
 export const COVERAGE_COLORS: Record<CoverageState, { ink: string; bg: string }> = {
