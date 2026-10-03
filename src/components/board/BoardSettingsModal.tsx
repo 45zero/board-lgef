@@ -14,6 +14,7 @@ import {
 } from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
 import { useAuth } from "@/contexts/AuthContext";
+import { useVisibleModules } from "@/hooks/board/useVisibleModules";
 import { listAccessRequests } from "@/app/actions/account-requests";
 import { unwrap } from "@/lib/board/actionResult";
 import { UsersAdminModal } from "@/components/board/users/UsersAdminModal";
@@ -23,18 +24,24 @@ import { MyProfileModal } from "@/components/board/profile/MyProfileModal";
 /** Compte connecté : déconnexion puis retour à la page de connexion pour se connecter avec un autre compte. */
 /**
  * Alertes « commentaire haineux » : chacun choisit ses canaux ; les admins choisissent en plus qui
- * prévenir (en plus d'eux-mêmes et de l'auteur de la publication, toujours prévenus).
+ * prévenir (en plus d'eux-mêmes et de l'auteur de la publication, toujours prévenus). Section
+ * visible seulement des personnes concernées : administrateurs et super users, personnes désignées
+ * ici, et celles qui ont accès au centre de publication (auteurs des publications).
  */
 function HateAlertsSection({ notif }: { notif: ReturnType<typeof useNotificationPreferences> }) {
   const role = useUserRole();
+  const { user } = useAuth();
+  const visible = useVisibleModules();
   const isAdmin = role.isAdmin || role.isSuperUser;
   const [data, setData] = useState<Awaited<ReturnType<typeof getModerationRecipients>> | null>(null);
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (isAdmin) getModerationRecipients().then(setData);
-  }, [isAdmin]);
+    getModerationRecipients().then(setData);
+  }, []);
+
+  const concerned = isAdmin || (!!user && !!data?.ids.includes(user.id)) || !!visible?.has("audiovisuel");
 
   const toggleRecipient = async (id: string) => {
     if (!data) return;
@@ -48,6 +55,7 @@ function HateAlertsSection({ notif }: { notif: ReturnType<typeof useNotification
     }
   };
 
+  if (!concerned) return null;
   const q = query.trim().toLowerCase();
   const selected = data?.members.filter((m) => data.ids.includes(m.id)) ?? [];
   const matches = q ? (data?.members ?? []).filter((m) => !data!.ids.includes(m.id) && `${m.name} ${m.email ?? ""}`.toLowerCase().includes(q)).slice(0, 6) : [];
