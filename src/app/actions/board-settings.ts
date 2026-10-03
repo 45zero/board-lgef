@@ -152,14 +152,21 @@ export async function createHabillageAnimationUpload(fileName: string): Promise<
  * (photos et vidéos publiées depuis 7 jours). Administrateurs et super users.
  */
 export async function getBoardDriveUsage() {
-  await requireAdmin();
-  const account = await getBoardDriveAccount();
-  if (!account) return null;
-  const service = createServiceClient();
-  const [quota, pending, { count: purged }] = await Promise.all([
-    getStorageQuota(account),
-    purgePublishedMedia(service, { dryRun: true }),
-    service.from("event_files").select("id", { count: "exact", head: true }).not("drive_purged_at", "is", null),
-  ]);
-  return { ...quota, toPurge: pending.files, toPurgeBytes: pending.bytes, purged: purged ?? 0 };
+  // Simple information : une erreur (Google indisponible, jeton à renouveler…) masque le bloc au
+  // lieu de faire échouer la requête.
+  try {
+    await requireAdmin();
+    const account = await getBoardDriveAccount();
+    if (!account) return null;
+    const service = createServiceClient();
+    const [quota, pending, { count: purged }] = await Promise.all([
+      getStorageQuota(account),
+      purgePublishedMedia(service, { dryRun: true }),
+      service.from("event_files").select("id", { count: "exact", head: true }).not("drive_purged_at", "is", null),
+    ]);
+    return { ...quota, toPurge: pending.files, toPurgeBytes: pending.bytes, purged: purged ?? 0 };
+  } catch (e) {
+    console.error("[getBoardDriveUsage]", e);
+    return null;
+  }
 }
