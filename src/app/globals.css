@@ -134,3 +134,14 @@ body {
 body {
   font-family: var(--font-sans);
 }
+
+/* Écrans tactiles (téléphone, tablette) : on défile au doigt, les barres de défilement ne servent
+   qu'à encombrer (carrousels de l'accueil, listes, panneaux). Elles restent à la souris. */
+@media (pointer: coarse) {
+  * {
+    scrollbar-width: none;
+  }
+  *::-webkit-scrollbar {
+    display: none;
+  }
+}
