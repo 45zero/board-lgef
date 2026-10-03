@@ -25,6 +25,7 @@ import { fr } from "date-fns/locale";
 import { useCalendarEvents } from "@/hooks/board/useCalendarEvents";
 import { useSolicitedFilter } from "@/hooks/board/useSolicitedFilter";
 import { passesCoverageFilters, useCoverageFilters } from "@/hooks/board/useCoverageFilters";
+import { DayWeatherBadge, useForecast } from "@/components/board/calendar/DayWeather";
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import { listMyCalendars, listMyEvents } from "@/app/actions/calendar";
@@ -65,6 +66,7 @@ const VIEW_MODES: { id: ViewMode; label: string }[] = [
 
 export function CalendrierScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
+  const forecast = useForecast();
   const [anchorDate, setAnchorDate] = useState(() => new Date());
 
   const weekStart = useMemo(() => startOfWeek(anchorDate, WEEK_OPTS), [anchorDate]);
@@ -438,6 +440,9 @@ export function CalendrierScreen() {
                       {format(day, "EEE", { locale: fr })}
                     </div>
                     <div className="text-sm font-bold">{format(day, "d")}</div>
+                    <div className="flex h-3.5 justify-center">
+                      <DayWeatherBadge day={day} forecast={forecast} />
+                    </div>
                   </div>
 
                   <div
@@ -525,7 +530,7 @@ export function CalendrierScreen() {
                 <div
                   key={day.toISOString()}
                   onDoubleClick={() => handleMonthCellDoubleClick(day)}
-                  className={`flex flex-col gap-1 border-b border-r border-line p-1.5 last:border-r-0 ${
+                  className={`relative flex flex-col gap-1 border-b border-r border-line p-1.5 last:border-r-0 ${
                     inMonth ? "" : "bg-subtle/40"
                   }`}
                 >
@@ -540,6 +545,11 @@ export function CalendrierScreen() {
                   >
                     {format(day, "d")}
                   </button>
+                  {inMonth && (
+                    <span className="pointer-events-none absolute right-1.5 top-2 text-ink-3">
+                      <DayWeatherBadge day={day} forecast={forecast} />
+                    </span>
+                  )}
 
                   <div className="flex flex-col gap-0.5">
                     {dayEvents.map((ev) => {

@@ -13,13 +13,16 @@ export interface ProfileDetails {
   homeCoordinates: LatLng | null;
   hasCompanyCar: boolean;
   licensePlate: string;
+  /** « yyyy-MM-dd » ; l'équipe ne voit que le jour et le mois (anniversaire). */
+  birthDate: string | null;
 }
 
-export const pickDetails = ({ homeAddress, homeCoordinates, hasCompanyCar, licensePlate }: ProfileDetails): ProfileDetails => ({
+export const pickDetails = ({ homeAddress, homeCoordinates, hasCompanyCar, licensePlate, birthDate }: ProfileDetails): ProfileDetails => ({
   homeAddress,
   homeCoordinates,
   hasCompanyCar,
   licensePlate,
+  birthDate,
 });
 
 export interface MyProfile extends ProfileDetails {

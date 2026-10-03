@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { buildDashboard } from "@/lib/board/dashboardCore";
 import { hasContent, parisHour, parisToday, renderDailyDigest } from "@/lib/board/dailyDigest";
 import { isResendConfigured, sendResendBatch, type ResendMessage } from "@/lib/email/resend";
+import { announceBirthdays } from "@/lib/board/birthdays";
 
 export const maxDuration = 60;
 
@@ -14,6 +15,7 @@ const SEND_HOUR = 7;
  * voir sql/2026-09-28_cron_daily_digest.sql) avec le secret CRON_SECRET. À 7 h (Paris), envoie à
  * chaque abonné (profiles.daily_digest_email) son tableau de bord du jour, une seule fois par jour,
  * et seulement s'il y a quelque chose (action ou événement). `?force=1` : envoi immédiat (test).
+ * Annonce aussi les anniversaires du jour à tout le personnel (une fois par anniversaire).
  */
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -26,6 +28,10 @@ export async function GET(request: Request) {
 
   const service = createServiceClient();
   const today = parisToday();
+  const birthdays = await announceBirthdays(service, (messages) => sendResendBatch(messages, async () => undefined)).catch((e) => {
+    console.error("[cron/daily-digest] anniversaires", e);
+    return { celebrants: 0, sent: 0, errors: [String(e)] };
+  });
   const { data: subscribers } = await service
     .from("profiles")
     .select("id, email, daily_digest_sent_on")
@@ -71,5 +77,5 @@ export async function GET(request: Request) {
     if (emptyIds.length) await service.from("profiles").update({ daily_digest_sent_on: today }).in("id", emptyIds);
   }
 
-  return NextResponse.json({ subscribers: due.length, sent: result.sent, empty, errors: result.errors });
+  return NextResponse.json({ subscribers: due.length, sent: result.sent, empty, errors: result.errors, birthdays });
 }

@@ -70,7 +70,7 @@ export function MobileShell() {
           <MobileMailsScreen menuOpen={tab === "mails" && mailMenuOpen} onMenuClose={closeMailMenu} onContextChange={setMailContext} />
         </div>
         {tab === "accueil" && (
-          <div className="h-full overflow-y-auto p-3 pb-20">
+          <div className="h-full px-3 pt-3">
             <AccueilScreen
               punchedIn={punchedIn}
               onTogglePunch={() => setPunchedIn((p) => !p)}

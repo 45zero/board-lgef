@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Car, ExternalLink, Home, MapPin } from "lucide-react";
+import { Cake, Car, ExternalLink, Home, MapPin } from "lucide-react";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { Toggle } from "@/components/board/Toggle";
 import type { LatLng } from "@/lib/board/geo";
@@ -72,6 +72,23 @@ export function ProfileDetailsFields({
 
   return (
     <div className="space-y-5">
+      <div>
+        <div className={sectionTitle}>
+          <Cake size={12} /> Date de naissance
+        </div>
+        <input
+          type="date"
+          value={value.birthDate ?? ""}
+          max={new Date().toISOString().slice(0, 10)}
+          onChange={(e) => onChange({ ...value, birthDate: e.target.value || null })}
+          className={`${input} max-w-[220px]`}
+        />
+        <p className="mt-1 text-[11px] text-ink-4">
+          Le jour J, toute l&apos;équipe est prévenue et {self ? "votre" : "son"} bandeau d&apos;accueil est à la fête. Seuls le jour et le mois
+          sont visibles, jamais l&apos;année.
+        </p>
+      </div>
+
       <div>
         <div className={sectionTitle}>
           <Home size={12} /> Adresse personnelle

@@ -1,5 +1,6 @@
 "use client";
 
+import { EventWeather } from "@/components/board/calendar/DayWeather";
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -95,8 +96,9 @@ export function MobileEventModal({
           placeholder="Titre de l'événement"
           className="mt-2 w-full border-b-2 border-white/25 bg-transparent pb-1.5 text-lg font-extrabold text-white outline-none placeholder:text-white/50 focus:border-white"
         />
-        <div className="mt-1 text-xs text-white/80">
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/80">
           {format(m.start, "EEEE d MMMM", { locale: fr })} — de {m.startTime} à {m.endTime}
+          <EventWeather eventId={event?.id} />
         </div>
         {isEditing && event?.createdAt && (
           <div className="mt-1 text-[11px] text-white/60">

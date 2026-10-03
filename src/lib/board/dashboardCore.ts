@@ -1,4 +1,6 @@
 import "server-only";
+import { todaysBirthdays } from "@/lib/board/birthdays";
+import { publicationThumbs } from "@/lib/board/publicationThumbs";
 import { isPublisher } from "@/lib/board/publishers";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import { computeMyExpenses, countPendingForValidator } from "@/lib/board/expensesCore";
@@ -30,6 +32,8 @@ export type DashboardAction = {
   count: number;
   title: string;
   detail: string;
+  /** Image de l'action (Médias à publier : premier média de la première publication). */
+  thumbUrl?: string | null;
 };
 
 export type ProgrammeItem = {
@@ -44,6 +48,8 @@ export type ProgrammeItem = {
 
 export type Dashboard = {
   firstName: string | null;
+  /** Anniversaires du jour (bandeau d'accueil) ; la personne connectée a `isMe`. */
+  birthdays?: { id: string; firstName: string; lastName: string; isMe: boolean }[];
   actions: DashboardAction[];
   programme: ProgrammeItem[];
 };
@@ -142,7 +148,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
       if (!isMediaTeam) return;
       const { data: pubs } = await service
         .from("media_publications")
-        .select("id, event_id, title, created_at, events(title, start_date)")
+        .select("id, event_id, title, created_at, file_ids, media, publish_info, events(title, start_date)")
         .eq("status", "to_publish")
         .order("created_at", { ascending: false })
         .limit(30);
@@ -150,7 +156,10 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
         const ev = p.events as unknown as { title: string; start_date: string } | null;
         return { id: p.id, eventId: p.event_id, title: ev?.title ?? p.title ?? "Publication", date: ev?.start_date ?? p.created_at };
       });
-      push({ id: "publier", app: "audiovisuel", tone: "red", count: pubItems.length, items: pubItems, title: "Médias à publier", detail: "Photos et vidéos en attente dans le centre de publication" });
+      // Une image pour l'action : le premier média qui a une miniature.
+      const thumbs = pubs?.length ? await publicationThumbs(service, pubs.slice(0, 6)) : new Map<string, string | null>();
+      const thumbUrl = [...thumbs.values()].find(Boolean) ?? null;
+      push({ id: "publier", app: "audiovisuel", tone: "red", count: pubItems.length, items: pubItems, title: "Médias à publier", detail: "Photos et vidéos en attente dans le centre de publication", thumbUrl });
       const { count: flagged } = await service
         .from("comment_moderation")
         .select("id", { count: "exact", head: true })
@@ -202,5 +211,6 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
 
   const toneOrder = { red: 0, orange: 1, navy: 2 };
   actions.sort((a, b) => toneOrder[a.tone] - toneOrder[b.tone] || b.count - a.count);
-  return { firstName: me?.first_name ?? null, actions, programme };
+  const birthdays = (await todaysBirthdays(service)).map((b) => ({ id: b.id, firstName: b.firstName, lastName: b.lastName, isMe: b.id === userId }));
+  return { firstName: me?.first_name ?? null, birthdays, actions, programme };
 }

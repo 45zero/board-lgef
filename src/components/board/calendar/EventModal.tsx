@@ -1,5 +1,6 @@
 "use client";
 
+import { EventWeather } from "@/components/board/calendar/DayWeather";
 import { EventCosts } from "@/components/board/calendar/EventCosts";
 import { EventTeamCards } from "@/components/board/team/TeamCardOpener";
 import { useEffect, useRef, useState } from "react";
@@ -84,7 +85,10 @@ export function EventModal({
               Calendrier · Board LGEF
             </div>
             <h2 className="mt-1 text-xl font-extrabold">{m.title || "Nouvel événement"}</h2>
-            <div className="mt-1 text-sm text-white/80">{subtitleRange}</div>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-white/80">
+              {subtitleRange}
+              <EventWeather eventId={event?.id} />
+            </div>
             {isEditing && event!.createdAt && (
               <div className="mt-1 text-xs text-white/60">
                 Créé le {format(parseISO(event!.createdAt), "d MMMM yyyy 'à' HH:mm", { locale: fr })}

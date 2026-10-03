@@ -28,11 +28,13 @@ import { CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
 import type { CalendarEvent } from "@/lib/board/calendar";
 import { MobileEventModal } from "@/components/board/mobile/MobileEventModal";
+import { DayWeatherBadge, useForecast } from "@/components/board/calendar/DayWeather";
 
 type View = "mois" | "semaine";
 
 export function MobileCalendrierScreen() {
   const [view, setView] = useState<View>("mois");
+  const forecast = useForecast();
   const [anchor, setAnchor] = useState(() => new Date());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [orgFilter, setOrgFilter] = useState<OrgKey | null>(null);
@@ -280,12 +282,19 @@ export function MobileCalendrierScreen() {
                           dayIdx > 0 ? "border-l border-line" : ""
                         } ${inMonth ? "bg-card" : "bg-subtle/40 opacity-50"}`}
                       >
-                        <span
-                          className={`self-start rounded-full px-1 text-[10px] font-bold ${
-                            isToday ? "bg-red text-white" : "text-ink-2"
-                          }`}
-                        >
-                          {format(day, "d")}
+                        <span className="flex items-center justify-between gap-0.5">
+                          <span
+                            className={`rounded-full px-1 text-[10px] font-bold ${
+                              isToday ? "bg-red text-white" : "text-ink-2"
+                            }`}
+                          >
+                            {format(day, "d")}
+                          </span>
+                          {inMonth && (
+                            <span className="text-ink-3">
+                              <DayWeatherBadge day={day} forecast={forecast} compact />
+                            </span>
+                          )}
                         </span>
                         {dayEvents.map((ev) => (
                           <span
@@ -344,6 +353,9 @@ export function MobileCalendrierScreen() {
                 <div className="w-9 shrink-0 text-center">
                   <div className="font-mono text-[9px] uppercase text-ink-4">{format(day, "EEE", { locale: fr })}</div>
                   <div className="text-sm font-extrabold text-ink">{format(day, "d")}</div>
+                  <div className="mt-0.5 flex justify-center text-ink-3">
+                    <DayWeatherBadge day={day} forecast={forecast} compact />
+                  </div>
                 </div>
                 <div className="flex-1 space-y-1">
                   {dayEvents.length === 0 && <div className="text-xs text-ink-4">Aucun événement</div>}
@@ -403,6 +415,7 @@ function DayPanel({
   onOpenEvent: (ev: CalendarEvent) => void;
   onCreate: () => void;
 }) {
+  const dayForecast = useForecast();
   return (
     <div
       className={`fixed inset-0 z-40 flex justify-end transition-opacity duration-300 ${
@@ -418,7 +431,12 @@ function DayPanel({
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <div>
             <div className="font-mono text-[10px] text-ink-4">{events.length} événement{events.length > 1 ? "s" : ""}</div>
-            <div className="text-sm font-extrabold text-ink">{format(day, "EEEE d MMMM yyyy", { locale: fr })}</div>
+            <div className="flex items-center gap-2 text-sm font-extrabold text-ink">
+              {format(day, "EEEE d MMMM yyyy", { locale: fr })}
+              <span className="font-normal text-ink-3">
+                <DayWeatherBadge day={day} forecast={dayForecast} />
+              </span>
+            </div>
           </div>
           <button onClick={onClose} className="text-ink-4">
             <X size={18} />

@@ -173,11 +173,24 @@ export interface LabelItem {
   name: string;
 }
 
-/** Nombre de mails non lus dans la boîte de réception (compteur du rail/dock). */
+/** Mails non lus affichés par Gmail dans « Principale » (hors Promotions, Réseaux sociaux, Notifications…). */
+export const PRIMARY_UNREAD_QUERY = "in:inbox is:unread category:primary";
+
+/**
+ * Nombre de mails non lus de l'onglet Principal (compteur du rail/dock et de l'accueil). Le compteur
+ * du libellé INBOX comptait aussi Promotions et Notifications (99+ alors que Gmail en montre 15).
+ * Décompte exact des identifiants, plafonné à 500 (affiché « 99+ » bien avant).
+ */
 export async function getInboxUnreadCount(account: ConnectedAccount): Promise<number> {
   const gmail = await gmailClient(account);
-  const { data } = await gmail.users.labels.get({ userId: "me", id: "INBOX" });
-  return data.messagesUnread ?? 0;
+  let count = 0;
+  let pageToken: string | undefined;
+  do {
+    const { data } = await gmail.users.messages.list({ userId: "me", q: PRIMARY_UNREAD_QUERY, maxResults: 500, pageToken, fields: "messages/id,nextPageToken" });
+    count += data.messages?.length ?? 0;
+    pageToken = data.nextPageToken ?? undefined;
+  } while (pageToken && count < 500);
+  return count;
 }
 
 export async function listLabels(account: ConnectedAccount): Promise<LabelItem[]> {

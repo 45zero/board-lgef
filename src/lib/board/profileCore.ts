@@ -10,14 +10,21 @@ import { normalizePlate, type ProfileDetails, type ProfileInput } from "@/lib/bo
 
 type Service = ReturnType<typeof createServiceClient>;
 
-export const DETAILS_COLUMNS = "home_address, home_coordinates, has_company_car, license_plate";
+export const DETAILS_COLUMNS = "home_address, home_coordinates, has_company_car, license_plate, birth_date";
 
-export function detailsFromRow(p: { home_address: string | null; home_coordinates: unknown; has_company_car: boolean | null; license_plate: string | null }): ProfileDetails {
+export function detailsFromRow(p: {
+  home_address: string | null;
+  home_coordinates: unknown;
+  has_company_car: boolean | null;
+  license_plate: string | null;
+  birth_date: string | null;
+}): ProfileDetails {
   return {
     homeAddress: p.home_address ?? "",
     homeCoordinates: parseLatLng(p.home_coordinates),
     hasCompanyCar: !!p.has_company_car,
     licensePlate: p.license_plate ?? "",
+    birthDate: p.birth_date,
   };
 }
 
@@ -35,6 +42,8 @@ export async function saveProfile(service: Service, id: string, input: ProfileIn
   }
 
   const plate = normalizePlate(input.licensePlate);
+  const birthDate = input.birthDate && /^\d{4}-\d{2}-\d{2}$/.test(input.birthDate) ? input.birthDate : null;
+  if (birthDate && (birthDate < "1900-01-01" || birthDate > new Date().toISOString().slice(0, 10))) throw new Error("Date de naissance invalide.");
   const { error } = await service
     .from("profiles")
     .update({
@@ -44,6 +53,7 @@ export async function saveProfile(service: Service, id: string, input: ProfileIn
       home_coordinates: address && coordinates ? (coordinates as unknown as Json) : null,
       has_company_car: input.hasCompanyCar,
       license_plate: plate || null,
+      birth_date: birthDate,
     })
     .eq("id", id);
   if (error) throw new Error(error.message);

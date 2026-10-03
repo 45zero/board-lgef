@@ -2401,6 +2401,8 @@ export type Database = {
           expense_validator_id: string | null
           daily_digest_email: boolean
           daily_digest_sent_on: string | null
+          birth_date: string | null
+          birthday_announced_on: string | null
         }
         Insert: {
           id: string
@@ -2428,6 +2430,8 @@ export type Database = {
           expense_validator_id?: string | null
           daily_digest_email?: boolean
           daily_digest_sent_on?: string | null
+          birth_date?: string | null
+          birthday_announced_on?: string | null
         }
         Update: {
           id?: string
@@ -2455,6 +2459,8 @@ export type Database = {
           expense_validator_id?: string | null
           daily_digest_email?: boolean
           daily_digest_sent_on?: string | null
+          birth_date?: string | null
+          birthday_announced_on?: string | null
         }
         Relationships: []
       }
