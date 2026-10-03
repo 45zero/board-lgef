@@ -23,6 +23,8 @@ export interface EventFile {
   storage_provider: "supabase" | "drive";
   drive_file_id: string | null;
   drive_web_view_link: string | null;
+  /** Photo ou vidéo retirée du Drive 7 jours après sa publication sur les réseaux (voir driveCleanup.ts). */
+  drive_purged_at: string | null;
 }
 
 function slugifyFilename(name: string) {
@@ -244,6 +246,7 @@ export async function deleteEventFile(file: { id: string; path: string | null })
 
 /** Lien d'accès au fichier — URL signée pour Supabase Storage, lien Drive natif sinon. */
 export async function getEventFileViewUrl(file: EventFile, downloadAs?: string) {
+  if (file.drive_purged_at) return null;
   if (file.storage_provider === "drive") return file.drive_web_view_link;
   if (!file.path) return null;
   return createEventFileUrl(file.path, downloadAs);

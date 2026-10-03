@@ -224,6 +224,15 @@ export async function trashFile(account: ConnectedAccount, fileId: string) {
   await drive.files.update({ fileId, requestBody: { trashed: true } });
 }
 
+/** Espace du compte Google (Drive + Gmail + Photos partagent le quota), en octets ; limit null : illimité. */
+export async function getStorageQuota(account: ConnectedAccount) {
+  const drive = await driveClient(account);
+  const { data } = await drive.about.get({ fields: "storageQuota" });
+  const q = data.storageQuota ?? {};
+  const n = (v: string | null | undefined) => (v ? Number(v) : 0);
+  return { limit: q.limit ? Number(q.limit) : null, usage: n(q.usage), inDrive: n(q.usageInDrive), inTrash: n(q.usageInDriveTrash) };
+}
+
 /** Rend un fichier consultable par quiconque a le lien — nécessaire pour qu'un partage soit ouvrable hors du compte Drive du board. */
 export async function ensurePublicViewAccess(account: ConnectedAccount, fileId: string) {
   const drive = await driveClient(account);

@@ -5,6 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { Json } from "@/lib/supabase/database.types";
 import type { HabillageSettings } from "@/lib/board/habillage";
+import { getBoardDriveAccount } from "@/lib/board/teamDrive";
+import { getStorageQuota } from "@/lib/google/drive";
+import { purgePublishedMedia } from "@/lib/board/driveCleanup";
 
 async function requireAdmin() {
   const supabase = await createClient();
@@ -140,4 +143,23 @@ export async function createHabillageAnimationUpload(fileName: string): Promise<
   const { data, error } = await service.storage.from("board-assets").createSignedUploadUrl(path);
   if (error || !data) throw new Error(error?.message ?? "Dépôt impossible.");
   return { path, token: data.token };
+}
+
+/* ---------- Espace du Drive du board ---------- */
+
+/**
+ * Espace utilisé par le compte Google du Drive du board, et ce que le nettoyage automatique retirera
+ * (photos et vidéos publiées depuis 7 jours). Administrateurs et super users.
+ */
+export async function getBoardDriveUsage() {
+  await requireAdmin();
+  const account = await getBoardDriveAccount();
+  if (!account) return null;
+  const service = createServiceClient();
+  const [quota, pending, { count: purged }] = await Promise.all([
+    getStorageQuota(account),
+    purgePublishedMedia(service, { dryRun: true }),
+    service.from("event_files").select("id", { count: "exact", head: true }).not("drive_purged_at", "is", null),
+  ]);
+  return { ...quota, toPurge: pending.files, toPurgeBytes: pending.bytes, purged: purged ?? 0 };
 }

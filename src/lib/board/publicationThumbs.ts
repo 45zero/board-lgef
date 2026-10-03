@@ -8,7 +8,7 @@ import { getNetworkEntry, NETWORK_KEYS, type PublishInfo, type StandaloneMedia }
 // sinon vidéo YouTube.
 
 type Service = ReturnType<typeof createServiceClient>;
-export type PubForThumb = { id: string; file_ids: string[] | null; media: unknown; publish_info: unknown };
+export type PubForThumb = { id: string; file_ids: string[] | null; media: unknown; publish_info: unknown; media_purged_at?: string | null };
 
 /** Miniature signée jusqu'au lendemain (même URL toute la journée : le cache navigateur sert). */
 function signedThumb(param: "f" | "p", value: string) {
@@ -20,7 +20,7 @@ function signedThumb(param: "f" | "p", value: string) {
 export async function publicationThumbs(service: Service, pubs: PubForThumb[]): Promise<Map<string, string | null>> {
   const firstIds = pubs.map((p) => p.file_ids?.[0]).filter((id): id is string => !!id);
   const { data: files } = firstIds.length
-    ? await service.from("event_files").select("id, storage_provider, path, drive_file_id, content_type").in("id", firstIds)
+    ? await service.from("event_files").select("id, storage_provider, path, drive_file_id, content_type, drive_purged_at").in("id", firstIds)
     : { data: [] };
   const fileBy = new Map((files ?? []).map((f) => [f.id, f]));
   const out = new Map<string, string | null>();
@@ -29,10 +29,12 @@ export async function publicationThumbs(service: Service, pubs: PubForThumb[]): 
     const media = (p.media as StandaloneMedia[] | null)?.[0];
     const youtubeId = getNetworkEntry(p.publish_info as PublishInfo | null, "youtube")?.videoId;
     let url: string | null = null;
-    if (file?.storage_provider === "drive" && file.drive_file_id) url = signedThumb("f", file.drive_file_id);
+    // Retiré du Drive après publication : plus de miniature Drive (YouTube ou icône à la place).
+    if (file?.drive_purged_at) url = youtubeId ? `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg` : null;
+    else if (file?.storage_provider === "drive" && file.drive_file_id) url = signedThumb("f", file.drive_file_id);
     // Photo du stockage : réduite à 480 px par la route (l'original pèse souvent plusieurs Mo).
     else if (file?.path && (file.content_type ?? "").startsWith("image")) url = signedThumb("p", file.path);
-    else if (media?.drive_file_id) url = signedThumb("f", media.drive_file_id);
+    else if (media?.drive_file_id && !p.media_purged_at) url = signedThumb("f", media.drive_file_id);
     else if (youtubeId) url = `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`;
     out.set(p.id, url);
   }

@@ -1153,8 +1153,12 @@ function AttachmentRow({
             <span className="block truncate text-sm font-semibold text-ink">{file.filename}</span>
             <span className="block text-[11px] text-ink-4">
               {formatFileSize(file.size_bytes)} · ajouté par {uploader} le {formatDateTime(file.created_at)}
-              {isDrive && (
-                <span className="ml-1.5 rounded-full bg-subtle px-1.5 py-0.5 font-semibold text-ink-3">Drive</span>
+              {file.drive_purged_at ? (
+                <span className="ml-1.5 rounded-full bg-subtle px-1.5 py-0.5 font-semibold text-ink-3" title="Retiré du Drive 7 jours après sa publication : il reste en ligne sur les réseaux">
+                  Retiré du Drive · en ligne sur les réseaux
+                </span>
+              ) : (
+                isDrive && <span className="ml-1.5 rounded-full bg-subtle px-1.5 py-0.5 font-semibold text-ink-3">Drive</span>
               )}
             </span>
             <PublishBadges file={file} />

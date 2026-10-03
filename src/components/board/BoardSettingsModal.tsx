@@ -11,6 +11,7 @@ import {
   setBoardDriveAccount,
   getModerationRecipients,
   setModerationRecipients,
+  getBoardDriveUsage,
 } from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
 import { useAuth } from "@/contexts/AuthContext";
@@ -225,6 +226,47 @@ function AccountSection() {
   );
 }
 
+const gb = (bytes: number) => `${(bytes / 1024 ** 3).toLocaleString("fr-FR", { maximumFractionDigits: bytes < 10 * 1024 ** 3 ? 1 : 0 })} Go`;
+
+/**
+ * Espace du Drive du board (quota Google : Drive, Gmail et Photos partagés) et nettoyage automatique
+ * des photos et vidéos publiées sur les réseaux depuis 7 jours.
+ */
+function BoardDriveUsage() {
+  const [usage, setUsage] = useState<Awaited<ReturnType<typeof getBoardDriveUsage>> | undefined>(undefined);
+  useEffect(() => {
+    getBoardDriveUsage()
+      .then(setUsage)
+      .catch(() => setUsage(null));
+  }, []);
+  if (usage === undefined) return <div className="mt-2 h-10 animate-pulse rounded-btn bg-card" />;
+  if (usage === null) return null;
+  const pct = usage.limit ? Math.min(100, (usage.usage / usage.limit) * 100) : 0;
+  return (
+    <div className="mt-2 space-y-1.5 rounded-btn bg-card px-2.5 py-2">
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="font-semibold text-ink-2">Espace utilisé</span>
+        <span className="font-mono text-ink-3">
+          {gb(usage.usage)}
+          {usage.limit ? ` / ${gb(usage.limit)}` : ""}
+        </span>
+      </div>
+      {usage.limit && (
+        <div className="h-1.5 overflow-hidden rounded-full bg-track">
+          <div className={`h-full rounded-full ${pct > 90 ? "bg-red" : pct > 75 ? "bg-warn" : "bg-good"}`} style={{ width: `${pct}%` }} />
+        </div>
+      )}
+      <div className="text-[11px] text-ink-4">
+        Drive {gb(usage.inDrive)} · corbeille {gb(usage.inTrash)} (vidée par Google après 30 jours)
+      </div>
+      <div className="text-[11px] text-ink-4">
+        Photos et vidéos retirées du Drive 7 jours après leur publication sur les réseaux : {usage.purged} déjà retirée{usage.purged > 1 ? "s" : ""}
+        {usage.toPurge > 0 ? `, ${usage.toPurge} au prochain passage (${gb(usage.toPurgeBytes)})` : ""}.
+      </div>
+    </div>
+  );
+}
+
 /**
  * Comptes Google connectés (Mails, Agenda, GED…) : déconnexion et ajout d'un autre compte.
  * Les admins/super users y désignent aussi le compte qui reçoit les médias d'événements de tout le monde.
@@ -309,9 +351,12 @@ function GoogleAccountsSection() {
             {canManageDrive && (
               <div className="mt-1">
                 {boardAccountId === a.id ? (
-                  <span className="rounded-full bg-good-bg px-2 py-0.5 text-[10px] font-bold text-good">
-                    Drive du board
-                  </span>
+                  <>
+                    <span className="rounded-full bg-good-bg px-2 py-0.5 text-[10px] font-bold text-good">
+                      Drive du board
+                    </span>
+                    <BoardDriveUsage />
+                  </>
                 ) : (
                   <button
                     disabled={busyId !== null}

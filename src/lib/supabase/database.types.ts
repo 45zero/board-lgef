@@ -290,6 +290,7 @@ export type Database = {
           category: string | null
           publish_info: Json | null
           published_by: string | null
+          media_purged_at: string | null
         }
         Insert: {
           id?: string
@@ -309,6 +310,7 @@ export type Database = {
           category?: string | null
           publish_info?: Json | null
           published_by?: string | null
+          media_purged_at?: string | null
         }
         Update: {
           id?: string
@@ -328,6 +330,7 @@ export type Database = {
           category?: string | null
           publish_info?: Json | null
           published_by?: string | null
+          media_purged_at?: string | null
         }
         Relationships: []
       }
@@ -1245,6 +1248,7 @@ export type Database = {
           storage_provider: string
           drive_file_id: string | null
           drive_web_view_link: string | null
+          drive_purged_at: string | null
         }
         Insert: {
           id?: string
@@ -1259,6 +1263,7 @@ export type Database = {
           storage_provider?: string
           drive_file_id?: string | null
           drive_web_view_link?: string | null
+          drive_purged_at?: string | null
         }
         Update: {
           id?: string
@@ -1273,6 +1278,7 @@ export type Database = {
           storage_provider?: string
           drive_file_id?: string | null
           drive_web_view_link?: string | null
+          drive_purged_at?: string | null
         }
         Relationships: []
       }

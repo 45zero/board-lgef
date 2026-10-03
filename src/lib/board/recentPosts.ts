@@ -21,7 +21,7 @@ export type RecentPost = {
 export async function getRecentPosts(service: ReturnType<typeof createServiceClient>, limit = 8): Promise<RecentPost[]> {
   const { data: pubs } = await service
     .from("media_publications")
-    .select("id, title, caption, kind, published_at, publish_info, file_ids, media, events(title)")
+    .select("id, title, caption, kind, published_at, publish_info, file_ids, media, media_purged_at, events(title)")
     .eq("status", "published")
     .not("published_at", "is", null)
     .order("published_at", { ascending: false })
