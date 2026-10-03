@@ -6,9 +6,9 @@ export type NavStyle = "rail" | "dock";
 
 export interface ContextPanelWidgets {
   today: boolean;
-  trello: boolean;
+  /** Mes cartes de l'Espace Team à traiter. */
+  cards: boolean;
   activity: boolean;
-  migration: boolean;
 }
 
 export interface BoardPreferences {
@@ -22,7 +22,7 @@ const STORAGE_KEY = "board-lgef:preferences";
 const DEFAULTS: BoardPreferences = {
   navStyle: "rail",
   contextPanelOpen: true,
-  contextPanelWidgets: { today: true, trello: false, activity: true, migration: true },
+  contextPanelWidgets: { today: true, cards: true, activity: true },
 };
 
 /** Préférences d'affichage personnelles (navigation, panneau récapitulatif) — persistées en local, propres à cet appareil. */
@@ -32,8 +32,12 @@ export function useBoardPreferences() {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time hydration from localStorage on mount, no async fetch involved
-      if (raw) setPrefs({ ...DEFAULTS, ...JSON.parse(raw) });
+      if (raw) {
+        const stored = JSON.parse(raw) as Partial<BoardPreferences>;
+        // Widgets fusionnés un à un : un nouveau widget (« Mes cartes ») prend sa valeur par défaut.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time hydration from localStorage on mount, no async fetch involved
+        setPrefs({ ...DEFAULTS, ...stored, contextPanelWidgets: { ...DEFAULTS.contextPanelWidgets, ...stored.contextPanelWidgets } });
+      }
     } catch {
       // localStorage indisponible (navigation privée...) — on reste sur les valeurs par défaut
     }

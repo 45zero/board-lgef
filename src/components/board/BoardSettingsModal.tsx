@@ -327,10 +327,9 @@ function GoogleAccountsSection() {
 }
 
 const WIDGET_ROWS: { key: keyof ContextPanelWidgets; title: string; subtitle: string }[] = [
-  { key: "today", title: "Aujourd'hui", subtitle: "Vos réunions du jour" },
-  { key: "trello", title: "Mes cartes Trello", subtitle: "Cartes assignées à échéance proche" },
-  { key: "activity", title: "Activité du Board", subtitle: "Flux inter-applications" },
-  { key: "migration", title: "Avancement migration", subtitle: "Applications déjà intégrées" },
+  { key: "today", title: "Aujourd'hui", subtitle: "Les événements du jour à la Ligue" },
+  { key: "cards", title: "Mes cartes", subtitle: "Cartes de l'Espace Team à traiter" },
+  { key: "activity", title: "Activité", subtitle: "Vos dernières notifications" },
 ];
 
 export function BoardSettingsModal({

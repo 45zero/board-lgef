@@ -1,12 +1,11 @@
-"use server";
-
-import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/serviceClient";
+import "server-only";
+import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import { publicationThumbs, totalViews } from "@/lib/board/publicationThumbs";
 import { getNetworkEntry, networkUrl, publishedNetworks, type PublishInfo } from "@/lib/social/targets";
 
 // Accueil — « Derniers médias publiés » : ce qui est parti récemment sur les réseaux de la Ligue,
-// avec le réseau (Facebook, Instagram, YouTube) et le lien vers le post.
+// avec le réseau (Facebook, Instagram, YouTube) et le lien vers le post. Servi par la route GET
+// /api/dashboard/recent-posts : en parallèle des server actions de l'accueil (exécutées une par une).
 
 export type RecentPost = {
   id: string;
@@ -19,11 +18,7 @@ export type RecentPost = {
   networks: { network: "facebook" | "instagram" | "youtube"; url: string | null }[];
 };
 
-export async function getRecentPosts(limit = 8): Promise<RecentPost[]> {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return [];
-  const service = createServiceClient();
+export async function getRecentPosts(service: ReturnType<typeof createServiceClient>, limit = 8): Promise<RecentPost[]> {
   const { data: pubs } = await service
     .from("media_publications")
     .select("id, title, caption, kind, published_at, publish_info, file_ids, media, events(title)")

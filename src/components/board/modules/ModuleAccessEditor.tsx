@@ -1,7 +1,8 @@
 "use client";
 
+import { Toggle } from "@/components/board/Toggle";
 import { useMemo, useState } from "react";
-import { Check, ChevronDown, Search, X } from "lucide-react";
+import { Check, ChevronDown, Search, X, EyeOff } from "lucide-react";
 import { saveModuleRule, type ModuleAccessAdmin } from "@/app/actions/module-access";
 import { unwrap } from "@/lib/board/actionResult";
 import { defaultRule, GROUP_CHOICES, isElevated, ROLE_CHOICES, ruleMatches, type DirectoryPerson, type ModuleRule } from "@/lib/board/modules";
@@ -130,7 +131,21 @@ export function ModuleAccessEditor({
 
   return (
     <div className="space-y-5">
-      <div>
+      {/* Masquer sans perdre la règle : pour présenter les modules petit à petit. */}
+      <div className={`flex items-center justify-between gap-3 rounded-btn border-2 p-3 ${rule.hidden ? "border-warn bg-warn-bg" : "border-line"}`}>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-sm font-bold text-ink">
+            <EyeOff size={14} /> Masqué — en préparation
+          </div>
+          <div className="text-[11px] text-ink-3">
+            Retiré du rail, du dock et du mobile de tout le monde ; seuls les administrateurs et super users le voient. La règle ci-dessous est
+            conservée pour le jour où il sera présenté.
+          </div>
+        </div>
+        <Toggle on={rule.hidden} onClick={() => update({ hidden: !rule.hidden })} />
+      </div>
+
+      <div className={rule.hidden ? "pointer-events-none opacity-50" : ""}>
         <div className={sectionTitle}>Qui voit « {moduleLabel} »</div>
         <div className="grid grid-cols-2 gap-1.5">
           {[

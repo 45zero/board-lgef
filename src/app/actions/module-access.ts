@@ -11,6 +11,7 @@ import type { SpecialtyLite } from "@/lib/board/poles";
 
 type Row = {
   module_id: string;
+  hidden: boolean;
   everyone: boolean;
   roles: string[];
   specialty_slugs: string[];
@@ -20,6 +21,7 @@ type Row = {
 
 const toRule = (r: Row): ModuleRule => ({
   moduleId: r.module_id,
+  hidden: r.hidden,
   everyone: r.everyone,
   roles: r.roles,
   specialtySlugs: r.specialty_slugs,
@@ -72,7 +74,7 @@ async function getModuleAccessAdminImpl(): Promise<ModuleAccessAdmin> {
   await requireManager();
   const service = createServiceClient();
   const [{ data: rows, error }, { data: profiles }, { data: links }, { data: specialties }] = await Promise.all([
-    service.from("module_access").select("module_id, everyone, roles, specialty_slugs, include_user_ids, exclude_user_ids"),
+    service.from("module_access").select("module_id, hidden, everyone, roles, specialty_slugs, include_user_ids, exclude_user_ids"),
     service.from("profiles").select("id, first_name, last_name, email, role").order("last_name"),
     service.from("profile_specialties").select("user_id, specialties(slug)"),
     service.from("specialties").select("slug, label, domain"),
@@ -101,6 +103,7 @@ async function saveModuleRuleImpl(rule: ModuleRule) {
   const uniq = (xs: string[]) => [...new Set(xs)];
   const { error } = await supabase.from("module_access").upsert({
     module_id: rule.moduleId,
+    hidden: rule.hidden,
     everyone: rule.everyone,
     roles: uniq(rule.roles),
     specialty_slugs: uniq(rule.specialtySlugs),

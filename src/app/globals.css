@@ -135,13 +135,11 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Écrans tactiles (téléphone, tablette) : on défile au doigt, les barres de défilement ne servent
-   qu'à encombrer (carrousels de l'accueil, listes, panneaux). Elles restent à la souris. */
-@media (pointer: coarse) {
-  * {
-    scrollbar-width: none;
-  }
-  *::-webkit-scrollbar {
-    display: none;
-  }
+/* Barres de défilement masquées partout (on défile à la molette, au pavé tactile ou au doigt) ;
+   les rangées horizontales de l'accueil ont des flèches au survol. */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
 }

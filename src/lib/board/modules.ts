@@ -6,6 +6,8 @@ import { BOARD_APPS } from "@/lib/board/tokens";
 
 export interface ModuleRule {
   moduleId: string;
+  /** Masqué — en préparation : visible seulement des administrateurs et super users, règle conservée. */
+  hidden: boolean;
   everyone: boolean;
   roles: string[];
   specialtySlugs: string[];
@@ -24,6 +26,7 @@ export const BUILT_MODULES = new Set(["accueil", "trello", "effectif", "mails", 
 
 export const defaultRule = (moduleId: string): ModuleRule => ({
   moduleId,
+  hidden: false,
   everyone: true,
   roles: [],
   specialtySlugs: [],
@@ -33,8 +36,9 @@ export const defaultRule = (moduleId: string): ModuleRule => ({
 
 export const isElevated = (role: string) => role === "admin" || role === "super_user";
 
-/** Même règle que module_rule_matches (SQL) : retirés > ajoutés > tout le monde > rôles / spécialités. */
+/** Même règle que module_rule_matches (SQL) : masqué > retirés > ajoutés > tout le monde > rôles / spécialités. */
 export function ruleMatches(rule: ModuleRule, p: Pick<DirectoryPerson, "id" | "role" | "slugs">) {
+  if (rule.hidden) return false;
   if (rule.excludeUserIds.includes(p.id)) return false;
   if (rule.includeUserIds.includes(p.id)) return true;
   if (rule.everyone) return true;

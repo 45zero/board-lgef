@@ -4,16 +4,17 @@ import { signMediaStreamToken } from "@/lib/board/mediaStreamToken";
 import { getNetworkEntry, NETWORK_KEYS, type PublishInfo, type StandaloneMedia } from "@/lib/social/targets";
 
 // Miniature et vues d'une publication du centre (accueil : « Médias à publier », « Derniers médias
-// publiés ») : premier média — Drive (miniature Google via /api/media/thumb), Storage (URL signée)
-// ou vidéo YouTube.
+// publiés ») : premier média — Drive ou photo du stockage (miniature 480 px via /api/media/thumb),
+// sinon vidéo YouTube.
 
 type Service = ReturnType<typeof createServiceClient>;
 export type PubForThumb = { id: string; file_ids: string[] | null; media: unknown; publish_info: unknown };
 
-/** Miniature Drive signée jusqu'au lendemain (même URL toute la journée : le cache navigateur sert). */
-function driveThumb(fileId: string) {
+/** Miniature signée jusqu'au lendemain (même URL toute la journée : le cache navigateur sert). */
+function signedThumb(param: "f" | "p", value: string) {
   const expiresAt = Math.ceil(Date.now() / 86_400_000 + 1) * 86_400_000;
-  return `/api/media/thumb?f=${encodeURIComponent(fileId)}&e=${expiresAt}&s=${signMediaStreamToken(`thumb:${fileId}`, expiresAt)}`;
+  const key = param === "p" ? `p:${value}` : value;
+  return `/api/media/thumb?${param}=${encodeURIComponent(value)}&e=${expiresAt}&s=${signMediaStreamToken(`thumb:${key}`, expiresAt)}`;
 }
 
 export async function publicationThumbs(service: Service, pubs: PubForThumb[]): Promise<Map<string, string | null>> {
@@ -23,20 +24,18 @@ export async function publicationThumbs(service: Service, pubs: PubForThumb[]): 
     : { data: [] };
   const fileBy = new Map((files ?? []).map((f) => [f.id, f]));
   const out = new Map<string, string | null>();
-  await Promise.all(
-    pubs.map(async (p) => {
-      const file = p.file_ids?.[0] ? fileBy.get(p.file_ids[0]) : undefined;
-      const media = (p.media as StandaloneMedia[] | null)?.[0];
-      const youtubeId = getNetworkEntry(p.publish_info as PublishInfo | null, "youtube")?.videoId;
-      let url: string | null = null;
-      if (file?.storage_provider === "drive" && file.drive_file_id) url = driveThumb(file.drive_file_id);
-      else if (file?.path && (file.content_type ?? "").startsWith("image")) {
-        url = (await service.storage.from("event-files").createSignedUrl(file.path, 3600)).data?.signedUrl ?? null;
-      } else if (media?.drive_file_id) url = driveThumb(media.drive_file_id);
-      else if (youtubeId) url = `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`;
-      out.set(p.id, url);
-    })
-  );
+  for (const p of pubs) {
+    const file = p.file_ids?.[0] ? fileBy.get(p.file_ids[0]) : undefined;
+    const media = (p.media as StandaloneMedia[] | null)?.[0];
+    const youtubeId = getNetworkEntry(p.publish_info as PublishInfo | null, "youtube")?.videoId;
+    let url: string | null = null;
+    if (file?.storage_provider === "drive" && file.drive_file_id) url = signedThumb("f", file.drive_file_id);
+    // Photo du stockage : réduite à 480 px par la route (l'original pèse souvent plusieurs Mo).
+    else if (file?.path && (file.content_type ?? "").startsWith("image")) url = signedThumb("p", file.path);
+    else if (media?.drive_file_id) url = signedThumb("f", media.drive_file_id);
+    else if (youtubeId) url = `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`;
+    out.set(p.id, url);
+  }
   return out;
 }
 

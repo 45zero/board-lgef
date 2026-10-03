@@ -1,5 +1,6 @@
 "use client";
 
+import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { MapPopup } from "@/components/board/calendar/MapPopup";
 import { useEffect, useState } from "react";
 import { X, Check, ChevronRight, CalendarDays, MapPin, Map as MapIcon } from "lucide-react";
@@ -34,6 +35,7 @@ const APP_LABELS: Record<string, string> = {
   calendrier: "le calendrier",
   audiovisuel: "le centre de publication",
   inscription: "Inscription",
+  trello: "l'Espace Team",
 };
 
 /** Date et lieu d'un événement, avec un léger bouton « Carte » qui ouvre la carte dans une fenêtre. */
@@ -391,6 +393,30 @@ function AssignList({ items, onDone }: { items: DashboardActionItem[]; onDone: (
 
 /* ---------- Popup ---------- */
 
+/** Carte de l'Espace Team : ouverte en popup (fiche complète), comme depuis le calendrier. */
+function CardRow({ item, onOpen }: { item: DashboardActionItem; onOpen: () => void }) {
+  const { open } = useOpenTeamCard();
+  const late = item.detail?.includes("en retard");
+  return (
+    <button
+      onClick={() => {
+        onOpen();
+        open(item.id);
+      }}
+      className="flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-bold text-ink">{item.title}</span>
+        <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-ink-3">
+          {item.detail && <span className={late ? "font-semibold text-bad" : ""}>{item.detail}</span>}
+          {item.date && <span>Échéance {new Date(item.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}</span>}
+        </span>
+      </span>
+      <ChevronRight size={15} className="shrink-0 text-ink-4" />
+    </button>
+  );
+}
+
 /**
  * Popup d'une action du tableau de bord : on traite directement (valider/refuser des frais,
  * accepter une captation, confirmer une présence…) sans quitter l'accueil ; le module complet
@@ -432,6 +458,9 @@ export function ActionPopup({
       break;
     case "captation-attribuer":
       body = items.length ? <AssignList items={items} onDone={removeItem} /> : null;
+      break;
+    case "cartes":
+      body = items.length ? items.map((i) => <CardRow key={i.id} item={i} onOpen={onClose} />) : null;
       break;
     case "publier":
       body = items.length ? items.map((i) => <Row key={i.id} title={i.title} eventId={i.eventId} date={i.date} />) : null;

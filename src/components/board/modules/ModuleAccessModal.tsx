@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, Lock, Users, X } from "lucide-react";
+import { ChevronLeft, Lock, Users, X, EyeOff } from "lucide-react";
 import { getModuleAccessAdmin, type ModuleAccessAdmin } from "@/app/actions/module-access";
 import { unwrap } from "@/lib/board/actionResult";
 import { BUILT_MODULES, CONFIGURABLE_MODULES, GROUP_CHOICES, ROLE_CHOICES, type ModuleRule } from "@/lib/board/modules";
@@ -11,6 +11,7 @@ import { ModuleAccessEditor } from "@/components/board/modules/ModuleAccessEdito
 /** Résumé d'une règle pour la liste : « Tout le monde » ou « Formation · Photographes · +2 · −1 ». */
 function describe(rule: ModuleRule | undefined, poles: Pole[]) {
   if (!rule) return "Tout le monde";
+  if (rule.hidden) return "Masqué — administrateurs et super users uniquement";
   const parts: string[] = [];
   if (rule.everyone) parts.push("Tout le monde");
   else {
@@ -89,7 +90,13 @@ export function ModuleAccessModal({ initialModuleId, onClose }: { initialModuleI
                       {restricted ? <Lock size={12} className="text-warn" /> : <Users size={12} className="text-ink-4" />}
                       {m.label}
                     </span>
-                    {!BUILT_MODULES.has(m.id) && <span className="shrink-0 text-[10px] font-semibold text-ink-4">à venir</span>}
+                    {rule?.hidden ? (
+                      <span className="flex shrink-0 items-center gap-1 rounded-full bg-warn-bg px-1.5 py-0.5 text-[10px] font-bold text-warn">
+                        <EyeOff size={10} /> Masqué
+                      </span>
+                    ) : (
+                      !BUILT_MODULES.has(m.id) && <span className="shrink-0 text-[10px] font-semibold text-ink-4">à venir</span>
+                    )}
                   </div>
                   <div className="truncate text-[11px] text-ink-4">{data ? describe(rule, poles) : "…"}</div>
                 </button>

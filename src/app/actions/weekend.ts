@@ -65,7 +65,7 @@ const listPhotographerIds = (service: ReturnType<typeof createServiceClient>) =>
  */
 async function listPublisherIds(service: ReturnType<typeof createServiceClient>) {
   const [{ data: rule }, { data: profiles }, { data: links }] = await Promise.all([
-    service.from("module_access").select("everyone, roles, specialty_slugs, include_user_ids, exclude_user_ids").eq("module_id", "audiovisuel").maybeSingle(),
+    service.from("module_access").select("hidden, everyone, roles, specialty_slugs, include_user_ids, exclude_user_ids").eq("module_id", "audiovisuel").maybeSingle(),
     service.from("profiles").select("id, role"),
     service.from("profile_specialties").select("user_id, specialties(slug)"),
   ]);
@@ -76,6 +76,7 @@ async function listPublisherIds(service: ReturnType<typeof createServiceClient>)
   }
   const moduleRule = {
     moduleId: "audiovisuel",
+    hidden: rule.hidden,
     everyone: rule.everyone,
     roles: rule.roles,
     specialtySlugs: rule.specialty_slugs,

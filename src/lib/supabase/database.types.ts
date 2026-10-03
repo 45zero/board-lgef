@@ -170,6 +170,7 @@ export type Database = {
         Row: {
           module_id: string
           everyone: boolean
+          hidden: boolean
           roles: string[]
           specialty_slugs: string[]
           include_user_ids: string[]
@@ -180,6 +181,7 @@ export type Database = {
         Insert: {
           module_id: string
           everyone?: boolean
+          hidden?: boolean
           roles?: string[]
           specialty_slugs?: string[]
           include_user_ids?: string[]
@@ -190,6 +192,7 @@ export type Database = {
         Update: {
           module_id?: string
           everyone?: boolean
+          hidden?: boolean
           roles?: string[]
           specialty_slugs?: string[]
           include_user_ids?: string[]

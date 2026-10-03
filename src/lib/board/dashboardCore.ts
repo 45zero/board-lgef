@@ -1,6 +1,7 @@
 import "server-only";
 import { todaysBirthdays } from "@/lib/board/birthdays";
 import { publicationThumbs } from "@/lib/board/publicationThumbs";
+import { myOpenCards } from "@/lib/board/myCards";
 import { isPublisher } from "@/lib/board/publishers";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import { computeMyExpenses, countPendingForValidator } from "@/lib/board/expensesCore";
@@ -85,6 +86,22 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
   };
 
   await Promise.all([
+    // Cartes de l'Espace Team qui me sont assignées et pas encore faites (rouge si une est en retard).
+    safe(async () => {
+      const cards = await myOpenCards(service, userId);
+      const late = cards.filter((c) => c.dueAt && new Date(c.dueAt) < now).length;
+      const fresh = cards.filter((c) => c.isNew).length;
+      const items = cards.map((c) => ({
+        id: c.id,
+        eventId: c.eventId,
+        title: c.title,
+        date: c.dueAt,
+        detail: [c.boardTitle, c.isNew ? "nouvelle" : null, c.dueAt && new Date(c.dueAt) < now ? "en retard" : null].filter(Boolean).join(" · "),
+      }));
+      const detail = [late ? `${late} en retard` : null, fresh ? `${fresh} nouvelle${fresh > 1 ? "s" : ""}` : null].filter(Boolean).join(" · ");
+      push({ id: "cartes", app: "trello", tone: late ? "red" : "orange", count: cards.length, items, title: "Cartes à traiter", detail: detail || "Cartes de l'Espace Team qui vous sont assignées" });
+    }, undefined),
+
     // Frais à déclarer (moi) et à valider (mon équipe, en tant que N+1).
     safe(async () => {
       const [mine, pending] = await Promise.all([computeMyExpenses(service, userId), countPendingForValidator(service, userId)]);

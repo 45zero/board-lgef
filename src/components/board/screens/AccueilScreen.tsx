@@ -1,7 +1,7 @@
 "use client";
 
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bell,
   Eye,
@@ -9,6 +9,7 @@ import {
   CalendarDays,
   Camera,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   Clock,
   ImageIcon,
@@ -17,9 +18,10 @@ import {
   Play,
   Receipt,
   Send,
+  SquareKanban,
 } from "lucide-react";
 import { getDashboard, type Dashboard, type DashboardAction, type ProgrammeItem } from "@/app/actions/dashboard";
-import { getRecentPosts, type RecentPost } from "@/app/actions/recent-posts";
+import type { RecentPost } from "@/lib/board/recentPosts";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
@@ -49,6 +51,7 @@ function ActionIcon({ id, size, strokeWidth }: { id: string; size: number; strok
   if (id === "publier") return <ImageIcon {...props} />;
   if (id === "commentaires") return <MessageSquareWarning {...props} />;
   if (id === "inscriptions") return <Send {...props} />;
+  if (id === "cartes") return <SquareKanban {...props} />;
   return <Bell {...props} />;
 }
 
@@ -101,7 +104,8 @@ export function AccueilScreen({
 }) {
   const [period, setPeriod] = useState<Period>("day");
   const [data, setData] = useState<Dashboard | null>(() => readCache<Dashboard>("dashboard:day") ?? null);
-  const [posts, setPosts] = useState<RecentPost[] | null>(null);
+  // Affichage instantané depuis le cache (miniatures Drive signées jusqu'au lendemain), puis rafraîchi.
+  const [posts, setPosts] = useState<RecentPost[] | null>(() => readCache<RecentPost[]>("dashboard:posts") ?? null);
   // Clic sur une action : popup de traitement rapide (valider, accepter…) plutôt que le module complet.
   const [openAction, setOpenAction] = useState<DashboardAction | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -129,12 +133,17 @@ export function AccueilScreen({
     };
   }, [period, reloadKey]);
 
-  // Derniers médias publiés : pas de cache navigateur (miniatures signées, temporaires).
+  // Derniers médias publiés : route GET, chargée en parallèle des server actions (exécutées une par une).
   useEffect(() => {
     let cancelled = false;
-    getRecentPosts()
-      .then((p) => !cancelled && setPosts(p))
-      .catch(() => !cancelled && setPosts([]));
+    fetch("/api/dashboard/recent-posts")
+      .then((r) => (r.ok ? (r.json() as Promise<RecentPost[]>) : Promise.reject()))
+      .then((p) => {
+        if (cancelled) return;
+        setPosts(p);
+        writeCache("dashboard:posts", p);
+      })
+      .catch(() => !cancelled && setPosts((prev) => prev ?? []));
     return () => {
       cancelled = true;
     };
@@ -162,19 +171,6 @@ export function AccueilScreen({
       <div className="relative h-full space-y-5 overflow-y-auto p-1 pb-28 md:pb-2">
         <HomeBanner firstName={data?.firstName ?? null} birthdays={data?.birthdays ?? []} punchedIn={punchedIn} onTogglePunch={onTogglePunch} />
 
-        <section className="flex justify-end">
-          <div className="flex rounded-full bg-subtle p-1">
-            {(["day", "week"] as const).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPeriod(p)}
-                className={`rounded-full px-4 py-1.5 text-xs font-bold transition-colors ${period === p ? "bg-navy text-white" : "text-ink-3"}`}
-              >
-                {p === "day" ? "Aujourd'hui" : "Cette semaine"}
-              </button>
-            ))}
-          </div>
-        </section>
 
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
           <section className="order-1 min-w-0">
@@ -236,9 +232,25 @@ export function AccueilScreen({
           </section>
 
           <section className="order-2 min-w-0 lg:order-3">
-            <SectionTitle action={onNavigate ? { label: "Calendrier", onClick: () => onNavigate("calendrier") } : undefined}>
-              {period === "day" ? "Aujourd'hui" : "Cette semaine"}
-            </SectionTitle>
+            {/* Aujourd'hui / Cette semaine : la période du calendrier, sur la ligne du titre. */}
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex rounded-full bg-subtle p-0.5">
+                {(["day", "week"] as const).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setPeriod(p)}
+                    className={`rounded-full px-3 py-1 text-xs font-extrabold transition-colors md:text-sm ${period === p ? "bg-navy text-white" : "text-ink-3 hover:text-ink"}`}
+                  >
+                    {p === "day" ? "Aujourd'hui" : "Cette semaine"}
+                  </button>
+                ))}
+              </div>
+              {onNavigate && (
+                <button onClick={() => onNavigate("calendrier")} className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-link hover:underline md:text-xs">
+                  Calendrier <ChevronRight size={12} />
+                </button>
+              )}
+            </div>
             {data === null ? (
               <div className="rounded-panel border border-line bg-card p-6 text-sm text-ink-4">Chargement…</div>
             ) : programme.length === 0 ? (
@@ -343,7 +355,7 @@ function RecentPosts({ posts, onSeeAll }: { posts: RecentPost[] | null; onSeeAll
   return (
     <section className="min-w-0">
       <SectionTitle action={onSeeAll ? { label: "Voir tout", onClick: onSeeAll } : undefined}>Derniers médias publiés</SectionTitle>
-      <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2">
+      <HScroll>
         {posts === null
           ? Array.from({ length: 5 }, (_, i) => <div key={i} className="aspect-square w-32 shrink-0 animate-pulse rounded-card bg-subtle sm:w-40" />)
           : posts.map((p) => {
@@ -401,8 +413,28 @@ function RecentPosts({ posts, onSeeAll }: { posts: RecentPost[] | null; onSeeAll
                 </div>
               );
             })}
-      </div>
+      </HScroll>
     </section>
+  );
+}
+
+/** Rangée horizontale : défilement au doigt, et flèches ‹ › au survol pour la souris (barres masquées). */
+function HScroll({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const scroll = (dir: -1 | 1) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth * 0.8, behavior: "smooth" });
+  const arrow = "absolute top-[38%] z-[1] hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-card text-ink shadow-modal hover:bg-hover md:group-hover/row:flex";
+  return (
+    <div className="group/row relative">
+      <div ref={ref} className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2">
+        {children}
+      </div>
+      <button type="button" onClick={() => scroll(-1)} className={`${arrow} -left-2`} aria-label="Précédents">
+        <ChevronLeft size={18} />
+      </button>
+      <button type="button" onClick={() => scroll(1)} className={`${arrow} -right-2`} aria-label="Suivants">
+        <ChevronRight size={18} />
+      </button>
+    </div>
   );
 }
 

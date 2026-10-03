@@ -1,6 +1,6 @@
 "use client";
 
-import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
+import { canShowModule, useHiddenModules, useVisibleModules } from "@/hooks/board/useVisibleModules";
 import { useAppBadges } from "@/hooks/board/useAppBadges";
 import { AppBadgePills } from "@/components/board/AppBadgePills";
 import type { ComponentType } from "react";
@@ -27,6 +27,7 @@ import {
   Receipt,
   Wallet,
   Camera,
+  EyeOff,
 } from "lucide-react";
 import { BOARD_APPS } from "@/lib/board/tokens";
 import type { NavLayout } from "./BoardShell";
@@ -69,6 +70,7 @@ export function AppRail({
   // Compteurs réels (mails non lus, à publier, inscriptions…) — voir /api/badges.
   const badges = useAppBadges();
   const visible = useVisibleModules();
+  const hidden = useHiddenModules();
   return (
     <aside
       className={`flex min-h-0 shrink-0 flex-col justify-between gap-2 rounded-panel border border-line bg-card/70 py-3 shadow-bar backdrop-blur ${
@@ -98,7 +100,7 @@ export function AppRail({
             <button
               key={item.id}
               type="button"
-              title={[item.label, ...(itemBadges ?? []).map((b) => b.title)].join(" — ")}
+              title={[item.label, ...(hidden.has(item.id) ? ["masqué : visible seulement des administrateurs"] : []), ...(itemBadges ?? []).map((b) => b.title)].join(" — ")}
               onClick={() => onSelectApp(item.id)}
               className={`group relative flex items-center rounded-btn transition-colors ${
                 nav === "rail" ? "h-[50px] w-[50px] justify-center" : "gap-3 px-3 py-2.5"
@@ -108,8 +110,13 @@ export function AppRail({
                   : "text-ink-2 hover:bg-hover"
               }`}
             >
-              <Icon size={18} />
-              {nav === "list" && <span className="text-sm font-semibold">{item.label}</span>}
+              <span className={hidden.has(item.id) ? "opacity-50" : ""}>
+                <Icon size={18} />
+              </span>
+              {nav === "list" && <span className={`text-sm font-semibold ${hidden.has(item.id) ? "opacity-60" : ""}`}>{item.label}</span>}
+              {hidden.has(item.id) && (
+                <EyeOff size={10} className={`absolute ${nav === "rail" ? "bottom-1 right-1" : "right-2 top-1/2 -translate-y-1/2"} ${isActive ? "text-white" : "text-warn"}`} />
+              )}
               <AppBadgePills
                 badges={itemBadges}
                 className={`absolute ${nav === "rail" ? "-right-1 -top-1" : "right-2 top-1/2 -translate-y-1/2"}`}
