@@ -34,6 +34,22 @@ async function graphFetch(
   return json;
 }
 
+const PHOTO_UPLOAD_CONCURRENCY = 8;
+
+/** map asynchrone limitée à `limit` appels simultanés, résultats dans l'ordre d'entrée. */
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 function summaryCount(edge: unknown): number {
   return Number((edge as { summary?: { total_count?: number } } | undefined)?.summary?.total_count ?? 0);
 }
@@ -64,11 +80,12 @@ export async function publishFacebookText(pageId: string, accessToken: string, {
  * que N posts séparés. Facebook n'accepte pas de vidéo dans attached_media.
  */
 export async function publishFacebookGallery(pageId: string, accessToken: string, { urls, message }: { urls: string[]; message: string }) {
-  const photoIds: string[] = [];
-  for (const url of urls) {
+  // Envois en parallèle (ordre de l'album conservé) : un par un, chaque photo attend que Meta
+  // la télécharge (~1-2 s) et un album de 60 photos dépassait les 60 s de la fonction Vercel.
+  const photoIds = await mapPool(urls, PHOTO_UPLOAD_CONCURRENCY, async (url) => {
     const photo = await graphFetch(`/${pageId}/photos`, { url, published: "false", access_token: accessToken }, "POST");
-    photoIds.push(String(photo.id));
-  }
+    return String(photo.id);
+  });
   const params: Record<string, string> = { message, access_token: accessToken };
   photoIds.forEach((id, i) => {
     params[`attached_media[${i}]`] = JSON.stringify({ media_fbid: id });
@@ -168,15 +185,14 @@ export async function createInstagramContainers(
   }
   if (items.length < 2 || items.length > 10) throw new Error("Un carrousel Instagram contient de 2 à 10 médias.");
 
-  const children: string[] = [];
-  for (const item of items) {
+  const children = await mapPool(items, PHOTO_UPLOAD_CONCURRENCY, async (item) => {
     const params: Record<string, string> =
       item.kind === "video"
         ? { media_type: "VIDEO", video_url: item.url, is_carousel_item: "true", access_token: accessToken }
         : { image_url: item.url, is_carousel_item: "true", access_token: accessToken, ...userTagsParam(userTags) };
     const child = await graphFetch(`/${igUserId}/media`, params, "POST");
-    children.push(String(child.id));
-  }
+    return String(child.id);
+  });
   return { stage: "children", containers: children, caption, since };
 }
 
