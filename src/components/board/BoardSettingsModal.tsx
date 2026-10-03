@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Sparkles, X, PanelLeft, LayoutGrid, LogOut, Users, Lock } from "lucide-react";
+import { Sparkles, X, PanelLeft, LayoutGrid, LogOut, Users, Lock, UserRound } from "lucide-react";
 import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 import { useUserRole } from "@/hooks/board/useUserRole";
@@ -18,6 +18,7 @@ import { listAccessRequests } from "@/app/actions/account-requests";
 import { unwrap } from "@/lib/board/actionResult";
 import { UsersAdminModal } from "@/components/board/users/UsersAdminModal";
 import { ModuleAccessModal } from "@/components/board/modules/ModuleAccessModal";
+import { MyProfileModal } from "@/components/board/profile/MyProfileModal";
 
 /** Compte connecté : déconnexion puis retour à la page de connexion pour se connecter avec un autre compte. */
 /**
@@ -139,7 +140,7 @@ function UsersSection() {
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-bold text-ink">Gérer les utilisateurs</span>
-          <span className="block text-xs text-ink-4">Rôle, statut, réseau photo, pôles, demandes d&rsquo;accès</span>
+          <span className="block text-xs text-ink-4">Rôle, statut, N+1, adresse, véhicule, pôles, demandes d&rsquo;accès</span>
         </span>
         {pending > 0 && <span className="shrink-0 rounded-full bg-red px-1.5 text-[10px] font-bold text-white">{pending}</span>}
       </button>
@@ -157,6 +158,26 @@ function UsersSection() {
       </button>
       {open && <UsersAdminModal onClose={() => setOpen(false)} />}
       {accessOpen && <ModuleAccessModal onClose={() => setAccessOpen(false)} />}
+    </div>
+  );
+}
+
+/** Mon profil : photo, nom, adresse, véhicule de service, mot de passe. */
+function MyProfileSection() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-5">
+      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Mon profil</div>
+      <button onClick={() => setOpen(true)} className="flex w-full items-center gap-3 rounded-btn border border-line p-3 text-left hover:bg-hover">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-btn bg-subtle text-ink-2">
+          <UserRound size={15} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold text-ink">Modifier mon profil</span>
+          <span className="block text-xs text-ink-4">Photo, nom, adresse, véhicule de service, mot de passe</span>
+        </span>
+      </button>
+      {open && <MyProfileModal onClose={() => setOpen(false)} />}
     </div>
   );
 }
@@ -344,6 +365,8 @@ export function BoardSettingsModal({
             <X size={18} />
           </button>
         </div>
+
+        <MyProfileSection />
 
         <div className="mt-5">
           <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">

@@ -7,7 +7,7 @@ import { readCache, writeCache } from "@/lib/board/localCache";
 import { Popover } from "@/components/board/team/TeamUi";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useOpenEvent } from "@/components/board/calendar/EventOpener";
-import { addMyReport, getInvoiceFiles, getStaffOverview, listReportCandidates, requestInvoice, reviewInvoice, setEventCostAdjustment, setStaffRate } from "@/app/actions/staff";
+import { addMyReport, getInvoiceFiles, getStaffOverview, listReportCandidates, requestInvoices, reviewInvoice, setEventCostAdjustment, setStaffRate } from "@/app/actions/staff";
 import { unwrap } from "@/lib/board/actionResult";
 import {
   INVOICE_STATUS_LABELS,
@@ -459,8 +459,40 @@ function InterventionList({
 }) {
   const { open, loadingId } = useOpenEvent();
   const base = (e: Engagement) => (e.km !== null ? Math.round(e.km * KM_RATE * 100) / 100 : person.rate);
+  // Factures réclamées pendant la session (une ligne, ou toutes d'un coup).
+  const [claimed, setClaimed] = useState<Record<string, string>>({});
+  const missing = engagements.filter((e) => invoiceMissing(e, person.status) && !claimed[e.eventId]);
+  const [bulk, setBulk] = useState(false);
+  const [bulkNote, setBulkNote] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const claimAll = async () => {
+    setBulkBusy(true);
+    const res = await requestInvoices(person.id, missing.map((e) => e.eventId), bulkNote);
+    setBulkBusy(false);
+    if (!res.ok) return onError(res.error);
+    setClaimed((c) => ({ ...c, ...Object.fromEntries(missing.map((e) => [e.eventId, res.data.email])) }));
+    setBulk(false);
+  };
   return (
     <ul className="min-h-0 flex-1 divide-y divide-line overflow-y-auto">
+      {missing.length > 1 && (
+        <li className="space-y-1.5 bg-bad-bg/50 px-5 py-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} className="text-bad" />
+            <span className="flex-1 text-[12px] font-bold text-bad">{missing.length} factures non déposées</span>
+            {!bulk && (
+              <button
+                type="button"
+                onClick={() => setBulk(true)}
+                className="flex items-center gap-1 rounded-btn bg-bad px-2.5 py-1 text-[11px] font-bold text-white hover:opacity-90"
+              >
+                <Mail size={11} /> Réclamer les {missing.length} factures
+              </button>
+            )}
+          </div>
+          {bulk && <ClaimForm busy={bulkBusy} note={bulkNote} onNote={setBulkNote} onSend={() => void claimAll()} onCancel={() => setBulk(false)} count={missing.length} />}
+        </li>
+      )}
       {engagements.length === 0 && <li className="px-5 py-6 text-center text-sm text-ink-4">Aucune intervention.</li>}
       {engagements.map((e) => (
         <li key={e.eventId} className="px-5 py-3">
@@ -502,7 +534,14 @@ function InterventionList({
               </button>
             )}
           </div>
-          {person.status === "tech-prestataire" && <InvoiceLine engagement={e} status={person.status} onChanged={onChanged} onError={onError} />}
+          {person.status === "tech-prestataire" && <InvoiceLine
+              engagement={e}
+              status={person.status}
+              claimedTo={claimed[e.eventId] ?? null}
+              onClaimed={(email) => setClaimed((c) => ({ ...c, [e.eventId]: email }))}
+              onChanged={onChanged}
+              onError={onError}
+            />}
           {e.adjusted && base(e) !== null && <p className="mt-1 text-[10px] text-ink-4">Montant ajusté pour cet événement (calculé : {euros(base(e)!)}).</p>}
           {e.km === null && person.status === "tech-reseau" && <p className="mt-1 text-[10px] text-ink-4">Kilomètres inconnus (domicile ou lieu non renseigné) : saisissez le montant.</p>}
         </li>
@@ -576,50 +615,61 @@ function MissingInvoices({ count }: { count: number }) {
 function InvoiceLine({
   engagement: e,
   status,
+  claimedTo,
+  onClaimed,
   onChanged,
   onError,
 }: {
   engagement: Engagement;
   status: StaffPerson["status"];
+  /** Adresse à qui la facture a été réclamée (ici ou via « Réclamer tout »). */
+  claimedTo: string | null;
+  onClaimed: (email: string) => void;
   onChanged: () => Promise<void>;
   onError: (m: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [claiming, setClaiming] = useState(false);
+  const [claimNote, setClaimNote] = useState("");
   const [rejecting, setRejecting] = useState(false);
   const [motive, setMotive] = useState("");
   const [reviewing, setReviewing] = useState<"approved" | "rejected" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   if (!e.invoice) {
     if (!invoiceMissing(e, status)) return null;
-    // Réclamer : e-mail au prestataire avec les infos de l'intervention et un lien pour déposer la facture.
+    // Réclamer : e-mail au prestataire (mot facultatif, infos de l'intervention, lien de dépôt).
     const claim = async () => {
       setBusy(true);
-      const res = await requestInvoice(e.eventId, e.userId);
+      const res = await requestInvoices(e.userId, [e.eventId], claimNote);
       setBusy(false);
       if (!res.ok) return onError(res.error);
-      setSentTo(res.data.email);
+      setClaiming(false);
+      onClaimed(res.data.email);
     };
     return (
-      <div className="mt-1.5 flex flex-wrap items-center gap-2">
-        <span className="flex items-center gap-1 text-[11px] font-semibold text-bad">
-          <AlertTriangle size={12} /> Facture non déposée
-        </span>
-        {sentTo ? (
-          <span className="flex items-center gap-1 text-[11px] font-semibold text-good">
-            <Check size={12} /> Réclamée à {sentTo}
+      <div className="mt-1.5 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1 text-[11px] font-semibold text-bad">
+            <AlertTriangle size={12} /> Facture non déposée
           </span>
-        ) : (
-          <button
-            type="button"
-            onClick={() => void claim()}
-            disabled={busy}
-            title="Envoie un e-mail avec les infos de l'intervention et un lien pour déposer la facture directement"
-            className="flex items-center gap-1 rounded-btn border border-bad/40 px-2 py-0.5 text-[11px] font-bold text-bad hover:bg-bad-bg disabled:opacity-50"
-          >
-            {busy ? <Loader2 size={11} className="animate-spin" /> : <Mail size={11} />} Réclamer
-          </button>
-        )}
+          {claimedTo ? (
+            <span className="flex items-center gap-1 text-[11px] font-semibold text-good">
+              <Check size={12} /> Réclamée à {claimedTo}
+            </span>
+          ) : (
+            !claiming && (
+              <button
+                type="button"
+                onClick={() => setClaiming(true)}
+                title="E-mail avec les infos de l'intervention et un lien pour déposer la facture directement"
+                className="flex items-center gap-1 rounded-btn border border-bad/40 px-2 py-0.5 text-[11px] font-bold text-bad hover:bg-bad-bg"
+              >
+                <Mail size={11} /> Réclamer
+              </button>
+            )
+          )}
+        </div>
+        {claiming && <ClaimForm busy={busy} note={claimNote} onNote={setClaimNote} onSend={() => void claim()} onCancel={() => setClaiming(false)} />}
       </div>
     );
   }
@@ -770,6 +820,50 @@ function AddReport({ onAdded, onError }: { onAdded: () => Promise<void>; onError
           ))}
         </div>
       </Popover>
+    </div>
+  );
+}
+
+/** Mot facultatif joint à la réclamation, puis envoi de l'e-mail. */
+function ClaimForm({
+  busy,
+  note,
+  onNote,
+  onSend,
+  onCancel,
+  count = 1,
+}: {
+  busy: boolean;
+  note: string;
+  onNote: (v: string) => void;
+  onSend: () => void;
+  onCancel: () => void;
+  count?: number;
+}) {
+  return (
+    <div className="space-y-1.5 rounded-btn border border-line bg-card p-2">
+      <textarea
+        autoFocus
+        value={note}
+        onChange={(ev) => onNote(ev.target.value)}
+        rows={2}
+        maxLength={500}
+        placeholder="Message pour le prestataire (facultatif) — ex. merci d'indiquer le n° de match sur la facture"
+        className="w-full resize-none rounded-btn border border-line px-2 py-1.5 text-[12px] outline-none focus:border-line-strong"
+      />
+      <div className="flex items-center justify-end gap-2">
+        <button type="button" onClick={onCancel} className="rounded-btn px-2 py-1 text-[11px] font-semibold text-ink-3 hover:bg-hover">
+          Annuler
+        </button>
+        <button
+          type="button"
+          onClick={onSend}
+          disabled={busy}
+          className="flex items-center gap-1 rounded-btn bg-navy px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+        >
+          {busy ? <Loader2 size={11} className="animate-spin" /> : <Mail size={11} />} Envoyer {count > 1 ? `la réclamation (${count} factures)` : "la réclamation"}
+        </button>
+      </div>
     </div>
   );
 }

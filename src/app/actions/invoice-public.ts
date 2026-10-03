@@ -4,10 +4,11 @@ import { toResult } from "@/lib/board/actionResult";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { readInvoiceToken } from "@/lib/board/invoiceToken";
 
-// Page publique /facture/<jeton> : le prestataire dépose sa facture depuis le lien reçu par e-mail,
-// sans compte. Le jeton signé (invoiceToken.ts) dit pour quel événement et quelle personne ; le
-// fichier part directement du navigateur vers le stockage privé « invoices » (lien d'envoi signé),
-// rangé et enregistré comme ceux de l'appli calendrier (event_invoices, statut « pending »).
+// Page publique /facture/<jeton> : le prestataire dépose ses factures depuis le lien reçu par e-mail,
+// sans compte — une par intervention réclamée. Le jeton signé (invoiceToken.ts) dit pour quelle
+// personne et quels événements ; chaque fichier part directement du navigateur vers le stockage privé
+// « invoices » (lien d'envoi signé), rangé et enregistré comme ceux de l'appli calendrier
+// (event_invoices, statut « pending »).
 
 const BUCKET = "invoices";
 const MAX_BYTES = 15 * 1024 * 1024;
@@ -16,52 +17,70 @@ const ACCEPTED = /^(application\/pdf|image\/(jpeg|png|webp|heic|heif))$/;
 const personName = (p: { first_name: string | null; last_name: string | null; email: string | null } | null) =>
   [p?.first_name, p?.last_name].filter(Boolean).join(" ").trim() || p?.email || "—";
 
-function payload(token: string) {
+function payload(token: string, eventId?: string) {
   const p = readInvoiceToken(token);
   if (!p) throw new Error("Ce lien n'est plus valide. Demandez un nouveau lien à votre responsable.");
+  if (eventId && !p.eventIds.includes(eventId)) throw new Error("Cette intervention ne fait pas partie de la demande.");
   return p;
 }
 
-export type InvoiceRequestInfo = {
-  personFirstName: string;
+export type InvoiceRequestItem = {
+  eventId: string;
   eventTitle: string;
   eventStart: string;
   location: string | null;
   expectedAmount: number | null;
+  existing: { status: string | null; amountTtc: number | null; comment: string | null } | null;
+};
+
+export type InvoiceRequestInfo = {
+  personFirstName: string;
   requesterName: string;
   requesterEmail: string | null;
-  existing: { status: string | null; amountTtc: number | null } | null;
+  comment: string | null;
+  items: InvoiceRequestItem[];
 };
 
 export const getInvoiceRequest = async (token: string) =>
   toResult(async (): Promise<InvoiceRequestInfo> => {
     const p = payload(token);
     const service = createServiceClient();
-    const [{ data: event }, { data: person }, { data: requester }, { data: adj }, { data: rate }, { data: existing }] = await Promise.all([
-      service.from("events").select("title, start_date, location").eq("id", p.eventId).maybeSingle(),
+    const [{ data: events }, { data: person }, { data: requester }, { data: adjs }, { data: rate }, { data: invoices }] = await Promise.all([
+      service.from("events").select("id, title, start_date, location").in("id", p.eventIds),
       service.from("profiles").select("first_name, last_name, email").eq("id", p.userId).maybeSingle(),
       service.from("profiles").select("first_name, last_name, email").eq("id", p.requesterId).maybeSingle(),
-      service.from("event_cost_adjustments").select("amount_eur").eq("event_id", p.eventId).eq("user_id", p.userId).maybeSingle(),
+      service.from("event_cost_adjustments").select("event_id, amount_eur").in("event_id", p.eventIds).eq("user_id", p.userId),
       service.from("staff_rates").select("amount_eur").eq("user_id", p.userId).maybeSingle(),
-      service.from("event_invoices").select("status, amount_ttc").eq("event_id", p.eventId).eq("user_id", p.userId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      service.from("event_invoices").select("event_id, status, amount_ttc, admin_comment, created_at").in("event_id", p.eventIds).eq("user_id", p.userId).order("created_at"),
     ]);
-    if (!event || !person) throw new Error("Cet événement n'existe plus.");
+    if (!person || !events?.length) throw new Error("Ces interventions n'existent plus.");
+    const adjBy = new Map((adjs ?? []).map((a) => [a.event_id, Number(a.amount_eur)]));
+    const invoiceBy = new Map((invoices ?? []).map((i) => [i.event_id, i]));
     return {
       personFirstName: person.first_name?.trim() || personName(person),
-      eventTitle: event.title,
-      eventStart: event.start_date,
-      location: event.location,
-      expectedAmount: adj ? Number(adj.amount_eur) : rate ? Number(rate.amount_eur) : null,
       requesterName: personName(requester),
       requesterEmail: requester?.email ?? null,
-      existing: existing ? { status: existing.status, amountTtc: existing.amount_ttc === null ? null : Number(existing.amount_ttc) } : null,
+      comment: p.comment,
+      items: events
+        .sort((a, b) => a.start_date.localeCompare(b.start_date))
+        .map((e) => {
+          const inv = invoiceBy.get(e.id);
+          return {
+            eventId: e.id,
+            eventTitle: e.title,
+            eventStart: e.start_date,
+            location: e.location,
+            expectedAmount: adjBy.get(e.id) ?? (rate ? Number(rate.amount_eur) : null),
+            existing: inv ? { status: inv.status, amountTtc: inv.amount_ttc === null ? null : Number(inv.amount_ttc), comment: inv.admin_comment } : null,
+          };
+        }),
     };
   });
 
 /** Lien d'envoi signé vers le stockage privé (le fichier ne transite pas par le serveur). */
-export const prepareInvoiceUpload = async (token: string, filename: string, contentType: string, size: number) =>
+export const prepareInvoiceUpload = async (token: string, eventId: string, filename: string, contentType: string, size: number) =>
   toResult(async () => {
-    const p = payload(token);
+    const p = payload(token, eventId);
     if (!ACCEPTED.test(contentType)) throw new Error("Format accepté : PDF ou photo (JPG, PNG).");
     if (size > MAX_BYTES) throw new Error("Fichier trop lourd (15 Mo maximum).");
     const safe = filename.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w.\- ]+/g, "_").slice(-120);
@@ -72,12 +91,13 @@ export const prepareInvoiceUpload = async (token: string, filename: string, cont
   });
 
 /**
- * Enregistre la facture déposée : nouvelle facture « à valider » ; une facture refusée est remplacée ;
- * une facture déjà déposée reçoit le fichier en pièce jointe supplémentaire. Le demandeur est prévenu.
+ * Enregistre une facture déposée pour une intervention : nouvelle facture « à valider » ; une facture
+ * refusée est remplacée ; une facture déjà déposée reçoit le fichier en pièce jointe supplémentaire.
+ * Le demandeur est prévenu.
  */
-export const confirmInvoiceUpload = async (token: string, path: string, amountTtc: number | null, comment: string) =>
+export const confirmInvoiceUpload = async (token: string, eventId: string, path: string, amountTtc: number | null, comment: string) =>
   toResult(async () => {
-    const p = payload(token);
+    const p = payload(token, eventId);
     if (!path.startsWith(`prestataire_invoices/${p.userId}/`)) throw new Error("Fichier invalide.");
     if (amountTtc === null) throw new Error("Indiquez le montant TTC de la facture.");
     if (!Number.isFinite(amountTtc) || amountTtc < 0 || amountTtc > 100000) throw new Error("Montant invalide.");
@@ -91,7 +111,7 @@ export const confirmInvoiceUpload = async (token: string, path: string, amountTt
     const { data: existing } = await service
       .from("event_invoices")
       .select("id, status")
-      .eq("event_id", p.eventId)
+      .eq("event_id", eventId)
       .eq("user_id", p.userId)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -99,7 +119,7 @@ export const confirmInvoiceUpload = async (token: string, path: string, amountTt
 
     if (!existing) {
       const { error } = await service.from("event_invoices").insert({
-        event_id: p.eventId,
+        event_id: eventId,
         user_id: p.userId,
         amount_ttc: amountTtc,
         file_url: path,
@@ -111,7 +131,7 @@ export const confirmInvoiceUpload = async (token: string, path: string, amountTt
     } else if (existing.status === "rejected") {
       const { error } = await service
         .from("event_invoices")
-        .update({ file_url: path, amount_ttc: amountTtc, status: "pending", submitted_at: now, prestataire_comment: note, updated_at: now })
+        .update({ file_url: path, amount_ttc: amountTtc, status: "pending", submitted_at: now, prestataire_comment: note, admin_comment: null, updated_at: now })
         .eq("id", existing.id);
       if (error) throw new Error(error.message);
     } else {
@@ -122,7 +142,7 @@ export const confirmInvoiceUpload = async (token: string, path: string, amountTt
     // Prévenir celui qui a réclamé la facture (et la retrouver dans l'Effectif).
     const [{ data: person }, { data: event }] = await Promise.all([
       service.from("profiles").select("first_name, last_name, email").eq("id", p.userId).maybeSingle(),
-      service.from("events").select("title").eq("id", p.eventId).maybeSingle(),
+      service.from("events").select("title").eq("id", eventId).maybeSingle(),
     ]);
     if (p.requesterId) {
       const { error } = await service.rpc("create_notification", {
@@ -131,7 +151,7 @@ export const confirmInvoiceUpload = async (token: string, path: string, amountTt
         p_title: "Facture déposée",
         p_message: `${personName(person)} a déposé sa facture pour « ${event?.title ?? "l'événement"} » (${amountTtc.toLocaleString("fr-FR")} € TTC).`,
         p_actor_name: personName(person),
-        p_data: { event_id: p.eventId, kind: "invoice_submitted" },
+        p_data: { event_id: eventId, kind: "invoice_submitted" },
       });
       if (error) console.error("[invoice-public.notify]", error);
     }

@@ -148,8 +148,17 @@ async function mileage(service: Service, list: { userId: string; eventId: string
   if (!userIds.length) return out;
   const { data: links } = await service.from("profile_specialties").select("user_id, specialties!inner(slug)").eq("specialties.slug", "tech-reseau").in("user_id", userIds);
   const reseau = new Set((links ?? []).map((l) => l.user_id));
+  // Véhicule de service (profil) : pas d'indemnités kilométriques, comme dans l'ancien calendrier.
+  const { data: companyCars } = reseau.size
+    ? await service.from("profiles").select("id").in("id", [...reseau]).eq("has_company_car", true)
+    : { data: [] };
+  const serviceCar = new Set((companyCars ?? []).map((p) => p.id));
   const byEvent = new Map<string, string[]>();
-  for (const e of list) if (reseau.has(e.userId)) byEvent.set(e.eventId, [...(byEvent.get(e.eventId) ?? []), e.userId]);
+  for (const e of list) {
+    if (!reseau.has(e.userId)) continue;
+    if (serviceCar.has(e.userId)) out.set(`${e.userId}|${e.eventId}`, 0);
+    else byEvent.set(e.eventId, [...(byEvent.get(e.eventId) ?? []), e.userId]);
+  }
   const events = [...byEvent.entries()];
   // Quelques événements à la fois : les appels Google restent raisonnables.
   for (let i = 0; i < events.length; i += 5) {
@@ -365,74 +374,97 @@ export const listReportCandidates = async () =>
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-/**
- * Réclame sa facture à un prestataire (intervention sans facture) : e-mail avec l'événement, la date,
- * le lieu, son rôle, le montant convenu, et un bouton qui ouvre /facture/<jeton> pour la déposer
- * directement, sans compte. La réponse à l'e-mail arrive au demandeur.
- */
-export const requestInvoice = async (eventId: string, personId: string) =>
-  toResult(async (): Promise<{ email: string }> => {
-    const v = await viewer();
-    await requireCanManage(v, personId);
-    if (!isResendConfigured()) throw new Error("L'envoi d'e-mails n'est pas configuré (Resend).");
-    const [{ data: person }, { data: me }, { data: event }] = await Promise.all([
-      v.service.from("profiles").select("first_name, last_name, email").eq("id", personId).single(),
-      v.service.from("profiles").select("first_name, last_name, email").eq("id", v.userId).single(),
-      v.service.from("events").select("title, start_date, location").eq("id", eventId).single(),
-    ]);
-    if (!person?.email) throw new Error("Cette personne n'a pas d'adresse e-mail.");
-    if (!event) throw new Error("Événement introuvable.");
-    const [engagement] = await loadEngagements(v.service, [personId], new Date(new Date(event.start_date).getTime() - 1000).toISOString(), new Date(new Date(event.start_date).getTime() + 1000).toISOString(), [eventId]);
-
-    const site = (process.env.NEXT_PUBLIC_SITE_URL || "https://board.lgef.fr").replace(/\/$/, "");
-    const link = `${site}/facture/${createInvoiceToken({ eventId, userId: personId, requesterId: v.userId })}`;
-    const first = person.first_name?.trim() || personName(person);
-    const requester = me ? personName(me) : "Votre responsable";
-    const date = new Date(event.start_date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" });
-    const time = new Date(event.start_date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" });
-    const amount = engagement?.amount ? engagement.amount.toLocaleString("fr-FR", { style: "currency", currency: "EUR" }) : null;
-    const rows: [string, string][] = [
-      ["Événement", event.title],
-      ["Date", `${date} à ${time}`],
-      ...(event.location ? ([["Lieu", event.location]] as [string, string][]) : []),
-      ...(engagement?.roles.length ? ([["Intervention", engagement.roles.join(", ")]] as [string, string][]) : []),
-      ...(amount ? ([["Montant convenu", amount]] as [string, string][]) : []),
-      ["Demandé par", `${requester}${me?.email ? ` (${me.email})` : ""}`],
-    ];
-
-    const html = `<!doctype html><html><body style="margin:0;background:#f2f5fb;font-family:Arial,Helvetica,sans-serif;color:#07172e">
+/** E-mail sobre aux couleurs de la Ligue : titre, paragraphes, tableau, bouton, mode d'emploi. */
+function mailLayout(title: string, body: string) {
+  return `<!doctype html><html><body style="margin:0;background:#f2f5fb;font-family:Arial,Helvetica,sans-serif;color:#07172e">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5fb;padding:24px 0"><tr><td align="center">
 <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden">
 <tr><td style="background:#0b1d3c;padding:22px 28px;color:#ffffff">
 <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.7">Ligue du Grand Est de Football</div>
-<div style="font-size:20px;font-weight:bold;margin-top:6px">Facture à déposer</div></td></tr>
-<tr><td style="padding:24px 28px;font-size:15px;line-height:1.55">
-<p style="margin:0 0 14px">Bonjour ${esc(first)},</p>
-<p style="margin:0 0 18px">Sauf erreur de notre part, nous n'avons pas encore reçu votre facture pour l'intervention suivante :</p>
+<div style="font-size:20px;font-weight:bold;margin-top:6px">${title}</div></td></tr>
+<tr><td style="padding:24px 28px;font-size:15px;line-height:1.55">${body}</td></tr></table></td></tr></table></body></html>`;
+}
+
+/**
+ * Réclame ses factures à un prestataire (interventions sans facture) : un seul e-mail pour toutes,
+ * avec le mot du demandeur, la liste (date, événement, lieu, montant convenu), un bouton qui ouvre
+ * /facture/<jeton> pour les déposer une à une sans compte, et un mode d'emploi en trois étapes.
+ * La réponse à l'e-mail arrive au demandeur.
+ */
+export const requestInvoices = async (personId: string, eventIds: string[], comment?: string) =>
+  toResult(async (): Promise<{ email: string; count: number }> => {
+    const v = await viewer();
+    await requireCanManage(v, personId);
+    const ids = [...new Set(eventIds)].slice(0, 30);
+    if (!ids.length) throw new Error("Aucune intervention à réclamer.");
+    if (!isResendConfigured()) throw new Error("L'envoi d'e-mails n'est pas configuré (Resend).");
+    const [{ data: person }, { data: me }, { data: events }] = await Promise.all([
+      v.service.from("profiles").select("first_name, last_name, email").eq("id", personId).single(),
+      v.service.from("profiles").select("first_name, last_name, email").eq("id", v.userId).single(),
+      v.service.from("events").select("id, title, start_date, location").in("id", ids).order("start_date"),
+    ]);
+    if (!person?.email) throw new Error("Cette personne n'a pas d'adresse e-mail.");
+    if (!events?.length) throw new Error("Événements introuvables.");
+    const starts = events.map((e) => new Date(e.start_date).getTime());
+    const engagements = await loadEngagements(v.service, [personId], new Date(Math.min(...starts) - 1000).toISOString(), new Date(Math.max(...starts) + 1000).toISOString(), ids);
+    const amountBy = new Map(engagements.map((e) => [e.eventId, e.amount]));
+
+    const note = comment?.trim() || null;
+    const site = (process.env.NEXT_PUBLIC_SITE_URL || "https://board.lgef.fr").replace(/\/$/, "");
+    const link = `${site}/facture/${createInvoiceToken({ eventIds: events.map((e) => e.id), userId: personId, requesterId: v.userId, comment: note })}`;
+    const first = person.first_name?.trim() || personName(person);
+    const requester = me ? personName(me) : "Votre responsable";
+    const n = events.length;
+    const day = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "Europe/Paris" });
+    const money = (x: number | undefined) => (x ? x.toLocaleString("fr-FR", { style: "currency", currency: "EUR" }) : "—");
+    const total = events.reduce((sum, e) => sum + (amountBy.get(e.id) ?? 0), 0);
+    const steps = [
+      ["Une facture par intervention", "au nom de la Ligue du Grand Est de Football, avec la date et l'événement."],
+      ["Cliquez sur « Déposer mes factures »", "chaque intervention a sa ligne : joignez le PDF (ou une photo lisible)."],
+      ["Vérifiez le montant TTC", "puis déposez. Vous êtes prévenu par e-mail dès qu'elle est validée, ou s'il faut la corriger."],
+    ];
+
+    const html = mailLayout(
+      n > 1 ? `${n} factures à déposer` : "Facture à déposer",
+      `<p style="margin:0 0 14px">Bonjour ${esc(first)},</p>
+${note ? `<div style="margin:0 0 16px;padding:12px 14px;background:#e9effa;border-left:4px solid #12305f;border-radius:8px;font-size:14px"><div style="font-size:12px;color:#525e77;margin-bottom:4px">Message de ${esc(requester)}</div>${esc(note).replace(/\n/g, "<br>")}</div>` : ""}
+<p style="margin:0 0 14px">Il nous manque votre facture pour ${n > 1 ? `ces ${n} interventions` : "cette intervention"} :</p>
 <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e3e9f4;border-radius:12px;font-size:14px">
-${rows.map(([k, val], i) => `<tr><td style="padding:10px 14px;color:#525e77;width:38%;${i ? "border-top:1px solid #e3e9f4;" : ""}">${esc(k)}</td><td style="padding:10px 14px;font-weight:bold;${i ? "border-top:1px solid #e3e9f4;" : ""}">${esc(val)}</td></tr>`).join("")}
+${events
+  .map(
+    (e, i) => `<tr><td style="padding:10px 14px;${i ? "border-top:1px solid #e3e9f4;" : ""}"><div style="font-weight:bold">${esc(e.title)}</div><div style="font-size:12px;color:#525e77">${esc(day(e.start_date))}${e.location ? ` · ${esc(e.location)}` : ""}</div></td><td align="right" style="padding:10px 14px;white-space:nowrap;font-weight:bold;${i ? "border-top:1px solid #e3e9f4;" : ""}">${money(amountBy.get(e.id))}</td></tr>`
+  )
+  .join("")}
+${n > 1 && total ? `<tr><td style="padding:10px 14px;border-top:2px solid #ccd6e5;color:#525e77">Total convenu</td><td align="right" style="padding:10px 14px;border-top:2px solid #ccd6e5;font-weight:bold">${money(total)}</td></tr>` : ""}
 </table>
-<p style="margin:22px 0 8px">Vous pouvez la déposer directement, sans vous connecter :</p>
-<p style="margin:0 0 22px"><a href="${link}" style="display:inline-block;background:#e1141b;color:#ffffff;text-decoration:none;font-weight:bold;padding:13px 22px;border-radius:12px">Déposer ma facture</a></p>
-<p style="margin:0;font-size:12px;color:#79859a">PDF ou photo, 15 Mo maximum. Lien personnel valable 45 jours. Pour toute question, répondez simplement à cet e-mail.</p>
-</td></tr></table></td></tr></table></body></html>`;
+<p style="margin:22px 0;text-align:center"><a href="${link}" style="display:inline-block;background:#e1141b;color:#ffffff;text-decoration:none;font-weight:bold;padding:14px 26px;border-radius:12px">${n > 1 ? "Déposer mes factures" : "Déposer ma facture"}</a></p>
+<div style="margin:0 0 16px;padding:14px;background:#f2f5fb;border-radius:12px;font-size:13px">
+<div style="font-weight:bold;margin-bottom:8px">Comment ça marche ?</div>
+${steps.map(([t, d], i) => `<div style="margin:0 0 6px"><b>${i + 1}. ${esc(t)}</b> — ${esc(d)}</div>`).join("")}
+</div>
+<p style="margin:0;font-size:12px;color:#79859a">Lien personnel, sans mot de passe, valable 45 jours. Une question ? Répondez simplement à cet e-mail (${esc(requester)}).</p>`
+    );
     const text = [
       `Bonjour ${first},`,
       "",
-      "Sauf erreur de notre part, nous n'avons pas encore reçu votre facture pour l'intervention suivante :",
-      ...rows.map(([k, val]) => `- ${k} : ${val}`),
+      ...(note ? [`Message de ${requester} : ${note}`, ""] : []),
+      `Il nous manque votre facture pour ${n > 1 ? `ces ${n} interventions` : "cette intervention"} :`,
+      ...events.map((e) => `- ${day(e.start_date)} · ${e.title}${e.location ? ` (${e.location})` : ""} — ${money(amountBy.get(e.id))}`),
       "",
-      `Déposez-la directement, sans vous connecter : ${link}`,
+      `Déposez ${n > 1 ? "vos factures" : "votre facture"} ici (sans mot de passe) : ${link}`,
       "",
-      "PDF ou photo, 15 Mo maximum. Lien valable 45 jours. Pour toute question, répondez à cet e-mail.",
+      "Comment ça marche ?",
+      ...steps.map(([t, d], i) => `${i + 1}. ${t} — ${d}`),
+      "",
+      `Lien valable 45 jours. Une question ? Répondez à cet e-mail (${requester}).`,
     ].join("\n");
 
     const { errors } = await sendResendBatch(
-      [{ to: [person.email], subject: `Facture à déposer — ${event.title} (${new Date(event.start_date).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" })})`, html, text, replyTo: me?.email ?? null }],
+      [{ to: [person.email], subject: n > 1 ? `${n} factures à déposer — Ligue du Grand Est de Football` : `Facture à déposer — ${events[0].title}`, html, text, replyTo: me?.email ?? null }],
       async () => {}
     );
     if (errors.length) throw new Error(`Envoi impossible : ${errors[0]}`);
-    return { email: person.email };
+    return { email: person.email, count: n };
   });
 
 /**
@@ -518,7 +550,7 @@ export const reviewInvoice = async (invoiceId: string, decision: "approved" | "r
       const first = person.first_name?.trim() || who;
       const link =
         decision === "rejected"
-          ? `${(process.env.NEXT_PUBLIC_SITE_URL || "https://board.lgef.fr").replace(/\/$/, "")}/facture/${createInvoiceToken({ eventId: invoice.event_id, userId: invoice.user_id, requesterId: v.userId })}`
+          ? `${(process.env.NEXT_PUBLIC_SITE_URL || "https://board.lgef.fr").replace(/\/$/, "")}/facture/${createInvoiceToken({ eventIds: [invoice.event_id], userId: invoice.user_id, requesterId: v.userId, comment: null })}`
           : null;
       const lines =
         decision === "approved"

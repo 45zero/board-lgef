@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Camera, Video, X, Ban } from "lucide-react";
+import { Camera, Video, X, Ban, ChevronRight, UserRound } from "lucide-react";
+import { MyProfileModal } from "@/components/board/profile/MyProfileModal";
 
 export type CenterAction = "frais" | "social" | "off";
 
@@ -47,6 +48,7 @@ export function MobileSettingsSheet({
   /** « Publication réseaux » n'est proposé qu'aux personnes habilitées à publier. */
   canPublish: boolean;
 }) {
+  const [profileOpen, setProfileOpen] = useState(false);
   return (
     <div className="fixed inset-0 z-[65] flex flex-col justify-end bg-[rgba(6,14,28,0.5)] backdrop-blur-[3px]" onClick={onClose}>
       <div className="rounded-t-[26px] bg-card px-4 pt-2.5" style={{ paddingBottom: "max(26px, env(safe-area-inset-bottom))" }} onClick={(e) => e.stopPropagation()}>
@@ -57,6 +59,16 @@ export function MobileSettingsSheet({
             <X size={15} />
           </button>
         </div>
+        <button onClick={() => setProfileOpen(true)} className="mt-4 flex w-full items-center gap-3 rounded-[14px] border border-line p-3 text-left">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-subtle text-ink-3">
+            <UserRound size={18} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-bold text-ink">Mon profil</span>
+            <span className="block text-xs text-ink-3">Photo, adresse, véhicule de service, mot de passe</span>
+          </span>
+          <ChevronRight size={16} className="shrink-0 text-ink-4" />
+        </button>
         <div className="mb-2 mt-4 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-4">Bouton central</div>
         <div className="flex flex-col gap-2">
           {CENTER_ACTIONS.filter((a) => a.id !== "social" || canPublish).map((a) => {
@@ -86,6 +98,7 @@ export function MobileSettingsSheet({
           })}
         </div>
       </div>
+      {profileOpen && <MyProfileModal onClose={() => setProfileOpen(false)} />}
     </div>
   );
 }

@@ -590,7 +590,7 @@ export async function getMyExpenseExport(month: string): Promise<ExpenseExport> 
       lastName: profile?.last_name ?? "",
       email: profile?.email ?? null,
       address: profile?.home_address ?? null,
-      vehicle: profile?.has_company_car ? "Véhicule de fonction" : profile?.license_plate ? "Véhicule personnel" : null,
+      vehicle: profile?.has_company_car ? "Véhicule de service" : profile?.license_plate ? "Véhicule personnel" : null,
       plate: profile?.license_plate ?? null,
     },
     lines,

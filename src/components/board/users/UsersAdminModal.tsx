@@ -9,6 +9,8 @@ import { AccessRequestCard } from "@/components/board/users/AccessRequestCard";
 import { buildPoles, type Pole } from "@/lib/board/poles";
 import { getUserModules } from "@/app/actions/module-access";
 import { CONFIGURABLE_MODULES } from "@/lib/board/modules";
+import { pickDetails, type ProfileDetails } from "@/lib/board/profile";
+import { ProfileDetailsFields } from "@/components/board/profile/ProfileFields";
 
 const input = "w-full rounded-btn border border-line bg-card px-2.5 py-2 text-sm outline-none focus:border-navy";
 const sectionTitle = "mb-1.5 text-[11px] font-bold uppercase tracking-wide text-ink-4";
@@ -113,6 +115,12 @@ function UserEditor({
   const [lastName, setLastName] = useState(user.lastName);
   const [role, setRole] = useState<UserRole>(user.role);
   const [slugs, setSlugs] = useState<string[]>(user.slugs);
+  const [details, setDetails] = useState<ProfileDetails>(() => pickDetails(user));
+  // Position trouvée à l'enregistrement (adresse tapée sans suggestion) : relue dans la liste.
+  const shownDetails = {
+    ...details,
+    homeCoordinates: details.homeCoordinates ?? (details.homeAddress.trim() === user.homeAddress.trim() ? user.homeCoordinates : null),
+  };
   const [managerId, setManagerId] = useState<string>(user.managerId ?? "");
   const [managerState, setManagerState] = useState<"idle" | "saving" | "saved">("idle");
   // Le N+1 s'enregistre dès qu'il est choisi (pas besoin du bouton « Enregistrer »).
@@ -161,7 +169,7 @@ function UserEditor({
     setError(null);
     setSaved(false);
     try {
-      unwrap(await updateUser(user.id, { firstName, lastName, role, slugs }));
+      unwrap(await updateUser(user.id, { firstName, lastName, role, slugs, details }));
       setSaved(true);
       onSaved();
       void loadModules();
@@ -249,6 +257,8 @@ function UserEditor({
         </p>
       </div>
 
+      <ProfileDetailsFields value={shownDetails} onChange={setDetails} self={false} />
+
       <div>
         <div className={sectionTitle}>Couverture match</div>
         <div className="space-y-1.5">
@@ -317,7 +327,7 @@ function UserEditor({
 
 /* ---------- Fenêtre ---------- */
 
-/** Paramètres → Utilisateurs : demandes d'accès, rôle, statut, réseau photo et pôles de chaque compte. */
+/** Paramètres → Utilisateurs : demandes d'accès, rôle, statut, N+1, adresse, véhicule, réseau photo et pôles de chaque compte. */
 export function UsersAdminModal({ onClose }: { onClose: () => void }) {
   const [data, setData] = useState<UsersList | null>(null);
   const [requests, setRequests] = useState<AccessRequest[]>([]);
@@ -420,7 +430,7 @@ export function UsersAdminModal({ onClose }: { onClose: () => void }) {
                     <span className="shrink-0 text-[10px] font-semibold text-ink-4">{ROLE_LABELS[u.role] ?? u.role}</span>
                   </div>
                   <div className="truncate text-[11px] text-ink-4">{u.email}</div>
-                  {u.slugs.some((s) => STATUS_BADGE[s]) && (
+                  {(u.slugs.some((s) => STATUS_BADGE[s]) || (u.slugs.includes("tech-reseau") && !u.homeAddress)) && (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {u.slugs
                         .filter((s) => STATUS_BADGE[s])
@@ -429,6 +439,9 @@ export function UsersAdminModal({ onClose }: { onClose: () => void }) {
                             {STATUS_BADGE[s]}
                           </span>
                         ))}
+                      {u.slugs.includes("tech-reseau") && !u.homeAddress && (
+                        <span className="rounded-full bg-bad-bg px-1.5 py-0.5 text-[10px] font-semibold text-bad">Adresse manquante</span>
+                      )}
                     </div>
                   )}
                 </button>
@@ -446,7 +459,7 @@ export function UsersAdminModal({ onClose }: { onClose: () => void }) {
                   onBack={() => setSelectedId(null)}
                 />
               ) : (
-                <p className="p-6 text-center text-sm text-ink-4">Sélectionnez un compte pour modifier son rôle, son statut et ses réseaux.</p>
+                <p className="p-6 text-center text-sm text-ink-4">Sélectionnez un compte pour modifier son rôle, son statut, son adresse et son véhicule.</p>
               )}
             </div>
           </div>

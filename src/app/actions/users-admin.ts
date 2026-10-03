@@ -3,6 +3,8 @@
 import { toResult } from "@/lib/board/actionResult";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
+import { DETAILS_COLUMNS, detailsFromRow, saveProfile } from "@/lib/board/profileCore";
+import type { ProfileDetails } from "@/lib/board/profile";
 
 // Paramètres → Utilisateurs : rôle et spécialités de chaque compte (profiles.role +
 // profile_specialties, partagés avec calendrier-lgef). Réservé aux administrateurs et super users ;
@@ -10,7 +12,7 @@ import { createServiceClient } from "@/lib/supabase/serviceClient";
 
 export type UserRole = "user" | "technician" | "organizer" | "comite_directeur" | "comite_directeur_bad" | "super_user" | "admin";
 
-export interface AdminUser {
+export interface AdminUser extends ProfileDetails {
   id: string;
   firstName: string;
   lastName: string;
@@ -20,6 +22,7 @@ export interface AdminUser {
   createdAt: string | null;
   /** N+1 : valide ses frais, ses pointages et ses factures, voit ses coûts (profiles.expense_validator_id). */
   managerId: string | null;
+  avatarUrl: string | null;
 }
 
 export interface SpecialtyOption {
@@ -47,7 +50,7 @@ async function listUsersImpl(): Promise<UsersList> {
   const { userId, isAdmin } = await requireManager();
   const service = createServiceClient();
   const [{ data: profiles, error }, { data: links }, { data: specialties }] = await Promise.all([
-    service.from("profiles").select("id, first_name, last_name, email, role, created_at, expense_validator_id").order("last_name"),
+    service.from("profiles").select(`id, first_name, last_name, email, role, created_at, expense_validator_id, avatar_url, ${DETAILS_COLUMNS}`).order("last_name"),
     service.from("profile_specialties").select("user_id, specialties(slug)"),
     service.from("specialties").select("slug, label, domain").order("label"),
   ]);
@@ -67,14 +70,16 @@ async function listUsersImpl(): Promise<UsersList> {
       slugs: slugsBy.get(p.id) ?? [],
       createdAt: p.created_at,
       managerId: p.expense_validator_id,
+      avatarUrl: p.avatar_url,
+      ...detailsFromRow(p),
     })),
     specialties: (specialties ?? []) as SpecialtyOption[],
     me: { id: userId, isAdmin },
   };
 }
 
-/** Enregistre nom, rôle et spécialités (l'ensemble remplace les spécialités actuelles). */
-type UserInput = { firstName: string; lastName: string; role: UserRole; slugs: string[] };
+/** Enregistre nom, adresse, véhicule, rôle et spécialités (l'ensemble remplace les spécialités actuelles). */
+type UserInput = { firstName: string; lastName: string; role: UserRole; slugs: string[]; details: ProfileDetails };
 
 async function updateUserImpl(id: string, input: UserInput) {
   const { userId, isAdmin } = await requireManager();
@@ -90,11 +95,11 @@ async function updateUserImpl(id: string, input: UserInput) {
     }
   }
 
-  const { error: profileError } = await service
-    .from("profiles")
-    .update({ first_name: input.firstName.trim() || null, last_name: input.lastName.trim() || null, role: input.role })
-    .eq("id", id);
-  if (profileError) throw new Error(profileError.message);
+  await saveProfile(service, id, { firstName: input.firstName, lastName: input.lastName, ...input.details });
+  if (input.role !== currentRole) {
+    const { error: roleError } = await service.from("profiles").update({ role: input.role }).eq("id", id);
+    if (roleError) throw new Error(roleError.message);
+  }
 
   const { data: catalog } = await service.from("specialties").select("id, slug");
   const wanted = new Set(input.slugs);

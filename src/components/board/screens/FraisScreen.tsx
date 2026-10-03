@@ -268,14 +268,19 @@ function MyExpenses() {
     () => void load()
   );
 
+  // Compteurs des filtres : sur la période choisie à gauche (le mois, ou toute l'année).
+  const inPeriod = useMemo(
+    () => (items ?? []).filter((i) => yearOf(i.start) === year && (monthIdx === null || monthIndexOf(i.start) === monthIdx)),
+    [items, year, monthIdx]
+  );
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
-    for (const i of items ?? []) {
+    for (const i of inPeriod) {
       const k = i.upcoming ? "upcoming" : i.status;
       c[k] = (c[k] ?? 0) + 1;
     }
     return c;
-  }, [items]);
+  }, [inPeriod]);
   // Mois exportables : ceux où des frais ont été saisis.
   const exportMonths = useMemo(() => [...new Set((items ?? []).filter((i) => i.lineCount > 0).map((i) => monthKey(i.start)))].sort().reverse(), [items]);
   const q = normalize(query.trim());
@@ -303,7 +308,7 @@ function MyExpenses() {
         {MINE_FILTERS.map((f) => (
           <FilterChip key={f.id} active={filter === f.id} onClick={() => setFilter(f.id)}>
             {f.label}
-            {f.id !== "all" && counts[f.id] ? ` (${counts[f.id]})` : f.id === "all" ? ` (${items.length})` : ""}
+            {f.id !== "all" && counts[f.id] ? ` (${counts[f.id]})` : f.id === "all" ? ` (${inPeriod.length})` : ""}
           </FilterChip>
         ))}
       </div>
