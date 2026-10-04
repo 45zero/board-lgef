@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, Video, Images, X, ChevronLeft, ChevronRight, Loader2, CalendarDays, Search, Send, Plus } from "lucide-react";
+import { Camera, Video, Images, X, ChevronLeft, ChevronRight, Loader2, CalendarDays, Search, Send, Plus, Trash2, Crop, RotateCcw } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { uploadEventFiles, uploadStandaloneMedia } from "@/lib/board/eventFiles";
 import { uploadResumableSigned } from "@/lib/board/resumableUpload";
@@ -19,7 +19,11 @@ import {
   type PhotoCrop,
   canvasToFile,
   loadBitmap,
+  preparePhoto,
+  renderPlain,
   renderHabillage,
+  PHOTO_FILTERS,
+  type PhotoFilter,
   withDefaults,
   type HabillageFormat,
   type HabillageSettings,
@@ -37,20 +41,13 @@ type Step = "capture" | "environnement" | "habillage" | "publier";
  * Un média de la série. `dress` : habillé LGEF (photos prises sur le moment) ou publié tel quel
  * (visuel partenaire déjà au format, image importée de la galerie).
  */
-type Item = { id: string; file: File; url: string; video: boolean; dress: boolean; crop: PhotoCrop };
+type Item = { id: string; file: File; url: string; video: boolean; dress: boolean; crop: PhotoCrop; filter: PhotoFilter };
+
+/** Aperçu CSS du filtre sur les vignettes (le rendu publié est calculé par preparePhoto). */
+const filterCss = (f: PhotoFilter) => PHOTO_FILTERS.find((x) => x.id === f)?.css ?? "none";
 
 /** Médias par publication : limite des carrousels Instagram. */
 const MAX_ITEMS = 10;
-
-/** Image publiée telle quelle : réenregistrée en JPEG (le HEIC de l'iPhone est refusé par les réseaux), 2160 px max. */
-async function plainJpeg(bmp: ImageBitmap, name: string) {
-  const scale = Math.min(1, 2160 / Math.max(bmp.width, bmp.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bmp.width * scale);
-  canvas.height = Math.round(bmp.height * scale);
-  canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-  return canvasToFile(canvas, name);
-}
 
 const chip = (active: boolean) =>
   `rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${active ? "bg-navy text-white" : "bg-subtle text-ink-3"}`;
@@ -96,6 +93,11 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   const crop = item?.crop ?? DEFAULT_CROP;
   const setCrop = (u: PhotoCrop | ((c: PhotoCrop) => PhotoCrop)) =>
     setItems((list) => list.map((it, i) => (i === active ? { ...it, crop: typeof u === "function" ? u(it.crop) : u } : it)));
+  const setFilter = (f: PhotoFilter) => setItems((list) => list.map((it, i) => (i === active ? { ...it, filter: f } : it)));
+  // Visionneuse plein écran de la série (agrandir, faire défiler, filtre, recadrage, suppression).
+  const [viewer, setViewer] = useState(false);
+  const viewerRef = useRef<HTMLCanvasElement>(null);
+  const swipe = useRef<{ x: number; y: number } | null>(null);
   const [dragMode, setDragMode] = useState<"title" | "crop" | null>(null);
   const dragStart = useRef<{ x: number; y: number; crop: PhotoCrop } | null>(null);
   // Pincement à deux doigts sur l'aperçu : taille du titre.
@@ -116,26 +118,26 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   const videoRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
 
-  // Une seule photo décodée à la fois (celle affichée) : dix photos de 12 Mpx en mémoire saturent un téléphone.
+  // Une seule photo décodée à la fois (celle affichée), réduite à 2160 px et filtrée : dix photos de
+  // 12 Mpx en mémoire saturent un téléphone.
   const photoFile = item && !item.video ? item.file : null;
-  const [loaded, setLoaded] = useState<{ file: File; bmp: ImageBitmap } | null>(null);
-  const bitmap = loaded && loaded.file === photoFile ? loaded.bmp : null;
+  const photoFilter = item?.filter ?? "aucun";
+  const [loaded, setLoaded] = useState<{ file: File; filter: PhotoFilter; src: HTMLCanvasElement } | null>(null);
+  const bitmap = loaded && loaded.file === photoFile && loaded.filter === photoFilter ? loaded.src : null;
   useEffect(() => {
     if (!photoFile) return;
     let alive = true;
-    let bmp: ImageBitmap | null = null;
     loadBitmap(photoFile)
       .then((b) => {
-        bmp = b;
-        if (alive) setLoaded({ file: photoFile, bmp: b });
-        else b.close();
+        const src = alive ? preparePhoto(b, photoFilter) : null;
+        b.close();
+        if (src) setLoaded({ file: photoFile, filter: photoFilter, src });
       })
       .catch(() => alive && setError("Photo illisible : retirez-la de la série."));
     return () => {
       alive = false;
-      bmp?.close();
     };
-  }, [photoFile]);
+  }, [photoFile, photoFilter]);
 
   // Libère les aperçus (URL locales) à la fermeture.
   const itemsRef = useRef(items);
@@ -199,9 +201,10 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
       if (!dragMode) return;
       e.currentTarget.setPointerCapture(e.pointerId);
       pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (pointers.current.size === 2 && dragMode === "title") {
+      if (pointers.current.size === 2) {
         const [a, b] = [...pointers.current.values()];
-        pinch.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), size: title.size };
+        // Pincement : taille du titre, ou zoom de la photo en recadrage.
+        pinch.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), size: dragMode === "title" ? title.size : crop.zoom };
         dragStart.current = null;
         return;
       }
@@ -213,7 +216,9 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
       if (pinch.current && pointers.current.size === 2) {
         const [a, b] = [...pointers.current.values()];
         const ratio = Math.hypot(a.x - b.x, a.y - b.y) / Math.max(pinch.current.dist, 1);
-        setTitle((t) => ({ ...t, size: Math.round(Math.min(220, Math.max(32, pinch.current!.size * ratio))) }));
+        const base = pinch.current.size;
+        if (dragMode === "title") setTitle((t) => ({ ...t, size: Math.round(Math.min(220, Math.max(32, base * ratio))) }));
+        else setCrop((c) => ({ ...c, zoom: Math.min(3, Math.max(1, base * ratio)) }));
         return;
       }
       if (!dragMode || !dragStart.current) return;
@@ -239,6 +244,13 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
     if (step !== "habillage" || !bitmap || !canvasRef.current) return;
     void renderHabillage(canvasRef.current, bitmap, { template, format, text, settings, crop, title: active === coverIndex ? title : { ...title, text: "" } });
   }, [step, bitmap, template, format, text, settings, crop, title, active, coverIndex]);
+
+  // Visionneuse : rendu final de la photo (habillée avec les réglages actuels, ou telle quelle).
+  useEffect(() => {
+    if (!viewer || !item || item.video || !bitmap || !viewerRef.current) return;
+    if (item.dress) void renderHabillage(viewerRef.current, bitmap, { template, format, text, settings, crop, title: active === coverIndex ? title : { ...title, text: "" } });
+    else renderPlain(viewerRef.current, bitmap, crop);
+  }, [viewer, item, bitmap, template, format, text, settings, crop, title, active, coverIndex]);
 
   // Aperçu du calque par-dessus la vidéo.
   useEffect(() => {
@@ -266,7 +278,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
     setError(files.length > room ? `${MAX_ITEMS} médias au maximum par publication (limite des carrousels Instagram).` : null);
     const added = files.slice(0, Math.max(room, 0)).map((f) => {
       const video = isVideoFile(f);
-      return { id: crypto.randomUUID(), file: f, url: URL.createObjectURL(f), video, dress: fromCamera && !video, crop: DEFAULT_CROP };
+      return { id: crypto.randomUUID(), file: f, url: URL.createObjectURL(f), video, dress: fromCamera && !video, crop: DEFAULT_CROP, filter: "aucun" as PhotoFilter };
     });
     if (!added.length) return;
     if (added.some((a) => a.video)) {
@@ -289,7 +301,20 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   const remove = (i: number) => {
     URL.revokeObjectURL(items[i].url);
     setItems((list) => list.filter((_, k) => k !== i));
-    setActive(0);
+    setActive(Math.max(0, Math.min(i, items.length - 2)));
+    setDragMode(null);
+    if (items.length <= 1) setViewer(false);
+  };
+
+  /** Visionneuse : photo précédente / suivante. */
+  const go = (dir: -1 | 1) => {
+    setDragMode(null);
+    setActive((a) => Math.min(items.length - 1, Math.max(0, a + dir)));
+  };
+  const openViewer = (i: number) => {
+    setDragMode(null);
+    setActive(i);
+    setViewer(true);
   };
 
   const toggleDress = (i: number) => setItems((list) => list.map((it, k) => (k === i ? { ...it, dress: !it.dress } : it)));
@@ -376,15 +401,18 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         const bmp = await loadBitmap(it.file).catch(() => {
           throw new Error(`Photo n° ${i + 1} illisible : retirez-la de la série.`);
         });
+        let src: HTMLCanvasElement;
         try {
-          if (it.dress) {
-            const canvas = document.createElement("canvas");
-            await renderHabillage(canvas, bmp, { template, format, text, settings, crop: it.crop, title: i === coverIndex ? title : { ...title, text: "" } });
-            medias.push(await canvasToFile(canvas, `${name}.jpg`));
-          } else medias.push(await plainJpeg(bmp, `${name}.jpg`));
+          src = preparePhoto(bmp, it.filter);
         } finally {
           bmp.close();
         }
+        // Habillée : gabarit LGEF ; telle quelle : proportions d'origine, recadrage appliqué
+        // (réenregistrée en JPEG : le HEIC de l'iPhone est refusé par les réseaux).
+        const canvas = document.createElement("canvas");
+        if (it.dress) await renderHabillage(canvas, src, { template, format, text, settings, crop: it.crop, title: i === coverIndex ? title : { ...title, text: "" } });
+        else renderPlain(canvas, src, it.crop);
+        medias.push(await canvasToFile(canvas, `${name}.jpg`));
       }
       setProgress(medias.length > 1 ? `Envoi des ${medias.length} médias…` : "Envoi du média…");
       const onProgress = (sent: number, total: number) =>
@@ -496,12 +524,14 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
               {items.map((it, i) => (
                 <div key={it.id} className="overflow-hidden rounded-panel border border-line bg-card">
                   <div className="relative aspect-square bg-subtle">
-                    {it.video ? (
-                      <video src={`${it.url}#t=0.1`} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element -- aperçu local (URL blob)
-                      <img src={it.url} alt="" className="h-full w-full object-cover" />
-                    )}
+                    <button onClick={() => openViewer(i)} className="block h-full w-full" aria-label={`Agrandir le média ${i + 1}`}>
+                      {it.video ? (
+                        <video src={`${it.url}#t=0.1`} muted playsInline preload="metadata" className="pointer-events-none h-full w-full object-cover" />
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element -- aperçu local (URL blob)
+                        <img src={it.url} alt="" className="h-full w-full object-cover" style={{ filter: filterCss(it.filter) }} />
+                      )}
+                    </button>
                     <span className="absolute left-1.5 top-1.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-navy px-1.5 text-xs font-extrabold text-white">
                       {i + 1}
                     </span>
@@ -559,7 +589,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
               <p className="text-center text-xs text-ink-4">{MAX_ITEMS} médias : c&apos;est le maximum d&apos;un carrousel Instagram.</p>
             )}
             <p className="text-[11px] text-ink-4">
-              « Habillée » : habillage LGEF et texte appliqués à l&apos;étape suivante. « Telle quelle » : publiée sans retouche (visuel partenaire déjà au format…).
+              Touchez une photo pour l&apos;agrandir, la recadrer ou lui appliquer un filtre. « Habillée » : habillage LGEF et texte appliqués à l&apos;étape suivante. « Telle quelle » : publiée sans retouche (visuel partenaire déjà au format…).
               {items.some((i) => i.video) && items.length > 1 ? " Dans une série, les vidéos partent sans habillage ; Facebook les publie à part de l'album photo." : ""}
             </p>
           </div>
@@ -627,7 +657,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                         aria-label={`Photo ${i + 1}`}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element -- aperçu local (URL blob) */}
-                        <img src={it.url} alt="" className="h-full w-full object-cover" />
+                        <img src={it.url} alt="" className="h-full w-full object-cover" style={{ filter: filterCss(it.filter) }} />
                         <span className="absolute left-0.5 top-0.5 rounded-full bg-navy px-1 text-[9px] font-bold text-white">{i + 1}</span>
                       </button>
                     )
@@ -732,6 +762,16 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                     {templates.map((t) => (
                       <button key={t.id} onClick={() => setTemplate(t.id)} className={chip(template === t.id)}>
                         {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className={label}>Filtre</div>
+                  <div className="flex gap-1.5 overflow-x-auto pb-1">
+                    {PHOTO_FILTERS.map((f) => (
+                      <button key={f.id} onClick={() => setFilter(f.id)} className={`shrink-0 ${chip(photoFilter === f.id)}`}>
+                        {f.label}
                       </button>
                     ))}
                   </div>
@@ -871,6 +911,106 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         )}
         {error && <p className="mt-3 rounded-btn bg-bad-bg px-3 py-2 text-xs text-bad">{error}</p>}
       </div>
+
+      {viewer && item && (
+        <div className="fixed inset-0 z-[70] flex flex-col bg-black text-white">
+          <div className="flex shrink-0 items-center gap-2 px-3 pb-2" style={{ paddingTop: "max(12px, env(safe-area-inset-top))" }}>
+            <button onClick={() => setViewer(false)} className="rounded-full p-2 hover:bg-white/10" aria-label="Fermer">
+              <X size={20} />
+            </button>
+            <div className="flex-1 text-center text-sm font-bold">
+              {active + 1} / {items.length}
+            </div>
+            <button onClick={() => remove(active)} className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-bold text-red hover:bg-white/10" aria-label="Supprimer ce média">
+              <Trash2 size={17} /> Supprimer
+            </button>
+          </div>
+
+          {/* Glisser à gauche / à droite pour faire défiler (hors recadrage). */}
+          <div
+            className="relative flex min-h-0 flex-1 items-center justify-center px-2"
+            onPointerDown={(e) => {
+              if (!dragMode) swipe.current = { x: e.clientX, y: e.clientY };
+            }}
+            onPointerUp={(e) => {
+              const st = swipe.current;
+              swipe.current = null;
+              if (!st || dragMode) return;
+              const dx = e.clientX - st.x;
+              if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(e.clientY - st.y)) go(dx < 0 ? 1 : -1);
+            }}
+          >
+            {item.video ? (
+              <video key={item.url} src={item.url} controls playsInline className="max-h-full max-w-full" />
+            ) : (
+              <>
+                <canvas ref={viewerRef} {...drag} className={`max-h-full max-w-full ${dragMode === "crop" ? "touch-none outline outline-2 outline-red" : ""}`} />
+                {!bitmap && <Loader2 size={28} className="absolute animate-spin text-white/70" />}
+              </>
+            )}
+            {active > 0 && (
+              <button onClick={() => go(-1)} className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2" aria-label="Précédent">
+                <ChevronLeft size={22} />
+              </button>
+            )}
+            {active < items.length - 1 && (
+              <button onClick={() => go(1)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2" aria-label="Suivant">
+                <ChevronRight size={22} />
+              </button>
+            )}
+          </div>
+
+          {!item.video && (
+            <div className="shrink-0 space-y-2.5 rounded-t-sheet bg-card p-3 text-ink" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
+                {PHOTO_FILTERS.map((f) => (
+                  <button key={f.id} onClick={() => setFilter(f.id)} className="flex shrink-0 flex-col items-center gap-1">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- aperçu local (URL blob) */}
+                    <img
+                      src={item.url}
+                      alt=""
+                      className={`h-14 w-14 rounded-btn object-cover ${item.filter === f.id ? "ring-2 ring-red" : ""}`}
+                      style={{ filter: f.css }}
+                    />
+                    <span className={`text-[10px] font-bold ${item.filter === f.id ? "text-red" : "text-ink-3"}`}>{f.label}</span>
+                  </button>
+                ))}
+              </div>
+              {dragMode === "crop" ? (
+                <div className="flex items-center gap-2 text-xs text-ink-3">
+                  <span className="shrink-0">Zoom</span>
+                  <input type="range" min={1} max={3} step={0.05} value={crop.zoom} onChange={(e) => setCrop((c) => ({ ...c, zoom: Number(e.target.value) }))} className="flex-1" />
+                  <button onClick={() => setCrop(DEFAULT_CROP)} className="rounded-full p-1.5 text-ink-3 hover:bg-hover" aria-label="Réinitialiser le cadrage">
+                    <RotateCcw size={15} />
+                  </button>
+                  <button onClick={() => setDragMode(null)} className={chip(true)}>
+                    OK
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setDragMode("crop")} className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-2 text-sm font-bold text-ink-2">
+                    <Crop size={15} /> Recadrer / zoomer
+                  </button>
+                  <button
+                    onClick={() => toggleDress(active)}
+                    className={`ml-auto rounded-btn px-3 py-2 text-sm font-bold ${item.dress ? "bg-navy text-white" : "bg-subtle text-ink-3"}`}
+                  >
+                    {item.dress ? "Habillée" : "Telle quelle"}
+                  </button>
+                </div>
+              )}
+              <p className="text-[11px] text-ink-4">
+                {dragMode === "crop"
+                  ? "Faites glisser la photo pour la cadrer, pincez à deux doigts ou utilisez le curseur pour zoomer."
+                  : item.dress
+                    ? "Aperçu avec l'habillage actuel (modifiable à l'étape suivante). Glissez à gauche ou à droite pour passer d'une photo à l'autre."
+                    : "Publiée telle quelle, avec ce filtre et ce cadrage. Glissez à gauche ou à droite pour passer d'une photo à l'autre."}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {(step !== "capture" || items.length > 0) && (
         <div className="flex shrink-0 gap-2 border-t border-line p-3" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>

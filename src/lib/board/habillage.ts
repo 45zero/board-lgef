@@ -420,3 +420,89 @@ export function canvasToFile(canvas: HTMLCanvasElement, name: string): Promise<F
     )
   );
 }
+
+/** Filtres de photo (publication réseaux) : calculés pixel par pixel, identiques sur tous les navigateurs. */
+export const PHOTO_FILTERS = [
+  { id: "aucun", label: "Original", css: "none" },
+  { id: "vif", label: "Vif", css: "saturate(1.35) contrast(1.1)" },
+  { id: "contraste", label: "Contraste", css: "contrast(1.25)" },
+  { id: "chaud", label: "Chaud", css: "sepia(0.25) saturate(1.15)" },
+  { id: "froid", label: "Froid", css: "saturate(0.9) hue-rotate(-12deg) brightness(1.03)" },
+  { id: "nb", label: "N&B", css: "grayscale(1) contrast(1.1)" },
+  { id: "vintage", label: "Vintage", css: "sepia(0.45) contrast(0.92) brightness(1.05)" },
+] as const;
+export type PhotoFilter = (typeof PHOTO_FILTERS)[number]["id"];
+
+/** Taille de travail des photos publiées (côté le plus long). */
+const PHOTO_MAX = 2160;
+
+/**
+ * Copie de travail d'une photo : réduite à 2160 px et filtrée. Sert d'image source à l'habillage et
+ * au rendu « tel quel » — on peut libérer l'ImageBitmap d'origine (12 Mpx) aussitôt après.
+ */
+export function preparePhoto(img: CanvasImageSource & { width: number; height: number }, filter: PhotoFilter = "aucun") {
+  const scale = Math.min(1, PHOTO_MAX / Math.max(img.width, img.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(img.width * scale));
+  canvas.height = Math.max(1, Math.round(img.height * scale));
+  const ctx = canvas.getContext("2d", { willReadFrequently: filter !== "aucun" })!;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  if (filter === "aucun") return canvas;
+
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const px = data.data;
+  const c = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v);
+  const contrast = (v: number, k: number) => (v - 128) * k + 128;
+  for (let i = 0; i < px.length; i += 4) {
+    let r = px[i];
+    let g = px[i + 1];
+    let b = px[i + 2];
+    const y = 0.299 * r + 0.587 * g + 0.114 * b;
+    switch (filter) {
+      case "vif":
+        r = contrast(y + (r - y) * 1.35, 1.1);
+        g = contrast(y + (g - y) * 1.35, 1.1);
+        b = contrast(y + (b - y) * 1.35, 1.1);
+        break;
+      case "contraste":
+        r = contrast(r, 1.25);
+        g = contrast(g, 1.25);
+        b = contrast(b, 1.25);
+        break;
+      case "chaud":
+        r = r * 1.08 + 8;
+        g = g * 1.02 + 2;
+        b = b * 0.88;
+        break;
+      case "froid":
+        r = r * 0.9;
+        g = g * 0.98 + 2;
+        b = b * 1.08 + 10;
+        break;
+      case "nb":
+        r = g = b = contrast(y, 1.1);
+        break;
+      case "vintage": {
+        const sr = 0.393 * r + 0.769 * g + 0.189 * b;
+        const sg = 0.349 * r + 0.686 * g + 0.168 * b;
+        const sb = 0.272 * r + 0.534 * g + 0.131 * b;
+        r = contrast((r + sr) / 2, 0.92) + 10;
+        g = contrast((g + sg) / 2, 0.92) + 8;
+        b = contrast((b + sb) / 2, 0.92) + 4;
+        break;
+      }
+    }
+    px[i] = c(r);
+    px[i + 1] = c(g);
+    px[i + 2] = c(b);
+  }
+  ctx.putImageData(data, 0, 0);
+  return canvas;
+}
+
+/** Photo publiée telle quelle (sans habillage) : proportions d'origine, cadrage (zoom, position) appliqué. */
+export function renderPlain(canvas: HTMLCanvasElement, img: CanvasImageSource & { width: number; height: number }, crop: PhotoCrop = DEFAULT_CROP) {
+  canvas.width = img.width;
+  canvas.height = img.height;
+  drawCover(canvas.getContext("2d")!, img, 0, 0, img.width, img.height, crop);
+}
