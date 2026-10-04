@@ -5,6 +5,7 @@ import { Bell, CheckCheck } from "lucide-react";
 import { useLive, type BoardNotification } from "@/components/board/live/LiveProvider";
 import { useOpenEvent } from "@/components/board/calendar/EventOpener";
 import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
+import { openSupport } from "@/lib/board/supportContext";
 
 const ago = (iso: string) => {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -16,7 +17,7 @@ const ago = (iso: string) => {
 
 /**
  * Cloche des notifications : compteur des non lues en direct, liste des 30 dernières. Un clic
- * marque comme lu et ouvre l'événement (ou la carte de l'Espace Team) concerné.
+ * marque comme lu et ouvre l'événement (ou la carte de l'Espace Team, ou le signalement) concerné.
  */
 export function NotificationBell({ variant = "desktop" }: { variant?: "desktop" | "mobile" }) {
   const { notifications, unread, markRead, markAllRead } = useLive();
@@ -34,7 +35,10 @@ export function NotificationBell({ variant = "desktop" }: { variant?: "desktop" 
 
   const click = (n: BoardNotification) => {
     void markRead(n.id);
-    if (n.data?.team_card_id) {
+    if (n.data?.support_ticket_id) {
+      setOpen(false);
+      openSupport(n.data.support_ticket_id);
+    } else if (n.data?.team_card_id) {
       setOpen(false);
       openTeamCard(n.data.team_card_id);
     } else if (n.event_id) {

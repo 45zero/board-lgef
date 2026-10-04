@@ -40,3 +40,6 @@ next-env.d.ts
 
 # exports de contacts (données personnelles) — ne jamais commiter
 *.xlsx
+
+# centre d'aide : photos des tickets téléchargées par scripts/support-tickets.mjs
+/.support-tickets/

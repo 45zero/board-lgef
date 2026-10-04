@@ -10,7 +10,7 @@ const MAX_SIDE = 2000;
  * 4G. Si le navigateur ne sait pas décoder l'image, le fichier d'origine est envoyé tel quel (le
  * serveur la convertit à la lecture).
  */
-async function normalizePhoto(file: File): Promise<File> {
+export async function normalizePhoto(file: File): Promise<File> {
   const isImage = file.type.startsWith("image/") || /\.(heic|heif)$/i.test(file.name);
   if (!isImage || file.type === "image/gif") return file;
   try {

@@ -52,6 +52,9 @@ function openLink(n: EmailNotification): { label: string; url: string } {
       return { label: "Voir mes frais", url: `${site}/?app=frais` };
     case "publication_to_publish":
       return { label: "Ouvrir le centre de publication", url: `${site}/?app=audiovisuel` };
+    case "support_ticket":
+    case "support_resolved":
+      return { label: "Ouvrir le centre d'aide", url: `${site}/?support=${typeof n.data?.support_ticket_id === "string" ? n.data.support_ticket_id : ""}` };
     case "registration_response":
       return { label: "Voir les inscriptions", url: `${site}/?app=inscription` };
     case "card_assigned":

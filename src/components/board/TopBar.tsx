@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { Search, Moon, Sun, ChevronRight, Settings, Lock } from "lucide-react";
 import { NotificationBell } from "@/components/board/live/NotificationBell";
+import { SupportButton } from "@/components/board/support/SupportButton";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { BoardApp } from "@/lib/board/tokens";
@@ -105,6 +106,8 @@ export function TopBar({
             ⌘K
           </kbd>
         </div>
+
+        <SupportButton app={currentApp.id} />
 
         <NotificationBell />
 

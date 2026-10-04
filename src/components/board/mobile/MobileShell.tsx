@@ -63,6 +63,7 @@ export function MobileShell() {
         onLogoClick={tab === "mails" ? () => setMailMenuOpen((o) => !o) : undefined}
         menuOpen={mailMenuOpen}
         onSettings={() => setSettingsOpen(true)}
+        app={tab}
       />
 
       {/* Calendrier et Mails restent montés (masqués quand inactifs) : les mails se chargent dès
@@ -95,7 +96,7 @@ export function MobileShell() {
 
       {fraisOpen && (
         <div className="absolute inset-0 z-40 flex flex-col bg-shell">
-          <MobileHeader title="Frais" kicker="NOTES DE FRAIS" />
+          <MobileHeader title="Frais" kicker="NOTES DE FRAIS" app="frais" />
           <div className="flex-1 overflow-y-auto pb-20">
             <FraisScreen />
           </div>

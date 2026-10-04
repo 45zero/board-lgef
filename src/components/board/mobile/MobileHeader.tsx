@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { ChevronDown, Settings } from "lucide-react";
 import { NotificationBell } from "@/components/board/live/NotificationBell";
+import { SupportButton } from "@/components/board/support/SupportButton";
 
 /** `onLogoClick` : sur la page Mails, le logo ouvre le menu comptes / dossiers (d'où le chevron). */
 export function MobileHeader({
@@ -11,6 +12,7 @@ export function MobileHeader({
   onLogoClick,
   menuOpen = false,
   onSettings,
+  app = null,
 }: {
   title: string;
   kicker: string;
@@ -18,6 +20,8 @@ export function MobileHeader({
   menuOpen?: boolean;
   /** Roue crantée : feuille Paramètres (bouton central…). */
   onSettings?: () => void;
+  /** Module affiché, joint aux signalements du centre d'aide. */
+  app?: string | null;
 }) {
   return (
     <div
@@ -45,6 +49,7 @@ export function MobileHeader({
         <button onClick={onSettings} className="flex h-8 w-8 items-center justify-center rounded-full text-white/85 hover:bg-white/10" aria-label="Paramètres">
           <Settings size={17} />
         </button>
+        <SupportButton app={app} variant="mobile" />
         <NotificationBell variant="mobile" />
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-red text-xs font-bold text-white">
           GV

@@ -4006,6 +4006,48 @@ export type Database = {
         }
         Relationships: []
       }
+      support_tickets: {
+        Row: {
+          id: string
+          created_at: string
+          created_by: string
+          message: string
+          app: string | null
+          context: Json
+          attachments: string[]
+          status: string
+          resolution: string | null
+          resolved_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          created_at?: string
+          created_by: string
+          message: string
+          app?: string | null
+          context?: Json
+          attachments?: string[]
+          status?: string
+          resolution?: string | null
+          resolved_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          created_at?: string
+          created_by?: string
+          message?: string
+          app?: string | null
+          context?: Json
+          attachments?: string[]
+          status?: string
+          resolution?: string | null
+          resolved_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       team_lists: {
         Row: {
           id: string
@@ -4656,7 +4698,7 @@ export type Database = {
       invoice_status: "submitted" | "processing" | "approved" | "rejected" | "paid"
       label_color: "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "pink" | "gray"
       note_member_role: "createur" | "destinataire" | "collaborateur"
-      notification_type: "card_assigned" | "card_commented" | "card_mentioned" | "card_due_soon" | "board_shared" | "director_assignment" | "expense_submitted" | "account_request" | "coverage_request" | "coverage_request_created" | "coverage_approved" | "coverage_denied" | "coverage_assignment" | "coverage_rejected" | "event_deleted" | "event_mentioned" | "event_commented" | "account_request_approved" | "account_request_denied" | "assignment_created" | "assignment_updated" | "expense_approved" | "expense_rejected" | "coverage_accepted" | "coverage_accepted_admin" | "director_request" | "director_approved" | "director_denied" | "director_reassigned" | "director_invitation" | "director_accepted" | "director_declined" | "event_team_added" | "event_reminder" | "hateful_comment" | "expense_to_validate" | "registration_response" | "publication_to_publish"
+      notification_type: "card_assigned" | "card_commented" | "card_mentioned" | "card_due_soon" | "board_shared" | "director_assignment" | "expense_submitted" | "account_request" | "coverage_request" | "coverage_request_created" | "coverage_approved" | "coverage_denied" | "coverage_assignment" | "coverage_rejected" | "event_deleted" | "event_mentioned" | "event_commented" | "account_request_approved" | "account_request_denied" | "assignment_created" | "assignment_updated" | "expense_approved" | "expense_rejected" | "coverage_accepted" | "coverage_accepted_admin" | "director_request" | "director_approved" | "director_denied" | "director_reassigned" | "director_invitation" | "director_accepted" | "director_declined" | "event_team_added" | "event_reminder" | "hateful_comment" | "expense_to_validate" | "registration_response" | "publication_to_publish" | "support_ticket" | "support_resolved"
       response_status: "accepted" | "rejected"
       sector_type: "arbitrage" | "technique" | "formation" | "communication" | "competitions"
       user_role: "user" | "technician" | "super_user" | "admin" | "organizer" | "comite_directeur_bad" | "comite_directeur"
