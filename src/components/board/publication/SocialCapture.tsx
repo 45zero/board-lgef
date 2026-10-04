@@ -79,6 +79,25 @@ const isVideoFile = (f: File) => f.type.startsWith("video") || VIDEO_EXT.test(f.
 /** Type annoncé au lecteur : un .mov (QuickTime) contient en général du H.264 lisible comme du MP4. */
 const playableType = (f: File) => (!f.type || f.type === "video/quicktime" ? "video/mp4" : f.type);
 
+/** Dimensions et durée d'une vidéo (null si le navigateur ne sait pas la lire). */
+function videoMetaOf(file: File): Promise<{ width: number; height: number; duration: number } | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement("video");
+    const done = (m: { width: number; height: number; duration: number } | null) => {
+      window.clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      resolve(m);
+    };
+    const timer = window.setTimeout(() => done(null), 10_000);
+    v.preload = "metadata";
+    v.muted = true;
+    v.onloadedmetadata = () => done(v.videoWidth && v.videoHeight ? { width: v.videoWidth, height: v.videoHeight, duration: v.duration } : null);
+    v.onerror = () => done(null);
+    v.src = url;
+  });
+}
+
 /** Durée maximale d'une vidéo habillée (encodage sur le serveur, limité à 300 s). */
 const VIDEO_HABILLAGE_MAX_SECONDS = 90;
 /** Taille maximale d'une vidéo à habiller (limite du bucket video-work). */
@@ -103,8 +122,9 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
   const videoUrl = item?.video ? item.url : null;
   const single = items.length === 1;
   // Le titre libre ne va que sur la première photo habillée (la couverture du carrousel).
-  const coverIndex = items.findIndex((i) => !i.video && i.dress);
-  const needsHabillage = coverIndex >= 0 || (single && items[0].video);
+  const coverIndex = items.findIndex((i) => i.dress);
+  // Habillage : photos et vidéos marquées « Habillée » (contexte R1… : bandeau, animation, pré-roll).
+  const needsHabillage = coverIndex >= 0;
   const [template, setTemplate] = useState<HabillageTemplate>("bandeau");
   // « Je suis sur… » (R1, Coupe de France…) : filtre les gabarits ; proposé d'après l'événement en cours.
   const [context, setContext] = useState<string | null>(null);
@@ -182,7 +202,7 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
   const overlayRef = useRef<HTMLCanvasElement>(null);
   // Vidéo : pas de « Cadre » (il redimensionne la photo), et pas d'habillage au-delà de 90 s ou
   // si le navigateur ne peut pas lire la vidéo (dimensions inconnues).
-  const videoHabillage = single && isVideo && !videoError && !!videoMeta && videoMeta.duration <= VIDEO_HABILLAGE_MAX_SECONDS;
+  const videoHabillage = isVideo && !!item?.dress && !videoError && !!videoMeta && videoMeta.duration <= VIDEO_HABILLAGE_MAX_SECONDS;
   const templates = availableTemplates(settings, context).filter((t) => !isVideo || t.id !== "cadre");
   const contexts = contextsOf(settings);
   const pre = videoMeta ? prerollFor(settings, orientationOf(videoMeta), template) : null;
@@ -285,8 +305,16 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
   // Aperçu du calque par-dessus la vidéo.
   useEffect(() => {
     if (step !== "habillage" || !videoHabillage || !videoMeta || !overlayRef.current) return;
-    void renderHabillage(overlayRef.current, null, { template, format, text, settings, overlaySize: overlaySizeFor(videoMeta), skipOverlayImage: !!anim, title });
-  }, [step, videoHabillage, videoMeta, template, format, text, settings, anim, title]);
+    void renderHabillage(overlayRef.current, null, {
+      template,
+      format,
+      text,
+      settings,
+      overlaySize: overlaySizeFor(videoMeta),
+      skipOverlayImage: !!anim,
+      title: active === coverIndex ? title : { ...title, text: "" },
+    });
+  }, [step, videoHabillage, videoMeta, template, format, text, settings, anim, title, active, coverIndex]);
 
   // Événements autour d'aujourd'hui (et recherche) pour rattacher la publication.
   useEffect(() => {
@@ -319,7 +347,7 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
     setError(files.length > room ? `${MAX_ITEMS} médias au maximum par publication (limite des carrousels Instagram).` : null);
     const added = files.slice(0, Math.max(room, 0)).map((f) => {
       const video = isVideoFile(f);
-      return { id: crypto.randomUUID(), file: f, url: URL.createObjectURL(f), video, dress: fromCamera && !video, crop: DEFAULT_CROP, filter: "aucun" as PhotoFilter, thumb: null };
+      return { id: crypto.randomUUID(), file: f, url: URL.createObjectURL(f), video, dress: fromCamera, crop: DEFAULT_CROP, filter: "aucun" as PhotoFilter, thumb: null };
     });
     if (!added.length) return;
     if (added.some((a) => a.video)) {
@@ -383,9 +411,12 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
    * Habillage d'une vidéo : calque PNG transparent dessiné ici, vidéo + calque déposés dans le bucket
    * privé video-work, assemblage par FFmpeg sur le serveur, puis récupération de la vidéo habillée.
    */
-  const habillerVideo = async (video: File, meta: { width: number; height: number }, report: Report): Promise<File> => {
+  const habillerVideo = async (video: File, meta: { width: number; height: number }, report: Report, withTitle: boolean): Promise<File> => {
+    // Animation et pré-roll du gabarit pour l'orientation de cette vidéo (verticale / horizontale).
+    const anim = animationFor(settings, template, orientationOf(meta));
+    const pre = prerollFor(settings, orientationOf(meta), template);
     const canvas = document.createElement("canvas");
-    await renderHabillage(canvas, null, { template, format, text, settings, overlaySize: overlaySizeFor(meta), skipOverlayImage: !!anim, title });
+    await renderHabillage(canvas, null, { template, format, text, settings, overlaySize: overlaySizeFor(meta), skipOverlayImage: !!anim, title: withTitle ? title : { ...title, text: "" } });
     const overlay = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Calque impossible."))), "image/png"));
 
     if (video.size > VIDEO_HABILLAGE_MAX_BYTES)
@@ -452,7 +483,16 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
         const name = `publication-${Date.now()}-${i + 1}`;
         if (it.video) {
           let v = it.file.type ? it.file : new File([it.file], it.file.name, { type: /\.mov$/i.test(it.file.name) ? "video/quicktime" : "video/mp4" });
-          if (videoHabillage && videoMeta && (template !== "aucun" || !!title.text.trim() || !!pre)) v = await habillerVideo(v, videoMeta, report);
+          if (it.dress) {
+            const meta = await videoMetaOf(it.file);
+            const pre = meta ? prerollFor(settings, orientationOf(meta), template) : null;
+            const titled = i === coverIndex && !!title.text.trim();
+            if (meta && meta.duration <= VIDEO_HABILLAGE_MAX_SECONDS && (template !== "aucun" || titled || !!pre)) {
+              const n = items.filter((x) => x.video && x.dress).length;
+              const sub: Report = (d, f) => report(n > 1 ? `Vidéo n° ${i + 1} — ${d}` : d, f);
+              v = await habillerVideo(v, meta, sub, i === coverIndex);
+            }
+          }
           medias.push(v);
           continue;
         }
@@ -599,16 +639,12 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
                     <button onClick={() => move(i, -1)} disabled={i === 0} className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-2 disabled:opacity-30" aria-label="Avancer">
                       <ChevronLeft size={16} />
                     </button>
-                    {it.video ? (
-                      <span className="flex-1 text-center text-[11px] font-semibold text-ink-4">{single ? "Vidéo" : "Telle quelle"}</span>
-                    ) : (
-                      <button
-                        onClick={() => toggleDress(i)}
-                        className={`flex-1 rounded-btn px-1 py-1.5 text-[11px] font-bold ${it.dress ? "bg-navy text-white" : "bg-subtle text-ink-3"}`}
-                      >
-                        {it.dress ? "Habillée" : "Telle quelle"}
-                      </button>
-                    )}
+                    <button
+                      onClick={() => toggleDress(i)}
+                      className={`flex-1 rounded-btn px-1 py-1.5 text-[11px] font-bold ${it.dress ? "bg-navy text-white" : "bg-subtle text-ink-3"}`}
+                    >
+                      {it.dress ? "Habillée" : "Telle quelle"}
+                    </button>
                     <button
                       onClick={() => move(i, 1)}
                       disabled={i === items.length - 1}
@@ -636,7 +672,7 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
             )}
             <p className="text-[11px] text-ink-4">
               Touchez une photo pour l&apos;agrandir, la recadrer ou lui appliquer un filtre. « Habillée » : habillage LGEF et texte appliqués à l&apos;étape suivante. « Telle quelle » : publiée sans retouche (visuel partenaire déjà au format…).
-              {items.some((i) => i.video) && items.length > 1 ? " Dans une série, les vidéos partent sans habillage ; Facebook les publie à part de l'album photo." : ""}
+              {items.some((i) => i.video) && items.length > 1 ? " Les vidéos habillées reçoivent le bandeau et le pré-roll du contexte (90 s max par vidéo) ; Facebook les publie à part de l'album photo." : ""}
             </p>
           </div>
         )}
@@ -692,25 +728,34 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
               <div>
                 <div className="flex gap-1.5 overflow-x-auto pb-1">
                   {items.map((it, i) =>
-                    it.video || !it.dress ? null : (
+                    !it.dress ? null : (
                       <button
                         key={it.id}
                         onClick={() => {
                           setDragMode(null);
+                          if (it.video && i !== active) {
+                            setVideoMeta(null);
+                            setVideoError(false);
+                          }
                           setActive(i);
                         }}
-                        className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-btn border-2 ${i === active ? "border-red" : "border-transparent"}`}
-                        aria-label={`Photo ${i + 1}`}
+                        className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-btn border-2 bg-black ${i === active ? "border-red" : "border-transparent"}`}
+                        aria-label={`${it.video ? "Vidéo" : "Photo"} ${i + 1}`}
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element -- aperçu local (URL blob) */}
-                        {it.thumb && <img src={it.thumb} decoding="async" alt="" className="h-full w-full object-cover" style={{ filter: filterCss(it.filter) }} />}
+                        {it.video ? (
+                          <video src={`${it.url}#t=0.1`} muted playsInline preload="metadata" className="pointer-events-none h-full w-full object-cover" />
+                        ) : (
+                          // eslint-disable-next-line @next/next/no-img-element -- aperçu local (URL blob)
+                          it.thumb && <img src={it.thumb} decoding="async" alt="" className="h-full w-full object-cover" style={{ filter: filterCss(it.filter) }} />
+                        )}
                         <span className="absolute left-0.5 top-0.5 rounded-full bg-navy px-1 text-[9px] font-bold text-white">{i + 1}</span>
                       </button>
                     )
                   )}
                 </div>
                 <p className="mt-1 text-[11px] text-ink-4">
-                  Habillage, format et texte valent pour les {items.filter((i) => !i.video && i.dress).length} photos habillées ; recadrage photo par photo ; le titre ne va que sur la photo n° {coverIndex + 1}.
+                  L&apos;habillage du contexte (bandeau, animation, pré-roll des vidéos) et le texte valent pour les {items.filter((i) => i.dress).length} médias
+                  habillés ; recadrage photo par photo ; le titre ne va que sur le média n° {coverIndex + 1}. Touchez une vignette pour la prévisualiser.
                 </p>
               </div>
             )}
@@ -1045,6 +1090,17 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
             )}
           </div>
 
+          {item.video && (
+            <div className="flex shrink-0 items-center gap-2 rounded-t-sheet bg-card p-3 text-ink" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
+              <span className="text-xs text-ink-3">Vidéo : habillage du contexte et pré-roll ajoutés à la publication.</span>
+              <button
+                onClick={() => toggleDress(active)}
+                className={`ml-auto shrink-0 rounded-btn px-3 py-2 text-sm font-bold ${item.dress ? "bg-navy text-white" : "bg-subtle text-ink-3"}`}
+              >
+                {item.dress ? "Habillée" : "Telle quelle"}
+              </button>
+            </div>
+          )}
           {!item.video && (
             <div className="shrink-0 space-y-2.5 rounded-t-sheet bg-card p-3 text-ink" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
               <div className="flex gap-1.5 overflow-x-auto pb-1">
