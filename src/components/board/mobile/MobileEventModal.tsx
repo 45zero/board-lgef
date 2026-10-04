@@ -11,6 +11,8 @@ import { useEventModalState } from "@/hooks/board/useEventModalState";
 import { PersonName } from "@/components/board/calendar/PersonName";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { Toggle } from "@/components/board/Toggle";
+import { DraftNotice } from "@/components/board/calendar/VoiceEvent";
+import type { EventDraft } from "@/app/actions/event-dictation";
 import {
   personName,
   DiscussionTab,
@@ -40,12 +42,14 @@ export function MobileEventModal({
   event,
   defaultStart,
   defaultEnd,
+  draft,
   onClose,
   onSaved,
 }: {
   event: CalendarEvent | null;
   defaultStart?: Date;
   defaultEnd?: Date;
+  draft?: EventDraft | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -53,7 +57,7 @@ export function MobileEventModal({
   const [orgPickerOpen, setOrgPickerOpen] = useState(false);
   const locationInputRef = useRef<HTMLInputElement>(null);
   const mapsLoaded = useGoogleMapsScript();
-  const m = useEventModalState({ event, defaultStart, defaultEnd, onClose, onSaved });
+  const m = useEventModalState({ event, defaultStart, defaultEnd, draft, onClose, onSaved });
   const { isEditing } = m;
   const orgColor = ORG_COLORS[m.org];
 
@@ -148,6 +152,7 @@ export function MobileEventModal({
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {tab === "details" && (
           <div className="space-y-4">
+            {m.draft && <DraftNotice draft={m.draft} />}
             <div className="relative">
               <button
                 onClick={() => setOrgPickerOpen((o) => !o)}

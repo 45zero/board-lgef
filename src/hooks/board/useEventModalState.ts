@@ -16,6 +16,7 @@ import { useUserRole } from "@/hooks/board/useUserRole";
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 import { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
 import { useEventCoverage } from "@/hooks/board/useEventCoverage";
+import type { EventDraft } from "@/app/actions/event-dictation";
 
 /** Préréglages de rappel façon Google Agenda — doit rester synchro avec la
  * contrainte CHECK sur event_reminders.reminder_offset. */
@@ -39,42 +40,60 @@ const REMINDER_OFFSET_MINUTES: Record<string, number> = {
   "1d": 1440,
 };
 
+/** Début du brouillon dicté (date du jour + heure dite, 09:00 sans heure ; rien sans date). */
+function draftStart(d: EventDraft | null) {
+  if (!d?.date) return null;
+  return new Date(`${d.date}T${d.startTime ?? "09:00"}:00`);
+}
+
+/** Fin du brouillon dicté : heure de fin dite si elle suit le début, sinon une heure plus tard. */
+function draftEnd(d: EventDraft | null) {
+  const s = draftStart(d);
+  if (!s) return null;
+  const e = d!.endTime ? new Date(`${d!.date}T${d!.endTime}:00`) : null;
+  return e && e > s ? e : new Date(s.getTime() + 3600_000);
+}
+
 /** État + logique partagés entre EventModal (bureau) et MobileEventModal. */
 export function useEventModalState({
   event,
   defaultStart,
   defaultEnd,
+  draft,
   onClose,
   onSaved,
 }: {
   event: CalendarEvent | null;
   defaultStart?: Date;
   defaultEnd?: Date;
+  /** Brouillon dicté (création à la voix) : pré-remplit la fiche d'un nouvel événement. */
+  draft?: EventDraft | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const { user } = useAuth();
   const isEditing = !!event;
+  const d = event ? null : draft ?? null;
 
-  const [org, setOrg] = useState<OrgKey>(event?.org ?? "navy");
-  const [title, setTitle] = useState(event?.title ?? "");
-  const [location, setLocation] = useState(event?.location ?? "");
-  const [onlineMeeting, setOnlineMeeting] = useState(event?.onlineMeeting ?? false);
+  const [org, setOrg] = useState<OrgKey>(event?.org ?? d?.org ?? "navy");
+  const [title, setTitle] = useState(event?.title ?? d?.title ?? "");
+  const [location, setLocation] = useState(event?.location ?? d?.location ?? "");
+  const [onlineMeeting, setOnlineMeeting] = useState(event?.onlineMeeting ?? d?.onlineMeeting ?? false);
   const [registrationEnabled, setRegistrationEnabled] = useState(event?.registrationEnabled ?? false);
-  const [message, setMessage] = useState(event?.message ?? "");
+  const [message, setMessage] = useState(event?.message ?? d?.message ?? "");
   const [pendingParticipants, setPendingParticipants] = useState<
     { id: string; name: string; role: "responsable" | "membre" }[]
-  >([]);
-  const [pendingReminders, setPendingReminders] = useState<string[]>([]);
-  const start = event ? parseISO(event.start) : defaultStart ?? new Date();
-  const end = event ? parseISO(event.end) : defaultEnd ?? new Date(Date.now() + 3600_000);
+  >(d?.participants ?? []);
+  const [pendingReminders, setPendingReminders] = useState<string[]>(d?.reminders ?? []);
+  const start = event ? parseISO(event.start) : draftStart(d) ?? defaultStart ?? new Date();
+  const end = event ? parseISO(event.end) : draftEnd(d) ?? defaultEnd ?? new Date(start.getTime() + 3600_000);
   const [dateStr, setDateStr] = useState(format(start, "yyyy-MM-dd"));
   const [startTime, setStartTime] = useState(format(start, "HH:mm"));
   const [endTime, setEndTime] = useState(format(end, "HH:mm"));
   const [saving, setSaving] = useState(false);
   const [reminders, setReminders] = useState<{ id: string; reminder_offset: string }[]>([]);
-  const [wantsCoverage, setWantsCoverage] = useState(false);
-  const [coverageDetails, setCoverageDetails] = useState("");
+  const [wantsCoverage, setWantsCoverage] = useState(d?.wantsCoverage ?? false);
+  const [coverageDetails, setCoverageDetails] = useState(d?.coverageDetails ?? "");
   const [coverageTechnicianId, setCoverageTechnicianId] = useState("");
 
   const { createEvent, updateEvent, deleteEventCascade } = useEventActions();
@@ -266,6 +285,7 @@ export function useEventModalState({
 
   return {
     isEditing,
+    draft: d,
     org,
     setOrg,
     title,

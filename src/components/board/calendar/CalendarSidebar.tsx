@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, PanelLeftClose, Plus } from "lucide-react";
+import { Mic, ChevronLeft, ChevronRight, PanelLeftClose, Plus } from "lucide-react";
 import { format, addDays, addMonths, subMonths, endOfMonth, endOfWeek, isSameDay, isSameMonth, startOfMonth, startOfWeek } from "date-fns";
 import { fr } from "date-fns/locale";
 import { CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
@@ -23,6 +23,7 @@ export function CalendarSidebar({
   collapsed,
   onToggleCollapsed,
   onCreateEvent,
+  onVoiceEvent,
   accounts,
   googleAccountId,
   onGoogleAccountChange,
@@ -38,6 +39,7 @@ export function CalendarSidebar({
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onCreateEvent: () => void;
+  onVoiceEvent: () => void;
   accounts: Account[] | null;
   googleAccountId: string | null;
   onGoogleAccountChange: (id: string) => void;
@@ -62,6 +64,14 @@ export function CalendarSidebar({
           className="flex flex-1 items-center justify-center gap-1.5 rounded-btn bg-navy px-3 py-2 text-sm font-bold text-white hover:bg-navy-600"
         >
           <Plus size={15} /> Nouvel événement
+        </button>
+        <button
+          onClick={onVoiceEvent}
+          className="ml-1.5 flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-btn border border-line text-navy hover:bg-hover"
+          aria-label="Créer un événement à la voix"
+          title="Créer un événement à la voix"
+        >
+          <Mic size={15} />
         </button>
         <button
           onClick={onToggleCollapsed}

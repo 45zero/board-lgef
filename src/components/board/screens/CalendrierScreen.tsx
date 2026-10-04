@@ -4,7 +4,7 @@ import { DirectorGlyph } from "@/components/board/calendar/DirectorGlyph";
 import { CoverageToggle } from "@/components/board/calendar/CoverageToggle";
 import { TeamCardGlyph, useEventTeamCards } from "@/components/board/team/TeamCardOpener";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus, Search, User, X, PanelLeftOpen, Camera, Video } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Search, User, X, PanelLeftOpen, Camera, Video, Mic } from "lucide-react";
 import {
   addDays,
   addMonths,
@@ -33,6 +33,8 @@ import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import { listMyCalendars, listMyEvents } from "@/app/actions/calendar";
 import { EventModal } from "@/components/board/calendar/EventModal";
+import { VoiceEventDialog } from "@/components/board/calendar/VoiceEvent";
+import type { EventDraft } from "@/app/actions/event-dictation";
 import { GoogleEventModal } from "@/components/board/calendar/GoogleEventModal";
 import { ORG_COLORS, type OrgKey } from "@/lib/board/tokens";
 import { CalendarSidebar } from "@/components/board/calendar/CalendarSidebar";
@@ -131,6 +133,8 @@ export function CalendrierScreen() {
 
   const [editingInternal, setEditingInternal] = useState<CalendarEvent | "new" | null>(null);
   const [newSlot, setNewSlot] = useState<{ start: Date; end: Date } | null>(null);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [draft, setDraft] = useState<EventDraft | null>(null);
   const [editingGoogle, setEditingGoogle] = useState<GoogleEventItem | "new" | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [hiddenOrgs, setHiddenOrgs] = useState<Set<OrgKey>>(() => new Set());
@@ -279,6 +283,7 @@ export function CalendrierScreen() {
           setNewSlot(null);
           setEditingInternal("new");
         }}
+        onVoiceEvent={() => setVoiceOpen(true)}
         accounts={accounts}
         googleAccountId={googleAccountId}
         onGoogleAccountChange={setGoogleAccountId}
@@ -306,6 +311,14 @@ export function CalendrierScreen() {
                 aria-label="Nouvel événement"
               >
                 <Plus size={15} />
+              </button>
+              <button
+                onClick={() => setVoiceOpen(true)}
+                className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-navy hover:bg-hover"
+                aria-label="Créer un événement à la voix"
+                title="Créer un événement à la voix"
+              >
+                <Mic size={15} />
               </button>
             </>
           )}
@@ -735,11 +748,25 @@ export function CalendrierScreen() {
           event={editingInternal === "new" ? null : editingInternal}
           defaultStart={newSlot?.start}
           defaultEnd={newSlot?.end}
+          draft={editingInternal === "new" ? draft : null}
           onClose={() => {
             setEditingInternal(null);
             setNewSlot(null);
+            setDraft(null);
           }}
           onSaved={refetch}
+        />
+      )}
+
+      {voiceOpen && (
+        <VoiceEventDialog
+          onClose={() => setVoiceOpen(false)}
+          onDraft={(d) => {
+            setVoiceOpen(false);
+            setDraft(d);
+            setNewSlot(null);
+            setEditingInternal("new");
+          }}
         />
       )}
 

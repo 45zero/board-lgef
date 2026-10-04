@@ -2,7 +2,7 @@
 
 import { DirectorGlyph } from "@/components/board/calendar/DirectorGlyph";
 import { useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown, User, X, Plus, Camera, Video } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, User, X, Plus, Camera, Video, Mic } from "lucide-react";
 import {
   addDays,
   addMonths,
@@ -30,6 +30,8 @@ import { isMultiDayEvent, CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
 import type { CalendarEvent } from "@/lib/board/calendar";
 import { MobileEventModal } from "@/components/board/mobile/MobileEventModal";
+import { VoiceEventDialog } from "@/components/board/calendar/VoiceEvent";
+import type { EventDraft } from "@/app/actions/event-dictation";
 import { DayWeatherBadge, useForecast } from "@/components/board/calendar/DayWeather";
 
 type View = "mois" | "semaine";
@@ -49,6 +51,8 @@ export function MobileCalendrierScreen() {
   const [coverage, setCoverage] = useCoverageFilters();
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [editing, setEditing] = useState<CalendarEvent | "new" | null>(null);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [draft, setDraft] = useState<EventDraft | null>(null);
 
   const gridStart = useMemo(
     () =>
@@ -154,7 +158,7 @@ export function MobileCalendrierScreen() {
   };
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-x-hidden">
+    <div className="relative flex h-full min-w-0 flex-col overflow-x-hidden">
       {/* Une seule ligne qui tient sur 375 px (iPhone) : filtres, période, vue. Les bascules
           sollicité / vidéo / photo sont dans le panneau des filtres. */}
       <div className="flex items-center gap-2 px-3 py-1.5">
@@ -388,14 +392,42 @@ export function MobileCalendrierScreen() {
         onClose={() => setSelectedDay(null)}
         onOpenEvent={(ev) => setEditing(ev)}
         onCreate={() => setEditing("new")}
+        onVoice={() => setVoiceOpen(true)}
       />
+
+      {/* Création à la voix : bouton flottant, toujours à portée de pouce. */}
+      {!selectedDay && !editing && (
+        <button
+          onClick={() => setVoiceOpen(true)}
+          className="absolute bottom-3 right-3 z-10 flex h-12 w-12 items-center justify-center rounded-full bg-navy text-white shadow-modal"
+          aria-label="Créer un événement à la voix"
+        >
+          <Mic size={20} />
+        </button>
+      )}
 
       {editing && (
         <MobileEventModal
           event={editing === "new" ? null : editing}
           defaultStart={selectedDay ?? undefined}
-          onClose={() => setEditing(null)}
+          draft={editing === "new" ? draft : null}
+          onClose={() => {
+            setEditing(null);
+            setDraft(null);
+          }}
           onSaved={refetch}
+        />
+      )}
+
+      {voiceOpen && (
+        <VoiceEventDialog
+          mobile
+          onClose={() => setVoiceOpen(false)}
+          onDraft={(d) => {
+            setVoiceOpen(false);
+            setDraft(d);
+            setEditing("new");
+          }}
         />
       )}
     </div>
@@ -409,6 +441,7 @@ function DayPanel({
   onClose,
   onOpenEvent,
   onCreate,
+  onVoice,
 }: {
   open: boolean;
   day: Date;
@@ -416,6 +449,7 @@ function DayPanel({
   onClose: () => void;
   onOpenEvent: (ev: CalendarEvent) => void;
   onCreate: () => void;
+  onVoice: () => void;
 }) {
   const dayForecast = useForecast();
   return (
@@ -469,12 +503,21 @@ function DayPanel({
               </div>
             </button>
           ))}
-          <button
-            onClick={onCreate}
-            className="flex w-full items-center justify-center gap-1.5 rounded-btn border border-dashed border-line py-2.5 text-xs font-semibold text-ink-3"
-          >
-            <Plus size={13} /> Nouvel événement
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={onCreate}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-btn border border-dashed border-line py-2.5 text-xs font-semibold text-ink-3"
+            >
+              <Plus size={13} /> Nouvel événement
+            </button>
+            <button
+              onClick={onVoice}
+              className="flex items-center justify-center gap-1.5 rounded-btn border border-dashed border-line px-3 py-2.5 text-xs font-semibold text-navy"
+              aria-label="Créer un événement à la voix"
+            >
+              <Mic size={13} /> À la voix
+            </button>
+          </div>
         </div>
       </div>
     </div>
