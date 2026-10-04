@@ -32,6 +32,7 @@ import {
 import { getHabillageSettings } from "@/app/actions/board-settings";
 import { searchEventsForExpense, type EventCandidate } from "@/app/actions/expense-scan";
 import { Composer } from "@/components/board/screens/PublicationScreen";
+import { InAppCamera, cameraSupported } from "@/components/board/publication/InAppCamera";
 import { createClient } from "@/lib/supabase/client";
 import { createVideoWorkUploads, removeVideoWork } from "@/app/actions/video-habillage";
 
@@ -111,6 +112,9 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   const setFilter = (f: PhotoFilter) => setItems((list) => list.map((it, i) => (i === active ? { ...it, filter: f } : it)));
   // Visionneuse plein écran de la série (agrandir, faire défiler, filtre, recadrage, suppression).
   const [viewer, setViewer] = useState(false);
+  // Caméra intégrée (photo instantanée, vidéo, zoom) ; repli sur l'appareil du téléphone si refusée.
+  const [camera, setCamera] = useState(false);
+  const [cameraBlocked, setCameraBlocked] = useState(false);
   const viewerRef = useRef<HTMLCanvasElement>(null);
   const swipe = useRef<{ x: number; y: number } | null>(null);
   const [dragMode, setDragMode] = useState<"title" | "crop" | null>(null);
@@ -293,11 +297,22 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   }, [step, eventQuery]);
 
   /** Ajoute des médias à la série : photos prises sur le moment habillées, imports de la galerie tels quels. */
-  const pick = (fromCamera: boolean) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const pick = (e: React.ChangeEvent<HTMLInputElement>, fromCamera: boolean) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
+    addFiles(files, fromCamera);
+  };
+
+  const openCamera = () => {
+    setError(null);
+    if (cameraSupported() && !cameraBlocked) setCamera(true);
+    else photoRef.current?.click();
+  };
+
+  const addFiles = (files: File[], fromCamera: boolean) => {
     if (!files.length) return;
-    const room = MAX_ITEMS - items.length;
+    // itemsRef : plusieurs prises rapprochées arrivent avant le rendu suivant.
+    const room = MAX_ITEMS - itemsRef.current.length;
     setError(files.length > room ? `${MAX_ITEMS} médias au maximum par publication (limite des carrousels Instagram).` : null);
     const added = files.slice(0, Math.max(room, 0)).map((f) => {
       const video = isVideoFile(f);
@@ -310,6 +325,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
       setTemplate((cur) => (cur === "cadre" ? "bandeau" : cur));
     }
     setItems((list) => [...list, ...added]);
+    itemsRef.current = [...itemsRef.current, ...added];
     for (const a of added) {
       if (a.video) continue;
       // Navigateur incapable de réduire l'image : la photo d'origine sert de vignette.
@@ -518,24 +534,24 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
-        <input ref={photoRef} type="file" accept="image/*" capture="environment" hidden onChange={pick(true)} />
-        <input ref={videoRef} type="file" accept="video/*" capture="environment" hidden onChange={pick(true)} />
-        <input ref={galleryRef} type="file" accept="image/*,video/*" multiple hidden onChange={pick(false)} />
+        <input ref={photoRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => pick(e, true)} />
+        <input ref={videoRef} type="file" accept="video/*" capture="environment" hidden onChange={(e) => pick(e, true)} />
+        <input ref={galleryRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => pick(e, false)} />
 
         {step === "capture" && items.length === 0 && (
           <div className="flex h-full flex-col justify-center gap-3">
-            <button onClick={() => photoRef.current?.click()} className="flex items-center gap-3 rounded-panel bg-red p-4 text-left text-white shadow-btn-red">
+            <button onClick={openCamera} className="flex items-center gap-3 rounded-panel bg-red p-4 text-left text-white shadow-btn-red">
               <Camera size={26} />
               <span>
-                <span className="block text-base font-extrabold">Prendre des photos</span>
-                <span className="block text-xs text-white/80">Une ou plusieurs, habillage LGEF et texte ensuite</span>
+                <span className="block text-base font-extrabold">Caméra</span>
+                <span className="block text-xs text-white/80">Photos instantanées à la suite, vidéo, zoom</span>
               </span>
             </button>
             <button onClick={() => videoRef.current?.click()} className="flex items-center gap-3 rounded-panel bg-navy p-4 text-left text-white">
               <Video size={26} />
               <span>
-                <span className="block text-base font-extrabold">Filmer une vidéo</span>
-                <span className="block text-xs text-white/80">Reel Instagram, Facebook, YouTube</span>
+                <span className="block text-base font-extrabold">Filmer avec le téléphone</span>
+                <span className="block text-xs text-white/80">Appareil du téléphone : vidéos longues, pleine qualité</span>
               </span>
             </button>
             <button onClick={() => galleryRef.current?.click()} className="flex items-center gap-3 rounded-panel border border-line p-4 text-left">
@@ -604,12 +620,12 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
 
             {items.length < MAX_ITEMS ? (
               <>
-                <button onClick={() => photoRef.current?.click()} className="flex w-full items-center justify-center gap-2 rounded-panel bg-red p-3.5 text-base font-extrabold text-white shadow-btn-red">
-                  <Camera size={22} /> Photo suivante
+                <button onClick={openCamera} className="flex w-full items-center justify-center gap-2 rounded-panel bg-red p-3.5 text-base font-extrabold text-white shadow-btn-red">
+                  <Camera size={22} /> Reprendre la caméra
                 </button>
                 <div className="grid grid-cols-2 gap-2">
                   <button onClick={() => videoRef.current?.click()} className="flex items-center justify-center gap-1.5 rounded-panel border border-line p-3 text-sm font-bold text-ink-2">
-                    <Video size={16} /> Vidéo
+                    <Video size={16} /> Vidéo téléphone
                   </button>
                   <button onClick={() => galleryRef.current?.click()} className="flex items-center justify-center gap-1.5 rounded-panel border border-line p-3 text-sm font-bold text-ink-2">
                     <Plus size={16} /> Galerie
@@ -942,6 +958,27 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         )}
         {error && <p className="mt-3 rounded-btn bg-bad-bg px-3 py-2 text-xs text-bad">{error}</p>}
       </div>
+
+      {camera && (
+        <InAppCamera
+          count={items.length}
+          max={MAX_ITEMS}
+          lastThumb={[...items].reverse().find((i) => i.thumb)?.thumb ?? null}
+          onCapture={(f) => addFiles([f], true)}
+          onOpenStack={() => openViewer(items.length - 1)}
+          onNativeVideo={() => {
+            setCamera(false);
+            videoRef.current?.click();
+          }}
+          onDone={() => setCamera(false)}
+          onClose={() => setCamera(false)}
+          onUnavailable={(msg) => {
+            setCamera(false);
+            setCameraBlocked(true);
+            setError(msg);
+          }}
+        />
+      )}
 
       {viewer && item && (
         <div className="fixed inset-0 z-[70] flex flex-col bg-black text-white">
