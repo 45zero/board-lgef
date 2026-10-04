@@ -12,7 +12,7 @@ let pendingAt = 0;
 
 /** Prévisions partagées par tous les jours affichés : une seule requête, rafraîchie toutes les 30 min. */
 export function useForecast() {
-  const [forecast, setForecast] = useState<Forecast | null>(() => readCache<Forecast>("weather:forecast") ?? null);
+  const [forecast, setForecast] = useState<Forecast | null>(() => readCache<Forecast>("weather:forecast:v2") ?? null);
   useEffect(() => {
     let cancelled = false;
     if (!pending || Date.now() - pendingAt > 30 * 60_000) {
@@ -23,7 +23,7 @@ export function useForecast() {
       .then((f) => {
         if (cancelled || !Object.keys(f.days).length) return;
         setForecast(f);
-        writeCache("weather:forecast", f);
+        writeCache("weather:forecast:v2", f);
       })
       .catch(() => undefined);
     return () => {
@@ -66,7 +66,7 @@ export function EventWeather({ eventId }: { eventId: string | null | undefined }
   if (!w) return null;
   const { icon, label } = weatherIcon(w.code);
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-subtle px-2 py-0.5 text-[11px] font-semibold text-ink-2" title="Prévision au lieu de l'événement">
+    <span className="inline-flex items-center gap-1 rounded-full bg-subtle px-2 py-0.5 text-[11px] font-semibold text-ink-2" title="Prévision au lieu et aux heures de l'événement">
       <span>{icon}</span>
       {label} · {w.max}° / {w.min}°{w.rain != null && w.rain > 0 ? ` · pluie ${w.rain} %` : ""}
     </span>
