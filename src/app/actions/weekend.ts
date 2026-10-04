@@ -354,15 +354,7 @@ async function saveMatchImpl(input: MatchInput, eventId?: string): Promise<strin
       if (error) throw new Error(error.message);
     }
     await supabase.from("events").update({ requires_coverage: true }).eq("id", id);
-    if (changed && designated) {
-      await notify([designated], {
-        type: "coverage_assignment",
-        title: "Match à filmer",
-        message: `${await actorName(userId)} vous demande la captation vidéo : ${eventFields.title}.`,
-        eventId: id,
-        trade: "video",
-      });
-    }
+    // Le vidéaste est prévenu (Accepter / Refuser) par le trigger notify_coverage_circuit.
   }
   return id;
 }
@@ -406,7 +398,8 @@ async function claimMissionImpl(missionId: string) {
   if (error) throw new Error(error.message);
   const mission = data as unknown as { event_id: string; created_by: string | null };
   const { data: ev } = await supabase.from("events").select("title").eq("id", mission.event_id).single();
-  await notify([mission.created_by].filter((id) => id !== userId), {
+  // Coordinateur qui a saisi le match + N+1 du photographe (prévenu de chaque réponse).
+  await notify([mission.created_by, await managerOf(userId)].filter((id) => id !== userId), {
     type: "coverage_accepted_admin",
     title: "Match pris",
     message: `${await actorName(userId)} photographiera ${ev?.title ?? "le match"}.`,
@@ -421,12 +414,18 @@ async function releaseMissionImpl(missionId: string) {
   if (error) throw new Error(error.message);
   const mission = data as unknown as { event_id: string; created_by: string | null };
   const { data: ev } = await supabase.from("events").select("title").eq("id", mission.event_id).single();
-  await notify([mission.created_by], {
+  await notify([mission.created_by, await managerOf(userId)].filter((id) => id !== userId), {
     type: "coverage_request",
     title: "Photographe désisté",
     message: `${await actorName(userId)} ne peut plus photographier ${ev?.title ?? "le match"} — le match est de nouveau proposé au réseau.`,
     eventId: mission.event_id,
   });
+}
+
+/** N+1 d'une personne (profiles.expense_validator_id). */
+async function managerOf(userId: string) {
+  const { data } = await createServiceClient().from("profiles").select("expense_validator_id").eq("id", userId).single();
+  return data?.expense_validator_id ?? null;
 }
 
 /* ---------- Couverture match ---------- */

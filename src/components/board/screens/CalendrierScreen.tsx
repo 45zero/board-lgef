@@ -1,5 +1,6 @@
 "use client";
 
+import { DirectorGlyph } from "@/components/board/calendar/DirectorGlyph";
 import { CoverageToggle } from "@/components/board/calendar/CoverageToggle";
 import { TeamCardGlyph, useEventTeamCards } from "@/components/board/team/TeamCardOpener";
 import { useEffect, useMemo, useState } from "react";
@@ -483,6 +484,7 @@ export function CalendrierScreen() {
                         {fromBefore && <ChevronLeft size={11} className="shrink-0 opacity-70" />}
                         <span className="min-w-0 flex-1 truncate">{ev.title}</span>
                         <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
+<DirectorGlyph status={ev.director} size={10} />
                         <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
                         {toAfter && <ChevronRight size={11} className="shrink-0 opacity-70" />}
                       </button>
@@ -548,6 +550,7 @@ export function CalendrierScreen() {
                               {ev.title}
                             </span>
                             <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
+<DirectorGlyph status={ev.director} size={10} />
                             <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
                           </div>
                           <div className="font-mono text-[10px]" style={{ color: color.ink }}>
@@ -672,6 +675,7 @@ export function CalendrierScreen() {
                         {fromBefore && <ChevronLeft size={10} className="shrink-0 opacity-70" />}
                         <span className="min-w-0 flex-1 truncate">{ev.title}</span>
                         <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
+<DirectorGlyph status={ev.director} size={10} />
                         <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
                         {toAfter && <ChevronRight size={10} className="shrink-0 opacity-70" />}
                       </button>
@@ -699,6 +703,7 @@ export function CalendrierScreen() {
                           >
                             <span className="min-w-0 flex-1 truncate">{ev.title}</span>
                             <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
+<DirectorGlyph status={ev.director} size={10} />
                             <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
                           </button>
                         );

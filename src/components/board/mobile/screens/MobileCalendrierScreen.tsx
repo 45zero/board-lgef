@@ -1,5 +1,6 @@
 "use client";
 
+import { DirectorGlyph } from "@/components/board/calendar/DirectorGlyph";
 import { useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, ChevronDown, User, X, Plus, Camera, Video } from "lucide-react";
 import {
@@ -308,6 +309,7 @@ export function MobileCalendrierScreen() {
                               {ev.title}
                             </span>
                             <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={9} />
+<DirectorGlyph status={ev.director} size={10} />
                           </span>
                         ))}
                       </button>
@@ -328,6 +330,7 @@ export function MobileCalendrierScreen() {
                       <span className="h-1 w-1 shrink-0 rounded-full" style={{ background: ORG_COLORS[ev.org].base }} />
                       <span className="min-w-0 flex-1 truncate text-left text-[10.5px] font-bold">{ev.title}</span>
                       <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
+<DirectorGlyph status={ev.director} size={10} />
                     </button>
                   ))}
                 </div>
@@ -363,6 +366,7 @@ export function MobileCalendrierScreen() {
                       <span className="font-mono text-[10px] text-ink-4">{format(parseISO(ev.start), "HH:mm")}</span>
                       <span className="min-w-0 flex-1 truncate font-semibold text-ink-2">{ev.title}</span>
                       <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={11} />
+<DirectorGlyph status={ev.director} size={10} />
                     </div>
                   ))}
                 </div>
@@ -458,6 +462,7 @@ function DayPanel({
                   {format(parseISO(ev.start), "HH:mm")}
                 </span>
                 <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={13} />
+<DirectorGlyph status={ev.director} size={10} />
               </div>
               <div className="text-sm font-bold" style={{ color: ORG_COLORS[ev.org].ink }}>
                 {ev.title}

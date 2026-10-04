@@ -7,8 +7,10 @@ import { CHOICES, eventWhen } from "@/lib/email/notificationEmails";
 
 // Réponses depuis les e-mails de notification (page /action/<jeton>), sans connexion : le jeton
 // signé désigne la notification et son destinataire. Mêmes effets qu'une réponse dans le board
-// (useEventCoverage.respondToCoverage, useDirectorAttendance.respondToAttendance), notifications
-// au créateur, aux responsables et aux admins comprises.
+// (useEventCoverage.respondToCoverage, useDirectorAttendance.respondToAttendance) ; les notifications
+// (N+1, réceptionnaires, créateur, responsables) partent des triggers de
+// sql/2026-10-04_circuit_couverture_comite.sql. Un membre du comité directeur qui ne peut pas venir
+// peut proposer un autre membre.
 
 type Service = ReturnType<typeof createServiceClient>;
 type Choice = "accept" | "refuse";
@@ -21,6 +23,8 @@ export type EmailActionView = {
   event: { title: string; when: string; location: string | null };
   /** Réponse déjà donnée (par e-mail ou dans le board). */
   answered: Choice | null;
+  /** Comité directeur : autres membres à qui proposer la présence en cas de refus. */
+  peers: { id: string; name: string }[];
 };
 
 async function load(token: string) {
@@ -54,15 +58,6 @@ async function directorAttendance(service: Service, eventId: string, userId: str
   return data;
 }
 
-/** Créateur + responsables de l'équipe (+ admins pour la couverture), comme dans le board. */
-async function recipients(service: Service, eventId: string, createdBy: string | null, withAdmins: boolean) {
-  const [{ data: team }, { data: admins }] = await Promise.all([
-    service.from("event_team_members").select("user_id").eq("event_id", eventId).eq("role", "responsable"),
-    withAdmins ? service.from("profiles").select("id").in("role", ["admin", "super_user"]) : Promise.resolve({ data: [] as { id: string }[] }),
-  ]);
-  return [...new Set([createdBy, ...(team ?? []).map((t) => t.user_id), ...(admins ?? []).map((a) => a.id)].filter((id): id is string => !!id))];
-}
-
 async function getEmailActionImpl(token: string): Promise<EmailActionView> {
   const { service, userId, type, event, personName } = await load(token);
   const choice = CHOICES[type];
@@ -76,6 +71,16 @@ async function getEmailActionImpl(token: string): Promise<EmailActionView> {
     if (!att) throw new Error("Vous n'êtes plus désigné pour cet événement.");
     answered = att.status === "approved" ? "accept" : att.status === "denied" ? "refuse" : null;
   }
+  let peers: EmailActionView["peers"] = [];
+  if (type !== "coverage_assignment") {
+    const { data } = await service
+      .from("profiles")
+      .select("id, first_name, last_name, email")
+      .in("role", ["comite_directeur", "comite_directeur_bad"])
+      .neq("id", userId)
+      .order("last_name");
+    peers = (data ?? []).map((p) => ({ id: p.id, name: [p.first_name, p.last_name].filter(Boolean).join(" ").trim() || p.email || "—" }));
+  }
   return {
     question: choice.question,
     acceptLabel: choice.accept,
@@ -83,10 +88,11 @@ async function getEmailActionImpl(token: string): Promise<EmailActionView> {
     personName,
     event: { title: event.title, when: eventWhen(event), location: event.location },
     answered,
+    peers,
   };
 }
 
-async function performEmailActionImpl(token: string, choice: Choice, comment: string): Promise<string> {
+async function performEmailActionImpl(token: string, choice: Choice, comment: string, forwardTo: string | null): Promise<string> {
   const { service, userId, type, event, personName } = await load(token);
   const accepted = choice === "accept";
   const note = comment.trim().slice(0, 500);
@@ -100,48 +106,32 @@ async function performEmailActionImpl(token: string, choice: Choice, comment: st
         technician_response: accepted ? "accepted" : "rejected",
         technician_response_notes: note || null,
         technician_response_date: new Date().toISOString(),
-        status: accepted ? "approved" : "rejected",
+        status: accepted ? "approved" : "pending",
       })
       .eq("id", req.id);
     if (error) throw new Error(error.message);
-    const to = await recipients(service, event.id, event.created_by, true);
-    await service.from("notifications").insert(
-      to
-        .filter((id) => id !== userId)
-        .map((user_id) => ({
-          user_id,
-          type: accepted ? ("coverage_accepted" as const) : ("coverage_rejected" as const),
-          title: event.title,
-          message: `${personName} ${accepted ? "a accepté" : "a refusé"} la mission de couverture média.${note ? ` « ${note} »` : ""}`,
-          actor_name: personName,
-          event_id: event.id,
-          data: { event_id: event.id, response: accepted ? "accepted" : "rejected", via: "email" },
-        }))
-    );
-    return accepted ? "Mission acceptée. Merci !" : "Refus enregistré. L'organisateur est prévenu.";
+    return accepted ? "Mission acceptée. Merci !" : "Refus enregistré. La demande est remise en attente et les personnes concernées sont prévenues.";
   }
 
   const att = await directorAttendance(service, event.id, userId);
   if (!att) throw new Error("Vous n'êtes plus désigné pour cet événement.");
+  if (!accepted && forwardTo) {
+    const { data: peer } = await service.from("profiles").select("id, role").eq("id", forwardTo).single();
+    if (!peer || !["comite_directeur", "comite_directeur_bad"].includes(peer.role ?? "")) throw new Error("Ce membre du comité directeur est introuvable.");
+    // Refus d'abord (créateur et responsables prévenus), puis la présence est proposée au membre choisi.
+    await service.from("director_attendance").update({ status: "denied", comments: note || null, updated_by: userId }).eq("id", att.id);
+    const { error } = await service
+      .from("director_attendance")
+      .update({ director_id: forwardTo, status: "pending", comments: `Proposé par ${personName}${note ? ` : « ${note} »` : ""}`, updated_by: userId })
+      .eq("id", att.id);
+    if (error) throw new Error(error.message);
+    return "C'est noté : la présence est proposée au membre choisi, l'organisateur est prévenu.";
+  }
   const { error } = await service
     .from("director_attendance")
-    .update({ status: accepted ? "approved" : "denied", updated_by: userId })
+    .update({ status: accepted ? "approved" : "denied", comments: note || null, updated_by: userId })
     .eq("id", att.id);
   if (error) throw new Error(error.message);
-  const to = await recipients(service, event.id, event.created_by, false);
-  await service.from("notifications").insert(
-    to
-      .filter((id) => id !== userId)
-      .map((user_id) => ({
-        user_id,
-        type: accepted ? ("director_accepted" as const) : ("director_declined" as const),
-        title: event.title,
-        message: `${personName} (comité directeur) ${accepted ? "a confirmé sa présence" : "ne pourra pas être présent(e)"}.${note ? ` « ${note} »` : ""}`,
-        actor_name: personName,
-        event_id: event.id,
-        data: { event_id: event.id, response: accepted ? "approved" : "denied", via: "email" },
-      }))
-  );
   return accepted ? "Présence confirmée. Merci !" : "Absence enregistrée. L'organisateur est prévenu.";
 }
 
@@ -151,6 +141,6 @@ export async function getEmailAction(token: string) {
   return toResult(() => getEmailActionImpl(token));
 }
 
-export async function performEmailAction(token: string, choice: Choice, comment: string) {
-  return toResult(() => performEmailActionImpl(token, choice, comment));
+export async function performEmailAction(token: string, choice: Choice, comment: string, forwardTo: string | null = null) {
+  return toResult(() => performEmailActionImpl(token, choice, comment, forwardTo));
 }

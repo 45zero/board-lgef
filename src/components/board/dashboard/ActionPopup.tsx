@@ -1,5 +1,7 @@
 "use client";
 
+import { DirectorDeclineForm } from "@/components/board/calendar/DirectorDeclineForm";
+import { useAuth } from "@/contexts/AuthContext";
 import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { MapPopup } from "@/components/board/calendar/MapPopup";
 import { useEffect, useState } from "react";
@@ -288,22 +290,39 @@ function CoverageRow({ item, onDone }: { item: DashboardActionItem; onDone: () =
 
 function AttendanceRow({ item, onDone }: { item: DashboardActionItem; onDone: () => void }) {
   const att = useDirectorAttendance(item.eventId ?? undefined);
+  const { user } = useAuth();
   const [busy, setBusy] = useState(false);
-  const respond = async (r: "approved" | "denied") => {
+  const [declining, setDeclining] = useState(false);
+  const respond = async (r: "approved" | "denied", comment?: string) => {
     setBusy(true);
-    const ok = await att.respondToAttendance(r);
+    const ok = await att.respondToAttendance(r, comment);
     setBusy(false);
     if (ok) onDone();
   };
   return (
-    <Row title={item.title} eventId={item.eventId} date={item.date} location={item.location}>
-      <button disabled={busy || !att.attendance} onClick={() => respond("denied")} className={btnKo}>
-        Absent
-      </button>
-      <button disabled={busy || !att.attendance} onClick={() => respond("approved")} className={btnOk}>
-        <Check size={12} /> Présent
-      </button>
-    </Row>
+    <>
+      <Row title={item.title} eventId={item.eventId} date={item.date} location={item.location}>
+        <button disabled={busy || !att.attendance} onClick={() => setDeclining(true)} className={btnKo}>
+          Absent
+        </button>
+        <button disabled={busy || !att.attendance} onClick={() => respond("approved")} className={btnOk}>
+          <Check size={12} /> Présent
+        </button>
+      </Row>
+      {declining && (
+        <div className="border-b border-line px-4 pb-3">
+          <DirectorDeclineForm
+            directors={att.directors}
+            selfId={user?.id ?? null}
+            onDecline={(comment) => respond("denied", comment)}
+            onForward={async (id, comment) => {
+              if (await att.forwardAttendance(id, comment)) onDone();
+            }}
+            onCancel={() => setDeclining(false)}
+          />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -324,7 +343,7 @@ function AssignRow({ item, technicians, onDone }: { item: DashboardActionItem; t
     setError(null);
     const ok = direct
       ? await cov.assignTechnician(tech)
-      : await cov.assignPending(tech, { title: item.title, start: new Date(item.date ?? Date.now()) });
+      : await cov.assignPending(tech);
     setBusy(false);
     if (ok) onDone();
     else setError("L'assignation a échoué.");

@@ -1,11 +1,9 @@
 "use client";
 
-import { notifyEventAssignment } from "@/app/actions/event-notifications";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { TechnicianOption } from "@/hooks/board/useAvailableTechnicians";
-import { notifyUsers, getEventOwners, getAdminIds, getActorName } from "@/lib/board/notify";
 
 export interface CoverageRequest {
   id: string;
@@ -120,8 +118,7 @@ export function useEventCoverage(eventId?: string) {
       return false;
     }
     await supabase.from("events").update({ requires_coverage: true }).eq("id", eventId);
-    // Désignation directe : pas de réponse attendue, mais la personne est prévenue (cloche et e-mail).
-    if (request?.assigned_technician_id !== tech.id) void notifyEventAssignment(eventId, [tech.id], "couverture");
+    // La personne désignée est prévenue par le trigger notify_coverage_circuit (cloche et e-mail).
     await fetchRequest();
     return true;
   };
@@ -133,10 +130,7 @@ export function useEventCoverage(eventId?: string) {
    * useCoverageRequests.ts dans calendrier-lgef), à la différence de
    * assignTechnician() qui valide tout de suite.
    */
-  const assignPending = async (
-    tech: TechnicianOption,
-    eventInfo: { title: string; start: Date }
-  ) => {
+  const assignPending = async (tech: TechnicianOption) => {
     if (!eventId || !user) return false;
     const supabase = createClient();
 
@@ -165,31 +159,7 @@ export function useEventCoverage(eventId?: string) {
     }
 
     await supabase.from("events").update({ requires_coverage: true }).eq("id", eventId);
-
-    try {
-      const { data: me } = await supabase
-        .from("profiles")
-        .select("first_name, last_name, email")
-        .eq("id", user.id)
-        .maybeSingle();
-      const actorName = [me?.first_name, me?.last_name].filter(Boolean).join(" ").trim() || me?.email || "";
-      const eventDate = eventInfo.start.toLocaleDateString("fr-FR", {
-        weekday: "long",
-        day: "numeric",
-        month: "long",
-      });
-
-      await supabase.rpc("create_notification", {
-        p_user_id: tech.id,
-        p_type: "coverage_assignment",
-        p_title: `${actorName} vous a assigné à une mission`,
-        p_message: `${eventInfo.title} — ${eventDate}`,
-        p_actor_name: actorName,
-        p_data: { event_id: eventId, technician_id: tech.id, assigned_by: user.id, assigned_by_name: actorName },
-      });
-    } catch (e) {
-      console.warn("[useEventCoverage.assignPending] notification failed:", e);
-    }
+    // Notification « mission proposée » : trigger notify_coverage_circuit (sql/2026-10-04_circuit_couverture_comite.sql).
 
     await fetchRequest();
     return true;
@@ -218,37 +188,8 @@ export function useEventCoverage(eventId?: string) {
       return false;
     }
 
-    try {
-      const [owners, adminIds, actorName, { data: ev }, { data: attendance }] = await Promise.all([
-        getEventOwners(eventId),
-        getAdminIds(),
-        getActorName(user.id),
-        supabase.from("events").select("title").eq("id", eventId).maybeSingle(),
-        supabase.from("director_attendance").select("director_id").eq("event_id", eventId).maybeSingle(),
-      ]);
-
-      const verb = response === "accepted" ? "a accepté" : "a refusé";
-      const notifType = response === "accepted" ? "coverage_accepted" : "coverage_rejected";
-      await notifyUsers([...owners, ...adminIds], {
-        type: notifType,
-        title: ev?.title ?? "Événement",
-        message: `${actorName} ${verb} la mission de couverture média.`,
-        actorName,
-        data: { event_id: eventId, response },
-      });
-
-      if (response === "accepted" && attendance?.director_id) {
-        await notifyUsers([attendance.director_id], {
-          type: "coverage_accepted",
-          title: ev?.title ?? "Événement",
-          message: `${actorName} a accepté la mission de couverture média.`,
-          actorName,
-          data: { event_id: eventId, response },
-        });
-      }
-    } catch (e) {
-      console.warn("[useEventCoverage.respondToCoverage] notification failed:", e);
-    }
+    // Notifications (N+1, réceptionnaires, créateur, responsables, comité directeur) : trigger
+    // notify_coverage_circuit ; un refus remet la demande en attente (à réattribuer).
 
     await fetchRequest();
     return true;

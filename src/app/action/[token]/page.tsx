@@ -20,6 +20,7 @@ function EmailAction() {
   const [error, setError] = useState<string | null>(null);
   const [choice, setChoice] = useState<Choice>(initial);
   const [comment, setComment] = useState("");
+  const [forwardTo, setForwardTo] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
 
@@ -29,7 +30,7 @@ function EmailAction() {
 
   const confirm = async () => {
     setBusy(true);
-    const r = await performEmailAction(token, choice, comment);
+    const r = await performEmailAction(token, choice, comment, choice === "refuse" && forwardTo ? forwardTo : null);
     setBusy(false);
     if (r.ok) setDone(r.data);
     else setError(r.error);
@@ -80,6 +81,23 @@ function EmailAction() {
                   </button>
                 ))}
               </div>
+              {choice === "refuse" && view.peers.length > 0 && (
+                <div className="mt-3">
+                  <label className="mb-1 block text-xs font-semibold text-ink-2">Proposer à un autre membre du comité directeur (facultatif)</label>
+                  <select
+                    value={forwardTo}
+                    onChange={(e) => setForwardTo(e.target.value)}
+                    className="w-full rounded-btn border border-line bg-card px-3 py-2 text-sm outline-none focus:border-line-strong"
+                  >
+                    <option value="">Non, simplement décliner</option>
+                    {view.peers.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <textarea
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}

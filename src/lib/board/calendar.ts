@@ -81,6 +81,8 @@ export interface CalendarEvent {
   published?: PublishedMedia | null;
   /** Match du week-end (event_type 'match_du_week_end') — concerné par les filtres CouvVidéo / CouvPhoto. */
   weekendMatch?: boolean;
+  /** Présence du comité directeur sollicitée sur l'événement (director_attendance). */
+  director?: "approved" | "pending" | "denied" | null;
   /** Match avec un poste photo (réseau Couverture match, table photo_missions). */
   photoCoverage?: boolean;
   /** L'utilisateur connecté est sollicité sur cet événement (voir src/lib/board/solicitation.ts). */

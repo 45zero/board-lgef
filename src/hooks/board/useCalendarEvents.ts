@@ -105,9 +105,10 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
     let coverageByEvent = new Map<string, CoverageRequestRow>();
     const publishedByEvent = new Map<string, PublishedMedia>();
     let photoCovered = new Set<string>();
+    const directorByEvent = new Map<string, "approved" | "pending" | "denied">();
     const eventIds = rows.map((r) => r.id);
     if (eventIds.length > 0) {
-      const [{ data: coverageRows }, { data: publishedRows }, { data: photoRows }] = await Promise.all([
+      const [{ data: coverageRows }, { data: publishedRows }, { data: photoRows }, { data: directorRows }] = await Promise.all([
         supabase
           .from("coverage_requests")
           .select("event_id, status, coverage_symbol, technician_response, assigned_technician_id")
@@ -117,7 +118,13 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
         supabase.from("media_publications").select("event_id, kind").eq("status", "published").in("event_id", eventIds),
         // Postes photo des matchs (filtre CouvPhoto).
         supabase.from("photo_missions").select("event_id").in("event_id", eventIds),
+        // Présence du comité directeur (pastille « CD »).
+        supabase.from("director_attendance").select("event_id, status, director_id").in("event_id", eventIds),
       ]);
+      for (const d of directorRows ?? []) {
+        if (!d.event_id || !d.director_id) continue;
+        directorByEvent.set(d.event_id, d.status === "approved" ? "approved" : d.status === "denied" ? "denied" : "pending");
+      }
       photoCovered = new Set((photoRows ?? []).map((p) => p.event_id));
       for (const p of publishedRows ?? []) {
         if (!p.event_id) continue;
@@ -138,6 +145,7 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       published: publishedByEvent.get(row.id) ?? null,
       weekendMatch: row.event_type === "match_du_week_end",
       photoCoverage: photoCovered.has(row.id),
+      director: directorByEvent.get(row.id) ?? null,
       solicited: solicited.has(row.id),
       awaitingMyAnswer: (() => {
         const c = coverageByEvent.get(row.id);

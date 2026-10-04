@@ -12,6 +12,8 @@ import {
   getModerationRecipients,
   setModerationRecipients,
   getBoardDriveUsage,
+  getCoverageReceivers,
+  setCoverageReceivers,
 } from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
 import { useAuth } from "@/contexts/AuthContext";
@@ -119,6 +121,82 @@ function HateAlertsSection({ notif }: { notif: ReturnType<typeof useNotification
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Circuits de notification (administrateurs) : qui reçoit les demandes de couverture — nouvelles
+ * demandes, refus à réattribuer, acceptations (sql/2026-10-04_circuit_couverture_comite.sql).
+ */
+function NotificationCircuitsSection() {
+  const role = useUserRole();
+  const canManage = role.isAdmin || role.isSuperUser;
+  const [data, setData] = useState<Awaited<ReturnType<typeof getCoverageReceivers>> | null>(null);
+  const [query, setQuery] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (canManage) getCoverageReceivers().then(setData).catch(() => setError("Chargement impossible."));
+  }, [canManage]);
+  if (!canManage) return null;
+
+  const save = async (ids: string[]) => {
+    if (!data) return;
+    setData({ ...data, ids });
+    setError("");
+    try {
+      await setCoverageReceivers(ids);
+    } catch {
+      setError("Enregistrement impossible.");
+    }
+  };
+
+  const q = query.trim().toLowerCase();
+  const selected = data?.members.filter((m) => data.ids.includes(m.id)) ?? [];
+  const matches = q && data ? data.members.filter((m) => !data.ids.includes(m.id) && `${m.name} ${m.email ?? ""}`.toLowerCase().includes(q)).slice(0, 6) : [];
+
+  return (
+    <div className="mt-5">
+      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Circuits de notification</div>
+      <div className="space-y-2 rounded-btn border border-line p-3">
+        <div className="text-sm font-semibold text-ink-2">Demandes de couverture reçues par</div>
+        <p className="text-xs text-ink-4">
+          Nouvelles demandes, refus à réattribuer et acceptations. Le N+1 de la personne qui répond est toujours prévenu.
+        </p>
+        {selected.length === 0 && data && <p className="text-xs font-semibold text-warn">Personne : les nouvelles demandes ne sont signalées à personne.</p>}
+        {selected.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {selected.map((m) => (
+              <span key={m.id} className="flex items-center gap-1 rounded-full bg-sel-bg px-2 py-0.5 text-[11px] font-semibold text-link">
+                {m.name}
+                <button onClick={() => void save(data!.ids.filter((id) => id !== m.id))} className="hover:text-red" aria-label={`Retirer ${m.name}`}>
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Ajouter une personne (nom ou e-mail)…"
+          className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
+        />
+        {matches.map((m) => (
+          <button
+            key={m.id}
+            onClick={() => {
+              void save([...data!.ids, m.id]);
+              setQuery("");
+            }}
+            className="block w-full truncate rounded-btn px-2 py-1 text-left text-xs text-ink-2 hover:bg-hover"
+          >
+            {m.name} <span className="text-ink-4">{m.email}</span>
+          </button>
+        ))}
+        {error && <p className="text-xs font-semibold text-bad">{error}</p>}
       </div>
     </div>
   );
@@ -516,6 +594,8 @@ export function BoardSettingsModal({
         </div>
 
         <UsersSection />
+
+        <NotificationCircuitsSection />
 
         <GoogleAccountsSection />
 

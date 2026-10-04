@@ -36,7 +36,8 @@ import { REMINDER_PRESETS } from "@/hooks/board/useEventModalState";
 import type { useUserRole } from "@/hooks/board/useUserRole";
 import type { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
 import { type useEventCoverage, type CoverageRequest } from "@/hooks/board/useEventCoverage";
-import type { useDirectorAttendance } from "@/hooks/board/useDirectorAttendance";
+import type { DirectorProfile, useDirectorAttendance } from "@/hooks/board/useDirectorAttendance";
+import { DirectorDeclineForm } from "@/components/board/calendar/DirectorDeclineForm";
 
 export function personName(
   p: { first_name: string | null; last_name: string | null; email: string | null } | null
@@ -506,7 +507,7 @@ export function CoverageActions({
           onClose={() => setMode(null)}
           onSelect={async (t) => {
             if (mode === "direct") await coverage.assignTechnician(t);
-            else await coverage.assignPending(t, eventInfo);
+            else await coverage.assignPending(t);
             setMode(null);
           }}
         />
@@ -745,9 +746,15 @@ export function DirectorAttendanceSection({
         <DirectorResponseModal
           canRespond={isAssignedDirector && att.status === "pending"}
           status={att.status}
+          directors={director.directors}
+          selfId={user?.id ?? null}
           onClose={() => setResponseOpen(false)}
-          onRespond={async (r) => {
-            await director.respondToAttendance(r);
+          onRespond={async (r, comment) => {
+            await director.respondToAttendance(r, comment);
+            setResponseOpen(false);
+          }}
+          onForward={async (id, comment) => {
+            await director.forwardAttendance(id, comment);
             setResponseOpen(false);
           }}
         />
@@ -759,15 +766,22 @@ export function DirectorAttendanceSection({
 function DirectorResponseModal({
   canRespond,
   status,
+  directors,
+  selfId,
   onClose,
   onRespond,
+  onForward,
 }: {
   canRespond: boolean;
   status: string | null;
+  directors: DirectorProfile[];
+  selfId: string | null;
   onClose: () => void;
-  onRespond: (response: "approved" | "denied") => void;
+  onRespond: (response: "approved" | "denied", comment?: string) => Promise<void>;
+  onForward: (directorId: string, comment: string) => Promise<void>;
 }) {
   const [submitting, setSubmitting] = useState(false);
+  const [declining, setDeclining] = useState(false);
   const submit = async (r: "approved" | "denied") => {
     setSubmitting(true);
     try {
@@ -789,12 +803,20 @@ function DirectorResponseModal({
             ✕
           </button>
         </div>
-        {canRespond ? (
+        {canRespond && declining ? (
+          <DirectorDeclineForm
+            directors={directors}
+            selfId={selfId}
+            onDecline={(comment) => onRespond("denied", comment)}
+            onForward={onForward}
+            onCancel={() => setDeclining(false)}
+          />
+        ) : canRespond ? (
           <>
             <p className="mb-3 text-xs text-ink-3">Confirmez-vous votre présence à cet événement ?</p>
             <div className="flex justify-end gap-2">
               <button
-                onClick={() => submit("denied")}
+                onClick={() => setDeclining(true)}
                 disabled={submitting}
                 className="rounded-btn border border-line px-3 py-2 text-sm font-semibold text-red disabled:opacity-60"
               >

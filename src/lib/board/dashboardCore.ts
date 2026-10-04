@@ -73,6 +73,10 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
   const isAdmin = me?.role === "admin" || me?.role === "super_user";
   // Centre de publication : administrateurs et personnes habilitées uniquement.
   const isMediaTeam = await isPublisher(service, userId);
+  // Réceptionnaires des demandes de couverture (Paramètres → Circuits de notification).
+  const { data: settings } = await service.from("board_settings").select("coverage_receiver_ids").eq("id", true).single();
+  const isCoverageReceiver = ((settings as { coverage_receiver_ids?: string[] } | null)?.coverage_receiver_ids ?? []).includes(userId);
+  const handlesCoverage = isAdmin || isCoverageReceiver;
 
   const now = new Date();
   const from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -145,7 +149,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
       });
       push({ id: "captation-repondre", app: "calendrier", tone: "red", count: mineItems.length, items: mineItems, title: "Captations à accepter", detail: "Des événements vous sont proposés" });
 
-      // Couvertures refusées par la personne désignée : à réattribuer (admins, et le demandeur).
+      // Couvertures refusées par la personne désignée : à réattribuer (admins, réceptionnaires, et le demandeur).
       let refusedQuery = service
         .from("coverage_requests")
         .select("id, event_id, details, refused_by_name, assigned_technician_name, technician_response_notes, events!inner(title, start_date, location, event_type)")
@@ -154,7 +158,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
         .gte("events.start_date", now.toISOString())
         .order("updated_at", { ascending: false })
         .limit(30);
-      if (!isAdmin) refusedQuery = refusedQuery.eq("requester_id", userId);
+      if (!handlesCoverage) refusedQuery = refusedQuery.eq("requester_id", userId);
       const { data: refusedRows } = await refusedQuery;
       const refused = (refusedRows ?? []).map((c) => {
         const ev = c.events as unknown as { title: string; start_date: string; location: string | null; event_type: DbEventType | null };
@@ -165,7 +169,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
       push({ id: "couverture-refusee", app: "calendrier", tone: "red", count: refused.length, items: refused, title: "Couvertures refusées", detail: "La personne désignée a refusé : à réattribuer" });
       const refusedIds = new Set(refused.map((r) => r.id));
 
-      if (isAdmin) {
+      if (handlesCoverage) {
         const { data: toAssign, count: toAssignCount } = await service
           .from("coverage_requests")
           .select("id, event_id, details, events!inner(title, start_date, location, event_type)", { count: "exact" })

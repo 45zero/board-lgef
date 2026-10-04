@@ -48,6 +48,35 @@ export async function setModerationRecipients(ids: string[]) {
   if (error) throw new Error(error.message);
 }
 
+/**
+ * Réceptionnaires des demandes de couverture (board_settings.coverage_receiver_ids) : nouvelles
+ * demandes, refus à réattribuer, acceptations — voir sql/2026-10-04_circuit_couverture_comite.sql.
+ */
+export async function getCoverageReceivers(): Promise<{ ids: string[]; members: { id: string; name: string; email: string | null }[] }> {
+  const { supabase } = await requireAdmin();
+  const [{ data: settings }, { data: members }] = await Promise.all([
+    supabase.from("board_settings").select("coverage_receiver_ids").eq("id", true).single(),
+    supabase.from("profiles").select("id, first_name, last_name, email").order("last_name"),
+  ]);
+  return {
+    ids: (settings as { coverage_receiver_ids?: string[] } | null)?.coverage_receiver_ids ?? [],
+    members: (members ?? []).map((m) => ({
+      id: m.id,
+      name: [m.first_name, m.last_name].filter(Boolean).join(" ") || m.email || "—",
+      email: m.email,
+    })),
+  };
+}
+
+export async function setCoverageReceivers(ids: string[]) {
+  const { supabase, userId } = await requireAdmin();
+  const { error } = await supabase
+    .from("board_settings")
+    .update({ coverage_receiver_ids: [...new Set(ids)], updated_by: userId, updated_at: new Date().toISOString() } as never)
+    .eq("id", true);
+  if (error) throw new Error(error.message);
+}
+
 /** Compte Google connecté désigné comme "Drive du board" — reçoit tous les médias d'événements, quel que soit l'uploadeur. */
 export async function getBoardDriveAccountId() {
   const supabase = await createClient();
