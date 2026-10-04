@@ -23,6 +23,7 @@ import { fr } from "date-fns/locale";
 import { useCalendarEvents } from "@/hooks/board/useCalendarEvents";
 import { useSolicitedFilter } from "@/hooks/board/useSolicitedFilter";
 import { passesCoverageFilters, useCoverageFilters } from "@/hooks/board/useCoverageFilters";
+import { useCalendarDefaults, type CalendarView } from "@/hooks/board/useCalendarDefaults";
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
 import { CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
@@ -32,8 +33,13 @@ import { DayWeatherBadge, useForecast } from "@/components/board/calendar/DayWea
 
 type View = "mois" | "semaine";
 
+/** Vue par défaut du compte (réglée au clic droit sur ordinateur) : Jour → Semaine, Carte → Mois. */
+const MOBILE_VIEW: Record<CalendarView, View> = { day: "semaine", week: "semaine", month: "mois", map: "mois" };
+
 export function MobileCalendrierScreen() {
-  const [view, setView] = useState<View>("mois");
+  const [calendarDefaults] = useCalendarDefaults();
+  const [viewOverride, setView] = useState<View | null>(null);
+  const view = viewOverride ?? MOBILE_VIEW[calendarDefaults.view];
   const forecast = useForecast();
   const [anchor, setAnchor] = useState(() => new Date());
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -78,6 +84,9 @@ export function MobileCalendrierScreen() {
       return true;
     });
   }, [events, orgFilter, mineOnly, coverage]);
+
+  // Point rouge sur le bouton des filtres : un filtre qui restreint l'affichage est actif.
+  const filtersActive = !!orgFilter || mineOnly;
 
   const eventsForDay = (day: Date) =>
     filtered.filter((e) => isSameDay(parseISO(e.start), day)).sort((a, b) => a.start.localeCompare(b.start));
@@ -144,73 +153,42 @@ export function MobileCalendrierScreen() {
   };
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-1.5">
-        <div className="flex items-center gap-2 justify-self-start">
-          <button
-            onClick={() => setFiltersOpen((o) => !o)}
-            className="flex h-[26px] w-[26px] items-center justify-center rounded-full border-[1.5px] bg-card transition-transform"
-            style={{
-              borderColor: filtersOpen ? "var(--red)" : "var(--navy-600)",
-              color: filtersOpen ? "var(--red)" : "var(--navy-600)",
-              transform: filtersOpen ? "rotate(180deg)" : undefined,
-            }}
-            aria-label="Filtrer par organisation"
-          >
-            <ChevronDown size={14} />
-          </button>
-          <button
-            onClick={() => setMineOnly(!mineOnly)}
-            className={`flex h-[26px] w-[26px] items-center justify-center rounded-btn border ${
-              mineOnly ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
-            }`}
-            title="Événements où je suis sollicité"
-            aria-label="Événements où je suis sollicité"
-          >
-            <User size={14} />
-          </button>
-          <button
-            onClick={() => setCoverage({ ...coverage, video: !coverage.video })}
-            className={`flex h-[26px] w-[26px] items-center justify-center rounded-btn border ${
-              coverage.video ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
-            }`}
-            title="CouvVidéo"
-            aria-label="Matchs du week-end couverts en vidéo"
-            aria-pressed={coverage.video}
-          >
-            <Video size={14} />
-          </button>
-          <button
-            onClick={() => setCoverage({ ...coverage, photo: !coverage.photo })}
-            className={`flex h-[26px] w-[26px] items-center justify-center rounded-btn border ${
-              coverage.photo ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
-            }`}
-            title="CouvPhoto"
-            aria-label="Matchs du week-end couverts en photo"
-            aria-pressed={coverage.photo}
-          >
-            <Camera size={14} />
-          </button>
-        </div>
+    <div className="flex h-full min-w-0 flex-col overflow-x-hidden">
+      {/* Une seule ligne qui tient sur 375 px (iPhone) : filtres, période, vue. Les bascules
+          sollicité / vidéo / photo sont dans le panneau des filtres. */}
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <button
+          onClick={() => setFiltersOpen((o) => !o)}
+          className="relative flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full border-[1.5px] bg-card transition-transform"
+          style={{
+            borderColor: filtersOpen ? "var(--red)" : "var(--navy-600)",
+            color: filtersOpen ? "var(--red)" : "var(--navy-600)",
+            transform: filtersOpen ? "rotate(180deg)" : undefined,
+          }}
+          aria-label="Filtres"
+        >
+          <ChevronDown size={14} />
+          {filtersActive && !filtersOpen && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-red" />}
+        </button>
 
-        <div className="flex items-center gap-1 justify-self-center">
-          <button onClick={navPrev} className="flex h-7 w-7 items-center justify-center rounded-btn text-ink-3">
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-0.5">
+          <button onClick={navPrev} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-btn text-ink-3" aria-label="Période précédente">
             <ChevronLeft size={16} />
           </button>
-          <span className="whitespace-nowrap text-[13px] font-extrabold uppercase text-navy-600">
-            {format(anchor, view === "mois" ? "MMMM yyyy" : "'Sem.' I, MMMM", { locale: fr })}
+          <span className="truncate text-[13px] font-extrabold uppercase text-navy-600">
+            {format(anchor, view === "mois" ? "MMM yyyy" : "'Sem.' I · MMM", { locale: fr })}
           </span>
-          <button onClick={navNext} className="flex h-7 w-7 items-center justify-center rounded-btn text-ink-3">
+          <button onClick={navNext} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-btn text-ink-3" aria-label="Période suivante">
             <ChevronRight size={16} />
           </button>
         </div>
 
-        <div className="flex items-center gap-0.5 justify-self-end rounded-full border border-line bg-subtle p-0.5">
+        <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-line bg-subtle p-0.5">
           {(["semaine", "mois"] as const).map((v) => (
             <button
               key={v}
               onClick={() => setView(v)}
-              className={`rounded-full px-3 py-1 text-[11px] font-bold capitalize transition-colors ${
+              className={`rounded-full px-2.5 py-1 text-[11px] font-bold capitalize transition-colors ${
                 view === v ? "bg-card text-ink shadow-card" : "text-ink-3"
               }`}
             >
@@ -220,6 +198,26 @@ export function MobileCalendrierScreen() {
         </div>
       </div>
 
+      {filtersOpen && (
+        <div className="flex flex-wrap gap-1.5 px-3 pb-1.5 pt-1">
+          {[
+            { on: mineOnly, icon: User, label: "Où je suis sollicité", toggle: () => setMineOnly(!mineOnly) },
+            { on: coverage.video, icon: Video, label: "Matchs vidéo", toggle: () => setCoverage({ ...coverage, video: !coverage.video }) },
+            { on: coverage.photo, icon: Camera, label: "Matchs photo", toggle: () => setCoverage({ ...coverage, photo: !coverage.photo }) },
+          ].map(({ on, icon: Icon, label, toggle }) => (
+            <button
+              key={label}
+              onClick={toggle}
+              aria-pressed={on}
+              className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                on ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
+              }`}
+            >
+              <Icon size={12} /> {label}
+            </button>
+          ))}
+        </div>
+      )}
       {filtersOpen && (
         <div className="grid grid-cols-5 gap-1.5 px-3 pb-2 pt-1">
           {CALENDAR_ORG_KEYS.map((key) => {

@@ -27,6 +27,7 @@ import { BackgroundTasksPanel } from "./BackgroundTasksPanel";
 import { ModuleAccessModal } from "./modules/ModuleAccessModal";
 import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
 import { useUserRole } from "@/hooks/board/useUserRole";
+import { clearAppParam, readAppParam } from "@/lib/board/deepLink";
 
 export type NavLayout = "rail" | "list";
 export type Theme = "light" | "dark";
@@ -68,14 +69,15 @@ function renderScreen(id: string, props: { punchedIn: boolean; onTogglePunch: ()
 }
 
 export function BoardShell() {
-  const [selectedApp, setApp] = useState("accueil");
+  // Lien direct depuis un e-mail (/?app=frais…) : module ouvert d'emblée.
+  const [selectedApp, setApp] = useState(() => readAppParam() ?? "accueil");
   // Module masqué (règle d'accès modifiée pendant qu'il était ouvert) : retour à l'accueil.
   const visible = useVisibleModules();
   const app = canShowModule(visible, selectedApp) ? selectedApp : "accueil";
   const role = useUserRole();
   const canManageAccess = role.isAdmin || role.isSuperUser;
   const [accessOpen, setAccessOpen] = useState(false);
-  const [mounted, setMounted] = useState<Set<string>>(() => new Set(["accueil"]));
+  const [mounted, setMounted] = useState<Set<string>>(() => new Set(["accueil", selectedApp]));
 
   // Module ouvert → monté pour de bon ; les modules les plus consultés sont préchargés dès que le
   // navigateur est libre, pour qu'ils s'affichent sans attente au premier clic.
@@ -96,6 +98,10 @@ export function BoardShell() {
   const [punchedIn, setPunchedIn] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const isMobile = useIsMobile();
+  // ?app= retiré de l'adresse une fois la coque (ordinateur ou mobile) affichée et le lien lu.
+  useEffect(() => {
+    if (isMobile !== null) clearAppParam();
+  }, [isMobile]);
   const { prefs, update, updateWidgets } = useBoardPreferences();
 
   const currentApp = BOARD_APPS.find((a) => a.id === app) ?? BOARD_APPS[0];

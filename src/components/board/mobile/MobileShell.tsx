@@ -10,6 +10,7 @@ import { FraisScreen } from "@/components/board/screens/FraisScreen";
 import { AccueilScreen } from "@/components/board/screens/AccueilScreen";
 import { WeekendScreen } from "@/components/board/screens/WeekendScreen";
 import { MobileSettingsSheet, useCenterAction } from "@/components/board/mobile/MobileSettingsSheet";
+import { readAppParam } from "@/lib/board/deepLink";
 import { SocialCapture } from "@/components/board/publication/SocialCapture";
 
 const TITLES: Record<MobileTab, { title: string; kicker: string }> = {
@@ -21,7 +22,11 @@ const TITLES: Record<MobileTab, { title: string; kicker: string }> = {
 
 /** Coque mobile — même app Next.js, bascule vers cette coque sous ~768px (voir useIsMobile). */
 export function MobileShell() {
-  const [tab, setTab] = useState<MobileTab>("calendrier");
+  // Lien direct depuis un e-mail (/?app=weekend, /?app=frais…).
+  const [linkedApp] = useState(readAppParam);
+  const [tab, setTab] = useState<MobileTab>(() =>
+    linkedApp === "accueil" || linkedApp === "mails" || linkedApp === "weekend" ? linkedApp : "calendrier"
+  );
   const [mailMenuOpen, setMailMenuOpen] = useState(false);
   const [punchedIn, setPunchedIn] = useState(true);
   const [mailContext, setMailContext] = useState<string | null>(null);
@@ -42,7 +47,7 @@ export function MobileShell() {
   // Publication réseaux réservée aux personnes habilitées : sinon, bouton Frais.
   const center = centerPref === "social" && !canPublish ? "frais" : centerPref;
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [fraisOpen, setFraisOpen] = useState(false);
+  const [fraisOpen, setFraisOpen] = useState(linkedApp === "frais");
   const [socialOpen, setSocialOpen] = useState(false);
   const handleCenterPress = () => {
     setMailMenuOpen(false);

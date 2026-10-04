@@ -25,6 +25,8 @@ import { fr } from "date-fns/locale";
 import { useCalendarEvents } from "@/hooks/board/useCalendarEvents";
 import { useSolicitedFilter } from "@/hooks/board/useSolicitedFilter";
 import { passesCoverageFilters, useCoverageFilters } from "@/hooks/board/useCoverageFilters";
+import { useCalendarDefaults, type CalendarView } from "@/hooks/board/useCalendarDefaults";
+import { DefaultMenu } from "@/components/board/calendar/DefaultMenu";
 import { DayWeatherBadge, useForecast } from "@/components/board/calendar/DayWeather";
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
@@ -44,7 +46,7 @@ const WEEK_OPTS = { weekStartsOn: 1 as const, locale: fr };
 
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
 type GoogleEventItem = Awaited<ReturnType<typeof listMyEvents>>[number];
-type ViewMode = "day" | "week" | "month" | "map";
+type ViewMode = CalendarView;
 
 function hourFloat(iso: string) {
   const d = parseISO(iso);
@@ -65,7 +67,10 @@ const VIEW_MODES: { id: ViewMode; label: string }[] = [
 ];
 
 export function CalendrierScreen() {
-  const [viewMode, setViewMode] = useState<ViewMode>("month");
+  // Vue par défaut (clic droit sur les vues) : celle du compte, reprise sur le mobile ; le clic simple vaut pour la session.
+  const [calendarDefaults, setCalendarDefault] = useCalendarDefaults();
+  const [viewOverride, setViewMode] = useState<ViewMode | null>(null);
+  const viewMode = viewOverride ?? calendarDefaults.view;
   const forecast = useForecast();
   const [anchorDate, setAnchorDate] = useState(() => new Date());
 
@@ -128,7 +133,7 @@ export function CalendrierScreen() {
   const [editingGoogle, setEditingGoogle] = useState<GoogleEventItem | "new" | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [hiddenOrgs, setHiddenOrgs] = useState<Set<OrgKey>>(() => new Set());
-  const [mineOnly, setMineOnly] = useSolicitedFilter();
+  const [mineOnly, setMineOnly, mineDefault, setMineDefault] = useSolicitedFilter();
   const [coverage, setCoverage, coverageDefaults, setCoverageDefault] = useCoverageFilters();
 
   const toggleOrgVisibility = (key: OrgKey) => {
@@ -338,17 +343,28 @@ export function CalendrierScreen() {
               </button>
             )}
           </div>
-          <button
-            onClick={() => setMineOnly(!mineOnly)}
-            className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-btn border ${
-              mineOnly ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3 hover:bg-hover"
-            }`}
-            title={mineOnly ? "Où je suis sollicité — afficher tous les événements" : "Tous les événements — n'afficher que ceux où je suis sollicité"}
-            aria-label="Événements où je suis sollicité"
-            aria-pressed={mineOnly}
+          <DefaultMenu
+            title="Où je suis sollicité"
+            options={[
+              { label: "Tous les événements par défaut", selected: !mineDefault, onSelect: () => setMineDefault(false) },
+              { label: "Seulement où je suis sollicité", selected: mineDefault, onSelect: () => setMineDefault(true) },
+            ]}
           >
-            <User size={15} />
-          </button>
+            {(onContextMenu) => (
+              <button
+                onClick={() => setMineOnly(!mineOnly)}
+                onContextMenu={onContextMenu}
+                className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-btn border ${
+                  mineOnly ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3 hover:bg-hover"
+                }`}
+                title={`${mineOnly ? "Où je suis sollicité — afficher tous les événements" : "Tous les événements — n'afficher que ceux où je suis sollicité"} · clic droit : affichage par défaut`}
+                aria-label="Événements où je suis sollicité"
+                aria-pressed={mineOnly}
+              >
+                <User size={15} />
+              </button>
+            )}
+          </DefaultMenu>
           <CoverageToggle
             icon={Video}
             label="en vidéo"
@@ -366,19 +382,28 @@ export function CalendrierScreen() {
             onSetDefault={(on) => setCoverageDefault("photo", on)}
           />
 
-          <div className="flex items-center gap-0.5 rounded-btn border border-line bg-card p-0.5">
-            {VIEW_MODES.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setViewMode(m.id)}
-                className={`rounded-[6px] px-2.5 py-1.5 text-xs font-semibold ${
-                  viewMode === m.id ? "bg-navy text-white" : "text-ink-3 hover:bg-hover"
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
+          <DefaultMenu
+            title="Vue par défaut"
+            options={VIEW_MODES.map((m) => ({ label: m.label, selected: calendarDefaults.view === m.id, onSelect: () => setCalendarDefault("view", m.id) }))}
+            footnote="Sur mobile : Jour s'ouvre en Semaine, Carte en Mois. Le clic simple change la vue pour cette session seulement."
+          >
+            {(onContextMenu) => (
+              <div className="flex items-center gap-0.5 rounded-btn border border-line bg-card p-0.5" onContextMenu={onContextMenu}>
+                {VIEW_MODES.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setViewMode(m.id)}
+                    title={`${m.label}${calendarDefaults.view === m.id ? " (vue par défaut)" : ""} · clic droit : vue par défaut`}
+                    className={`rounded-[6px] px-2.5 py-1.5 text-xs font-semibold ${
+                      viewMode === m.id ? "bg-navy text-white" : "text-ink-3 hover:bg-hover"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </DefaultMenu>
         </div>
       </div>
 

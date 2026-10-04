@@ -1,5 +1,6 @@
 "use client";
 
+import { notifyEventAssignment } from "@/app/actions/event-notifications";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -119,6 +120,8 @@ export function useEventCoverage(eventId?: string) {
       return false;
     }
     await supabase.from("events").update({ requires_coverage: true }).eq("id", eventId);
+    // Désignation directe : pas de réponse attendue, mais la personne est prévenue (cloche et e-mail).
+    if (request?.assigned_technician_id !== tech.id) void notifyEventAssignment(eventId, [tech.id], "couverture");
     await fetchRequest();
     return true;
   };

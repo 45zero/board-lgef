@@ -1,28 +1,19 @@
 "use client";
 
 import { useState } from "react";
-
-const KEY = "lgef-board:calendar-mine-only";
+import { useCalendarDefaults } from "@/hooks/board/useCalendarDefaults";
 
 /**
- * Filtre « Uniquement où je suis sollicité » du calendrier (ordinateur et mobile) : désactivé par
- * défaut (tous les événements), mémorisé dans le navigateur.
+ * Filtre « Uniquement où je suis sollicité » du calendrier (ordinateur et mobile). Le réglage par
+ * défaut (clic droit sur le bonhomme) est celui du compte, repris sur le mobile ; le clic simple
+ * n'agit que sur la session.
  */
-export function useSolicitedFilter(): [boolean, (value: boolean) => void] {
-  const [mineOnly, setMineOnly] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
-  const set = (value: boolean) => {
-    setMineOnly(value);
-    try {
-      localStorage.setItem(KEY, value ? "1" : "0");
-    } catch {
-      // stockage indisponible : le choix vaut pour la session
-    }
+export function useSolicitedFilter(): [boolean, (value: boolean) => void, boolean, (value: boolean) => void] {
+  const [defaults, setCalendarDefault] = useCalendarDefaults();
+  const [session, setSession] = useState<boolean | null>(null);
+  const setDefault = (value: boolean) => {
+    setCalendarDefault("mine", value);
+    setSession(value);
   };
-  return [mineOnly, set];
+  return [session ?? defaults.mine, setSession, defaults.mine, setDefault];
 }

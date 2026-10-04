@@ -1,5 +1,6 @@
 "use client";
 
+import { notifyEventAssignment } from "@/app/actions/event-notifications";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -40,7 +41,8 @@ export function useEventTeam(eventId: string, createdBy: string | null) {
       await supabase.from("event_team_members").delete().eq("event_id", eventId).eq("role", "responsable");
     }
 
-    await supabase.from("event_team_members").insert({ event_id: eventId, user_id: userId, role });
+    const { error } = await supabase.from("event_team_members").insert({ event_id: eventId, user_id: userId, role });
+    if (!error) void notifyEventAssignment(eventId, [userId], role);
     fetchTeam();
   };
 

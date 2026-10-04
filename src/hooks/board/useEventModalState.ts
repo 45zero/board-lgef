@@ -1,5 +1,6 @@
 "use client";
 
+import { notifyEventAssignment } from "@/app/actions/event-notifications";
 import { useEffect, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
@@ -181,9 +182,15 @@ export function useEventModalState({
 
       if (pendingParticipants.length > 0) {
         const supabase = createClient();
-        await supabase.from("event_team_members").insert(
+        const { error: teamError } = await supabase.from("event_team_members").insert(
           pendingParticipants.map((p) => ({ event_id: newId, user_id: p.id, role: p.role }))
         );
+        if (!teamError) {
+          for (const role of ["responsable", "membre"] as const) {
+            const ids = pendingParticipants.filter((p) => p.role === role).map((p) => p.id);
+            if (ids.length) void notifyEventAssignment(newId, ids, role);
+          }
+        }
       }
 
       if (pendingReminders.length > 0 && user) {

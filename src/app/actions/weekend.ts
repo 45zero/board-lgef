@@ -88,7 +88,14 @@ async function listPublisherIds(service: ReturnType<typeof createServiceClient>)
 
 async function notify(
   userIds: (string | null | undefined)[],
-  params: { title: string; message: string; eventId?: string | null; type?: "coverage_request" | "coverage_assignment" | "coverage_accepted_admin" }
+  params: {
+    title: string;
+    message: string;
+    eventId?: string | null;
+    type?: "coverage_request" | "coverage_assignment" | "coverage_accepted_admin";
+    /** « photo » : poste photo (pas de réponse Accepter / Refuser dans l'e-mail). */
+    trade?: "photo" | "video";
+  }
 ) {
   const ids = [...new Set(userIds.filter((id): id is string => !!id))];
   if (ids.length === 0) return;
@@ -101,7 +108,7 @@ async function notify(
         title: params.title,
         message: params.message,
         event_id: params.eventId ?? null,
-        data: { app: "weekend", event_id: params.eventId ?? null },
+        data: { app: "weekend", event_id: params.eventId ?? null, ...(params.trade ? { trade: params.trade } : {}) },
       }))
     );
   if (error) console.error("[weekend.notify]", error);
@@ -302,6 +309,7 @@ async function saveMatchImpl(input: MatchInput, eventId?: string): Promise<strin
         title: "Match à photographier",
         message: `${await actorName(userId)} vous a désigné : ${eventFields.title}.`,
         eventId: id,
+        trade: "photo",
       });
     }
   } else if (mission) {
@@ -350,8 +358,9 @@ async function saveMatchImpl(input: MatchInput, eventId?: string): Promise<strin
       await notify([designated], {
         type: "coverage_assignment",
         title: "Match à filmer",
-        message: `${await actorName(userId)} vous demande la captation vidéo : ${eventFields.title}. Acceptez ou refusez depuis l'événement.`,
+        message: `${await actorName(userId)} vous demande la captation vidéo : ${eventFields.title}.`,
         eventId: id,
+        trade: "video",
       });
     }
   }

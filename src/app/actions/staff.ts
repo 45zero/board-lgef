@@ -543,7 +543,8 @@ export const reviewInvoice = async (invoiceId: string, decision: "approved" | "r
           ? `Votre facture pour « ${eventTitle} »${amount ? ` (${amount})` : ""} a été validée.`
           : `Votre facture pour « ${eventTitle} » a été refusée : ${motive}`,
       p_actor_name: reviewer,
-      p_data: { event_id: invoice.event_id, kind: "invoice_reviewed", decision },
+      // Déjà prévenu par l'e-mail détaillé ci-dessous : pas de second e-mail de notification.
+      p_data: { event_id: invoice.event_id, kind: "invoice_reviewed", decision, skip_email: true },
     });
 
     if (person?.email && isResendConfigured()) {

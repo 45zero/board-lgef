@@ -35,7 +35,8 @@ export const ORG_COLORS: Record<OrgKey, { base: string; bg: string; ink: string 
   teal: { base: "#2C7A6B", bg: "#DCF0E9", ink: "#14574A" },
   amber: { base: "#D98A0B", bg: "#FCEDD5", ink: "#7A4E06" },
   tirages: { base: "#9A6B00", bg: "#FAEFD0", ink: "#6B4A00" },
-  matchs: { base: "#5B3FA8", bg: "#EBE4FA", ink: "#422D7C" },
+  // Même rouge que Compétitions : les matchs du week-end en sont une partie, gardée à part pour le filtre et le libellé.
+  matchs: { base: "#E1141B", bg: "#FBDFE1", ink: "#A50E15" },
   perso: { base: "#7A3FD9", bg: "#EAE2FA", ink: "#4A2585" },
 };
 

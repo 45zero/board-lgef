@@ -2252,6 +2252,8 @@ export type Database = {
           push_last_error: string | null
           push_enqueued_at: string | null
           actor_name: string | null
+          email_status: string | null
+          email_sent_at: string | null
         }
         Insert: {
           id?: string
@@ -2274,6 +2276,8 @@ export type Database = {
           push_last_error?: string | null
           push_enqueued_at?: string | null
           actor_name?: string | null
+          email_status?: string | null
+          email_sent_at?: string | null
         }
         Update: {
           id?: string
@@ -2296,6 +2300,8 @@ export type Database = {
           push_last_error?: string | null
           push_enqueued_at?: string | null
           actor_name?: string | null
+          email_status?: string | null
+          email_sent_at?: string | null
         }
         Relationships: []
       }
@@ -2410,6 +2416,7 @@ export type Database = {
           expense_validator_id: string | null
           daily_digest_email: boolean
           daily_digest_sent_on: string | null
+          calendar_prefs: Json
           birth_date: string | null
           birthday_announced_on: string | null
         }
@@ -2439,6 +2446,7 @@ export type Database = {
           expense_validator_id?: string | null
           daily_digest_email?: boolean
           daily_digest_sent_on?: string | null
+          calendar_prefs?: Json
           birth_date?: string | null
           birthday_announced_on?: string | null
         }
@@ -2468,6 +2476,7 @@ export type Database = {
           expense_validator_id?: string | null
           daily_digest_email?: boolean
           daily_digest_sent_on?: string | null
+          calendar_prefs?: Json
           birth_date?: string | null
           birthday_announced_on?: string | null
         }

@@ -2,43 +2,25 @@
 
 import { useState } from "react";
 import type { CalendarEvent } from "@/lib/board/calendar";
-
-// Réglage « par défaut » (clic droit sur l'icône) mémorisé dans le navigateur ; le clic simple
-// n'agit que sur la session en cours. v2 : ancien réglage unique, repris comme valeur par défaut.
-const DEFAULTS_KEY = "lgef-board:calendar-coverage-defaults";
-const LEGACY_KEY = "lgef-board:calendar-coverage-v2";
+import { useCalendarDefaults } from "@/hooks/board/useCalendarDefaults";
 
 export type CoverageFilters = { video: boolean; photo: boolean };
 
-function readDefaults(): CoverageFilters {
-  try {
-    const saved = JSON.parse(localStorage.getItem(DEFAULTS_KEY) ?? localStorage.getItem(LEGACY_KEY) ?? "null") as Partial<CoverageFilters> | null;
-    return { video: saved?.video ?? false, photo: saved?.photo ?? false };
-  } catch {
-    return { video: false, photo: false };
-  }
-}
-
 /**
  * Filtres « CouvVidéo » / « CouvPhoto » du calendrier (ordinateur et mobile). Ils affichent les
- * matchs du week-end couverts en vidéo / en photo. Chacun a un réglage par défaut (masqué tant
- * qu'on ne l'a pas changé : une trentaine de matchs par week-end encombreraient la grille) ;
- * le clic simple affiche ou masque pour la session sans toucher au défaut.
+ * matchs du week-end couverts en vidéo / en photo. Le réglage par défaut (clic droit) est celui du
+ * compte (useCalendarDefaults, repris sur le mobile) ; le clic simple affiche ou masque pour la
+ * session sans toucher au défaut.
  */
 export function useCoverageFilters(): [CoverageFilters, (next: CoverageFilters) => void, CoverageFilters, (kind: keyof CoverageFilters, on: boolean) => void] {
-  const [defaults, setDefaults] = useState<CoverageFilters>(readDefaults);
-  const [filters, setFilters] = useState<CoverageFilters>(defaults);
+  const [defaults, setCalendarDefault] = useCalendarDefaults();
+  const [session, setSession] = useState<Partial<CoverageFilters>>({});
+  const filters = { video: session.video ?? defaults.video, photo: session.photo ?? defaults.photo };
   const setDefault = (kind: keyof CoverageFilters, on: boolean) => {
-    const next = { ...defaults, [kind]: on };
-    setDefaults(next);
-    setFilters((f) => ({ ...f, [kind]: on }));
-    try {
-      localStorage.setItem(DEFAULTS_KEY, JSON.stringify(next));
-    } catch {
-      // stockage indisponible : le choix vaut pour la session
-    }
+    setCalendarDefault(kind, on);
+    setSession((s) => ({ ...s, [kind]: on }));
   };
-  return [filters, setFilters, defaults, setDefault];
+  return [filters, setSession, { video: defaults.video, photo: defaults.photo }, setDefault];
 }
 
 /**
