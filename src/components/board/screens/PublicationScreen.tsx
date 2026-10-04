@@ -1,5 +1,6 @@
 "use client";
 
+import { InstagramMentionField } from "@/components/board/publication/InstagramMentionField";
 import { PublicationSettings } from "@/components/board/publication/PublicationSettings";
 import { useCanPublish } from "@/hooks/board/useCanPublish";
 import { useUserRole } from "@/hooks/board/useUserRole";
@@ -744,9 +745,10 @@ function PublishElsewhere({ pub, onChanged }: { pub: MediaPublication; onChanged
       {selected.includes("instagram") && rules.count > 10 && (
         <p className="text-[10px] text-ink-4">Instagram : les 10 premiers médias de l&rsquo;album seulement.</p>
       )}
-      <textarea
+      <InstagramMentionField
+        multiline
         value={caption}
-        onChange={(e) => setCaption(e.target.value)}
+        onChange={setCaption}
         rows={3}
         placeholder="Texte de la publication…"
         className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
@@ -1236,9 +1238,10 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
           </ul>
         )}
 
-        <textarea
+        <InstagramMentionField
+          multiline
           value={caption}
-          onChange={(e) => setCaption(e.target.value)}
+          onChange={setCaption}
           rows={4}
           placeholder="Texte de la publication…"
           className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
@@ -1329,9 +1332,9 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
               <label className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
                 Identifier des comptes Instagram sur la photo
               </label>
-              <input
+              <InstagramMentionField
                 value={igTagsInput}
-                onChange={(e) => setIgTagsInput(e.target.value)}
+                onChange={setIgTagsInput}
                 placeholder="@club_exemple @autre_compte"
                 className="w-full rounded-btn border border-line px-2.5 py-1.5 text-sm outline-none"
               />
@@ -1582,9 +1585,10 @@ function NewPublicationDialog({ onClose, onCreated }: { onClose: () => void; onC
               </div>
             )}
 
-            <textarea
+            <InstagramMentionField
+              multiline
               value={caption}
-              onChange={(e) => setCaption(e.target.value)}
+              onChange={setCaption}
               rows={4}
               placeholder="Texte de la publication…"
               className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"

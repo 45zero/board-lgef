@@ -461,3 +461,49 @@ export async function editFacebookPost(
   if (!postId) throw new Error("Id de la publication inconnu — rafraîchissez les stats puis réessayez.");
   await graphFetch(`/${postId}`, { message, access_token: accessToken }, "POST");
 }
+
+/* ---------- Comptes Instagram (identifications, mentions) ---------- */
+
+export type InstagramProfile = { username: string; name: string | null; pictureUrl: string | null; followers: number | null };
+
+/**
+ * Compte Instagram professionnel ou créateur, lu par son nom exact (Business Discovery). Instagram
+ * n'offre aucune recherche par début de nom : seul un nom complet peut être vérifié. `null` : compte
+ * introuvable, ou compte personnel (non lisible par l'API).
+ */
+export async function lookupInstagramAccount(igUserId: string, accessToken: string, username: string): Promise<InstagramProfile | null> {
+  try {
+    const json = await graphFetch(`/${igUserId}`, {
+      fields: `business_discovery.username(${username}){username,name,profile_picture_url,followers_count}`,
+      access_token: accessToken,
+    });
+    const bd = json.business_discovery as { username: string; name?: string; profile_picture_url?: string; followers_count?: number } | undefined;
+    if (!bd) return null;
+    return { username: bd.username, name: bd.name ?? null, pictureUrl: bd.profile_picture_url ?? null, followers: bd.followers_count ?? null };
+  } catch (e) {
+    // 110 / « Cannot find User » : nom inexistant ou compte personnel.
+    if (e instanceof Error && /Invalid user id|cannot be found/i.test(e.message)) return null;
+    throw e;
+  }
+}
+
+/** Légendes des dernières publications du compte (pages de 50), avec leur date. */
+export async function listInstagramCaptions(igUserId: string, accessToken: string, maxPages = 10): Promise<{ caption: string; timestamp: string }[]> {
+  const out: { caption: string; timestamp: string }[] = [];
+  let after: string | undefined;
+  for (let page = 0; page < maxPages; page++) {
+    const json = await graphFetch(`/${igUserId}/media`, {
+      fields: "caption,timestamp",
+      limit: "50",
+      access_token: accessToken,
+      ...(after ? { after } : {}),
+    });
+    const data = (json.data as { caption?: string; timestamp?: string }[] | undefined) ?? [];
+    for (const m of data) if (m.caption) out.push({ caption: m.caption, timestamp: m.timestamp ?? "" });
+    after = (json.paging as { cursors?: { after?: string }; next?: string } | undefined)?.next
+      ? (json.paging as { cursors?: { after?: string } }).cursors?.after
+      : undefined;
+    if (!after) break;
+  }
+  return out;
+}
