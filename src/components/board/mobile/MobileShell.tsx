@@ -1,7 +1,7 @@
 "use client";
 
 import { useCanPublish } from "@/hooks/board/useCanPublish";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { MobileHeader } from "@/components/board/mobile/MobileHeader";
 import { MobileBottomNav, type MobileTab } from "@/components/board/mobile/MobileBottomNav";
 import { MobileCalendrierScreen } from "@/components/board/mobile/screens/MobileCalendrierScreen";
@@ -53,6 +53,14 @@ export function MobileShell() {
   const [socialOpen, setSocialOpen] = useState(false);
   // Publication dont les médias ont fini de s'envoyer en arrière-plan : choix des réseaux.
   const [composerPub, setComposerPub] = useState<MediaPublication | null>(null);
+  // Appli mobile : la page elle-même ne défile ni ne rebondit jamais (seules les listes internes
+  // défilent). Sans ce verrou, Chrome / Samsung Internet / Safari laissent un léger défilement de
+  // la page entière (hauteur d'écran arrondie, effet élastique).
+  useEffect(() => {
+    document.documentElement.classList.add("mobile-locked");
+    return () => document.documentElement.classList.remove("mobile-locked");
+  }, []);
+
   const handleCenterPress = () => {
     setMailMenuOpen(false);
     if (center === "social") setSocialOpen(true);
@@ -60,7 +68,7 @@ export function MobileShell() {
   };
 
   return (
-    <div className="relative flex h-dvh flex-col bg-shell">
+    <div className="fixed inset-0 flex flex-col overflow-hidden overscroll-none bg-shell">
       <MobileHeader
         title={title}
         kicker={kicker}

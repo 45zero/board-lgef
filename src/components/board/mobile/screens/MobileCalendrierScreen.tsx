@@ -91,7 +91,8 @@ export function MobileCalendrierScreen() {
   }, [events, orgFilter, mineOnly, coverage]);
 
   // Point rouge sur le bouton des filtres : un filtre qui restreint l'affichage est actif.
-  const filtersActive = !!orgFilter || mineOnly;
+  // Pastille du bouton filtres : catégorie choisie (les bascules sollicité / vidéo / photo sont visibles à côté).
+  const filtersActive = !!orgFilter;
 
   const eventsForDay = (day: Date) =>
     filtered.filter((e) => isSameDay(parseISO(e.start), day)).sort((a, b) => a.start.localeCompare(b.start));
@@ -159,9 +160,9 @@ export function MobileCalendrierScreen() {
 
   return (
     <div className="relative flex h-full min-w-0 flex-col overflow-x-hidden">
-      {/* Une seule ligne qui tient sur 375 px (iPhone) : filtres, période, vue. Les bascules
-          sollicité / vidéo / photo sont dans le panneau des filtres. */}
-      <div className="flex items-center gap-2 px-3 py-1.5">
+      {/* Une seule ligne qui tient sur 375 px (iPhone) : filtres, bascules sollicité / vidéo / photo
+          (toujours visibles), période, vue. */}
+      <div className="flex items-center gap-1.5 px-3 py-1.5">
         <button
           onClick={() => setFiltersOpen((o) => !o)}
           className="relative flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full border-[1.5px] bg-card transition-transform"
@@ -176,35 +177,7 @@ export function MobileCalendrierScreen() {
           {filtersActive && !filtersOpen && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-red" />}
         </button>
 
-        <div className="flex min-w-0 flex-1 items-center justify-center gap-0.5">
-          <button onClick={navPrev} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-btn text-ink-3" aria-label="Période précédente">
-            <ChevronLeft size={16} />
-          </button>
-          <span className="truncate text-[13px] font-extrabold uppercase text-navy-600">
-            {format(anchor, view === "mois" ? "MMM yyyy" : "'Sem.' I · MMM", { locale: fr })}
-          </span>
-          <button onClick={navNext} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-btn text-ink-3" aria-label="Période suivante">
-            <ChevronRight size={16} />
-          </button>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-line bg-subtle p-0.5">
-          {(["semaine", "mois"] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={`rounded-full px-2.5 py-1 text-[11px] font-bold capitalize transition-colors ${
-                view === v ? "bg-card text-ink shadow-card" : "text-ink-3"
-              }`}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {filtersOpen && (
-        <div className="flex flex-wrap gap-1.5 px-3 pb-1.5 pt-1">
+        <div className="flex shrink-0 items-center gap-1">
           {[
             { on: mineOnly, icon: User, label: "Où je suis sollicité", toggle: () => setMineOnly(!mineOnly) },
             { on: coverage.video, icon: Video, label: "Matchs vidéo", toggle: () => setCoverage({ ...coverage, video: !coverage.video }) },
@@ -214,15 +187,44 @@ export function MobileCalendrierScreen() {
               key={label}
               onClick={toggle}
               aria-pressed={on}
-              className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+              aria-label={label}
+              title={label}
+              className={`flex h-[26px] w-[26px] items-center justify-center rounded-full border-[1.5px] ${
                 on ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-3"
               }`}
             >
-              <Icon size={12} /> {label}
+              <Icon size={13} />
             </button>
           ))}
         </div>
-      )}
+
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-0.5">
+          <button onClick={navPrev} className="flex h-7 w-6 shrink-0 items-center justify-center rounded-btn text-ink-3" aria-label="Période précédente">
+            <ChevronLeft size={16} />
+          </button>
+          <span className="truncate text-[13px] font-extrabold uppercase text-navy-600">
+            {format(anchor, view === "mois" ? "MMM yyyy" : "'Sem.' I · MMM", { locale: fr })}
+          </span>
+          <button onClick={navNext} className="flex h-7 w-6 shrink-0 items-center justify-center rounded-btn text-ink-3" aria-label="Période suivante">
+            <ChevronRight size={16} />
+          </button>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-line bg-subtle p-0.5">
+          {(["semaine", "mois"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`rounded-full px-2 py-1 text-[11px] font-bold transition-colors ${
+                view === v ? "bg-card text-ink shadow-card" : "text-ink-3"
+              }`}
+            >
+              {v === "semaine" ? "Sem." : "Mois"}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {filtersOpen && (
         <div className="grid grid-cols-5 gap-1.5 px-3 pb-2 pt-1">
           {CALENDAR_ORG_KEYS.map((key) => {
@@ -256,7 +258,8 @@ export function MobileCalendrierScreen() {
       )}
 
       {view === "mois" ? (
-        <div className="flex flex-1 flex-col overflow-y-auto pb-1" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden pb-1" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
+          {/* Le mois tient toujours dans l'écran (aucun défilement) : les cases se partagent la hauteur. */}
           <div className="grid grid-cols-7 pb-1">
             {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => (
               <div key={i} className="text-center font-mono text-[9px] uppercase text-ink-4">
@@ -264,13 +267,13 @@ export function MobileCalendrierScreen() {
               </div>
             ))}
           </div>
-          <div className="flex flex-1 flex-col overflow-hidden border-t border-line bg-card">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-line bg-card">
             {weeks.map((week, weekIdx) => {
               const banners = bannersForWeek(week);
               return (
                 <div
                   key={week[0].toISOString()}
-                  className={`grid flex-1 grid-cols-7 ${weekIdx > 0 ? "border-t border-line" : ""}`}
+                  className={`grid min-h-0 flex-1 grid-cols-7 ${weekIdx > 0 ? "border-t border-line" : ""}`}
                   style={{ gridTemplateRows: `1fr repeat(${banners.length}, auto)` }}
                 >
                   {week.map((day, dayIdx) => {
@@ -281,7 +284,7 @@ export function MobileCalendrierScreen() {
                       <button
                         key={day.toISOString()}
                         onClick={() => setSelectedDay(day)}
-                        className={`flex h-full min-h-[52px] flex-col gap-0.5 p-1 text-left ${
+                        className={`flex h-full min-h-0 flex-col gap-0.5 overflow-hidden p-1 text-left ${
                           dayIdx > 0 ? "border-l border-line" : ""
                         } ${inMonth ? "bg-card" : "bg-subtle/40 opacity-50"}`}
                       >
@@ -343,7 +346,7 @@ export function MobileCalendrierScreen() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 space-y-1.5 overflow-y-auto px-3 pb-2" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
+        <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain px-3 pb-2" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
           {days.map((day) => {
             const dayEvents = eventsForDay(day);
             const isToday = isSameDay(day, new Date());
@@ -478,7 +481,7 @@ function DayPanel({
             <X size={18} />
           </button>
         </div>
-        <div className="flex-1 space-y-2 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-4">
           {events.length === 0 && (
             <div className="rounded-btn border border-dashed border-line p-4 text-center text-xs text-ink-4">
               Aucun événement ce jour-là.

@@ -135,6 +135,14 @@ body {
   font-family: var(--font-sans);
 }
 
+/* Board mobile (MobileShell) : page figée — ni défilement ni rebond de la page entière. */
+html.mobile-locked,
+html.mobile-locked body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 /* Barres de défilement masquées partout (on défile à la molette, au pavé tactile ou au doigt) ;
    les rangées horizontales de l'accueil ont des flèches au survol. */
 * {
