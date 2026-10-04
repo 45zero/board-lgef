@@ -10,6 +10,13 @@ import { createPublication, listMediaPublications, type MediaPublication } from 
 import {
   HABILLAGE_FORMATS,
   DEFAULT_CROP,
+  DEFAULT_PLACEMENT,
+  DEFAULT_TIMING,
+  customOf,
+  isTimed,
+  textStateAt,
+  type LayerPlacement,
+  type TextTiming,
   animationFor,
   availableTemplates,
   contextFromEventTitle,
@@ -35,6 +42,7 @@ import { searchEventsForExpense, type EventCandidate } from "@/app/actions/expen
 import { InAppCamera, cameraSupported } from "@/components/board/publication/InAppCamera";
 import { createClient } from "@/lib/supabase/client";
 import { createVideoWorkUploads, removeVideoWork } from "@/app/actions/video-habillage";
+import { TextTimingEditor } from "@/components/board/publication/TextTimingEditor";
 
 type Step = "capture" | "environnement" | "habillage" | "publier";
 /** Progression d'une tâche de fond : texte, et avancement de 0 à 1 s'il est connu. */
@@ -44,7 +52,18 @@ type Report = (detail: string, fraction?: number) => void;
  * Un média de la série. `dress` : habillé LGEF (photos prises sur le moment) ou publié tel quel
  * (visuel partenaire déjà au format, image importée de la galerie).
  */
-type Item = { id: string; file: File; url: string; video: boolean; dress: boolean; crop: PhotoCrop; filter: PhotoFilter; thumb: string | null };
+type Item = {
+  id: string;
+  file: File;
+  url: string;
+  video: boolean;
+  dress: boolean;
+  crop: PhotoCrop;
+  filter: PhotoFilter;
+  thumb: string | null;
+  /** Position / taille du calque ou de l'animation pour ce média (nul : réglage de l'habillage). */
+  layer: LayerPlacement | null;
+};
 
 /**
  * Miniature légère d'une photo (≈ 480 px) : la vignette s'affiche tout de suite, sans décoder les
@@ -110,7 +129,16 @@ const overlaySizeFor = (v: { width: number; height: number }) => ({ width: 1080,
  * LGEF + texte (photos), légende et événement éventuel, puis le compositeur du centre de
  * publication pour choisir les réseaux et publier tout de suite.
  */
-export function SocialCapture({ onClose, onReady }: { onClose: () => void; onReady: (pub: MediaPublication) => void }) {
+export function SocialCapture({
+  onClose,
+  onReady,
+  onOpenCenter,
+}: {
+  onClose: () => void;
+  onReady: (pub: MediaPublication) => void;
+  /** Ouvre le centre de publication (à publier, programmées, publiées). */
+  onOpenCenter: () => void;
+}) {
   const { user } = useAuth();
   const { runTask } = useBackgroundTasks();
   const [step, setStep] = useState<Step>("capture");
@@ -142,8 +170,9 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
   const swipe = useRef<{ x: number; y: number } | null>(null);
   // Décalage horizontal pendant le glissement : la photo suit le doigt.
   const [swipeX, setSwipeX] = useState(0);
-  const [dragMode, setDragMode] = useState<"title" | "crop" | null>(null);
-  const dragStart = useRef<{ x: number; y: number; crop: PhotoCrop } | null>(null);
+  // Au doigt sur l'aperçu : placer le titre, recadrer la photo, ou déplacer le calque / l'animation.
+  const [dragMode, setDragMode] = useState<"title" | "crop" | "layer" | null>(null);
+  const dragStart = useRef<{ x: number; y: number; crop: PhotoCrop; layer: LayerPlacement } | null>(null);
   // Pincement à deux doigts sur l'aperçu : taille du titre.
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; size: number } | null>(null);
@@ -200,6 +229,9 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
   const [videoError, setVideoError] = useState(false);
   const [videoMeta, setVideoMeta] = useState<{ width: number; height: number; duration: number } | null>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
+  const textRef = useRef<HTMLCanvasElement>(null);
+  const titleRef = useRef<HTMLCanvasElement>(null);
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
   // Vidéo : pas de « Cadre » (il redimensionne la photo), et pas d'habillage au-delà de 90 s ou
   // si le navigateur ne peut pas lire la vidéo (dimensions inconnues).
   const videoHabillage = isVideo && !!item?.dress && !videoError && !!videoMeta && videoMeta.duration <= VIDEO_HABILLAGE_MAX_SECONDS;
@@ -207,7 +239,20 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
   const contexts = contextsOf(settings);
   const pre = videoMeta ? prerollFor(settings, orientationOf(videoMeta), template) : null;
   // Animation du gabarit (.mov alpha converti) pour l'orientation de la vidéo.
-  const anim = videoMeta ? animationFor(settings, template, orientationOf(videoMeta)) : null;
+  const anim = isVideo && videoMeta ? animationFor(settings, template, orientationOf(videoMeta)) : null;
+  // Élément graphique réglable du gabarit : l'animation (vidéo qui en a une), sinon le calque PNG
+  // (ou, pour une photo sans calque, l'image clé de l'animation).
+  const customTpl = customOf(settings, template);
+  const fixedOverlay = !!(customTpl?.overlays.portrait || customTpl?.overlays.carre);
+  const animOverlay = !!(customTpl?.animations?.vertical || customTpl?.animations?.horizontal);
+  const layerIsAnim = isVideo ? !!anim : !fixedOverlay;
+  const hasLayer = !!item?.dress && (isVideo ? videoHabillage && (!!anim || fixedOverlay) : fixedOverlay || animOverlay);
+  const defaultLayer = (layerIsAnim ? customTpl?.animationPlacement : customTpl?.overlayPlacement) ?? DEFAULT_PLACEMENT;
+  const layer = item?.layer ?? defaultLayer;
+  const setLayer = (u: LayerPlacement | null | ((l: LayerPlacement) => LayerPlacement)) =>
+    setItems((list) => list.map((it, i) => (i === active ? { ...it, layer: typeof u === "function" ? u(it.layer ?? defaultLayer) : u } : it)));
+  // Texte de l'habillage (environnement) et titre : apparition minutée dans les vidéos.
+  const textTiming = customTpl && customTpl.textPosition !== "none" ? customTpl.textTiming : undefined;
 
   // Réglages des habillages (administrateur) : tailles, signature, gabarits actifs et personnalisés.
   useEffect(() => {
@@ -254,11 +299,11 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
       if (pointers.current.size === 2) {
         const [a, b] = [...pointers.current.values()];
         // Pincement : taille du titre, ou zoom de la photo en recadrage.
-        pinch.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), size: dragMode === "title" ? title.size : crop.zoom };
+        pinch.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), size: dragMode === "title" ? title.size : dragMode === "layer" ? layer.scale : crop.zoom };
         dragStart.current = null;
         return;
       }
-      dragStart.current = { x: e.clientX, y: e.clientY, crop };
+      dragStart.current = { x: e.clientX, y: e.clientY, crop, layer };
       drag.onPointerMove(e);
     },
     onPointerMove: (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -268,6 +313,7 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
         const ratio = Math.hypot(a.x - b.x, a.y - b.y) / Math.max(pinch.current.dist, 1);
         const base = pinch.current.size;
         if (dragMode === "title") setTitle((t) => ({ ...t, size: Math.round(Math.min(220, Math.max(32, base * ratio))) }));
+        else if (dragMode === "layer") setLayer((l) => ({ ...l, scale: Math.min(2, Math.max(0.1, base * ratio)) }));
         else setCrop((c) => ({ ...c, zoom: Math.min(3, Math.max(1, base * ratio)) }));
         return;
       }
@@ -276,6 +322,10 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
       const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
       if (dragMode === "title") {
         setTitle((t) => ({ ...t, x: clamp((e.clientX - r.left) / r.width, 0.05, 0.95), y: clamp((e.clientY - r.top) / r.height, 0.04, 0.96) }));
+      } else if (dragMode === "layer") {
+        // Le calque suit le doigt (décalage depuis le début du geste).
+        const st = dragStart.current;
+        setLayer({ ...st.layer, x: clamp(st.layer.x + (e.clientX - st.x) / r.width, -0.5, 1.5), y: clamp(st.layer.y + (e.clientY - st.y) / r.height, -0.5, 1.5) });
       } else {
         const st = dragStart.current;
         setCrop({ ...st.crop, dx: clamp(st.crop.dx + ((e.clientX - st.x) / r.width) * 2, -1, 1), dy: clamp(st.crop.dy + ((e.clientY - st.y) / r.height) * 2, -1, 1) });
@@ -292,29 +342,57 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
   // Aperçu de l'habillage, redessiné à chaque changement.
   useEffect(() => {
     if (step !== "habillage" || !bitmap || !canvasRef.current) return;
-    void renderHabillage(canvasRef.current, bitmap, { template, format, text, settings, crop, title: active === coverIndex ? title : { ...title, text: "" } });
-  }, [step, bitmap, template, format, text, settings, crop, title, active, coverIndex]);
+    void renderHabillage(canvasRef.current, bitmap, { template, format, text, settings, crop, placement: item?.layer, title: active === coverIndex ? title : { ...title, text: "" } });
+  }, [step, bitmap, template, format, text, settings, crop, title, active, coverIndex, item?.layer]);
 
   // Visionneuse : rendu final de la photo (habillée avec les réglages actuels, ou telle quelle).
   useEffect(() => {
     if (!viewer || !item || item.video || !bitmap || !viewerRef.current) return;
-    if (item.dress) void renderHabillage(viewerRef.current, bitmap, { template, format, text, settings, crop, title: active === coverIndex ? title : { ...title, text: "" } });
+    if (item.dress)
+      void renderHabillage(viewerRef.current, bitmap, { template, format, text, settings, crop, placement: item.layer, title: active === coverIndex ? title : { ...title, text: "" } });
     else renderPlain(viewerRef.current, bitmap, crop);
   }, [viewer, item, bitmap, template, format, text, settings, crop, title, active, coverIndex]);
 
-  // Aperçu du calque par-dessus la vidéo.
+  // Aperçu par-dessus la vidéo : gabarit, texte de l'habillage et titre en trois couches, pour
+  // montrer leur apparition pendant la lecture.
   useEffect(() => {
-    if (step !== "habillage" || !videoHabillage || !videoMeta || !overlayRef.current) return;
-    void renderHabillage(overlayRef.current, null, {
+    if (step !== "habillage" || !videoHabillage || !videoMeta || !overlayRef.current || !textRef.current || !titleRef.current) return;
+    const opts = {
       template,
       format,
       text,
       settings,
       overlaySize: overlaySizeFor(videoMeta),
       skipOverlayImage: !!anim,
+      placement: item?.layer,
       title: active === coverIndex ? title : { ...title, text: "" },
-    });
-  }, [step, videoHabillage, videoMeta, template, format, text, settings, anim, title, active, coverIndex]);
+    };
+    void renderHabillage(overlayRef.current, null, { ...opts, layer: "base" });
+    void renderHabillage(textRef.current, null, { ...opts, layer: "text" });
+    void renderHabillage(titleRef.current, null, { ...opts, layer: "title" });
+  }, [step, videoHabillage, videoMeta, template, format, text, settings, anim, title, active, coverIndex, item?.layer]);
+
+  // Lecture de l'aperçu vidéo : textes affichés selon leur minutage (à l'arrêt, toujours visibles
+  // pour pouvoir les placer).
+  useEffect(() => {
+    if (step !== "habillage" || !videoHabillage) return;
+    let raf = 0;
+    const tick = () => {
+      const v = previewVideoRef.current;
+      const playing = !!v && !v.paused && !v.ended;
+      const apply = (el: HTMLCanvasElement | null, timing: TextTiming | undefined) => {
+        if (!el) return;
+        const st = playing ? textStateAt(timing, v!.currentTime) : { opacity: 1, dx: 0, dy: 0 };
+        el.style.opacity = String(st.opacity);
+        el.style.transform = `translate(${st.dx * 100}%, ${st.dy * 100}%)`;
+      };
+      apply(textRef.current, textTiming);
+      apply(titleRef.current, title.timing);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [step, videoHabillage, textTiming, title.timing]);
 
   // Événements autour d'aujourd'hui (et recherche) pour rattacher la publication.
   useEffect(() => {
@@ -347,7 +425,7 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
     setError(files.length > room ? `${MAX_ITEMS} médias au maximum par publication (limite des carrousels Instagram).` : null);
     const added = files.slice(0, Math.max(room, 0)).map((f) => {
       const video = isVideoFile(f);
-      return { id: crypto.randomUUID(), file: f, url: URL.createObjectURL(f), video, dress: fromCamera, crop: DEFAULT_CROP, filter: "aucun" as PhotoFilter, thumb: null };
+      return { id: crypto.randomUUID(), file: f, url: URL.createObjectURL(f), video, dress: fromCamera, crop: DEFAULT_CROP, filter: "aucun" as PhotoFilter, thumb: null, layer: null };
     });
     if (!added.length) return;
     if (added.some((a) => a.video)) {
@@ -411,24 +489,56 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
    * Habillage d'une vidéo : calque PNG transparent dessiné ici, vidéo + calque déposés dans le bucket
    * privé video-work, assemblage par FFmpeg sur le serveur, puis récupération de la vidéo habillée.
    */
-  const habillerVideo = async (video: File, meta: { width: number; height: number }, report: Report, withTitle: boolean): Promise<File> => {
+  const habillerVideo = async (
+    video: File,
+    meta: { width: number; height: number },
+    report: Report,
+    withTitle: boolean,
+    placement: LayerPlacement | null
+  ): Promise<File> => {
     // Animation et pré-roll du gabarit pour l'orientation de cette vidéo (verticale / horizontale).
     const anim = animationFor(settings, template, orientationOf(meta));
     const pre = prerollFor(settings, orientationOf(meta), template);
-    const canvas = document.createElement("canvas");
-    await renderHabillage(canvas, null, { template, format, text, settings, overlaySize: overlaySizeFor(meta), skipOverlayImage: !!anim, title: withTitle ? title : { ...title, text: "" } });
-    const overlay = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Calque impossible."))), "image/png"));
+    const custom = customOf(settings, template);
+    const titleOn = withTitle && !!title.text.trim();
+    const textOn = !!custom && custom.textPosition !== "none" && !!text.trim();
+    // Texte ou titre minuté : chacun sa couche PNG, incrustée de son début à sa fin par FFmpeg.
+    const timed = (textOn && isTimed(custom.textTiming)) || (titleOn && isTimed(title.timing));
+    const base = {
+      template,
+      format,
+      text,
+      settings,
+      overlaySize: overlaySizeFor(meta),
+      skipOverlayImage: !!anim,
+      placement,
+      title: titleOn ? title : { ...title, text: "" },
+    };
+    const png = async (layer?: "base" | "text" | "title") => {
+      const canvas = document.createElement("canvas");
+      await renderHabillage(canvas, null, layer ? { ...base, layer } : base);
+      return new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Calque impossible."))), "image/png"));
+    };
+    const overlay = await png(timed ? "base" : undefined);
+    const texts: { blob: Blob; timing: TextTiming }[] = [];
+    if (timed && textOn) texts.push({ blob: await png("text"), timing: custom.textTiming ?? DEFAULT_TIMING });
+    if (timed && titleOn) texts.push({ blob: await png("title"), timing: title.timing ?? DEFAULT_TIMING });
 
     if (video.size > VIDEO_HABILLAGE_MAX_BYTES)
       throw new Error(
         `Vidéo trop lourde pour l'habillage (${Math.round(video.size / 1_048_576)} Mo, 500 Mo maximum) : filmez plus court ou en 1080p, ou choisissez le gabarit « Aucun » pour la publier telle quelle.`
       );
     report("Envoi de la vidéo pour l'habillage…");
-    const targets = await createVideoWorkUploads(video.name || "video.mp4");
-    // Calque (quelques Ko) d'un seul tenant ; vidéo (souvent des centaines de Mo au téléphone) en
+    const targets = await createVideoWorkUploads(video.name || "video.mp4", texts.length);
+    // Calques (quelques Ko) d'un seul tenant ; vidéo (souvent des centaines de Mo au téléphone) en
     // envoi reprenable par morceaux, sinon la moindre coupure réseau fait tout échouer.
-    const overlayUp = await createClient().storage.from("video-work").uploadToSignedUrl(targets.overlay.path, targets.overlay.token, overlay, { contentType: "image/png" });
-    if (overlayUp.error) throw new Error(`Envoi du calque impossible : ${overlayUp.error.message}`);
+    const storage = createClient().storage.from("video-work");
+    const ups = await Promise.all([
+      storage.uploadToSignedUrl(targets.overlay.path, targets.overlay.token, overlay, { contentType: "image/png" }),
+      ...targets.texts.map((t, k) => storage.uploadToSignedUrl(t.path, t.token, texts[k].blob, { contentType: "image/png" })),
+    ]);
+    const upErr = ups.find((u) => u.error)?.error;
+    if (upErr) throw new Error(`Envoi du calque impossible : ${upErr.message}`);
     try {
       await uploadResumableSigned({
         bucket: "video-work",
@@ -449,8 +559,9 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
       body: JSON.stringify({
         videoPath: targets.video.path,
         overlayPath: targets.overlay.path,
-        animation: anim ? { url: anim.url, mode: anim.mode } : null,
+        animation: anim ? { url: anim.url, mode: anim.mode, placement: placement ?? anim.placement } : null,
         preroll: pre ? { url: pre.url, revealAt: pre.revealAt } : null,
+        texts: targets.texts.map((t, k) => ({ path: t.path, timing: texts[k].timing })),
       }),
     });
     const body = (await res.json().catch(() => ({}))) as { url?: string; path?: string; error?: string };
@@ -490,7 +601,7 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
             if (meta && meta.duration <= VIDEO_HABILLAGE_MAX_SECONDS && (template !== "aucun" || titled || !!pre)) {
               const n = items.filter((x) => x.video && x.dress).length;
               const sub: Report = (d, f) => report(n > 1 ? `Vidéo n° ${i + 1} — ${d}` : d, f);
-              v = await habillerVideo(v, meta, sub, i === coverIndex);
+              v = await habillerVideo(v, meta, sub, i === coverIndex, it.layer);
             }
           }
           medias.push(v);
@@ -509,7 +620,8 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
         // Habillée : gabarit LGEF ; telle quelle : proportions d'origine, recadrage appliqué
         // (réenregistrée en JPEG : le HEIC de l'iPhone est refusé par les réseaux).
         const canvas = document.createElement("canvas");
-        if (it.dress) await renderHabillage(canvas, src, { template, format, text, settings, crop: it.crop, title: i === coverIndex ? title : { ...title, text: "" } });
+        if (it.dress)
+          await renderHabillage(canvas, src, { template, format, text, settings, crop: it.crop, placement: it.layer, title: i === coverIndex ? title : { ...title, text: "" } });
         else renderPlain(canvas, src, it.crop);
         medias.push(await canvasToFile(canvas, `${name}.jpg`));
       }
@@ -603,6 +715,13 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
               <span>
                 <span className="block text-sm font-bold text-ink">Galerie du téléphone</span>
                 <span className="block text-xs text-ink-4">Photos, vidéos ou images déjà prêtes (visuel partenaire…)</span>
+              </span>
+            </button>
+            <button onClick={onOpenCenter} className="flex items-center gap-3 rounded-panel border border-line p-4 text-left">
+              <Send size={24} className="text-ink-3" />
+              <span>
+                <span className="block text-sm font-bold text-ink">Centre de publication</span>
+                <span className="block text-xs text-ink-4">Médias à publier, publications programmées et publiées</span>
               </span>
             </button>
           </div>
@@ -769,6 +888,7 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
                     {/* « #t=0.1 » : affiche la première image sur iPhone au lieu d'un cadre noir. */}
                     <video
                       key={videoUrl}
+                      ref={previewVideoRef}
                       controls
                       playsInline
                       preload="metadata"
@@ -784,14 +904,29 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
                     {/* Aperçu de l'animation : son image clé (Safari ne lit pas le VP9 transparent). */}
                     {videoHabillage && anim && (
                       // eslint-disable-next-line @next/next/no-img-element -- image distante du bucket, superposée à la vidéo
-                      <img src={anim.preview} alt="" className="pointer-events-none absolute inset-0 h-full w-full object-cover" />
+                      <img
+                        src={anim.preview}
+                        alt=""
+                        className="pointer-events-none absolute max-w-none object-fill"
+                        style={{
+                          left: `${(layer.x - layer.scale / 2) * 100}%`,
+                          top: `${(layer.y - layer.scale / 2) * 100}%`,
+                          width: `${layer.scale * 100}%`,
+                          height: `${layer.scale * 100}%`,
+                        }}
+                      />
                     )}
                     {videoHabillage && (
-                      <canvas
-                        ref={overlayRef}
-                        {...drag}
-                        className={`absolute inset-0 h-full w-full ${dragMode === "title" ? "cursor-move touch-none" : "pointer-events-none"}`}
-                      />
+                      <>
+                        <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+                        <canvas ref={textRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+                        {/* Couche du dessus : reçoit le doigt pour placer le titre ou le calque. */}
+                        <canvas
+                          ref={titleRef}
+                          {...drag}
+                          className={`absolute inset-0 h-full w-full ${dragMode === "title" || dragMode === "layer" ? "cursor-move touch-none" : "pointer-events-none"}`}
+                        />
+                      </>
                     )}
                   </div>
                 )}
@@ -879,6 +1014,31 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
                 </div>
               </>
             )}
+            {hasLayer && (
+              <div className="rounded-panel border border-line p-3">
+                <div className={label}>{layerIsAnim ? "Animation" : "Calque"} de l&rsquo;habillage{!single ? ` · média n° ${active + 1}` : ""}</div>
+                <div className="flex items-center gap-2 text-xs text-ink-3">
+                  <span className="w-12 shrink-0">Taille</span>
+                  <input
+                    type="range"
+                    min={0.1}
+                    max={2}
+                    step={0.01}
+                    value={layer.scale}
+                    onChange={(e) => setLayer((l) => ({ ...l, scale: Number(e.target.value) }))}
+                    className="min-w-0 flex-1"
+                  />
+                  <button onClick={() => setDragMode((m) => (m === "layer" ? null : "layer"))} className={chip(dragMode === "layer")}>
+                    {dragMode === "layer" ? "Terminer" : "Déplacer"}
+                  </button>
+                  {item?.layer && (
+                    <button onClick={() => setLayer(null)} className="rounded-full p-1.5 text-ink-4" aria-label="Revenir au réglage de l'habillage" title="Revenir au réglage de l'habillage">
+                      <RotateCcw size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
@@ -924,6 +1084,13 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
                         {dragMode === "title" ? "Terminer" : "Placer le titre"}
                       </button>
                     </div>
+                    {isVideo && (
+                      <div className="border-t border-dashed border-line pt-3">
+                        <div className={label}>Apparition du titre dans la vidéo</div>
+                        <TextTimingEditor value={title.timing} onChange={(t) => setTitle((x) => ({ ...x, timing: t }))} duration={videoMeta?.duration ?? 10} />
+                        <p className="mt-1.5 text-[11px] text-ink-4">Lancez la vidéo ci-dessus pour voir l&rsquo;apparition.</p>
+                      </div>
+                    )}
                   </>
                 )}
                 {!isVideo && (
@@ -939,7 +1106,9 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
                   <p className="text-[11px] text-link">
                     {dragMode === "title"
                       ? "Touchez ou faites glisser l'aperçu pour placer le titre ; pincez à deux doigts pour changer sa taille."
-                      : "Faites glisser l'aperçu pour déplacer la photo."}
+                      : dragMode === "layer"
+                        ? "Faites glisser l'aperçu pour déplacer le calque ; pincez à deux doigts pour changer sa taille."
+                        : "Faites glisser l'aperçu pour déplacer la photo."}
                   </p>
                 )}
               </div>

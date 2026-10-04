@@ -4,6 +4,8 @@
 // (bandeau, cadre, titre) ou personnalisé par un administrateur (calque PNG transparent) — avec le
 // texte saisi. Rendu dans un canvas, export JPEG 1080 px de large. Réglages : board_settings.habillage.
 
+import { DEFAULT_PLACEMENT, type LayerPlacement, type TextTiming } from "@/lib/board/textTiming";
+
 export type HabillageFormat = "portrait" | "carre" | "original";
 export type BuiltinTemplate = "aucun" | "bandeau" | "cadre" | "titre";
 /** Gabarit intégré, ou `custom:<id>` pour un gabarit personnalisé. */
@@ -26,7 +28,26 @@ export type CustomHabillage = {
   keywords?: string;
   /** Pré-roll propre à ce gabarit (sa compétition) ; à défaut, le pré-roll général. */
   preroll?: Preroll | null;
+  /** Position et taille du calque PNG (défaut : plein cadre). */
+  overlayPlacement?: LayerPlacement;
+  /** Position et taille de l'animation vidéo (défaut : plein cadre). */
+  animationPlacement?: LayerPlacement;
+  /** Apparition du texte dans les vidéos (défaut : toute la vidéo). */
+  textTiming?: TextTiming;
 };
+
+export {
+  DEFAULT_PLACEMENT,
+  DEFAULT_TIMING,
+  SLIDE_DISTANCE,
+  TEXT_MOTIONS,
+  isTimed,
+  motionDirection,
+  textStateAt,
+  type LayerPlacement,
+  type TextMotion,
+  type TextTiming,
+} from "@/lib/board/textTiming";
 
 /** Pré-roll : transition (volet, fond, logo) jouée au début de chaque vidéo publiée. */
 export type Preroll = {
@@ -35,8 +56,8 @@ export type Preroll = {
   revealAt: number;
 };
 
-/** Titre libre posé sur la photo ou la vidéo : position (fraction de la largeur / hauteur), taille, couleur. */
-export type FreeTitle = { text: string; x: number; y: number; size: number; color: string };
+/** Titre libre posé sur la photo ou la vidéo : position (fraction de la largeur / hauteur), taille, couleur, apparition (vidéo). */
+export type FreeTitle = { text: string; x: number; y: number; size: number; color: string; timing?: TextTiming };
 /** Cadrage de la photo : zoom (≥ 1) et décalage (-1 à 1) dans la marge disponible. */
 export type PhotoCrop = { zoom: number; dx: number; dy: number };
 export const DEFAULT_CROP: PhotoCrop = { zoom: 1, dx: 0, dy: 0 };
@@ -54,9 +75,19 @@ export const orientationOf = (v: { width: number; height: number }): VideoOrient
 
 /** Animation d'un gabarit pour une vidéo de cette orientation (ou l'autre, à défaut). */
 export function animationFor(settings: HabillageSettings, template: HabillageTemplate, orientation: VideoOrientation) {
-  const custom = settings.custom.find((c) => `custom:${c.id}` === template);
+  const custom = customOf(settings, template);
   const anim = custom?.animations?.[orientation] ?? custom?.animations?.[orientation === "vertical" ? "horizontal" : "vertical"];
-  return anim ? { ...anim, mode: custom?.animationMode ?? "once" } : null;
+  return anim ? { ...anim, mode: custom?.animationMode ?? "once", placement: custom?.animationPlacement ?? DEFAULT_PLACEMENT } : null;
+}
+
+export const customOf = (settings: HabillageSettings, template: HabillageTemplate) => settings.custom.find((c) => `custom:${c.id}` === template) ?? null;
+
+/** Rectangle d'un calque placé : taille « couvrante » (plein cadre à l'échelle 1), centré sur (x, y). */
+export function placedRect(img: { width: number; height: number }, W: number, H: number, p: LayerPlacement, stretch = false) {
+  const k = Math.max(W / img.width, H / img.height);
+  const w = (stretch ? W : img.width * k) * p.scale;
+  const h = (stretch ? H : img.height * k) * p.scale;
+  return { x: p.x * W - w / 2, y: p.y * H - h / 2, w, h };
 }
 
 export type HabillageSettings = {
@@ -274,6 +305,15 @@ type RenderOptions = {
   crop?: PhotoCrop;
   /** Titre libre, placé et dimensionné par l'utilisateur, dessiné par-dessus le gabarit. */
   title?: FreeTitle | null;
+  /** Position / taille du calque PNG ou de l'animation (défaut : réglage du gabarit). */
+  placement?: LayerPlacement | null;
+  /**
+   * Vidéo à textes minutés : une couche à la fois — « base » (gabarit sans son texte ni le titre),
+   * « text » (texte du gabarit personnalisé seul) ou « title » (titre seul). Défaut : tout.
+   */
+  layer?: "base" | "text" | "title";
+  /** Aperçu (administration) : dessine l'image clé de l'animation de cette orientation, placée. */
+  animationPreview?: VideoOrientation;
 };
 
 /**
@@ -283,7 +323,7 @@ type RenderOptions = {
 export async function renderHabillage(canvas: HTMLCanvasElement, img: (CanvasImageSource & { width: number; height: number }) | null, opts: RenderOptions) {
   await renderTemplate(canvas, img, opts);
   const t = opts.title;
-  if (!t?.text.trim()) return;
+  if (!t?.text.trim() || opts.layer === "base" || opts.layer === "text") return;
   const ctx = canvas.getContext("2d")!;
   const W = canvas.width;
   const H = canvas.height;
@@ -316,6 +356,9 @@ async function renderTemplate(
   canvas.height = H;
   const ctx = canvas.getContext("2d")!;
   ctx.clearRect(0, 0, W, H);
+  // Couche « texte » ou « titre » seule : rien du gabarit (le titre est dessiné par renderHabillage).
+  if (opts.layer === "title") return;
+  if (opts.layer === "text") img = null;
   const photo = (x: number, y: number, w: number, h: number) => {
     if (img) drawCover(ctx, img, x, y, w, h, opts.crop);
   };
@@ -330,13 +373,24 @@ async function renderTemplate(
     const custom = settings.custom.find((c) => `custom:${c.id}` === opts.template);
     photo(0, 0, W, H);
     if (!custom) return;
-    const key = opts.format === "carre" ? "carre" : "portrait";
-    // Photo sans calque fixe : l'image clé de l'animation sert de calque.
-    const src = opts.skipOverlayImage
-      ? undefined
-      : (custom.overlays[key] ?? custom.overlays.portrait ?? custom.overlays.carre ?? custom.animations?.vertical?.preview ?? custom.animations?.horizontal?.preview);
-    const overlay = src ? await loadImage(src) : null;
-    if (overlay) drawCover(ctx, overlay, 0, 0, W, H);
+    if (opts.layer !== "text") {
+      const key = opts.format === "carre" ? "carre" : "portrait";
+      // Photo sans calque fixe : l'image clé de l'animation sert de calque (placée comme l'animation).
+      const fixed = custom.overlays[key] ?? custom.overlays.portrait ?? custom.overlays.carre;
+      const animKey = opts.animationPreview
+        ? (custom.animations?.[opts.animationPreview] ?? custom.animations?.[opts.animationPreview === "vertical" ? "horizontal" : "vertical"])?.preview
+        : undefined;
+      const fromAnim = !!animKey || (!fixed && !opts.skipOverlayImage);
+      const src = animKey ?? (opts.skipOverlayImage ? undefined : (fixed ?? custom.animations?.vertical?.preview ?? custom.animations?.horizontal?.preview));
+      const overlay = src ? await loadImage(src) : null;
+      if (overlay) {
+        const p = opts.placement ?? (fromAnim ? custom.animationPlacement : custom.overlayPlacement) ?? DEFAULT_PLACEMENT;
+        // L'animation est étirée au cadre de la vidéo (comme FFmpeg) ; le calque PNG le couvre.
+        const r = placedRect(overlay, W, H, p, !!animKey);
+        ctx.drawImage(overlay, r.x, r.y, r.w, r.h);
+      }
+    }
+    if (opts.layer === "base") return;
     if (text && custom.textPosition !== "none") {
       const pad = 72;
       const { size, lines } = fitText(ctx, text, W - pad * 2, 3, tMax, tMin);
@@ -346,6 +400,9 @@ async function renderTemplate(
     }
     return;
   }
+
+  // Gabarits intégrés : leur texte fait partie du gabarit (pas de couche texte séparée).
+  if (opts.layer === "text") return;
 
   if (opts.template === "cadre") {
     const pad = 40;

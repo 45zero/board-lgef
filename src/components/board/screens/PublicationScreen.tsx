@@ -3,6 +3,7 @@
 import { InstagramMentionField } from "@/components/board/publication/InstagramMentionField";
 import { PublicationSettings } from "@/components/board/publication/PublicationSettings";
 import { useCanPublish } from "@/hooks/board/useCanPublish";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -197,9 +198,9 @@ function MediaThumb({ pub }: { pub: MediaPublication }) {
 
 function StatTile({ icon: Icon, label, value }: { icon: typeof Eye; label: string; value: number | undefined }) {
   return (
-    <div className="min-w-[78px] rounded-btn bg-subtle px-2.5 py-1.5">
-      <div className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-[0.08em] text-ink-4">
-        <Icon size={10} /> {label}
+    <div className="min-w-0 rounded-btn bg-subtle px-2 py-1.5 md:min-w-[78px] md:px-2.5">
+      <div className="flex items-center gap-1 truncate text-[10px] font-mono uppercase tracking-[0.08em] text-ink-4">
+        <Icon size={10} className="shrink-0" /> {label}
       </div>
       <div className="text-sm font-bold text-ink">{value === undefined ? "—" : numberFormatter.format(value)}</div>
     </div>
@@ -876,12 +877,12 @@ function StatsToolbar({ items, refreshing, onRefresh }: { items: MediaPublicatio
   if (totals.posts === 0) return null;
 
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-panel border border-line bg-card p-3">
+    <div className="mb-3 grid grid-cols-4 gap-1.5 rounded-panel border border-line bg-card p-3 md:flex md:flex-wrap md:items-center md:gap-2">
       <StatTile icon={Eye} label="Vues" value={totals.views} />
       <StatTile icon={Heart} label="J'aime" value={totals.likes} />
       <StatTile icon={MessageCircle} label="Comm." value={totals.comments} />
       <StatTile icon={Repeat2} label="Partages" value={totals.shares} />
-      <div className="ml-auto flex flex-col items-end gap-1">
+      <div className="col-span-4 flex items-center justify-between gap-1 md:ml-auto md:flex-col md:items-end">
         <button
           onClick={onRefresh}
           disabled={refreshing}
@@ -918,7 +919,7 @@ function FilterChip({
     <button
       onClick={onClick}
       style={active && color ? { background: color.base, color: "#fff" } : !active && color ? { background: color.bg, color: color.ink } : undefined}
-      className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+      className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${
         color ? "" : active ? "bg-navy text-white" : "bg-subtle text-ink-3 hover:bg-hover"
       }`}
     >
@@ -948,7 +949,8 @@ function FiltersBar({ items, filters, onChange }: { items: MediaPublication[]; f
 
   return (
     <div className="mb-3 space-y-2 rounded-panel border border-line bg-card p-3">
-      <div className="flex flex-wrap items-center gap-1.5">
+      {/* Téléphone : chaque rangée défile à l'horizontale au lieu de s'empiler. */}
+      <div className="-mx-3 flex items-center gap-1.5 overflow-x-auto px-3 md:mx-0 md:flex-wrap md:px-0">
         <FilterChip active={filters.category === "all"} onClick={() => onChange({ ...filters, category: "all", competition: "all" })}>
           Tous ({items.length})
         </FilterChip>
@@ -965,7 +967,7 @@ function FiltersBar({ items, filters, onChange }: { items: MediaPublication[]; f
       </div>
 
       {filters.category === "competitions" && (
-        <div className="flex flex-wrap items-center gap-1.5 border-t border-dashed border-line pt-2">
+        <div className="-mx-3 flex items-center gap-1.5 overflow-x-auto border-t border-dashed border-line px-3 pt-2 md:mx-0 md:flex-wrap md:px-0">
           <FilterChip active={filters.competition === "all"} onClick={() => onChange({ ...filters, competition: "all" })}>
             Tous
           </FilterChip>
@@ -977,7 +979,7 @@ function FiltersBar({ items, filters, onChange }: { items: MediaPublication[]; f
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-1.5 border-t border-dashed border-line pt-2">
+      <div className="-mx-3 flex items-center gap-1.5 overflow-x-auto border-t border-dashed border-line px-3 pt-2 md:mx-0 md:flex-wrap md:px-0">
         <FilterChip active={filters.kind === "all"} onClick={() => onChange({ ...filters, kind: "all" })}>
           Tous les types
         </FilterChip>
@@ -1745,7 +1747,7 @@ function PublicationCard({
   const KindIcon = KIND_ICONS[kind];
 
   return (
-    <div className="flex items-start gap-3 border-b border-line bg-card px-4 py-3 last:border-b-0 hover:bg-hover">
+    <div className="flex flex-wrap items-start gap-3 border-b border-line bg-card px-3 py-3 last:border-b-0 hover:bg-hover md:flex-nowrap md:px-4">
       <MediaThumb pub={pub} />
 
       <div className="min-w-0 flex-1">
@@ -1794,7 +1796,8 @@ function PublicationCard({
         {tab === "published" && <FlaggedComments rows={flagged} onChanged={onChanged} />}
       </div>
 
-      <div className="flex shrink-0 items-center gap-3 self-center">
+      {/* Téléphone : actions sous le contenu, bouton Publier à droite. */}
+      <div className="flex w-full shrink-0 items-center gap-3 self-center empty:hidden md:w-auto">
         {hasMedia && (
           <button onClick={openMedia} className="flex items-center gap-1 text-[11px] font-semibold text-ink-3 hover:text-ink">
             {isDrive ? <ExternalLink size={12} /> : <Play size={12} />}
@@ -1812,16 +1815,16 @@ function PublicationCard({
         )}
         {tab === "to_publish" && (
           <>
-            <button onClick={remove} title="Retirer" className="text-ink-4 hover:text-bad">
+            <button onClick={remove} title="Retirer" aria-label="Retirer" className="p-1 text-ink-4 hover:text-bad md:p-0">
               <Trash2 size={13} />
             </button>
-            <button onClick={onOpenComposer} className="rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white">
+            <button onClick={onOpenComposer} className="ml-auto rounded-btn bg-navy px-4 py-2 text-xs font-bold text-white md:ml-0 md:px-3 md:py-1.5">
               Publier / Programmer
             </button>
           </>
         )}
         {tab === "scheduled" && (
-          <button onClick={onCancelSchedule} className="rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2">
+          <button onClick={onCancelSchedule} className="ml-auto rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 md:ml-0">
             Annuler
           </button>
         )}
@@ -1832,6 +1835,7 @@ function PublicationCard({
 
 export function PublicationScreen() {
   const role = useUserRole();
+  const mobile = useIsMobile();
   const canPublish = useCanPublish();
   // Paramètres (administrateurs) : deux sous-menus, Publication (qui peut publier) et Habillages.
   const [settingsSection, setSettingsSection] = useState<"publication" | "habillages" | null>(null);
@@ -1905,6 +1909,128 @@ export function PublicationScreen() {
     );
   }
 
+  // Liste de l'onglet courant (ou paramètres), commune au bureau et au téléphone.
+  const content = settingsSection ? (
+    <PublicationSettings section={settingsSection} />
+    ) : loading ? (
+    <div className="flex h-full items-center justify-center text-ink-4">Chargement…</div>
+    ) : items.length === 0 ? (
+    <div className="flex h-full items-center justify-center rounded-panel border border-dashed border-line text-sm text-ink-4">
+      Rien ici pour l&rsquo;instant.
+    </div>
+    ) : (
+    <>
+      <FiltersBar items={items} filters={filters} onChange={setFilters} />
+      {tab === "published" && (
+        <StatsToolbar
+          items={visible}
+          refreshing={refreshingStats}
+          onRefresh={() => refreshStats(visible.filter((p) => publishedEntries(p).length > 0).map((p) => p.id))}
+        />
+      )}
+      {visible.length === 0 ? (
+        <div className="rounded-panel border border-dashed border-line p-8 text-center text-sm text-ink-4">
+          Aucune publication pour ces filtres.
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-panel border border-line">
+          {visible.map((pub) => (
+            <PublicationCard
+              key={pub.id}
+              pub={pub}
+              tab={tab}
+              onOpenComposer={() => setComposerFor(pub)}
+              onCancelSchedule={async () => {
+                await cancelScheduledPublication(pub.id);
+                refetch();
+              }}
+              onChanged={() => refetch(true)}
+              flagged={flaggedRows.filter((r) => r.publication_id === pub.id)}
+            />
+          ))}
+        </div>
+      )}
+    </>
+    );
+
+  // Fenêtres du centre : compositeur et nouvelle publication.
+  const dialogs = (
+    <>
+      {composerFor && (
+        <Composer
+          pub={composerFor}
+          onClose={() => setComposerFor(null)}
+          onDone={() => {
+            setComposerFor(null);
+            refetch();
+          }}
+        />
+      )}
+
+      {creating && (
+        <NewPublicationDialog
+          onClose={() => setCreating(false)}
+          onCreated={async (id) => {
+            // Appelé à la fin de la tâche de fond : si l'utilisateur est toujours sur cet écran,
+            // on lui ouvre directement le compositeur de la nouvelle publication.
+            setTab("to_publish");
+            tabRef.current = "to_publish";
+            const list = await refetch();
+            const created = list.find((p) => p.id === id);
+            if (created) setComposerFor(created);
+          }}
+        />
+      )}
+    </>
+  );
+
+  // Téléphone : onglets en haut sur toute la largeur, liste en dessous. On crée depuis Caméra /
+  // Galerie de l'écran Publication réseaux ; la gestion des habillages est ouverte aux administrateurs.
+  if (mobile) {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="flex shrink-0 gap-1.5 px-3 pt-3">
+          <div className="grid min-w-0 flex-1 grid-cols-3 gap-1 rounded-panel border border-line bg-card p-1">
+            {TABS.map((t) => {
+              const Icon = t.icon;
+              const active = tab === t.id && !settingsOpen;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    setTab(t.id);
+                    setSettingsSection(null);
+                  }}
+                  className={`flex items-center justify-center gap-1.5 rounded-btn px-1 py-2 text-xs font-bold transition-colors ${
+                    active ? "bg-navy text-white" : "text-ink-2"
+                  }`}
+                >
+                  <Icon size={14} className="shrink-0" />
+                  <span className="truncate">{t.label}</span>
+                  <span className={`rounded-full px-1.5 text-[10px] ${active ? "bg-white/20 text-white" : "bg-subtle text-ink-3"}`}>
+                    {counts[t.id]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {role.isSuperUser && (
+            <button
+              onClick={() => setSettingsSection((s) => (s ? null : "habillages"))}
+              className={`flex w-11 shrink-0 items-center justify-center rounded-panel border ${settingsOpen ? "border-navy bg-navy text-white" : "border-line bg-card text-ink-2"}`}
+              aria-label="Habillages"
+              title="Habillages"
+            >
+              <Settings size={17} />
+            </button>
+          )}
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-3">{content}</div>
+        {dialogs}
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full gap-4 p-4">
       <aside className="w-[220px] shrink-0 rounded-panel border border-line bg-card p-3">
@@ -1969,76 +2095,9 @@ export function PublicationScreen() {
         )}
       </aside>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {settingsSection ? (
-          <PublicationSettings section={settingsSection} />
-        ) : loading ? (
-          <div className="flex h-full items-center justify-center text-ink-4">Chargement…</div>
-        ) : items.length === 0 ? (
-          <div className="flex h-full items-center justify-center rounded-panel border border-dashed border-line text-sm text-ink-4">
-            Rien ici pour l&rsquo;instant.
-          </div>
-        ) : (
-          <>
-            <FiltersBar items={items} filters={filters} onChange={setFilters} />
-            {tab === "published" && (
-              <StatsToolbar
-                items={visible}
-                refreshing={refreshingStats}
-                onRefresh={() => refreshStats(visible.filter((p) => publishedEntries(p).length > 0).map((p) => p.id))}
-              />
-            )}
-            {visible.length === 0 ? (
-              <div className="rounded-panel border border-dashed border-line p-8 text-center text-sm text-ink-4">
-                Aucune publication pour ces filtres.
-              </div>
-            ) : (
-              <div className="overflow-hidden rounded-panel border border-line">
-                {visible.map((pub) => (
-                  <PublicationCard
-                    key={pub.id}
-                    pub={pub}
-                    tab={tab}
-                    onOpenComposer={() => setComposerFor(pub)}
-                    onCancelSchedule={async () => {
-                      await cancelScheduledPublication(pub.id);
-                      refetch();
-                    }}
-                    onChanged={() => refetch(true)}
-                    flagged={flaggedRows.filter((r) => r.publication_id === pub.id)}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">{content}</div>
 
-      {composerFor && (
-        <Composer
-          pub={composerFor}
-          onClose={() => setComposerFor(null)}
-          onDone={() => {
-            setComposerFor(null);
-            refetch();
-          }}
-        />
-      )}
-
-      {creating && (
-        <NewPublicationDialog
-          onClose={() => setCreating(false)}
-          onCreated={async (id) => {
-            // Appelé à la fin de la tâche de fond : si l'utilisateur est toujours sur cet écran,
-            // on lui ouvre directement le compositeur de la nouvelle publication.
-            setTab("to_publish");
-            tabRef.current = "to_publish";
-            const list = await refetch();
-            const created = list.find((p) => p.id === id);
-            if (created) setComposerFor(created);
-          }}
-        />
-      )}
+      {dialogs}
     </div>
   );
 }

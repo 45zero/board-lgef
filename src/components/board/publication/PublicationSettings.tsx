@@ -74,7 +74,7 @@ function Habillages() {
           on choisit l&rsquo;environnement et son habillage s&rsquo;applique.
         </p>
       </div>
-      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {settings.custom.map((c) => (
           <button key={c.id} onClick={() => setOpen(c.id)} className="space-y-2 rounded-panel border border-line bg-card p-3 text-left hover:border-link">
             <Thumb c={c} />
@@ -89,13 +89,13 @@ function Habillages() {
         ))}
         <button
           onClick={() => setOpen("new")}
-          className="flex min-h-[180px] flex-col items-center justify-center gap-2 rounded-panel border-2 border-dashed border-line text-sm font-bold text-link hover:border-link hover:bg-sel-bg"
+          className="flex min-h-[140px] flex-col items-center justify-center gap-2 rounded-panel border-2 border-dashed border-line text-sm font-bold text-link hover:border-link hover:bg-sel-bg"
         >
           <Plus size={22} /> Créer un nouvel habillage
         </button>
         <button
           onClick={() => setOpen("general")}
-          className="flex min-h-[180px] flex-col items-center justify-center gap-2 rounded-panel border border-line bg-card p-3 text-center hover:border-link"
+          className="flex min-h-[140px] flex-col items-center justify-center gap-2 rounded-panel border border-line bg-card p-3 text-center hover:border-link"
         >
           <Settings2 size={22} className="text-navy" />
           <span className="text-sm font-bold text-ink">Réglages généraux</span>

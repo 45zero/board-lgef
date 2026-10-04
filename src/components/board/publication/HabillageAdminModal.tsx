@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Upload, Trash2, Plus, ImageIcon, Loader2 } from "lucide-react";
+import { X, Upload, Trash2, Plus, ImageIcon, Loader2, Play, Square, Move, RotateCcw } from "lucide-react";
+import { TextTimingEditor } from "@/components/board/publication/TextTimingEditor";
 import { createClient } from "@/lib/supabase/client";
 import {
   createHabillageAnimationUpload,
@@ -14,6 +15,11 @@ import {
   HABILLAGE_FORMATS,
   HABILLAGE_SIZES,
   HABILLAGE_VIDEO_SIZES,
+  DEFAULT_PLACEMENT,
+  animationFor,
+  customOf,
+  textStateAt,
+  type LayerPlacement,
   type Preroll,
   type VideoOrientation,
   availableTemplates,
@@ -28,7 +34,20 @@ import {
 
 const label = "mb-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4";
 const input = "rounded-btn border border-line bg-card px-2.5 py-1.5 text-sm outline-none focus:border-link";
-const chip = (active: boolean) => `rounded-full px-3 py-1 text-xs font-bold ${active ? "bg-navy text-white" : "bg-subtle text-ink-3"}`;
+const chip = (active: boolean) => `shrink-0 rounded-full px-3 py-1 text-xs font-bold ${active ? "bg-navy text-white" : "bg-subtle text-ink-3"}`;
+
+/** Aperçu : formats photo, ou cadre d'une vidéo verticale / horizontale (animation, textes minutés). */
+type PreviewMode = HabillageFormat | VideoOrientation;
+const PREVIEW_MODES: { id: PreviewMode; label: string }[] = [
+  ...HABILLAGE_FORMATS.map((f) => ({ id: f.id as PreviewMode, label: f.label })),
+  { id: "vertical", label: "Vidéo 9:16" },
+  { id: "horizontal", label: "Vidéo 16:9" },
+];
+/** Cadre de l'aperçu vidéo (1080 px de large, comme le calque incrusté). */
+const VIDEO_FRAME: Record<VideoOrientation, { width: number; height: number }> = {
+  vertical: { width: 1080, height: 1920 },
+  horizontal: { width: 1080, height: 608 },
+};
 
 /** Photo d'exemple pour l'aperçu, tant qu'aucune photo de test n'est choisie. */
 function samplePhoto(): HTMLCanvasElement {
@@ -76,7 +95,16 @@ export function HabillageAdminModal({
   const [settings, setSettings] = useState<HabillageSettings | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(focus && focus !== "general" && focus !== "new" ? focus : null);
   const [template, setTemplate] = useState<HabillageTemplate>("bandeau");
-  const [format, setFormat] = useState<HabillageFormat>("portrait");
+  const [preview, setPreview] = useState<PreviewMode>("portrait");
+  const videoMode = preview === "vertical" || preview === "horizontal" ? preview : null;
+  const format: HabillageFormat = videoMode ? "portrait" : (preview as HabillageFormat);
+  const setFormat = (f: HabillageFormat) => setPreview(f);
+  // Lecture de l'apparition du texte (aperçu vidéo) et déplacement du calque au doigt.
+  const [playing, setPlaying] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const textCanvasRef = useRef<HTMLCanvasElement>(null);
+  const clockRef = useRef<HTMLSpanElement>(null);
+  const moveStart = useRef<{ x: number; y: number; p: LayerPlacement } | null>(null);
   const [sampleText, setSampleText] = useState("Rentrée de l'arbitrage 2026");
   const [photo, setPhoto] = useState<(CanvasImageSource & { width: number; height: number }) | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -101,10 +129,51 @@ export function HabillageAdminModal({
       });
   }, [focus]);
 
+  const tpl = settings ? customOf(settings, template) : null;
+  const anim = settings && videoMode ? animationFor(settings, template, videoMode) : null;
+
+  // Aperçu en deux couches : le gabarit (photo, calque ou animation placés) et, par-dessus, le texte
+  // de l'habillage, que la lecture fait apparaître selon son minutage.
   useEffect(() => {
-    if (!settings || !canvasRef.current) return;
-    void renderHabillage(canvasRef.current, photo ?? samplePhoto(), { template, format, text: sampleText, settings });
-  }, [settings, template, format, sampleText, photo]);
+    if (!settings || !canvasRef.current || !textCanvasRef.current) return;
+    const opts = {
+      template,
+      format,
+      text: sampleText,
+      settings,
+      overlaySize: videoMode ? VIDEO_FRAME[videoMode] : undefined,
+      skipOverlayImage: !!anim,
+      animationPreview: anim ? (videoMode ?? undefined) : undefined,
+    };
+    const img = photo ?? samplePhoto();
+    void renderHabillage(canvasRef.current, img, { ...opts, layer: "base" });
+    void renderHabillage(textCanvasRef.current, img, { ...opts, layer: "text" });
+  }, [settings, template, format, sampleText, photo, videoMode, anim]);
+
+  // Lecture : boucle sur une durée qui couvre l'apparition et la disparition du texte.
+  const timing = tpl?.textTiming;
+  useEffect(() => {
+    const el = textCanvasRef.current;
+    if (!el) return;
+    if (!playing) {
+      el.style.opacity = "1";
+      el.style.transform = "";
+      return;
+    }
+    const total = Math.max(6, (timing?.end ?? timing?.start ?? 0) + 2);
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = ((now - t0) / 1000) % total;
+      const st = textStateAt(timing, t);
+      el.style.opacity = String(st.opacity);
+      el.style.transform = `translate(${st.dx * 100}%, ${st.dy * 100}%)`;
+      if (clockRef.current) clockRef.current.textContent = `${t.toFixed(1)} s`;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, timing]);
 
   if (!settings) {
     return (
@@ -117,6 +186,29 @@ export function HabillageAdminModal({
   const update = (p: Partial<HabillageSettings>) => setSettings((s) => (s ? { ...s, ...p } : s));
   const updateCustom = (id: string, p: Partial<CustomHabillage>) =>
     setSettings((s) => (s ? { ...s, custom: s.custom.map((c) => (c.id === id ? { ...c, ...p } : c)) } : s));
+
+  // Élément placé dans l'aperçu : l'animation (aperçu vidéo, ou photo sans calque), sinon le calque PNG.
+  const fixedOverlay = !!(tpl?.overlays.portrait || tpl?.overlays.carre);
+  const usesAnim = videoMode ? !!anim : !fixedOverlay && !!(tpl?.animations?.vertical || tpl?.animations?.horizontal);
+  const placeKey: "animationPlacement" | "overlayPlacement" | null = !tpl ? null : usesAnim ? "animationPlacement" : fixedOverlay ? "overlayPlacement" : null;
+  const placement = (tpl && placeKey && tpl[placeKey]) || DEFAULT_PLACEMENT;
+  const setPlacement = (p: LayerPlacement | undefined) => tpl && placeKey && updateCustom(tpl.id, { [placeKey]: p });
+  const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+  const moveHandlers = {
+    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!moving) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      moveStart.current = { x: e.clientX, y: e.clientY, p: placement };
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
+      const st = moveStart.current;
+      if (!moving || !st) return;
+      const r = e.currentTarget.getBoundingClientRect();
+      setPlacement({ ...st.p, x: clamp(st.p.x + (e.clientX - st.x) / r.width, -0.5, 1.5), y: clamp(st.p.y + (e.clientY - st.y) / r.height, -0.5, 1.5) });
+    },
+    onPointerUp: () => (moveStart.current = null),
+    onPointerCancel: () => (moveStart.current = null),
+  };
 
   const showGeneral = !focus || focus === "general";
   const showCustom = focus !== "general";
@@ -296,9 +388,16 @@ export function HabillageAdminModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-modal bg-card shadow-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="flex shrink-0 items-start justify-between bg-navy px-5 py-4 text-white">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 md:p-4" onClick={onClose}>
+      {/* Téléphone : plein écran ; ordinateur : fenêtre. */}
+      <div
+        className="flex h-full w-full max-w-5xl flex-col overflow-hidden bg-card shadow-modal md:h-auto md:max-h-[92vh] md:rounded-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className="flex shrink-0 items-start justify-between bg-navy px-4 pb-3 text-white md:px-5 md:py-4"
+          style={{ paddingTop: "max(12px, env(safe-area-inset-top))" }}
+        >
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-white/70">Centre de publication · Administration</div>
             <h3 className="mt-1 text-base font-extrabold">
@@ -308,18 +407,98 @@ export function HabillageAdminModal({
                   ? `Habillage ${settings.custom.find((c) => c.id === focusedId)?.name || "— nouvel environnement"}`
                   : "Habillages des publications"}
             </h3>
-            <div className="text-xs text-white/80">Appliqués aux photos publiées depuis le mobile (bouton central « Publication réseaux »).</div>
+            <div className="hidden text-xs text-white/80 md:block">Appliqués aux photos et vidéos publiées depuis le mobile (bouton central « Publication réseaux »).</div>
           </div>
           <button onClick={onClose} className="rounded-full p-1 text-white/80 hover:bg-white/10" aria-label="Fermer">
             <X size={18} />
           </button>
         </div>
 
-        <div className="grid flex-1 gap-5 overflow-y-auto p-5 md:grid-cols-[1fr_380px]">
-          <div className="space-y-5">
-            <section className="rounded-panel border border-line bg-subtle/50 p-3 text-xs text-ink-2">
-              <div className={label}>Tailles des images</div>
-              <ul className="space-y-0.5">
+        <div className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto overscroll-contain p-4 md:grid-cols-[1fr_380px] md:grid-rows-[auto_1fr] md:gap-5 md:p-5">
+          {/* Aperçu : collé en haut de l'écran sur téléphone pendant qu'on règle en dessous. */}
+          <div className="sticky -top-4 z-10 -mx-4 -mt-4 space-y-2 bg-card px-4 pb-2 pt-3 shadow-[0_8px_12px_-10px_rgba(0,0,0,0.35)] md:sticky md:top-0 md:col-start-2 md:row-start-1 md:m-0 md:self-start md:p-0 md:shadow-none">
+            <div className={`${label} hidden md:block`}>Aperçu</div>
+            <div
+              {...moveHandlers}
+              className={`relative mx-auto w-fit max-w-full overflow-hidden rounded-panel bg-subtle shadow-card ${moving ? "cursor-move touch-none outline outline-2 outline-red" : ""}`}
+            >
+              <canvas ref={canvasRef} className="block max-h-[28vh] w-auto max-w-full md:max-h-[55vh]" />
+              <canvas ref={textCanvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+              {playing && (
+                <span ref={clockRef} className="absolute right-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 font-mono text-[10px] text-white" />
+              )}
+            </div>
+            {(placeKey || (tpl && tpl.textPosition !== "none")) && (
+              <div className="flex items-center gap-2 text-xs text-ink-3">
+                {placeKey && (
+                  <>
+                    <span className="shrink-0 font-semibold">{placeKey === "animationPlacement" ? "Animation" : "Calque"}</span>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={2}
+                      step={0.01}
+                      value={placement.scale}
+                      onChange={(e) => setPlacement({ ...placement, scale: Number(e.target.value) })}
+                      aria-label="Taille"
+                      className="min-w-0 flex-1"
+                    />
+                    <button onClick={() => setMoving((m) => !m)} className={`flex items-center gap-1 ${chip(moving)}`}>
+                      <Move size={12} /> {moving ? "OK" : "Déplacer"}
+                    </button>
+                    {tpl?.[placeKey] && (
+                      <button onClick={() => setPlacement(undefined)} className="rounded-full p-1 text-ink-4" title="Plein cadre" aria-label="Revenir au plein cadre">
+                        <RotateCcw size={14} />
+                      </button>
+                    )}
+                  </>
+                )}
+                {tpl && tpl.textPosition !== "none" && (
+                  <button onClick={() => setPlaying((p) => !p)} className={`flex items-center gap-1 ${chip(playing)} ${placeKey ? "" : "ml-auto"}`}>
+                    {playing ? <Square size={11} /> : <Play size={11} />} Texte
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3 md:col-start-2 md:row-start-2 md:self-start">
+            <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 md:mx-0 md:flex-wrap md:px-0">
+              {availableTemplates(settings).map((t) => (
+                <button key={t.id} onClick={() => setTemplate(t.id)} className={chip(template === t.id)}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 md:mx-0 md:flex-wrap md:px-0">
+              {PREVIEW_MODES.map((f) => (
+                <button key={f.id} onClick={() => setPreview(f.id)} className={chip(preview === f.id)}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input value={sampleText} onChange={(e) => setSampleText(e.target.value)} placeholder="Texte d'exemple" className={`${input} min-w-0 flex-1`} />
+              <label className="shrink-0 cursor-pointer text-xs font-semibold text-link hover:underline">
+                Photo test…
+                <input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (f) setPhoto(await loadBitmap(f));
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="space-y-5 md:col-start-1 md:row-span-2 md:row-start-1">
+            <details className="rounded-panel border border-line bg-subtle/50 p-3 text-xs text-ink-2">
+              <summary className={`${label} mb-0 cursor-pointer`}>Tailles des images</summary>
+              <ul className="mt-1.5 space-y-0.5">
                 <li>• {HABILLAGE_SIZES.portrait.label}</li>
                 <li>• {HABILLAGE_SIZES.carre.label}</li>
                 <li>• Original — 1080 px de large, 566 à 1350 px de haut (les calques personnalisés y sont recadrés)</li>
@@ -329,7 +508,7 @@ export function HabillageAdminModal({
                 <li className="pl-3">– {HABILLAGE_VIDEO_SIZES.vertical.label}</li>
                 <li className="pl-3">– {HABILLAGE_VIDEO_SIZES.horizontal.label}</li>
               </ul>
-            </section>
+            </details>
 
             {showGeneral && (
             <>
@@ -535,6 +714,24 @@ export function HabillageAdminModal({
                         <input type="color" value={c.textColor} onChange={(e) => updateCustom(c.id, { textColor: e.target.value })} className="h-7 w-10 rounded border border-line" />
                       </label>
                     </div>
+                    {c.textPosition !== "none" && (
+                      <div className="rounded-btn bg-subtle/60 p-2">
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-ink-2">Apparition du texte dans les vidéos</span>
+                          <button
+                            onClick={() => {
+                              setTemplate(`custom:${c.id}`);
+                              if (!videoMode) setPreview("vertical");
+                              setPlaying(true);
+                            }}
+                            className="flex items-center gap-1 text-xs font-semibold text-link hover:underline"
+                          >
+                            <Play size={11} /> Voir
+                          </button>
+                        </div>
+                        <TextTimingEditor value={c.textTiming} onChange={(t) => updateCustom(c.id, { textTiming: t })} duration={10} />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -542,41 +739,12 @@ export function HabillageAdminModal({
             )}
           </div>
 
-          <div className="space-y-3 md:sticky md:top-0 md:self-start">
-            <div className={label}>Aperçu</div>
-            <canvas ref={canvasRef} className="w-full rounded-panel bg-subtle shadow-card" />
-            <div className="flex flex-wrap gap-1.5">
-              {availableTemplates(settings).map((t) => (
-                <button key={t.id} onClick={() => setTemplate(t.id)} className={chip(template === t.id)}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {HABILLAGE_FORMATS.map((f) => (
-                <button key={f.id} onClick={() => setFormat(f.id)} className={chip(format === f.id)}>
-                  {f.label}
-                </button>
-              ))}
-            </div>
-            <input value={sampleText} onChange={(e) => setSampleText(e.target.value)} placeholder="Texte d'exemple" className={`${input} w-full`} />
-            <label className="block cursor-pointer text-xs font-semibold text-link hover:underline">
-              Tester avec une photo…
-              <input
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  e.target.value = "";
-                  if (f) setPhoto(await loadBitmap(f));
-                }}
-              />
-            </label>
-          </div>
         </div>
 
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-line px-5 py-3">
+        <div
+          className="flex shrink-0 items-center justify-between gap-3 border-t border-line px-4 pt-3 md:px-5 md:pb-3"
+          style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}
+        >
           <p className={`text-xs ${message?.tone === "bad" ? "text-bad" : "text-good"}`}>{message?.text}</p>
           <div className="flex gap-2">
             <button onClick={onClose} className="rounded-btn border border-line px-4 py-2 text-sm font-semibold text-ink-2">

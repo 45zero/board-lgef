@@ -8,11 +8,13 @@ import ffmpeg from "@ffmpeg-installer/ffmpeg";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { isPublisher } from "@/lib/board/publishers";
+import { sanitizePlacement, sanitizeTiming, timedOverlayExprs } from "@/lib/board/textTiming";
 
 // Habillage d'une vidéo : la vidéo d'origine et le calque PNG transparent (déposés dans video-work
 // par le téléphone) sont assemblés par FFmpeg — vidéo ramenée à 1080 px de large, calque ajusté à sa
 // taille, H.264 + AAC, lecture rapide (faststart). Le résultat est déposé dans video-work et un lien
-// signé est renvoyé ; les fichiers d'entrée sont supprimés.
+// signé est renvoyé ; les fichiers d'entrée sont supprimés. Textes minutés (texte du gabarit, titre) :
+// couches PNG à part, incrustées de leur début à leur fin avec fondu / glissement.
 
 export const runtime = "nodejs";
 // Plan Hobby avec Fluid compute : jusqu'à 300 s. Vidéos limitées à 90 s (encodage mesuré ~1,5 fois la durée sur un processeur).
@@ -40,16 +42,21 @@ export async function POST(request: Request) {
   if (!userId) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   if (!(await isPublisher(supabase, userId))) return NextResponse.json({ error: "Vous n'êtes pas habilité à publier." }, { status: 403 });
 
-  const { videoPath, overlayPath, animation, preroll } = (await request.json()) as {
+  const { videoPath, overlayPath, animation, preroll, texts } = (await request.json()) as {
     videoPath?: string;
     overlayPath?: string;
-    /** Animation du gabarit (WebM VP9 transparent du bucket board-assets), jouée une fois ou en boucle. */
-    animation?: { url?: string; mode?: "once" | "loop" } | null;
+    /** Animation du gabarit (WebM VP9 transparent du bucket board-assets), jouée une fois ou en boucle, placée. */
+    animation?: { url?: string; mode?: "once" | "loop"; placement?: unknown } | null;
+    /** Couches de texte minutées (2 au plus) : PNG plein cadre et minutage. */
+    texts?: { path?: string; timing?: unknown }[] | null;
     /** Pré-roll (volet) joué au début : la vidéo démarre à `revealAt` s, sous le volet qui s'ouvre. */
     preroll?: { url?: string; revealAt?: number } | null;
   };
   const own = (p?: string) => !!p && p.startsWith(`${userId}/`) && !p.includes("..");
-  if (!own(videoPath) || !own(overlayPath)) return NextResponse.json({ error: "Fichiers non reconnus." }, { status: 400 });
+  const textLayers = (Array.isArray(texts) ? texts : []).slice(0, 2);
+  if (!own(videoPath) || !own(overlayPath) || textLayers.some((t) => !own(t.path))) {
+    return NextResponse.json({ error: "Fichiers non reconnus." }, { status: 400 });
+  }
   const animPrefix = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/board-assets/habillages/anim/`;
   const validAnim = (u?: string) => !u || (u.startsWith(animPrefix) && u.endsWith(".webm"));
   if (!validAnim(animation?.url) || !validAnim(preroll?.url)) {
@@ -59,16 +66,24 @@ export async function POST(request: Request) {
   const service = createServiceClient();
   const dir = await mkdtemp(path.join(tmpdir(), "habillage-"));
   try {
-    const [video, overlay] = await Promise.all([
+    const [video, overlay, ...textFiles] = await Promise.all([
       service.storage.from(BUCKET).download(videoPath!),
       service.storage.from(BUCKET).download(overlayPath!),
+      ...textLayers.map((t) => service.storage.from(BUCKET).download(t.path!)),
     ]);
-    if (!video.data || !overlay.data) throw new Error("Vidéo ou calque introuvable.");
+    if (!video.data || !overlay.data || textFiles.some((t) => !t.data)) throw new Error("Vidéo ou calque introuvable.");
     const input = path.join(dir, `in${path.extname(videoPath!) || ".mp4"}`);
     const layer = path.join(dir, "overlay.png");
     const output = path.join(dir, "out.mp4");
     await writeFile(input, Buffer.from(await video.data.arrayBuffer()));
     await writeFile(layer, Buffer.from(await overlay.data.arrayBuffer()));
+    const textPngs = await Promise.all(
+      textFiles.map(async (t, i) => {
+        const file = path.join(dir, `text${i + 1}.png`);
+        await writeFile(file, Buffer.from(await t.data!.arrayBuffer()));
+        return file;
+      })
+    );
 
     // Vidéo ramenée à 1080 px de large ; animation (décodée par libvpx pour garder la transparence,
     // une fois ou en boucle) puis calque PNG (texte, logo) ajustés à sa taille.
@@ -84,11 +99,30 @@ export async function POST(request: Request) {
     if (anim) {
       inputs.push(...(loop ? ["-stream_loop", "-1"] : []), "-c:v", "libvpx-vp9", "-i", anim.url!);
       const i = next++;
-      chain.push(`[${i}:v]format=rgba[a${i}]`, `[a${i}][${cur}]scale2ref=w=main_w:h=main_h[an${i}][b${i}]`, `[b${i}][an${i}]overlay=0:0:${loop ? "shortest=1" : "eof_action=pass"}:format=auto[s${i}]`);
+      // Placement : animation étirée au cadre puis mise à l'échelle, centrée sur (x, y).
+      const p = sanitizePlacement(anim.placement);
+      chain.push(
+        `[${i}:v]format=rgba[a${i}]`,
+        `[a${i}][${cur}]scale2ref=w=main_w*${p.scale}:h=main_h*${p.scale}[an${i}][b${i}]`,
+        `[b${i}][an${i}]overlay=x=${p.x}*main_w-overlay_w/2:y=${p.y}*main_h-overlay_h/2:${loop ? "shortest=1" : "eof_action=pass"}:format=auto[s${i}]`
+      );
       cur = `s${i}`;
     }
     chain.push(`[1:v][${cur}]scale2ref=w=main_w:h=main_h[ov][bp]`, "[bp][ov]overlay=0:0:format=auto[sp]");
     cur = "sp";
+    // Textes minutés : image fixe répétée (-loop 1), fondu sur l'alpha, glissement par les
+    // expressions x / y, visible de son début à sa fin (enable) ; shortest=1 : s'arrête avec la vidéo.
+    for (const [k, t] of textLayers.entries()) {
+      inputs.push("-loop", "1", "-framerate", "30", "-i", textPngs[k]);
+      const i = next++;
+      const e = timedOverlayExprs(sanitizeTiming(t.timing), pre?.revealAt ?? 0);
+      chain.push(
+        `[${i}:v]format=rgba${e.fade ? `,${e.fade}` : ""}[t${i}]`,
+        `[t${i}][${cur}]scale2ref=w=main_w:h=main_h[tl${i}][b${i}]`,
+        `[b${i}][tl${i}]overlay=x='${e.x}':y='${e.y}':enable='${e.enable}':shortest=1:format=auto[s${i}]`
+      );
+      cur = `s${i}`;
+    }
     if (pre) {
       inputs.push("-c:v", "libvpx-vp9", "-i", pre.url);
       const i = next++;
@@ -137,6 +171,9 @@ export async function POST(request: Request) {
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     // Fichiers d'entrée temporaires : plus utiles une fois l'encodage terminé (ou échoué).
-    await service.storage.from(BUCKET).remove([videoPath!, overlayPath!]).catch(() => undefined);
+    await service.storage
+      .from(BUCKET)
+      .remove([videoPath!, overlayPath!, ...textLayers.map((t) => t.path!)])
+      .catch(() => undefined);
   }
 }

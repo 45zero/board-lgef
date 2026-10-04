@@ -12,7 +12,8 @@ import { WeekendScreen } from "@/components/board/screens/WeekendScreen";
 import { MobileSettingsSheet, useCenterAction } from "@/components/board/mobile/MobileSettingsSheet";
 import { readAppParam } from "@/lib/board/deepLink";
 import { SocialCapture } from "@/components/board/publication/SocialCapture";
-import { Composer } from "@/components/board/screens/PublicationScreen";
+import { Composer, PublicationScreen } from "@/components/board/screens/PublicationScreen";
+import { ChevronLeft, X } from "lucide-react";
 import type { MediaPublication } from "@/lib/board/mediaPublications";
 
 const TITLES: Record<MobileTab, { title: string; kicker: string }> = {
@@ -53,6 +54,8 @@ export function MobileShell() {
   const [socialOpen, setSocialOpen] = useState(false);
   // Publication dont les médias ont fini de s'envoyer en arrière-plan : choix des réseaux.
   const [composerPub, setComposerPub] = useState<MediaPublication | null>(null);
+  // Centre de publication, ouvert depuis l'écran du bouton central.
+  const [centerOpen, setCenterOpen] = useState(false);
   // Appli mobile : la page elle-même ne défile ni ne rebondit jamais (seules les listes internes
   // défilent). Sans ce verrou, Chrome / Samsung Internet / Safari laissent un léger défilement de
   // la page entière (hauteur d'écran arrondie, effet élastique).
@@ -121,7 +124,43 @@ export function MobileShell() {
         </div>
       )}
 
-      {socialOpen && <SocialCapture onClose={() => setSocialOpen(false)} onReady={setComposerPub} />}
+      {socialOpen && (
+        <SocialCapture
+          onClose={() => setSocialOpen(false)}
+          onReady={setComposerPub}
+          onOpenCenter={() => {
+            setSocialOpen(false);
+            setCenterOpen(true);
+          }}
+        />
+      )}
+      {/* Sous les fenêtres du centre (compositeur, z-60) et au-dessus de la barre du bas. */}
+      {centerOpen && (
+        <div className="fixed inset-0 z-[55] flex flex-col bg-shell">
+          <div className="flex shrink-0 items-center gap-2 bg-navy px-3 pb-3 text-white" style={{ paddingTop: "max(12px, env(safe-area-inset-top))" }}>
+            <button
+              onClick={() => {
+                setCenterOpen(false);
+                setSocialOpen(true);
+              }}
+              className="rounded-full p-1.5 hover:bg-white/10"
+              aria-label="Retour"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-white/70">Publication réseaux</div>
+              <div className="text-sm font-extrabold">Centre de publication</div>
+            </div>
+            <button onClick={() => setCenterOpen(false)} className="rounded-full p-1.5 hover:bg-white/10" aria-label="Fermer">
+              <X size={18} />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1">
+            <PublicationScreen />
+          </div>
+        </div>
+      )}
       {composerPub && <Composer pub={composerPub} onClose={() => setComposerPub(null)} onDone={() => setComposerPub(null)} />}
       {settingsOpen && (
         <MobileSettingsSheet

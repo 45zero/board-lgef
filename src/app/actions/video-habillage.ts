@@ -20,10 +20,11 @@ async function currentPublisher() {
   return userId;
 }
 
-/** Deux URL de dépôt signées : la vidéo d'origine et le calque d'habillage. */
+/** URL de dépôt signées : la vidéo d'origine, le calque d'habillage et les couches de texte minutées (2 au plus). */
 export async function createVideoWorkUploads(
-  videoName: string
-): Promise<{ video: { path: string; token: string }; overlay: { path: string; token: string } }> {
+  videoName: string,
+  textLayers = 0
+): Promise<{ video: { path: string; token: string }; overlay: { path: string; token: string }; texts: { path: string; token: string }[] }> {
   const userId = await currentPublisher();
   const ext = (videoName.split(".").pop() ?? "mp4").toLowerCase().replace(/[^a-z0-9]/g, "") || "mp4";
   const id = randomUUID();
@@ -33,8 +34,13 @@ export async function createVideoWorkUploads(
     if (error || !data) throw new Error(error?.message ?? "Dépôt impossible.");
     return { path, token: data.token };
   };
-  const [video, overlay] = await Promise.all([sign(`${userId}/${id}.${ext}`), sign(`${userId}/${id}-overlay.png`)]);
-  return { video, overlay };
+  const count = Math.min(2, Math.max(0, Math.floor(textLayers)));
+  const [video, overlay, ...texts] = await Promise.all([
+    sign(`${userId}/${id}.${ext}`),
+    sign(`${userId}/${id}-overlay.png`),
+    ...Array.from({ length: count }, (_, i) => sign(`${userId}/${id}-text${i + 1}.png`)),
+  ]);
+  return { video, overlay, texts };
 }
 
 /** Supprime un fichier de travail (le résultat, une fois récupéré par le téléphone). */
