@@ -204,12 +204,30 @@ export function DraftNotice({ draft }: { draft: EventDraft }) {
     ...(draft.date ? [] : ["Aucune date comprise : choisissez-la ci-dessous."]),
     ...draft.unknownPeople.map((n) => `« ${n} » n'a pas été retrouvé parmi les utilisateurs : ajoutez la bonne personne.`),
   ];
+  // Personnes comprises, rappelées ici pour repérer d'un coup d'œil un nom oublié.
+  const names = (role: "responsable" | "membre") => draft.participants.filter((p) => p.role === role).map((p) => p.name).join(", ");
+  const understood = (
+    [
+      ["Responsable", names("responsable")],
+      ["Participants", names("membre")],
+      ["Captation", draft.wantsCoverage ? draft.coverageAssignee?.name ?? "demandée, à attribuer" : ""],
+    ] as const
+  ).filter(([, v]) => v);
   return (
     <div className="rounded-btn border border-navy/20 bg-navy/5 px-3 py-2.5 text-xs text-ink-2">
       <div className="flex items-center gap-1.5 font-bold text-navy">
         <Mic size={13} /> Pré-rempli d&apos;après votre demande — vérifiez avant d&apos;enregistrer
       </div>
       <p className="mt-1 italic text-ink-3">« {draft.text} »</p>
+      {understood.length > 0 && (
+        <div className="mt-1.5 space-y-0.5">
+          {understood.map(([label, value]) => (
+            <div key={label}>
+              <span className="font-bold text-ink">{label} :</span> {value}
+            </div>
+          ))}
+        </div>
+      )}
       {checks.length > 0 && (
         <ul className="mt-1.5 list-disc space-y-0.5 pl-4 font-semibold text-amber-700 dark:text-amber-400">
           {checks.map((c) => (

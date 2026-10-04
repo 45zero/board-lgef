@@ -52,6 +52,8 @@ export async function prepareDictatedEvent(text: string): Promise<{ draft: Event
 
   try {
     const out = await readDictatedEvent({ text: clean, today, me, people });
+    // Trace de diagnostic (journaux serveur) : phrase reçue et personnes retenues.
+    console.info("[event-dictation]", JSON.stringify({ text: clean, responsibleIds: out?.responsibleIds, memberIds: out?.memberIds, coverageAssigneeId: out?.coverageAssigneeId, unknownPeople: out?.unknownPeople }));
     if (!out) return { draft: null, error: "Je n'ai pas compris cette demande : reformulez-la ou remplissez la fiche à la main." };
     const nameOf = new Map(people.map((p) => [p.id, p.name]));
     return {
