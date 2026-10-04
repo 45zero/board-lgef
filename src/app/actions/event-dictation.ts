@@ -21,6 +21,8 @@ export type EventDraft = {
   participants: { id: string; name: string; role: "responsable" | "membre" }[];
   unknownPeople: string[];
   wantsCoverage: boolean;
+  /** Personne chargée de la captation (présélectionnée si l'utilisateur peut attribuer la couverture). */
+  coverageAssignee: { id: string; name: string } | null;
   coverageDetails: string;
   reminders: string[];
   doubts: string[];
@@ -69,8 +71,12 @@ export async function prepareDictatedEvent(text: string): Promise<{ draft: Event
           ...out.memberIds.map((id) => ({ id, name: nameOf.get(id) ?? "—", role: "membre" as const })),
         ],
         unknownPeople: out.unknownPeople,
-        wantsCoverage: out.wantsCoverage,
-        coverageDetails: out.coverageDetails.trim(),
+        wantsCoverage: out.wantsCoverage || !!out.coverageAssigneeId,
+        coverageAssignee: out.coverageAssigneeId ? { id: out.coverageAssigneeId, name: nameOf.get(out.coverageAssigneeId) ?? "—" } : null,
+        // Sans droit d'attribution, la demande part « à réattribuer » : le nom voulu figure dans les détails.
+        coverageDetails: [out.coverageDetails.trim(), out.coverageAssigneeId ? `Demandée à ${nameOf.get(out.coverageAssigneeId) ?? "—"}` : ""]
+          .filter(Boolean)
+          .join(" — "),
         reminders: out.reminders,
         doubts: out.doubts,
       },

@@ -24,12 +24,14 @@ Champs :
 - location : lieu ou adresse tel que dit (ville, stade, siège de la ligue…), sinon null. Ne l'invente pas.
 - onlineMeeting : true pour une visio / Teams / Zoom / « en ligne ».
 - message : précisions utiles qui ne rentrent dans aucun autre champ (ordre du jour, matériel, consignes), sinon chaîne vide.
-- responsibleIds : identifiants des personnes désignées responsables. « me », « moi », « je suis responsable » = l'utilisateur courant (identifiant fourni).
+- responsibleIds : identifiants des personnes explicitement désignées responsables (liste vide si personne ne l'est ; la personne qui fait la captation n'est pas responsable pour autant). « me », « moi », « je suis responsable » = l'utilisateur courant (identifiant fourni).
 - memberIds : identifiants des autres participants cités.
+  Si le nom cité est celui de l'utilisateur courant (« Giovanni Verna » dit par Giovanni Verna), c'est lui : prends son identifiant, même si un autre compte porte un nom proche.
   Ne choisis un identifiant que dans la liste des personnes fournie, en tenant compte des erreurs de transcription (« Jean-Marc » pour « Jean Marc », nom mal orthographié). Si un nom est ambigu ou absent de la liste, ne devine pas : mets-le dans unknownPeople.
 - unknownPeople : noms cités sans correspondance sûre dans la liste.
 - wantsCoverage : true si on demande une couverture photo / vidéo / captation / « un photographe », « un vidéaste ».
-- coverageDetails : détails de la couverture demandée (ex. « photos de la remise des prix »), sinon chaîne vide.
+- coverageAssigneeId : identifiant de la personne qui doit faire la captation / les photos (« c'est X qui filme », « envoie la demande de couverture à X »), sinon null. Ne la mets pas en plus dans memberIds sauf si elle est aussi citée comme participante.
+- coverageDetails : détails de la couverture demandée (ex. « captation vidéo », « photos de la remise des prix »), sinon chaîne vide.
 - reminders : rappels demandés parmi 0min, 10min, 20min, 30min, 1h, 2h, 1d (« rappelle-moi la veille » → 1d).
 - doubts : au plus 3 vraies ambiguïtés à vérifier, en phrases courtes (« mardi prochain » pouvant viser deux dates, date déjà passée cette année…). N'y mets pas ce qui n'a simplement pas été dit (heure de fin, adresse exacte, catégorie par défaut) ni les personnes de unknownPeople. Liste vide si rien n'est ambigu.
 
@@ -48,6 +50,7 @@ const DraftSchema = z.object({
   memberIds: z.array(z.string()),
   unknownPeople: z.array(z.string()),
   wantsCoverage: z.boolean(),
+  coverageAssigneeId: z.string().nullable(),
   coverageDetails: z.string(),
   reminders: z.array(z.enum(REMINDERS)),
   doubts: z.array(z.string()),
@@ -113,6 +116,7 @@ export async function readDictatedEvent(input: {
     endTime: isTime(out.endTime),
     responsibleIds,
     memberIds: [...new Set(out.memberIds.filter((id) => known.has(id) && !responsibleIds.includes(id)))],
+    coverageAssigneeId: out.coverageAssigneeId && known.has(out.coverageAssigneeId) ? out.coverageAssigneeId : null,
     reminders: [...new Set(out.reminders)],
   };
 }

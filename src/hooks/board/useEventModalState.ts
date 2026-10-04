@@ -94,7 +94,7 @@ export function useEventModalState({
   const [reminders, setReminders] = useState<{ id: string; reminder_offset: string }[]>([]);
   const [wantsCoverage, setWantsCoverage] = useState(d?.wantsCoverage ?? false);
   const [coverageDetails, setCoverageDetails] = useState(d?.coverageDetails ?? "");
-  const [coverageTechnicianId, setCoverageTechnicianId] = useState("");
+  const [coverageTechnicianId, setCoverageTechnicianId] = useState(d?.coverageAssignee?.id ?? "");
 
   const { createEvent, updateEvent, deleteEventCascade } = useEventActions();
   const team = useEventTeam(event?.id ?? "", event?.createdBy ?? null);

@@ -26,12 +26,32 @@ function recognitionCtor(): (new () => Recognition) | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+/**
+ * Texte d'une séance de dictée, reconstruit à chaque résultat. Sur mobile (Chrome Android surtout),
+ * chaque résultat redonne la phrase entière depuis le début (« crée-moi », « crée-moi un »,
+ * « crée-moi un évènement »…) : un résultat qui prolonge le précédent le remplace au lieu de s'y ajouter.
+ */
+function sessionTranscript(results: ArrayLike<{ 0: { transcript: string } }>) {
+  const parts: string[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const t = results[i][0].transcript.trim();
+    if (!t) continue;
+    const last = parts[parts.length - 1];
+    const norm = (x: string) => x.toLowerCase().replace(/\s+/g, " ");
+    if (last !== undefined && norm(t).startsWith(norm(last))) parts[parts.length - 1] = t;
+    else if (last !== undefined && norm(last).startsWith(norm(t))) continue;
+    else parts.push(t);
+  }
+  return parts.join(" ");
+}
+
 const EXAMPLE = "Crée-moi un événement le 25 août à 18 h, réunion de la commission arbitrage au siège à Champigneulles, tu me mets responsable avec Paul Martin, et rappelle-moi la veille.";
 
 /** Fenêtre de dictée : micro + texte modifiable → brouillon d'événement. */
 export function VoiceEventDialog({ onClose, onDraft, mobile }: { onClose: () => void; onDraft: (d: EventDraft) => void; mobile?: boolean }) {
   const [text, setText] = useState("");
-  const [interim, setInterim] = useState("");
+  /** Texte déjà présent quand la séance de dictée a commencé (la dictée s'y ajoute). */
+  const baseRef = useRef("");
   const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,17 +69,15 @@ export function VoiceEventDialog({ onClose, onDraft, mobile }: { onClose: () => 
     rec.continuous = true;
     rec.interimResults = true;
     rec.onresult = (e) => {
-      let finalPart = "";
-      let interimPart = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        if (r.isFinal) finalPart += r[0].transcript;
-        else interimPart += r[0].transcript;
-      }
-      if (finalPart) setText((t) => `${t}${t && !t.endsWith(" ") ? " " : ""}${finalPart.trim()}`);
-      setInterim(interimPart);
+      const spoken = sessionTranscript(e.results);
+      const base = baseRef.current;
+      setText(spoken ? `${base}${base && !base.endsWith(" ") ? " " : ""}${spoken}` : base);
     };
     rec.onstart = () => {
+      setText((t) => {
+        baseRef.current = t;
+        return t;
+      });
       setError(null);
       setListening(true);
     };
@@ -70,7 +88,6 @@ export function VoiceEventDialog({ onClose, onDraft, mobile }: { onClose: () => 
     };
     rec.onend = () => {
       setListening(false);
-      setInterim("");
       recRef.current = null;
     };
     recRef.current = rec;
@@ -93,7 +110,7 @@ export function VoiceEventDialog({ onClose, onDraft, mobile }: { onClose: () => 
     setBusy(true);
     setError(null);
     try {
-      const { draft, error } = await prepareDictatedEvent(`${text} ${interim}`.trim());
+      const { draft, error } = await prepareDictatedEvent(text.trim());
       if (draft) onDraft(draft);
       else setError(error);
     } catch {
@@ -128,7 +145,7 @@ export function VoiceEventDialog({ onClose, onDraft, mobile }: { onClose: () => 
 
         <div className="relative">
           <textarea
-            value={listening && interim ? `${text}${text ? " " : ""}${interim}` : text}
+            value={text}
             onChange={(e) => {
               stop();
               setText(e.target.value);
@@ -168,7 +185,7 @@ export function VoiceEventDialog({ onClose, onDraft, mobile }: { onClose: () => 
           )}
           <button
             onClick={submit}
-            disabled={busy || `${text}${interim}`.trim().length < 5}
+            disabled={busy || text.trim().length < 5}
             className="flex items-center gap-1.5 rounded-btn bg-navy px-4 py-2 text-sm font-bold text-white hover:bg-navy-600 disabled:opacity-40"
           >
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
