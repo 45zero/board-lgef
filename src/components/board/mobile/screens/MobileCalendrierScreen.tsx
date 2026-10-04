@@ -25,7 +25,7 @@ import { useSolicitedFilter } from "@/hooks/board/useSolicitedFilter";
 import { passesCoverageFilters, useCoverageFilters } from "@/hooks/board/useCoverageFilters";
 import { useCalendarDefaults, type CalendarView } from "@/hooks/board/useCalendarDefaults";
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
-import { CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
+import { isMultiDayEvent, CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
 import type { CalendarEvent } from "@/lib/board/calendar";
 import { MobileEventModal } from "@/components/board/mobile/MobileEventModal";
@@ -94,8 +94,7 @@ export function MobileCalendrierScreen() {
   // Un événement est "multi-jours" s'il s'étend sur plus d'une journée calendaire
   // locale (ex: BMF Apprentissage sur 4-5 jours) — rendu en bandeau plutôt qu'en
   // puce dans une seule case, comme dans le prototype (§6.4 du handoff).
-  const isMultiDay = (e: CalendarEvent) =>
-    differenceInCalendarDays(startOfDay(parseISO(e.end)), startOfDay(parseISO(e.start))) >= 1;
+  const isMultiDay = (e: CalendarEvent) => isMultiDayEvent(e);
 
   const multiDayEvents = useMemo(() => filtered.filter(isMultiDay), [filtered]);
   const singleDayEventsForDay = (day: Date) => eventsForDay(day).filter((e) => !isMultiDay(e));
@@ -113,7 +112,8 @@ export function MobileCalendrierScreen() {
       .filter((e) => parseISO(e.start) <= weekEnd && parseISO(e.end) >= weekStart)
       .map((e) => {
         const colStart = Math.max(0, differenceInCalendarDays(startOfDay(parseISO(e.start)), weekStart));
-        const colEnd = Math.min(6, differenceInCalendarDays(startOfDay(parseISO(e.end)), weekStart));
+        // Une fin pile à minuit appartient au jour précédent (même règle que l'ordinateur).
+        const colEnd = Math.min(6, differenceInCalendarDays(startOfDay(new Date(parseISO(e.end).getTime() - 1)), weekStart));
         return { event: e, colStart, colEnd };
       });
   };

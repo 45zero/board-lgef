@@ -36,7 +36,7 @@ import { GoogleEventModal } from "@/components/board/calendar/GoogleEventModal";
 import { ORG_COLORS, type OrgKey } from "@/lib/board/tokens";
 import { CalendarSidebar } from "@/components/board/calendar/CalendarSidebar";
 import { StaffEventsMap } from "@/components/board/calendar/StaffEventsMap";
-import type { CalendarEvent } from "@/lib/board/calendar";
+import { isMultiDayEvent, layoutBanners, type CalendarEvent } from "@/lib/board/calendar";
 
 const HOUR_START = 8;
 const HOUR_END = 20;
@@ -190,7 +190,13 @@ export function CalendrierScreen() {
   }, [events, searchQuery, hiddenOrgs, mineOnly, coverage]);
 
   const teamCards = useEventTeamCards(visibleEvents.map((e) => e.id));
-  const eventsForDay = (day: Date) => visibleEvents.filter((e) => isSameDay(parseISO(e.start), day));
+  // Les événements de plusieurs jours sont en bandeaux (layoutBanners), pas dans la case de leur premier jour.
+  const eventsForDay = (day: Date) => visibleEvents.filter((e) => !isMultiDayEvent(e) && isSameDay(parseISO(e.start), day));
+  const monthWeeks = useMemo(() => {
+    const weeks: Date[][] = [];
+    for (let i = 0; i < monthGridDays.length; i += 7) weeks.push(monthGridDays.slice(i, i + 7));
+    return weeks;
+  }, [monthGridDays]);
   const googleEventsForDay = (day: Date) =>
     googleEvents.filter((e) => !e.allDay && isSameDay(parseISO(e.start), day));
 
@@ -442,7 +448,51 @@ export function CalendrierScreen() {
           />
         </div>
       ) :viewMode !== "month" ? (
-        <div className="flex flex-1 overflow-hidden rounded-panel border border-line bg-card">
+        <div className="flex flex-1 flex-col overflow-hidden rounded-panel border border-line bg-card">
+          {/* Événements de plusieurs jours : bandeaux au-dessus de la grille horaire. */}
+          {(() => {
+            const banners = layoutBanners(visibleEvents, displayDays);
+            if (banners.length === 0) return null;
+            const laneCount = banners.reduce((n, b) => Math.max(n, b.lane + 1), 0);
+            const rangeEnd = addDays(displayDays[displayDays.length - 1], 1);
+            return (
+              <div className="flex shrink-0 border-b border-line bg-subtle/40">
+                <div className="flex w-12 shrink-0 items-center justify-end border-r border-line pr-1.5 text-right font-mono text-[9px] leading-tight text-ink-4">
+                  Plusieurs
+                  <br />
+                  jours
+                </div>
+                <div
+                  className="grid flex-1 py-1"
+                  style={{ gridTemplateColumns: `repeat(${displayDays.length}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${laneCount}, auto)` }}
+                >
+                  {banners.map(({ event: ev, colStart, colEnd, lane }) => {
+                    const color = ORG_COLORS[ev.org];
+                    const fromBefore = parseISO(ev.start) < displayDays[0];
+                    const toAfter = new Date(parseISO(ev.end).getTime() - 1) >= rangeEnd;
+                    return (
+                      <button
+                        key={ev.id}
+                        onClick={() => setEditingInternal(ev)}
+                        title={`${ev.title} — du ${format(parseISO(ev.start), "d MMM HH:mm", { locale: fr })} au ${format(parseISO(ev.end), "d MMM HH:mm", { locale: fr })}`}
+                        className={`mx-0.5 my-px flex h-[22px] items-center gap-1 overflow-hidden px-1.5 text-left text-[11px] font-bold ${
+                          fromBefore ? "rounded-l-none" : "rounded-l-chip border-l-4"
+                        } ${toAfter ? "rounded-r-none" : "rounded-r-chip"} ${ev.awaitingMyAnswer ? "ring-2 ring-red" : ""}`}
+                        style={{ gridColumn: `${colStart + 1} / ${colEnd + 2}`, gridRow: lane + 1, background: color.bg, borderLeftColor: color.base, color: color.ink }}
+                      >
+                        {fromBefore && <ChevronLeft size={11} className="shrink-0 opacity-70" />}
+                        <span className="min-w-0 flex-1 truncate">{ev.title}</span>
+                        <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
+                        <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
+                        {toAfter && <ChevronRight size={11} className="shrink-0 opacity-70" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+          <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="w-12 shrink-0 border-r border-line pt-8">
             {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => (
               <div key={i} style={{ height: PX_PER_HOUR }} className="pr-2 text-right font-mono text-[10px] text-ink-4">
@@ -527,6 +577,7 @@ export function CalendrierScreen() {
               );
             })}
           </div>
+          </div>
         </div>
       ) : (
         <div className="flex flex-1 flex-col overflow-hidden rounded-panel border border-line bg-card">
@@ -541,73 +592,131 @@ export function CalendrierScreen() {
             ))}
           </div>
 
-          <div
-            className="grid flex-1 grid-cols-7 overflow-y-auto"
-            style={{ gridTemplateRows: `repeat(${monthGridDays.length / 7}, minmax(96px, auto))` }}
-          >
-            {monthGridDays.map((day) => {
-              const isToday = isSameDay(day, new Date());
-              const inMonth = isSameMonth(day, anchorDate);
-              const dayEvents = eventsForDay(day);
-              const dayGoogleEvents = googleEventsForDay(day);
-
+          <div className="flex flex-1 flex-col overflow-y-auto">
+            {monthWeeks.map((week) => {
+              const banners = layoutBanners(visibleEvents, week);
+              const laneCount = banners.reduce((n, b) => Math.max(n, b.lane + 1), 0);
+              const weekEnd = addDays(week[6], 1);
               return (
                 <div
-                  key={day.toISOString()}
-                  onDoubleClick={() => handleMonthCellDoubleClick(day)}
-                  className={`relative flex flex-col gap-1 border-b border-r border-line p-1.5 last:border-r-0 ${
-                    inMonth ? "" : "bg-subtle/40"
-                  }`}
+                  key={week[0].toISOString()}
+                  className="grid min-h-[104px] flex-1 grid-cols-7 border-b border-line"
+                  style={{ gridTemplateRows: `auto ${laneCount ? `repeat(${laneCount}, auto) ` : ""}1fr` }}
                 >
-                  <button
-                    onClick={() => {
-                      setViewMode("day");
-                      setAnchorDate(day);
-                    }}
-                    className={`flex h-6 w-6 shrink-0 items-center justify-center self-start rounded-full text-xs font-bold ${
-                      isToday ? "bg-navy text-white" : inMonth ? "text-ink-2 hover:bg-hover" : "text-ink-4"
-                    }`}
-                  >
-                    {format(day, "d")}
-                  </button>
-                  {inMonth && (
-                    <span className="pointer-events-none absolute right-1.5 top-2 text-ink-3">
-                      <DayWeatherBadge day={day} forecast={forecast} />
-                    </span>
-                  )}
+                  {/* Fond des cases (toute la hauteur de la semaine). */}
+                  {week.map((day, i) => (
+                    <div
+                      key={`bg-${day.toISOString()}`}
+                      onDoubleClick={() => handleMonthCellDoubleClick(day)}
+                      className={`border-r border-line last:border-r-0 ${isSameMonth(day, anchorDate) ? "" : "bg-subtle/40"}`}
+                      style={{ gridColumn: i + 1, gridRow: "1 / -1" }}
+                    />
+                  ))}
 
-                  <div className="flex flex-col gap-0.5">
-                    {dayEvents.map((ev) => {
-                      const color = ORG_COLORS[ev.org];
-                      return (
+                  {week.map((day, i) => {
+                    const isToday = isSameDay(day, new Date());
+                    const inMonth = isSameMonth(day, anchorDate);
+                    return (
+                      <div
+                        key={`head-${day.toISOString()}`}
+                        onDoubleClick={() => handleMonthCellDoubleClick(day)}
+                        className="relative flex items-start justify-between px-1.5 pt-1.5"
+                        style={{ gridColumn: i + 1, gridRow: 1 }}
+                      >
                         <button
-                          key={ev.id}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingInternal(ev);
+                          onClick={() => {
+                            setViewMode("day");
+                            setAnchorDate(day);
                           }}
-                          className={`flex items-center gap-1 rounded-[4px] border-l-2 px-1 py-0.5 text-left text-[10px] font-semibold ${ev.awaitingMyAnswer ? "ring-2 ring-red" : ""}`}
-                          style={{ background: color.bg, borderLeftColor: color.base, color: color.ink }}
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                            isToday ? "bg-navy text-white" : inMonth ? "text-ink-2 hover:bg-hover" : "text-ink-4"
+                          }`}
                         >
-                          <span className="min-w-0 flex-1 truncate">{ev.title}</span>
-                          <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
-                            <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
+                          {format(day, "d")}
                         </button>
-                      );
-                    })}
-                    {dayGoogleEvents.map((ev) => (
+                        {inMonth && (
+                          <span className="pointer-events-none pt-0.5 text-ink-3">
+                            <DayWeatherBadge day={day} forecast={forecast} />
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Événements de plusieurs jours : un bandeau sur tous leurs jours, comme sur mobile. */}
+                  {banners.map(({ event: ev, colStart, colEnd, lane }) => {
+                    const color = ORG_COLORS[ev.org];
+                    const fromBefore = parseISO(ev.start) < week[0];
+                    const toAfter = new Date(parseISO(ev.end).getTime() - 1) >= weekEnd;
+                    return (
                       <button
-                        key={`g-${ev.id}`}
+                        key={`banner-${ev.id}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setEditingGoogle(ev);
+                          setEditingInternal(ev);
                         }}
-                        className="truncate rounded-[4px] border border-dashed border-line-strong px-1 py-0.5 text-left text-[10px] text-ink-3"
+                        title={`${ev.title} — du ${format(parseISO(ev.start), "d MMM HH:mm", { locale: fr })} au ${format(parseISO(ev.end), "d MMM HH:mm", { locale: fr })}`}
+                        className={`relative mx-1 my-px flex h-[20px] items-center gap-1 overflow-hidden px-1.5 text-left text-[10px] font-semibold ${
+                          fromBefore ? "rounded-l-none border-l-0" : "rounded-l-[4px] border-l-2"
+                        } ${toAfter ? "rounded-r-none" : "rounded-r-[4px]"} ${ev.awaitingMyAnswer ? "ring-2 ring-red" : ""}`}
+                        style={{
+                          gridColumn: `${colStart + 1} / ${colEnd + 2}`,
+                          gridRow: lane + 2,
+                          background: color.bg,
+                          borderLeftColor: color.base,
+                          color: color.ink,
+                          marginLeft: fromBefore ? 0 : undefined,
+                          marginRight: toAfter ? 0 : undefined,
+                        }}
                       >
-                        G · {ev.summary}
+                        {fromBefore && <ChevronLeft size={10} className="shrink-0 opacity-70" />}
+                        <span className="min-w-0 flex-1 truncate">{ev.title}</span>
+                        <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
+                        <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
+                        {toAfter && <ChevronRight size={10} className="shrink-0 opacity-70" />}
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
+
+                  {week.map((day, i) => (
+                    <div
+                      key={`events-${day.toISOString()}`}
+                      onDoubleClick={() => handleMonthCellDoubleClick(day)}
+                      className="relative flex min-w-0 flex-col gap-0.5 px-1.5 pb-1.5 pt-0.5"
+                      style={{ gridColumn: i + 1, gridRow: laneCount + 2 }}
+                    >
+                      {eventsForDay(day).map((ev) => {
+                        const color = ORG_COLORS[ev.org];
+                        return (
+                          <button
+                            key={ev.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingInternal(ev);
+                            }}
+                            className={`flex items-center gap-1 rounded-[4px] border-l-2 px-1 py-0.5 text-left text-[10px] font-semibold ${ev.awaitingMyAnswer ? "ring-2 ring-red" : ""}`}
+                            style={{ background: color.bg, borderLeftColor: color.base, color: color.ink }}
+                          >
+                            <span className="min-w-0 flex-1 truncate">{ev.title}</span>
+                            <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
+                            <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
+                          </button>
+                        );
+                      })}
+                      {googleEventsForDay(day).map((ev) => (
+                        <button
+                          key={`g-${ev.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingGoogle(ev);
+                          }}
+                          className="truncate rounded-[4px] border border-dashed border-line-strong px-1 py-0.5 text-left text-[10px] text-ink-3"
+                        >
+                          G · {ev.summary}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
                 </div>
               );
             })}

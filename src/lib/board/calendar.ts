@@ -168,3 +168,43 @@ export function mapEventRow(row: EventRow, coverageRequest?: CoverageRequestRow)
     status: row.status,
   };
 }
+
+/* ---------- Événements sur plusieurs jours (bandeaux) ---------- */
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+/** Dernier jour occupé : une fin pile à minuit appartient au jour précédent. */
+const lastDay = (endISO: string) => dayStart(new Date(new Date(endISO).getTime() - 1));
+const dayIndex = (d: Date, origin: Date) => Math.round((dayStart(d).getTime() - origin.getTime()) / DAY_MS);
+
+/** Événement qui s'étend sur plus d'une journée calendaire (affiché en bandeau). */
+export function isMultiDayEvent(e: { start: string; end: string }) {
+  return lastDay(e.end).getTime() > dayStart(new Date(e.start)).getTime();
+}
+
+/**
+ * Bandeaux des événements de plusieurs jours sur une rangée de jours consécutifs (une semaine du
+ * mois, les jours de la vue Semaine) : colonnes couvertes et ligne, chaque bandeau prenant la
+ * première ligne libre.
+ */
+export function layoutBanners<T extends { start: string; end: string }>(events: T[], days: Date[]) {
+  if (days.length === 0) return [];
+  const origin = dayStart(days[0]);
+  const last = days.length - 1;
+  const placed: { event: T; colStart: number; colEnd: number; lane: number }[] = [];
+  const lanes: number[] = []; // dernière colonne occupée par ligne
+  const inRow = events
+    .filter(isMultiDayEvent)
+    .map((event) => ({ event, from: dayIndex(new Date(event.start), origin), to: dayIndex(lastDay(event.end), origin) }))
+    .filter(({ from, to }) => to >= 0 && from <= last)
+    .sort((a, b) => a.from - b.from || b.to - b.from - (a.to - a.from));
+  for (const { event, from, to } of inRow) {
+    const colStart = Math.max(0, from);
+    const colEnd = Math.min(last, to);
+    let lane = lanes.findIndex((end) => end < colStart);
+    if (lane === -1) lane = lanes.length;
+    lanes[lane] = colEnd;
+    placed.push({ event, colStart, colEnd, lane });
+  }
+  return placed;
+}
