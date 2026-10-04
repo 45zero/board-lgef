@@ -24,6 +24,7 @@ import {
   setCommentHidden,
   getInstagramPermalink,
   type StatsResult,
+  lookupInstagramAccount,
 } from "@/lib/social/graph";
 import {
   SOCIAL_TARGETS,
@@ -154,6 +155,39 @@ export async function savePublishInfo(client: Client, pub: PublicationRow, updat
   return next;
 }
 
+/* ---------- Texte Facebook ---------- */
+
+const igNames = new Map<string, string | null>();
+
+/**
+ * Facebook ne comprend pas les @comptes Instagram (le texte est commun à tous les réseaux) : chaque
+ * @compte est remplacé par le nom du compte, lu sur Instagram (« @fcmetz » → « FC Metz »). Un compte
+ * introuvable ou personnel reste tel quel. Une fois les mentions de Pages autorisées par Meta, ce
+ * nom pourra devenir une vraie mention Facebook.
+ */
+export async function instagramHandlesToNames(text: string): Promise<string> {
+  const re = /(^|[\s(«"'’])@([A-Za-z0-9._]{2,30})/g;
+  const handles = [...new Set([...text.matchAll(re)].map((m) => m[2].replace(/\.+$/, "").toLowerCase()))];
+  if (handles.length === 0) return text;
+  const target = SOCIAL_TARGETS.find((t) => t.plateforme === "INSTAGRAM");
+  const account = target ? getSocialAccountById(target.accountId) : null;
+  if (!account) return text;
+  await Promise.all(
+    handles
+      .filter((h) => !igNames.has(h))
+      .map(async (h) => {
+        const profile = await lookupInstagramAccount(account.externalId, account.accessToken, h).catch(() => undefined);
+        // Erreur passagère (undefined) : pas mise en cache, retentée à la prochaine publication.
+        if (profile !== undefined) igNames.set(h, profile?.name?.trim() || null);
+      })
+  );
+  return text.replace(re, (whole, before: string, raw: string) => {
+    const handle = raw.replace(/\.+$/, "");
+    const name = igNames.get(handle.toLowerCase());
+    return name ? `${before}${name}${raw.slice(handle.length)}` : whole;
+  });
+}
+
 /**
  * Publie une publication (texte, photo, vidéo ou galerie) sur les pages Facebook et/ou le compte
  * Instagram sélectionnés. Les cibles partent en parallèle ; un échec sur l'une n'empêche pas les
@@ -169,7 +203,7 @@ export async function publishPublicationToSocial(
 ): Promise<SocialPublishResult[]> {
   const pub = await loadPublication(client, publicationId);
   const igTags = normalizeInstagramUsernames(options.igUserTags ?? []);
-  const fbMessage = (caption: string) => withFacebookMentions(caption, options.fbMentions);
+  const fbMessage = async (caption: string) => withFacebookMentions(await instagramHandlesToNames(caption), options.fbMentions);
   const items = await resolveMediaItems(client, pub);
   const kind: PublicationKind = pub.kind ?? kindFromContentTypes(items.map((i) => i.contentType));
   const at = new Date().toISOString();
@@ -218,19 +252,19 @@ export async function publishPublicationToSocial(
 
         if (items.length === 0) {
           if (!caption.trim()) throw new Error("Le texte de la publication est vide.");
-          const { postId } = await publishFacebookText(account.externalId, account.accessToken, { message: fbMessage(caption) });
+          const { postId } = await publishFacebookText(account.externalId, account.accessToken, { message: await fbMessage(caption) });
           return { key, entry: { published: true, at, by, postId, mediaType: "text" } };
         }
         if (items.length > 1) {
           if (items.some((i) => i.kind === "video")) throw new Error("Une galerie Facebook ne peut contenir que des photos.");
-          const { postId } = await publishFacebookGallery(account.externalId, account.accessToken, { urls: items.map((i) => i.url), message: fbMessage(caption) });
+          const { postId } = await publishFacebookGallery(account.externalId, account.accessToken, { urls: items.map((i) => i.url), message: await fbMessage(caption) });
           return { key, entry: { published: true, at, by, postId, mediaType: "gallery" } };
         }
         if (items[0].kind === "video") {
-          const { videoId } = await publishFacebookVideo(account.externalId, account.accessToken, { fileUrl: items[0].url, description: fbMessage(caption) });
+          const { videoId } = await publishFacebookVideo(account.externalId, account.accessToken, { fileUrl: items[0].url, description: await fbMessage(caption) });
           return { key, entry: { published: true, at, by, videoId, mediaType: "video" } };
         }
-        const { postId } = await publishFacebookPhoto(account.externalId, account.accessToken, { url: items[0].url, caption: fbMessage(caption) });
+        const { postId } = await publishFacebookPhoto(account.externalId, account.accessToken, { url: items[0].url, caption: await fbMessage(caption) });
         return { key, entry: { published: true, at, by, postId, mediaType: "image" } };
       } catch (e) {
         return { key, error: e instanceof Error ? e.message : "Erreur inattendue." };
@@ -525,7 +559,7 @@ export async function editPublicationCaption(client: Client, publicationId: stri
       const target = SOCIAL_TARGETS.find((t) => t.key === key);
       if (!entry?.published || target?.plateforme !== "FACEBOOK") return { key, ok: false, error: "non modifiable depuis le board." };
       try {
-        await editFacebookPost(entry, withFacebookMentions(caption, mentions), metaTarget(key as SocialTargetKey).account.accessToken);
+        await editFacebookPost(entry, withFacebookMentions(await instagramHandlesToNames(caption), mentions), metaTarget(key as SocialTargetKey).account.accessToken);
         return { key, ok: true };
       } catch (e) {
         return { key, ok: false, error: e instanceof Error ? e.message : "Erreur inattendue." };
