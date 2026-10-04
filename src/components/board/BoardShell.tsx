@@ -111,7 +111,7 @@ export function BoardShell() {
     return (
       <>
         <MobileShell />
-        <BackgroundTasksPanel />
+        <BackgroundTasksPanel mobile />
       </>
     );
 

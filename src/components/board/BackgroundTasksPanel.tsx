@@ -3,13 +3,19 @@
 import { AlertTriangle, CheckCircle2, Loader2, X } from "lucide-react";
 import { useBackgroundTasks } from "@/contexts/BackgroundTasksContext";
 
-/** Tâches en arrière-plan (envois, publications) — coin inférieur droit, visible depuis n'importe quel module. */
-export function BackgroundTasksPanel() {
+/**
+ * Tâches en arrière-plan (envois, publications) — coin inférieur droit, visible depuis n'importe quel
+ * module ; sur mobile, au-dessus de la barre de navigation.
+ */
+export function BackgroundTasksPanel({ mobile }: { mobile?: boolean }) {
   const { tasks, dismiss } = useBackgroundTasks();
   if (tasks.length === 0) return null;
 
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[90] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+    <div
+      className={`pointer-events-none fixed z-[90] flex flex-col gap-2 ${mobile ? "inset-x-3" : "bottom-4 right-4 w-80 max-w-[calc(100vw-2rem)]"}`}
+      style={mobile ? { bottom: "calc(env(safe-area-inset-bottom) + 84px)" } : undefined}
+    >
       {tasks.map((t) => (
         <div key={t.id} className="pointer-events-auto rounded-panel border border-line bg-card p-3 shadow-modal">
           <div className="flex items-start gap-2">
@@ -33,6 +39,17 @@ export function BackgroundTasksPanel() {
               </button>
             )}
           </div>
+          {t.status === "done" && t.action && (
+            <button
+              onClick={() => {
+                t.action!.run();
+                dismiss(t.id);
+              }}
+              className="mt-2 w-full rounded-btn bg-red py-2.5 text-sm font-extrabold text-white shadow-btn-red"
+            >
+              {t.action.label}
+            </button>
+          )}
           {t.status === "running" && (
             <div className="mt-2 h-1 overflow-hidden rounded-full bg-subtle">
               {t.progress === undefined ? (

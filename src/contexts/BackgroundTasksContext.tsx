@@ -17,6 +17,8 @@ export type BackgroundTask = {
   progress?: number;
   status: "running" | "done" | "error";
   message?: string;
+  /** Suite à donner une fois la tâche terminée (ex. « Choisir les réseaux ») : la tâche reste affichée jusque-là. */
+  action?: { label: string; run: () => void };
 };
 
 export type TaskControl = { setProgress: (progress: number | undefined, detail?: string) => void };
@@ -24,6 +26,8 @@ export type TaskControl = { setProgress: (progress: number | undefined, detail?:
 type RunOptions<T> = {
   /** Message affiché une fois la tâche terminée (null = message par défaut). */
   success?: (result: T) => string | null;
+  /** Bouton proposé une fois la tâche terminée. */
+  action?: (result: T) => { label: string; run: () => void } | null;
 };
 
 type Ctx = {
@@ -57,8 +61,9 @@ export function BackgroundTasksProvider({ children }: { children: React.ReactNod
       try {
         const result = await fn({ setProgress: (progress, detail) => patch(id, { progress, ...(detail !== undefined ? { detail } : {}) }) });
         const message = options?.success?.(result) ?? "Terminé.";
-        patch(id, { status: "done", progress: 1, message });
-        setTimeout(() => dismiss(id), AUTO_DISMISS_MS);
+        const action = options?.action?.(result) ?? undefined;
+        patch(id, { status: "done", progress: 1, message, action });
+        if (!action) setTimeout(() => dismiss(id), AUTO_DISMISS_MS);
         return result;
       } catch (e) {
         patch(id, { status: "error", message: e instanceof Error ? e.message : "Échec." });

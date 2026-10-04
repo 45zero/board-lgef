@@ -12,6 +12,8 @@ import { WeekendScreen } from "@/components/board/screens/WeekendScreen";
 import { MobileSettingsSheet, useCenterAction } from "@/components/board/mobile/MobileSettingsSheet";
 import { readAppParam } from "@/lib/board/deepLink";
 import { SocialCapture } from "@/components/board/publication/SocialCapture";
+import { Composer } from "@/components/board/screens/PublicationScreen";
+import type { MediaPublication } from "@/lib/board/mediaPublications";
 
 const TITLES: Record<MobileTab, { title: string; kicker: string }> = {
   calendrier: { title: "Calendrier", kicker: "EVENEMENTS" },
@@ -49,6 +51,8 @@ export function MobileShell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fraisOpen, setFraisOpen] = useState(linkedApp === "frais");
   const [socialOpen, setSocialOpen] = useState(false);
+  // Publication dont les médias ont fini de s'envoyer en arrière-plan : choix des réseaux.
+  const [composerPub, setComposerPub] = useState<MediaPublication | null>(null);
   const handleCenterPress = () => {
     setMailMenuOpen(false);
     if (center === "social") setSocialOpen(true);
@@ -109,7 +113,8 @@ export function MobileShell() {
         </div>
       )}
 
-      {socialOpen && <SocialCapture onClose={() => setSocialOpen(false)} />}
+      {socialOpen && <SocialCapture onClose={() => setSocialOpen(false)} onReady={setComposerPub} />}
+      {composerPub && <Composer pub={composerPub} onClose={() => setComposerPub(null)} onDone={() => setComposerPub(null)} />}
       {settingsOpen && (
         <MobileSettingsSheet
           canPublish={canPublish}

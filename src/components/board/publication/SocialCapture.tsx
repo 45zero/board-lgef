@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Video, Images, X, ChevronLeft, ChevronRight, Loader2, CalendarDays, Search, Send, Plus, Trash2, Crop, RotateCcw } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useBackgroundTasks } from "@/contexts/BackgroundTasksContext";
 import { uploadEventFiles, uploadStandaloneMedia } from "@/lib/board/eventFiles";
 import { uploadResumableSigned } from "@/lib/board/resumableUpload";
 import { createPublication, listMediaPublications, type MediaPublication } from "@/lib/board/mediaPublications";
@@ -31,12 +32,13 @@ import {
 } from "@/lib/board/habillage";
 import { getHabillageSettings } from "@/app/actions/board-settings";
 import { searchEventsForExpense, type EventCandidate } from "@/app/actions/expense-scan";
-import { Composer } from "@/components/board/screens/PublicationScreen";
 import { InAppCamera, cameraSupported } from "@/components/board/publication/InAppCamera";
 import { createClient } from "@/lib/supabase/client";
 import { createVideoWorkUploads, removeVideoWork } from "@/app/actions/video-habillage";
 
 type Step = "capture" | "environnement" | "habillage" | "publier";
+/** Progression d'une tâche de fond : texte, et avancement de 0 à 1 s'il est connu. */
+type Report = (detail: string, fraction?: number) => void;
 
 /**
  * Un média de la série. `dress` : habillé LGEF (photos prises sur le moment) ou publié tel quel
@@ -89,8 +91,9 @@ const overlaySizeFor = (v: { width: number; height: number }) => ({ width: 1080,
  * LGEF + texte (photos), légende et événement éventuel, puis le compositeur du centre de
  * publication pour choisir les réseaux et publier tout de suite.
  */
-export function SocialCapture({ onClose }: { onClose: () => void }) {
+export function SocialCapture({ onClose, onReady }: { onClose: () => void; onReady: (pub: MediaPublication) => void }) {
   const { user } = useAuth();
+  const { runTask } = useBackgroundTasks();
   const [step, setStep] = useState<Step>("capture");
   // Série de médias (ordre de publication) et média affiché dans l'éditeur d'habillage.
   const [items, setItems] = useState<Item[]>([]);
@@ -129,9 +132,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   const [event, setEvent] = useState<EventCandidate | null>(null);
   const [eventQuery, setEventQuery] = useState("");
   const [eventResults, setEventResults] = useState<EventCandidate[] | null>(null);
-  const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [composerFor, setComposerFor] = useState<MediaPublication | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
@@ -380,7 +381,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
    * Habillage d'une vidéo : calque PNG transparent dessiné ici, vidéo + calque déposés dans le bucket
    * privé video-work, assemblage par FFmpeg sur le serveur, puis récupération de la vidéo habillée.
    */
-  const habillerVideo = async (video: File, meta: { width: number; height: number }): Promise<File> => {
+  const habillerVideo = async (video: File, meta: { width: number; height: number }, report: Report): Promise<File> => {
     const canvas = document.createElement("canvas");
     await renderHabillage(canvas, null, { template, format, text, settings, overlaySize: overlaySizeFor(meta), skipOverlayImage: !!anim, title });
     const overlay = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Calque impossible."))), "image/png"));
@@ -389,7 +390,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
       throw new Error(
         `Vidéo trop lourde pour l'habillage (${Math.round(video.size / 1_048_576)} Mo, 500 Mo maximum) : filmez plus court ou en 1080p, ou choisissez le gabarit « Aucun » pour la publier telle quelle.`
       );
-    setProgress("Envoi de la vidéo pour l'habillage…");
+    report("Envoi de la vidéo pour l'habillage…");
     const targets = await createVideoWorkUploads(video.name || "video.mp4");
     // Calque (quelques Ko) d'un seul tenant ; vidéo (souvent des centaines de Mo au téléphone) en
     // envoi reprenable par morceaux, sinon la moindre coupure réseau fait tout échouer.
@@ -402,13 +403,13 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         token: targets.video.token,
         file: video,
         contentType: video.type || "video/mp4",
-        onProgress: (sent, total) => setProgress(`Envoi de la vidéo pour l'habillage… ${Math.round((sent / Math.max(total, 1)) * 100)} %`),
+        onProgress: (sent, total) => report(`Envoi de la vidéo pour l'habillage… ${Math.round((sent / Math.max(total, 1)) * 100)} %`, sent / Math.max(total, 1)),
       });
     } catch (e) {
       throw new Error(`Envoi de la vidéo impossible (${Math.round(video.size / 1_048_576)} Mo) : ${e instanceof Error ? e.message : "réseau coupé"}. Réessayez, idéalement en Wi-Fi.`);
     }
 
-    setProgress("Habillage de la vidéo… (jusqu'à 2 à 3 minutes)");
+    report("Habillage de la vidéo… (jusqu'à 2 à 3 minutes)");
     const res = await fetch("/api/media/video-habillage", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -422,16 +423,25 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
     const body = (await res.json().catch(() => ({}))) as { url?: string; path?: string; error?: string };
     if (!res.ok || !body.url) throw new Error(body.error ?? "Habillage de la vidéo impossible.");
 
-    setProgress("Récupération de la vidéo habillée…");
+    report("Récupération de la vidéo habillée…");
     const blob = await (await fetch(body.url)).blob();
     if (body.path) void removeVideoWork(body.path).catch(() => undefined);
     return new File([blob], `publication-${Date.now()}.mp4`, { type: "video/mp4" });
   };
 
-  const publish = async () => {
+  /**
+   * Préparation et envoi en tâche de fond (BackgroundTasksContext) : l'écran se ferme tout de suite,
+   * la progression s'affiche au-dessus de la barre du bas et on peut naviguer dans le board pendant
+   * l'envoi. Une fois les médias envoyés, « Choisir les réseaux et publier » ouvre le compositeur.
+   */
+  const publish = () => {
     if (!items.length || !user) return;
-    setError(null);
-    try {
+    const userId = user.id;
+    onClose();
+    void runTask(
+      `Publication réseaux · ${items.length} média${items.length > 1 ? "s" : ""}`,
+      async ({ setProgress }) => {
+      const report: Report = (detail, fraction) => setProgress(fraction, detail);
       // Dans l'ordre de la série : photos habillées (rendues ici), images telles quelles (JPEG),
       // vidéos d'origine (typées d'après leur extension si le téléphone ne l'a pas fait, sinon les
       // réseaux les refusent) — habillées seulement quand elles sont seules.
@@ -440,11 +450,11 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         const name = `publication-${Date.now()}-${i + 1}`;
         if (it.video) {
           let v = it.file.type ? it.file : new File([it.file], it.file.name, { type: /\.mov$/i.test(it.file.name) ? "video/quicktime" : "video/mp4" });
-          if (videoHabillage && videoMeta && (template !== "aucun" || !!title.text.trim() || !!pre)) v = await habillerVideo(v, videoMeta);
+          if (videoHabillage && videoMeta && (template !== "aucun" || !!title.text.trim() || !!pre)) v = await habillerVideo(v, videoMeta, report);
           medias.push(v);
           continue;
         }
-        setProgress(items.length > 1 ? `Préparation des photos… ${i + 1}/${items.length}` : "Préparation de la photo…");
+        report(items.length > 1 ? `Préparation des photos… ${i + 1}/${items.length}` : "Préparation de la photo…");
         const bmp = await loadBitmap(it.file).catch(() => {
           throw new Error(`Photo n° ${i + 1} illisible : retirez-la de la série.`);
         });
@@ -461,9 +471,9 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         else renderPlain(canvas, src, it.crop);
         medias.push(await canvasToFile(canvas, `${name}.jpg`));
       }
-      setProgress(medias.length > 1 ? `Envoi des ${medias.length} médias…` : "Envoi du média…");
+      report(medias.length > 1 ? `Envoi des ${medias.length} médias…` : "Envoi du média…", 0);
       const onProgress = (sent: number, total: number) =>
-        setProgress(`${medias.length > 1 ? `Envoi des ${medias.length} médias` : "Envoi du média"}… ${Math.round((sent / Math.max(total, 1)) * 100)} %`);
+        report(`${medias.length > 1 ? `Envoi des ${medias.length} médias` : "Envoi du média"}… ${Math.round((sent / Math.max(total, 1)) * 100)} %`, sent / Math.max(total, 1));
       let fileIds: string[] = [];
       let standalone: Awaited<ReturnType<typeof uploadStandaloneMedia>> = [];
       if (event) {
@@ -474,7 +484,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
       } else {
         standalone = await uploadStandaloneMedia(medias, onProgress);
       }
-      setProgress("Préparation de la publication…");
+      report("Préparation de la publication…");
       const id = await createPublication(
         {
           eventId: event?.id ?? null,
@@ -484,20 +494,19 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
           category: event ? null : "communication",
           caption: caption.trim() || text.trim(),
         },
-        user.id
+        userId
       );
       const pub = (await listMediaPublications("to_publish")).find((p) => p.id === id);
       if (!pub) throw new Error("Publication créée : retrouvez-la dans le centre de publication.");
-      setProgress(null);
-      setComposerFor(pub);
-    } catch (e) {
-      setProgress(null);
-      setError(e instanceof Error ? e.message : "Publication impossible.");
-    }
+      return pub;
+      },
+      {
+        success: () => "Médias envoyés.",
+        action: (pub) => (pub ? { label: "Choisir les réseaux et publier", run: () => onReady(pub) } : null),
+      }
+    );
   };
 
-  // Dernière étape : le compositeur du centre de publication (réseaux, identifications, publier).
-  if (composerFor) return <Composer pub={composerFor} onClose={onClose} onDone={onClose} />;
 
   const back = () => {
     if (step === "publier") setStep(needsHabillage ? "habillage" : "capture");
@@ -547,18 +556,11 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                 <span className="block text-xs text-white/80">Photos instantanées à la suite, vidéo, zoom</span>
               </span>
             </button>
-            <button onClick={() => videoRef.current?.click()} className="flex items-center gap-3 rounded-panel bg-navy p-4 text-left text-white">
-              <Video size={26} />
-              <span>
-                <span className="block text-base font-extrabold">Filmer avec le téléphone</span>
-                <span className="block text-xs text-white/80">Appareil du téléphone : vidéos longues, pleine qualité</span>
-              </span>
-            </button>
             <button onClick={() => galleryRef.current?.click()} className="flex items-center gap-3 rounded-panel border border-line p-4 text-left">
               <Images size={24} className="text-ink-3" />
               <span>
-                <span className="block text-sm font-bold text-ink">Choisir dans la galerie</span>
-                <span className="block text-xs text-ink-4">Photos, vidéos ou visuels déjà prêts (partenaire…)</span>
+                <span className="block text-sm font-bold text-ink">Galerie du téléphone</span>
+                <span className="block text-xs text-ink-4">Photos, vidéos ou images déjà prêtes (visuel partenaire…)</span>
               </span>
             </button>
           </div>
@@ -623,14 +625,9 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                 <button onClick={openCamera} className="flex w-full items-center justify-center gap-2 rounded-panel bg-red p-3.5 text-base font-extrabold text-white shadow-btn-red">
                   <Camera size={22} /> Reprendre la caméra
                 </button>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => videoRef.current?.click()} className="flex items-center justify-center gap-1.5 rounded-panel border border-line p-3 text-sm font-bold text-ink-2">
-                    <Video size={16} /> Vidéo téléphone
-                  </button>
-                  <button onClick={() => galleryRef.current?.click()} className="flex items-center justify-center gap-1.5 rounded-panel border border-line p-3 text-sm font-bold text-ink-2">
-                    <Plus size={16} /> Galerie
-                  </button>
-                </div>
+                <button onClick={() => galleryRef.current?.click()} className="flex w-full items-center justify-center gap-1.5 rounded-panel border border-line p-3 text-sm font-bold text-ink-2">
+                  <Plus size={16} /> Galerie : photos, vidéos, images
+                </button>
               </>
             ) : (
               <p className="text-center text-xs text-ink-4">{MAX_ITEMS} médias : c&apos;est le maximum d&apos;un carrousel Instagram.</p>
@@ -1082,7 +1079,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
 
       {(step !== "capture" || items.length > 0) && (
         <div className="flex shrink-0 gap-2 border-t border-line p-3" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
-          <button onClick={back} disabled={!!progress} className="rounded-btn border border-line px-4 py-3 text-sm font-bold text-ink-2 disabled:opacity-50">
+          <button onClick={back} className="rounded-btn border border-line px-4 py-3 text-sm font-bold text-ink-2">
             Retour
           </button>
           {step === "capture" ? (
@@ -1102,11 +1099,10 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
           ) : (
             <button
               onClick={publish}
-              disabled={!!progress}
               className="flex flex-1 items-center justify-center gap-2 rounded-btn bg-red py-3 text-sm font-extrabold text-white shadow-btn-red disabled:opacity-60"
             >
-              {progress ? <Loader2 size={16} className="animate-spin" /> : <Send size={15} />}
-              {progress ?? "Choisir les réseaux et publier"}
+              <Send size={15} />
+              Envoyer en arrière-plan
             </button>
           )}
         </div>
