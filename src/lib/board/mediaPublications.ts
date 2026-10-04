@@ -313,31 +313,46 @@ export async function publishPublicationToYoutube(
   by: { first_name: string | null; last_name: string | null } | null
 ) {
   const supabase = createClient();
-  let videoUrl: string | null = null;
-  const standalone = pub.media.find((m) => (m.content_type ?? "").startsWith("video"));
-  const file = pub.files.find((f) => (f.content_type ?? "").startsWith("video"));
-  if (standalone) {
-    videoUrl = await getDriveStreamUrl("publication", standalone.drive_file_id);
-  } else if (file?.storage_provider === "drive" && file.drive_file_id) {
-    videoUrl = await getDriveStreamUrl(file.event_id, file.drive_file_id);
-  } else if (file?.path) {
-    videoUrl = (await supabase.storage.from("event-files").createSignedUrl(file.path, 3600)).data?.signedUrl ?? null;
+  // YouTube ne prend que des vidéos : chacune est publiée, dans l'ordre (photos ignorées).
+  const urls: string[] = [];
+  for (const m of pub.media.filter((m) => (m.content_type ?? "").startsWith("video"))) {
+    const url = await getDriveStreamUrl("publication", m.drive_file_id);
+    if (url) urls.push(url);
   }
-  if (!videoUrl) throw new Error("Aucune vidéo à publier sur YouTube.");
-
-  const { data, error } = await supabase.functions.invoke("publish-youtube", {
-    body: { videoUrl, title, description: description ?? "" },
-  });
-  if (error || !data?.success) {
-    throw new Error(data?.error ?? error?.message ?? "Échec de la publication YouTube.");
+  for (const f of pub.files.filter((f) => (f.content_type ?? "").startsWith("video"))) {
+    const url =
+      f.storage_provider === "drive" && f.drive_file_id
+        ? await getDriveStreamUrl(f.event_id, f.drive_file_id)
+        : f.path
+          ? ((await supabase.storage.from("event-files").createSignedUrl(f.path, 3600)).data?.signedUrl ?? null)
+          : null;
+    if (url) urls.push(url);
   }
+  if (urls.length === 0) throw new Error("Aucune vidéo à publier sur YouTube.");
 
+  const ids: string[] = [];
+  let failure: string | null = null;
+  for (const [n, videoUrl] of urls.entries()) {
+    const { data, error } = await supabase.functions.invoke("publish-youtube", {
+      body: { videoUrl, title: urls.length > 1 ? `${title} (${n + 1}/${urls.length})` : title, description: description ?? "" },
+    });
+    if (error || !data?.success) {
+      failure = data?.error ?? error?.message ?? "Échec de la publication YouTube.";
+      break;
+    }
+    if (data.youtube?.videoId) ids.push(data.youtube.videoId);
+  }
+  if (ids.length === 0) throw new Error(failure ?? "Échec de la publication YouTube.");
+
+  const [videoId, ...extraIds] = ids;
   await saveYoutubeInfo(pub.id, {
     published: true,
-    videoId: data.youtube?.videoId,
+    videoId,
+    extraIds: extraIds.length ? extraIds : undefined,
     title,
-    at: data.youtube?.at ?? new Date().toISOString(),
+    at: new Date().toISOString(),
     by,
-    permalink: data.youtube?.videoId ? `https://www.youtube.com/watch?v=${data.youtube.videoId}` : undefined,
+    permalink: `https://www.youtube.com/watch?v=${videoId}`,
   });
+  if (failure) throw new Error(`${ids.length}/${urls.length} vidéos publiées sur YouTube : ${failure}`);
 }

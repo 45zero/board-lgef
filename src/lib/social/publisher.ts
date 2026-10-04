@@ -256,9 +256,42 @@ export async function publishPublicationToSocial(
           return { key, entry: { published: true, at, by, postId, mediaType: "text" } };
         }
         if (items.length > 1) {
-          if (items.some((i) => i.kind === "video")) throw new Error("Une galerie Facebook ne peut contenir que des photos.");
-          const { postId } = await publishFacebookGallery(account.externalId, account.accessToken, { urls: items.map((i) => i.url), message: await fbMessage(caption) });
-          return { key, entry: { published: true, at, by, postId, mediaType: "gallery" } };
+          const photos = items.filter((i) => i.kind !== "video");
+          const videos = items.filter((i) => i.kind === "video");
+          const message = await fbMessage(caption);
+          if (videos.length === 0) {
+            const { postId } = await publishFacebookGallery(account.externalId, account.accessToken, { urls: photos.map((i) => i.url), message });
+            return { key, entry: { published: true, at, by, postId, mediaType: "gallery" } };
+          }
+          // Photos et vidéos mêlées : Facebook n'accepte pas de vidéo dans un album — album (ou photo)
+          // des photos, puis chaque vidéo publiée à part avec le même texte.
+          let postId: string | undefined;
+          if (photos.length > 1) postId = (await publishFacebookGallery(account.externalId, account.accessToken, { urls: photos.map((i) => i.url), message })).postId;
+          else if (photos.length === 1) postId = (await publishFacebookPhoto(account.externalId, account.accessToken, { url: photos[0].url, caption: message })).postId;
+          const videoIds: string[] = [];
+          const failed: string[] = [];
+          for (const [n, v] of videos.entries()) {
+            try {
+              videoIds.push((await publishFacebookVideo(account.externalId, account.accessToken, { fileUrl: v.url, description: message })).videoId);
+            } catch (e) {
+              failed.push(`vidéo ${n + 1} : ${e instanceof Error ? e.message : "échec"}`);
+            }
+          }
+          if (!postId && videoIds.length === 0) throw new Error(failed.join(" ; ") || "Échec de la publication.");
+          const videoId = postId ? undefined : videoIds.shift();
+          return {
+            key,
+            warning: failed.length ? failed.join(" ; ") : undefined,
+            entry: {
+              published: true,
+              at,
+              by,
+              postId,
+              videoId,
+              extraIds: videoIds.length ? videoIds : undefined,
+              mediaType: photos.length > 1 ? "gallery" : photos.length === 1 ? "image" : "video",
+            },
+          };
         }
         if (items[0].kind === "video") {
           const { videoId } = await publishFacebookVideo(account.externalId, account.accessToken, { fileUrl: items[0].url, description: await fbMessage(caption) });
@@ -301,27 +334,39 @@ async function invokeYoutube<T>(client: Client, body: Record<string, unknown>): 
 export async function publishPublicationToYoutubeServer(client: Client, publicationId: string, by: By): Promise<SocialPublishResult> {
   try {
     const pub = await loadPublication(client, publicationId);
-    const video = (await resolveMediaItems(client, pub)).find((i) => i.kind === "video");
-    if (!video) throw new Error("Aucune vidéo à publier sur YouTube.");
-    const title = pub.events?.title ?? pub.title ?? "Vidéo LGEF";
+    // YouTube ne prend que des vidéos : chacune est publiée (photos ignorées).
+    const videos = (await resolveMediaItems(client, pub)).filter((i) => i.kind === "video");
+    if (videos.length === 0) throw new Error("Aucune vidéo à publier sur YouTube.");
+    const baseTitle = pub.events?.title ?? pub.title ?? "Vidéo LGEF";
 
-    const { data, error } = await client.functions.invoke("publish-youtube", {
-      body: { videoUrl: video.url, title, description: pub.caption ?? "" },
-    });
-    if (error || !data?.success) throw new Error(data?.error ?? error?.message ?? "Échec de la publication YouTube.");
+    const ids: string[] = [];
+    let failure: string | null = null;
+    for (const [n, video] of videos.entries()) {
+      const title = videos.length > 1 ? `${baseTitle} (${n + 1}/${videos.length})` : baseTitle;
+      const { data, error } = await client.functions.invoke("publish-youtube", {
+        body: { videoUrl: video.url, title, description: pub.caption ?? "" },
+      });
+      if (error || !data?.success) {
+        failure = data?.error ?? error?.message ?? "Échec de la publication YouTube.";
+        break;
+      }
+      if (data.youtube?.videoId) ids.push(data.youtube.videoId as string);
+    }
+    if (ids.length === 0) throw new Error(failure ?? "Échec de la publication YouTube.");
 
-    const videoId = data.youtube?.videoId as string | undefined;
+    const [videoId, ...extraIds] = ids;
     await savePublishInfo(client, pub, (current) =>
       withNetworkEntry(current, "youtube", {
         published: true,
         at: new Date().toISOString(),
         by,
         videoId,
+        extraIds: extraIds.length ? extraIds : undefined,
         mediaType: "video",
-        permalink: videoId ? `https://www.youtube.com/watch?v=${videoId}` : undefined,
+        permalink: `https://www.youtube.com/watch?v=${videoId}`,
       })
     );
-    return { key: "youtube", ok: true };
+    return failure ? { key: "youtube", ok: true, warning: `${ids.length}/${videos.length} vidéos publiées : ${failure}` } : { key: "youtube", ok: true };
   } catch (e) {
     return { key: "youtube", ok: false, error: e instanceof Error ? e.message : "Erreur inattendue." };
   }
@@ -596,6 +641,16 @@ export async function deletePublicationPosts(client: Client, publicationId: stri
       const entry = getNetworkEntry(info, key);
       if (!entry?.published) return { key, ok: true };
       try {
+        // Publications liées (vidéos publiées à part, vidéos YouTube supplémentaires) : supprimées
+        // d'abord ; déjà absentes de la plateforme, elles sont ignorées.
+        for (const extra of entry.extraIds ?? []) {
+          try {
+            if (key === "youtube") await invokeYoutube(client, { action: "delete", videoId: extra });
+            else await deleteGraphObject(extra, metaTarget(key).account.accessToken);
+          } catch (e) {
+            if (!/does not exist|not found|videoNotFound|cannot be loaded/i.test(e instanceof Error ? e.message : "")) throw e;
+          }
+        }
         if (key === "youtube") {
           if (!entry.videoId) throw new Error("Id de la vidéo YouTube inconnu.");
           await invokeYoutube(client, { action: "delete", videoId: entry.videoId });

@@ -609,11 +609,25 @@ function CaptionEditor({ pub, onChanged }: { pub: MediaPublication; onChanged: (
 function networkRules(contentTypes: string[]) {
   const count = contentTypes.length;
   const videos = contentTypes.filter((ct) => ct.startsWith("video")).length;
+  const photos = count - videos;
+  const n = (k: number, word: string) => `${k} ${word}${k > 1 ? "s" : ""}`;
   return {
     count,
     videos,
-    canYoutube: count === 1 && videos === 1,
-    canFacebook: count <= 1 || videos === 0,
+    // Photos et vidéos mêlées : chaque réseau reçoit ce qu'il accepte (voir publisher.ts).
+    canYoutube: videos > 0,
+    canFacebook: true,
+    /** Ce qui part sur chaque réseau quand ce n'est pas un simple média. */
+    plan: {
+      facebook:
+        count <= 1
+          ? null
+          : videos === 0
+            ? `Album de ${photos} photos`
+            : `${photos > 1 ? `Album de ${photos} photos + ` : photos === 1 ? "1 photo + " : ""}${n(videos, "vidéo")} à part`,
+      youtube: videos > 0 && count > 1 ? `${n(videos, "vidéo")}${photos ? " (photos ignorées)" : ""}` : null,
+      instagram: count > 1 ? `Carrousel de ${Math.min(count, 10)} médias` : null,
+    },
     // Sans média, Instagram reçoit un visuel généré à partir du texte (voir /api/media/text-card).
     // Au-delà de 10 médias, Instagram (carrousel limité à 10) reçoit les 10 premiers de l'album.
     canInstagram: contentTypes.slice(0, 10).every((ct) => isInstagramCompatible(ct)),
@@ -1071,17 +1085,17 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
 
   // Types des médias réellement publiés (galerie composée ici pour une publication d'événement).
   const contentTypes = pub.media.length > 0 ? pub.media.map((m) => m.content_type ?? "") : files.map((f) => f.content_type ?? "");
-  const { count, videos, canYoutube, canFacebook, canInstagram: igFormatOk } = networkRules(contentTypes);
+  const { count, videos, canYoutube, canFacebook, canInstagram: igFormatOk, plan } = networkRules(contentTypes);
   // Vidéo filmée en 4K (ou plus) : refusée par l'API Instagram, inutile d'attendre l'échec.
   const oversized = useOversizedVideo(files, pub.media);
   const canInstagram = igFormatOk && !oversized;
   const kindLabel = count === 0 ? "Texte" : count > 1 ? `Galerie (${count})` : videos ? "Vidéo" : "Photo";
 
-  const fbReason = !canFacebook ? "Galerie : photos uniquement" : null;
+  const fbReason = plan.facebook;
   const igReason = oversized
     ? `Vidéo ${oversized.width}×${oversized.height} : 1920 px max — exportez en 1080p`
-    : !canInstagram ? "Format non pris en charge (HEIC)" : count > 10 ? "Les 10 premiers seulement" : count === 0 ? "Visuel généré depuis le texte" : null;
-  const ytReason = !canYoutube ? "Une seule vidéo" : null;
+    : !canInstagram ? "Format non pris en charge (HEIC)" : count > 10 ? "Les 10 premiers seulement" : count === 0 ? "Visuel généré depuis le texte" : plan.instagram;
+  const ytReason = !canYoutube ? "Vidéo uniquement" : plan.youtube;
 
   const anyTarget = (canYoutube && youtube) || (canFacebook && (fb.lorraine || fb.champagne_ardenne || fb.alsace)) || (canInstagram && instagram);
   const targets: PublicationTargets = {

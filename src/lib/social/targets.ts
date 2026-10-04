@@ -59,6 +59,11 @@ export interface SocialPublishTarget extends PublishTarget {
   postId?: string;
   permalink?: string;
   mediaType?: "video" | "image" | "gallery" | "text";
+  /**
+   * Publications liées sur ce réseau, en plus de la principale (videoId / postId, qui porte stats et
+   * commentaires) : vidéos Facebook publiées à côté de l'album photo, vidéos YouTube supplémentaires.
+   */
+  extraIds?: string[];
   stats?: SocialStats;
   /** Instagram : média encore en traitement chez Meta (`published` reste false jusqu'à sa mise en ligne). */
   pending?: InstagramPending;
