@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Camera, Video, Images, X, ChevronLeft, Loader2, CalendarDays, Search, Send } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { uploadEventFiles, uploadStandaloneMedia } from "@/lib/board/eventFiles";
+import { uploadResumableSigned } from "@/lib/board/resumableUpload";
 import { createPublication, listMediaPublications, type MediaPublication } from "@/lib/board/mediaPublications";
 import {
   HABILLAGE_FORMATS,
@@ -46,6 +47,8 @@ const playableType = (f: File) => (!f.type || f.type === "video/quicktime" ? "vi
 
 /** Durée maximale d'une vidéo habillée (encodage sur le serveur, limité à 300 s). */
 const VIDEO_HABILLAGE_MAX_SECONDS = 90;
+/** Taille maximale d'une vidéo à habiller (limite du bucket video-work). */
+const VIDEO_HABILLAGE_MAX_BYTES = 500 * 1024 * 1024;
 /** Calque vidéo : 1080 px de large, à la proportion de la vidéo. */
 const overlaySizeFor = (v: { width: number; height: number }) => ({ width: 1080, height: Math.round((1080 * v.height) / v.width / 2) * 2 });
 
@@ -237,14 +240,28 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
     await renderHabillage(canvas, null, { template, format, text, settings, overlaySize: overlaySizeFor(meta), skipOverlayImage: !!anim, title });
     const overlay = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Calque impossible."))), "image/png"));
 
+    if (video.size > VIDEO_HABILLAGE_MAX_BYTES)
+      throw new Error(
+        `Vidéo trop lourde pour l'habillage (${Math.round(video.size / 1_048_576)} Mo, 500 Mo maximum) : filmez plus court ou en 1080p, ou choisissez le gabarit « Aucun » pour la publier telle quelle.`
+      );
     setProgress("Envoi de la vidéo pour l'habillage…");
     const targets = await createVideoWorkUploads(video.name || "video.mp4");
-    const storage = createClient().storage.from("video-work");
-    const [up1, up2] = await Promise.all([
-      storage.uploadToSignedUrl(targets.video.path, targets.video.token, video, { contentType: video.type || "video/mp4" }),
-      storage.uploadToSignedUrl(targets.overlay.path, targets.overlay.token, overlay, { contentType: "image/png" }),
-    ]);
-    if (up1.error || up2.error) throw new Error("Envoi de la vidéo impossible.");
+    // Calque (quelques Ko) d'un seul tenant ; vidéo (souvent des centaines de Mo au téléphone) en
+    // envoi reprenable par morceaux, sinon la moindre coupure réseau fait tout échouer.
+    const overlayUp = await createClient().storage.from("video-work").uploadToSignedUrl(targets.overlay.path, targets.overlay.token, overlay, { contentType: "image/png" });
+    if (overlayUp.error) throw new Error(`Envoi du calque impossible : ${overlayUp.error.message}`);
+    try {
+      await uploadResumableSigned({
+        bucket: "video-work",
+        path: targets.video.path,
+        token: targets.video.token,
+        file: video,
+        contentType: video.type || "video/mp4",
+        onProgress: (sent, total) => setProgress(`Envoi de la vidéo pour l'habillage… ${Math.round((sent / Math.max(total, 1)) * 100)} %`),
+      });
+    } catch (e) {
+      throw new Error(`Envoi de la vidéo impossible (${Math.round(video.size / 1_048_576)} Mo) : ${e instanceof Error ? e.message : "réseau coupé"}. Réessayez, idéalement en Wi-Fi.`);
+    }
 
     setProgress("Habillage de la vidéo… (jusqu'à 2 à 3 minutes)");
     const res = await fetch("/api/media/video-habillage", {
