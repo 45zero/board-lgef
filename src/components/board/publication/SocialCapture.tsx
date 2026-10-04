@@ -41,7 +41,22 @@ type Step = "capture" | "environnement" | "habillage" | "publier";
  * Un média de la série. `dress` : habillé LGEF (photos prises sur le moment) ou publié tel quel
  * (visuel partenaire déjà au format, image importée de la galerie).
  */
-type Item = { id: string; file: File; url: string; video: boolean; dress: boolean; crop: PhotoCrop; filter: PhotoFilter };
+type Item = { id: string; file: File; url: string; video: boolean; dress: boolean; crop: PhotoCrop; filter: PhotoFilter; thumb: string | null };
+
+/**
+ * Miniature légère d'une photo (≈ 480 px) : la vignette s'affiche tout de suite, sans décoder les
+ * 12 Mpx de la photo d'origine (lent sur téléphone, et dix fois pour une série).
+ */
+async function makeThumb(file: File) {
+  const bmp = await createImageBitmap(file, { resizeWidth: 480, resizeQuality: "medium", imageOrientation: "from-image" });
+  const canvas = document.createElement("canvas");
+  canvas.width = bmp.width;
+  canvas.height = bmp.height;
+  canvas.getContext("2d")!.drawImage(bmp, 0, 0);
+  bmp.close();
+  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.8));
+  return blob ? URL.createObjectURL(blob) : null;
+}
 
 /** Aperçu CSS du filtre sur les vignettes (le rendu publié est calculé par preparePhoto). */
 const filterCss = (f: PhotoFilter) => PHOTO_FILTERS.find((x) => x.id === f)?.css ?? "none";
@@ -120,7 +135,8 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
 
   // Une seule photo décodée à la fois (celle affichée), réduite à 2160 px et filtrée : dix photos de
   // 12 Mpx en mémoire saturent un téléphone.
-  const photoFile = item && !item.video ? item.file : null;
+  // Préparée seulement quand elle s'affiche en grand (visionneuse, habillage) : rien ne ralentit la prise.
+  const photoFile = item && !item.video && (viewer || step === "habillage") ? item.file : null;
   const photoFilter = item?.filter ?? "aucun";
   const [loaded, setLoaded] = useState<{ file: File; filter: PhotoFilter; src: HTMLCanvasElement } | null>(null);
   const bitmap = loaded && loaded.file === photoFile && loaded.filter === photoFilter ? loaded.src : null;
@@ -144,7 +160,14 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
-  useEffect(() => () => itemsRef.current.forEach((i) => URL.revokeObjectURL(i.url)), []);
+  useEffect(
+    () => () =>
+      itemsRef.current.forEach((i) => {
+        URL.revokeObjectURL(i.url);
+        if (i.thumb && i.thumb !== i.url) URL.revokeObjectURL(i.thumb);
+      }),
+    []
+  );
 
   const isVideo = !!item?.video;
   const [videoError, setVideoError] = useState(false);
@@ -278,7 +301,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
     setError(files.length > room ? `${MAX_ITEMS} médias au maximum par publication (limite des carrousels Instagram).` : null);
     const added = files.slice(0, Math.max(room, 0)).map((f) => {
       const video = isVideoFile(f);
-      return { id: crypto.randomUUID(), file: f, url: URL.createObjectURL(f), video, dress: fromCamera && !video, crop: DEFAULT_CROP, filter: "aucun" as PhotoFilter };
+      return { id: crypto.randomUUID(), file: f, url: URL.createObjectURL(f), video, dress: fromCamera && !video, crop: DEFAULT_CROP, filter: "aucun" as PhotoFilter, thumb: null };
     });
     if (!added.length) return;
     if (added.some((a) => a.video)) {
@@ -287,6 +310,13 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
       setTemplate((cur) => (cur === "cadre" ? "bandeau" : cur));
     }
     setItems((list) => [...list, ...added]);
+    for (const a of added) {
+      if (a.video) continue;
+      // Navigateur incapable de réduire l'image : la photo d'origine sert de vignette.
+      makeThumb(a.file)
+        .catch(() => null)
+        .then((thumb) => setItems((list) => list.map((it) => (it.id === a.id ? { ...it, thumb: thumb ?? it.url } : it))));
+    }
   };
 
   const move = (i: number, dir: -1 | 1) =>
@@ -300,6 +330,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
 
   const remove = (i: number) => {
     URL.revokeObjectURL(items[i].url);
+    if (items[i].thumb && items[i].thumb !== items[i].url) URL.revokeObjectURL(items[i].thumb!);
     setItems((list) => list.filter((_, k) => k !== i));
     setActive(Math.max(0, Math.min(i, items.length - 2)));
     setDragMode(null);
@@ -529,7 +560,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                         <video src={`${it.url}#t=0.1`} muted playsInline preload="metadata" className="pointer-events-none h-full w-full object-cover" />
                       ) : (
                         // eslint-disable-next-line @next/next/no-img-element -- aperçu local (URL blob)
-                        <img src={it.url} alt="" className="h-full w-full object-cover" style={{ filter: filterCss(it.filter) }} />
+                        it.thumb && <img src={it.thumb} decoding="async" alt="" className="h-full w-full object-cover" style={{ filter: filterCss(it.filter) }} />
                       )}
                     </button>
                     <span className="absolute left-1.5 top-1.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-navy px-1.5 text-xs font-extrabold text-white">
@@ -657,7 +688,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                         aria-label={`Photo ${i + 1}`}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element -- aperçu local (URL blob) */}
-                        <img src={it.url} alt="" className="h-full w-full object-cover" style={{ filter: filterCss(it.filter) }} />
+                        {it.thumb && <img src={it.thumb} decoding="async" alt="" className="h-full w-full object-cover" style={{ filter: filterCss(it.filter) }} />}
                         <span className="absolute left-0.5 top-0.5 rounded-full bg-navy px-1 text-[9px] font-bold text-white">{i + 1}</span>
                       </button>
                     )
@@ -967,7 +998,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                   <button key={f.id} onClick={() => setFilter(f.id)} className="flex shrink-0 flex-col items-center gap-1">
                     {/* eslint-disable-next-line @next/next/no-img-element -- aperçu local (URL blob) */}
                     <img
-                      src={item.url}
+                      src={item.thumb ?? item.url}
                       alt=""
                       className={`h-14 w-14 rounded-btn object-cover ${item.filter === f.id ? "ring-2 ring-red" : ""}`}
                       style={{ filter: f.css }}
