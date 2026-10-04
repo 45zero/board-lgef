@@ -120,6 +120,8 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
   const [cameraBlocked, setCameraBlocked] = useState(false);
   const viewerRef = useRef<HTMLCanvasElement>(null);
   const swipe = useRef<{ x: number; y: number } | null>(null);
+  // Décalage horizontal pendant le glissement : la photo suit le doigt.
+  const [swipeX, setSwipeX] = useState(0);
   const [dragMode, setDragMode] = useState<"title" | "crop" | null>(null);
   const dragStart = useRef<{ x: number; y: number; crop: PhotoCrop } | null>(null);
   // Pincement à deux doigts sur l'aperçu : taille du titre.
@@ -991,37 +993,55 @@ export function SocialCapture({ onClose, onReady }: { onClose: () => void; onRea
             </button>
           </div>
 
-          {/* Glisser à gauche / à droite pour faire défiler (hors recadrage). */}
+          {/* Glisser à gauche / à droite pour faire défiler (hors recadrage) : la photo suit le doigt.
+              touch-none : sans lui, le navigateur prend le geste pour un défilement et l'annule. */}
           <div
-            className="relative flex min-h-0 flex-1 items-center justify-center px-2"
+            className="relative flex min-h-0 flex-1 touch-none items-center justify-center overflow-hidden px-2"
             onPointerDown={(e) => {
-              if (!dragMode) swipe.current = { x: e.clientX, y: e.clientY };
+              if (dragMode) return;
+              swipe.current = { x: e.clientX, y: e.clientY };
+            }}
+            onPointerMove={(e) => {
+              const st = swipe.current;
+              if (!st || dragMode) return;
+              const dx = e.clientX - st.x;
+              // Résistance aux extrémités de la série.
+              const edge = (dx > 0 && active === 0) || (dx < 0 && active === items.length - 1);
+              setSwipeX(edge ? dx / 3 : dx);
             }}
             onPointerUp={(e) => {
               const st = swipe.current;
               swipe.current = null;
+              setSwipeX(0);
               if (!st || dragMode) return;
               const dx = e.clientX - st.x;
-              if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(e.clientY - st.y)) go(dx < 0 ? 1 : -1);
+              if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(e.clientY - st.y)) go(dx < 0 ? 1 : -1);
+            }}
+            onPointerCancel={() => {
+              swipe.current = null;
+              setSwipeX(0);
             }}
           >
-            {item.video ? (
-              <video key={item.url} src={item.url} controls playsInline className="max-h-full max-w-full" />
-            ) : (
-              <>
-                <canvas ref={viewerRef} {...drag} className={`max-h-full max-w-full ${dragMode === "crop" ? "touch-none outline outline-2 outline-red" : ""}`} />
-                {!bitmap && <Loader2 size={28} className="absolute animate-spin text-white/70" />}
-              </>
-            )}
-            {active > 0 && (
-              <button onClick={() => go(-1)} className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2" aria-label="Précédent">
-                <ChevronLeft size={22} />
-              </button>
-            )}
-            {active < items.length - 1 && (
-              <button onClick={() => go(1)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 p-2" aria-label="Suivant">
-                <ChevronRight size={22} />
-              </button>
+            <div
+              className={`flex h-full w-full items-center justify-center ${swipeX ? "" : "transition-transform duration-200"}`}
+              style={{ transform: `translateX(${swipeX}px)` }}
+            >
+              {item.video ? (
+                <video key={item.url} src={item.url} controls playsInline className="max-h-full max-w-full" />
+              ) : (
+                <>
+                  <canvas ref={viewerRef} {...drag} className={`max-h-full max-w-full ${dragMode === "crop" ? "outline outline-2 outline-red" : ""}`} />
+                  {!bitmap && <Loader2 size={28} className="absolute animate-spin text-white/70" />}
+                </>
+              )}
+            </div>
+            {/* Position dans la série. */}
+            {items.length > 1 && (
+              <div className="pointer-events-none absolute bottom-2 left-0 right-0 flex justify-center gap-1.5">
+                {items.map((it, i) => (
+                  <span key={it.id} className={`h-1.5 rounded-full transition-all ${i === active ? "w-4 bg-white" : "w-1.5 bg-white/40"}`} />
+                ))}
+              </div>
             )}
           </div>
 
