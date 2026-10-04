@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { LifeBuoy } from "lucide-react";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import { installSupportErrorCapture, OPEN_SUPPORT_EVENT } from "@/lib/board/supportContext";
@@ -44,7 +45,13 @@ export function SupportButton({ app, variant = "desktop" }: { app: string | null
       >
         <LifeBuoy size={variant === "mobile" ? 17 : 16} />
       </button>
-      {open && <SupportModal key={open.ticketId ?? "new"} app={app} isStaff={role.isAdmin || role.isSuperUser} focusTicketId={open.ticketId} onClose={() => setOpen(null)} />}
+      {/* Hors de la barre du haut : son backdrop-blur piégerait la fenêtre (position fixed). Rendue
+          dans la coque (data-theme) pour garder le thème clair / sombre. */}
+      {open &&
+        createPortal(
+          <SupportModal key={open.ticketId ?? "new"} app={app} isStaff={role.isAdmin || role.isSuperUser} focusTicketId={open.ticketId} onClose={() => setOpen(null)} />,
+          document.querySelector("[data-theme]") ?? document.body
+        )}
     </>
   );
 }
