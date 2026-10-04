@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, Video, Images, X, ChevronLeft, Loader2, CalendarDays, Search, Send } from "lucide-react";
+import { Camera, Video, Images, X, ChevronLeft, ChevronRight, Loader2, CalendarDays, Search, Send, Plus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { uploadEventFiles, uploadStandaloneMedia } from "@/lib/board/eventFiles";
 import { uploadResumableSigned } from "@/lib/board/resumableUpload";
@@ -33,6 +33,25 @@ import { createVideoWorkUploads, removeVideoWork } from "@/app/actions/video-hab
 
 type Step = "capture" | "environnement" | "habillage" | "publier";
 
+/**
+ * Un média de la série. `dress` : habillé LGEF (photos prises sur le moment) ou publié tel quel
+ * (visuel partenaire déjà au format, image importée de la galerie).
+ */
+type Item = { id: string; file: File; url: string; video: boolean; dress: boolean; crop: PhotoCrop };
+
+/** Médias par publication : limite des carrousels Instagram. */
+const MAX_ITEMS = 10;
+
+/** Image publiée telle quelle : réenregistrée en JPEG (le HEIC de l'iPhone est refusé par les réseaux), 2160 px max. */
+async function plainJpeg(bmp: ImageBitmap, name: string) {
+  const scale = Math.min(1, 2160 / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bmp.width * scale);
+  canvas.height = Math.round(bmp.height * scale);
+  canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  return canvasToFile(canvas, name);
+}
+
 const chip = (active: boolean) =>
   `rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${active ? "bg-navy text-white" : "bg-subtle text-ink-3"}`;
 const fmtDay = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
@@ -60,14 +79,23 @@ const overlaySizeFor = (v: { width: number; height: number }) => ({ width: 1080,
 export function SocialCapture({ onClose }: { onClose: () => void }) {
   const { user } = useAuth();
   const [step, setStep] = useState<Step>("capture");
-  const [file, setFile] = useState<File | null>(null);
-  const [bitmap, setBitmap] = useState<ImageBitmap | null>(null);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  // Série de médias (ordre de publication) et média affiché dans l'éditeur d'habillage.
+  const [items, setItems] = useState<Item[]>([]);
+  const [active, setActive] = useState(0);
+  const item = items[active] ?? null;
+  const file = item?.file ?? null;
+  const videoUrl = item?.video ? item.url : null;
+  const single = items.length === 1;
+  // Le titre libre ne va que sur la première photo habillée (la couverture du carrousel).
+  const coverIndex = items.findIndex((i) => !i.video && i.dress);
+  const needsHabillage = coverIndex >= 0 || (single && items[0].video);
   const [template, setTemplate] = useState<HabillageTemplate>("bandeau");
   // « Je suis sur… » (R1, Coupe de France…) : filtre les gabarits ; proposé d'après l'événement en cours.
   const [context, setContext] = useState<string | null>(null);
   const [title, setTitle] = useState<FreeTitle>({ text: "", x: 0.5, y: 0.2, size: 84, color: "#FFFFFF" });
-  const [crop, setCrop] = useState<PhotoCrop>(DEFAULT_CROP);
+  const crop = item?.crop ?? DEFAULT_CROP;
+  const setCrop = (u: PhotoCrop | ((c: PhotoCrop) => PhotoCrop)) =>
+    setItems((list) => list.map((it, i) => (i === active ? { ...it, crop: typeof u === "function" ? u(it.crop) : u } : it)));
   const [dragMode, setDragMode] = useState<"title" | "crop" | null>(null);
   const dragStart = useRef<{ x: number; y: number; crop: PhotoCrop } | null>(null);
   // Pincement à deux doigts sur l'aperçu : taille du titre.
@@ -88,13 +116,41 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   const videoRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
 
-  const isVideo = !!file && isVideoFile(file);
+  // Une seule photo décodée à la fois (celle affichée) : dix photos de 12 Mpx en mémoire saturent un téléphone.
+  const photoFile = item && !item.video ? item.file : null;
+  const [loaded, setLoaded] = useState<{ file: File; bmp: ImageBitmap } | null>(null);
+  const bitmap = loaded && loaded.file === photoFile ? loaded.bmp : null;
+  useEffect(() => {
+    if (!photoFile) return;
+    let alive = true;
+    let bmp: ImageBitmap | null = null;
+    loadBitmap(photoFile)
+      .then((b) => {
+        bmp = b;
+        if (alive) setLoaded({ file: photoFile, bmp: b });
+        else b.close();
+      })
+      .catch(() => alive && setError("Photo illisible : retirez-la de la série."));
+    return () => {
+      alive = false;
+      bmp?.close();
+    };
+  }, [photoFile]);
+
+  // Libère les aperçus (URL locales) à la fermeture.
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+  useEffect(() => () => itemsRef.current.forEach((i) => URL.revokeObjectURL(i.url)), []);
+
+  const isVideo = !!item?.video;
   const [videoError, setVideoError] = useState(false);
   const [videoMeta, setVideoMeta] = useState<{ width: number; height: number; duration: number } | null>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   // Vidéo : pas de « Cadre » (il redimensionne la photo), et pas d'habillage au-delà de 90 s ou
   // si le navigateur ne peut pas lire la vidéo (dimensions inconnues).
-  const videoHabillage = isVideo && !videoError && !!videoMeta && videoMeta.duration <= VIDEO_HABILLAGE_MAX_SECONDS;
+  const videoHabillage = single && isVideo && !videoError && !!videoMeta && videoMeta.duration <= VIDEO_HABILLAGE_MAX_SECONDS;
   const templates = availableTemplates(settings, context).filter((t) => !isVideo || t.id !== "cadre");
   const contexts = contextsOf(settings);
   const pre = videoMeta ? prerollFor(settings, orientationOf(videoMeta), template) : null;
@@ -181,21 +237,14 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   // Aperçu de l'habillage, redessiné à chaque changement.
   useEffect(() => {
     if (step !== "habillage" || !bitmap || !canvasRef.current) return;
-    void renderHabillage(canvasRef.current, bitmap, { template, format, text, settings, crop, title });
-  }, [step, bitmap, template, format, text, settings, crop, title]);
+    void renderHabillage(canvasRef.current, bitmap, { template, format, text, settings, crop, title: active === coverIndex ? title : { ...title, text: "" } });
+  }, [step, bitmap, template, format, text, settings, crop, title, active, coverIndex]);
 
   // Aperçu du calque par-dessus la vidéo.
   useEffect(() => {
     if (step !== "habillage" || !videoHabillage || !videoMeta || !overlayRef.current) return;
     void renderHabillage(overlayRef.current, null, { template, format, text, settings, overlaySize: overlaySizeFor(videoMeta), skipOverlayImage: !!anim, title });
   }, [step, videoHabillage, videoMeta, template, format, text, settings, anim, title]);
-
-  useEffect(
-    () => () => {
-      if (videoUrl) URL.revokeObjectURL(videoUrl);
-    },
-    [videoUrl]
-  );
 
   // Événements autour d'aujourd'hui (et recherche) pour rattacher la publication.
   useEffect(() => {
@@ -208,25 +257,49 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
     return () => window.clearTimeout(timer);
   }, [step, eventQuery]);
 
-  const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
+  /** Ajoute des médias à la série : photos prises sur le moment habillées, imports de la galerie tels quels. */
+  const pick = (fromCamera: boolean) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!f) return;
-    setError(null);
-    setFile(f);
-    if (isVideoFile(f)) {
-      setBitmap(null);
+    if (!files.length) return;
+    const room = MAX_ITEMS - items.length;
+    setError(files.length > room ? `${MAX_ITEMS} médias au maximum par publication (limite des carrousels Instagram).` : null);
+    const added = files.slice(0, Math.max(room, 0)).map((f) => {
+      const video = isVideoFile(f);
+      return { id: crypto.randomUUID(), file: f, url: URL.createObjectURL(f), video, dress: fromCamera && !video, crop: DEFAULT_CROP };
+    });
+    if (!added.length) return;
+    if (added.some((a) => a.video)) {
       setVideoError(false);
       setVideoMeta(null);
       setTemplate((cur) => (cur === "cadre" ? "bandeau" : cur));
-      setVideoUrl(URL.createObjectURL(f));
-    } else {
-      try {
-        setBitmap(await loadBitmap(f));
-      } catch {
-        return setError("Photo illisible : réessayez.");
-      }
     }
+    setItems((list) => [...list, ...added]);
+  };
+
+  const move = (i: number, dir: -1 | 1) =>
+    setItems((list) => {
+      const j = i + dir;
+      if (j < 0 || j >= list.length) return list;
+      const next = [...list];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+
+  const remove = (i: number) => {
+    URL.revokeObjectURL(items[i].url);
+    setItems((list) => list.filter((_, k) => k !== i));
+    setActive(0);
+  };
+
+  const toggleDress = (i: number) => setItems((list) => list.map((it, k) => (k === i ? { ...it, dress: !it.dress } : it)));
+
+  /** Fin de la série : habillage (s'il y a des photos à habiller ou une vidéo seule), sinon légende. */
+  const continueSeries = () => {
+    setError(null);
+    setDragMode(null);
+    setActive(Math.max(coverIndex, 0));
+    if (!needsHabillage) return setStep("publier");
     // Environnements définis (R1, Coupe de France…) : on demande d'abord dans lequel on évolue.
     setStep(contexts.length ? "environnement" : "habillage");
   };
@@ -284,29 +357,47 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   };
 
   const publish = async () => {
-    if (!file || !user) return;
+    if (!items.length || !user) return;
     setError(null);
     try {
-      // Photo : on publie la version habillée ; vidéo : le fichier d'origine (typé d'après son
-      // extension si le téléphone ne l'a pas fait, sinon les réseaux la refusent).
-      let media = isVideo && !file.type ? new File([file], file.name, { type: /\.mov$/i.test(file.name) ? "video/quicktime" : "video/mp4" }) : file;
-      if (!isVideo && bitmap) {
-        const canvas = document.createElement("canvas");
-        await renderHabillage(canvas, bitmap, { template, format, text, settings, crop, title });
-        media = await canvasToFile(canvas, `publication-${Date.now()}.jpg`);
+      // Dans l'ordre de la série : photos habillées (rendues ici), images telles quelles (JPEG),
+      // vidéos d'origine (typées d'après leur extension si le téléphone ne l'a pas fait, sinon les
+      // réseaux les refusent) — habillées seulement quand elles sont seules.
+      const medias: File[] = [];
+      for (const [i, it] of items.entries()) {
+        const name = `publication-${Date.now()}-${i + 1}`;
+        if (it.video) {
+          let v = it.file.type ? it.file : new File([it.file], it.file.name, { type: /\.mov$/i.test(it.file.name) ? "video/quicktime" : "video/mp4" });
+          if (videoHabillage && videoMeta && (template !== "aucun" || !!title.text.trim() || !!pre)) v = await habillerVideo(v, videoMeta);
+          medias.push(v);
+          continue;
+        }
+        setProgress(items.length > 1 ? `Préparation des photos… ${i + 1}/${items.length}` : "Préparation de la photo…");
+        const bmp = await loadBitmap(it.file).catch(() => {
+          throw new Error(`Photo n° ${i + 1} illisible : retirez-la de la série.`);
+        });
+        try {
+          if (it.dress) {
+            const canvas = document.createElement("canvas");
+            await renderHabillage(canvas, bmp, { template, format, text, settings, crop: it.crop, title: i === coverIndex ? title : { ...title, text: "" } });
+            medias.push(await canvasToFile(canvas, `${name}.jpg`));
+          } else medias.push(await plainJpeg(bmp, `${name}.jpg`));
+        } finally {
+          bmp.close();
+        }
       }
-      if (videoHabillage && videoMeta && (template !== "aucun" || !!title.text.trim() || !!pre)) media = await habillerVideo(media, videoMeta);
-      setProgress("Envoi du média…");
-      const onProgress = (sent: number, total: number) => setProgress(`Envoi du média… ${Math.round((sent / Math.max(total, 1)) * 100)} %`);
+      setProgress(medias.length > 1 ? `Envoi des ${medias.length} médias…` : "Envoi du média…");
+      const onProgress = (sent: number, total: number) =>
+        setProgress(`${medias.length > 1 ? `Envoi des ${medias.length} médias` : "Envoi du média"}… ${Math.round((sent / Math.max(total, 1)) * 100)} %`);
       let fileIds: string[] = [];
       let standalone: Awaited<ReturnType<typeof uploadStandaloneMedia>> = [];
       if (event) {
-        const results = await uploadEventFiles(event.id, [media], onProgress);
+        const results = await uploadEventFiles(event.id, medias, onProgress);
         const failed = results.find((r) => !r.ok);
         if (failed) throw new Error(failed.error ?? "Échec de l'envoi du média.");
         fileIds = results.map((r) => r.id).filter((id): id is string => !!id);
       } else {
-        standalone = await uploadStandaloneMedia([media], onProgress);
+        standalone = await uploadStandaloneMedia(medias, onProgress);
       }
       setProgress("Préparation de la publication…");
       const id = await createPublication(
@@ -334,7 +425,7 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
   if (composerFor) return <Composer pub={composerFor} onClose={onClose} onDone={onClose} />;
 
   const back = () => {
-    if (step === "publier") setStep("habillage");
+    if (step === "publier") setStep(needsHabillage ? "habillage" : "capture");
     else if (step === "habillage") setStep(contexts.length ? "environnement" : "capture");
     else if (step === "environnement") setStep("capture");
     else onClose();
@@ -350,7 +441,9 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
           <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-white/70">Publication réseaux</div>
           <div className="text-sm font-extrabold">
             {step === "capture"
-              ? "Photo ou vidéo à publier"
+              ? items.length
+                ? `Série · ${items.length} média${items.length > 1 ? "s" : ""}`
+                : "Photo ou vidéo à publier"
               : step === "environnement"
                 ? "Choix de l'environnement"
                 : step === "habillage"
@@ -366,13 +459,17 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
-        {step === "capture" && (
+        <input ref={photoRef} type="file" accept="image/*" capture="environment" hidden onChange={pick(true)} />
+        <input ref={videoRef} type="file" accept="video/*" capture="environment" hidden onChange={pick(true)} />
+        <input ref={galleryRef} type="file" accept="image/*,video/*" multiple hidden onChange={pick(false)} />
+
+        {step === "capture" && items.length === 0 && (
           <div className="flex h-full flex-col justify-center gap-3">
             <button onClick={() => photoRef.current?.click()} className="flex items-center gap-3 rounded-panel bg-red p-4 text-left text-white shadow-btn-red">
               <Camera size={26} />
               <span>
-                <span className="block text-base font-extrabold">Prendre une photo</span>
-                <span className="block text-xs text-white/80">Habillage LGEF et texte ensuite</span>
+                <span className="block text-base font-extrabold">Prendre des photos</span>
+                <span className="block text-xs text-white/80">Une ou plusieurs, habillage LGEF et texte ensuite</span>
               </span>
             </button>
             <button onClick={() => videoRef.current?.click()} className="flex items-center gap-3 rounded-panel bg-navy p-4 text-left text-white">
@@ -386,12 +483,85 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
               <Images size={24} className="text-ink-3" />
               <span>
                 <span className="block text-sm font-bold text-ink">Choisir dans la galerie</span>
-                <span className="block text-xs text-ink-4">Photo ou vidéo déjà prise</span>
+                <span className="block text-xs text-ink-4">Photos, vidéos ou visuels déjà prêts (partenaire…)</span>
               </span>
             </button>
-            <input ref={photoRef} type="file" accept="image/*" capture="environment" hidden onChange={pick} />
-            <input ref={videoRef} type="file" accept="video/*" capture="environment" hidden onChange={pick} />
-            <input ref={galleryRef} type="file" accept="image/*,video/*" hidden onChange={pick} />
+          </div>
+        )}
+
+        {step === "capture" && items.length > 0 && (
+          <div className="space-y-3">
+            {/* Série : ordre de publication (carrousel / album), à réorganiser avec les flèches. */}
+            <div className="grid grid-cols-2 gap-2">
+              {items.map((it, i) => (
+                <div key={it.id} className="overflow-hidden rounded-panel border border-line bg-card">
+                  <div className="relative aspect-square bg-subtle">
+                    {it.video ? (
+                      <video src={`${it.url}#t=0.1`} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element -- aperçu local (URL blob)
+                      <img src={it.url} alt="" className="h-full w-full object-cover" />
+                    )}
+                    <span className="absolute left-1.5 top-1.5 flex h-6 min-w-6 items-center justify-center rounded-full bg-navy px-1.5 text-xs font-extrabold text-white">
+                      {i + 1}
+                    </span>
+                    {it.video && <Video size={16} className="absolute bottom-1.5 left-1.5 text-white drop-shadow" />}
+                    <button
+                      onClick={() => remove(i)}
+                      className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white"
+                      aria-label={`Retirer le média ${i + 1}`}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1 p-1.5">
+                    <button onClick={() => move(i, -1)} disabled={i === 0} className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-2 disabled:opacity-30" aria-label="Avancer">
+                      <ChevronLeft size={16} />
+                    </button>
+                    {it.video ? (
+                      <span className="flex-1 text-center text-[11px] font-semibold text-ink-4">{single ? "Vidéo" : "Telle quelle"}</span>
+                    ) : (
+                      <button
+                        onClick={() => toggleDress(i)}
+                        className={`flex-1 rounded-btn px-1 py-1.5 text-[11px] font-bold ${it.dress ? "bg-navy text-white" : "bg-subtle text-ink-3"}`}
+                      >
+                        {it.dress ? "Habillée" : "Telle quelle"}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => move(i, 1)}
+                      disabled={i === items.length - 1}
+                      className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-2 disabled:opacity-30"
+                      aria-label="Reculer"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {items.length < MAX_ITEMS ? (
+              <>
+                <button onClick={() => photoRef.current?.click()} className="flex w-full items-center justify-center gap-2 rounded-panel bg-red p-3.5 text-base font-extrabold text-white shadow-btn-red">
+                  <Camera size={22} /> Photo suivante
+                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => videoRef.current?.click()} className="flex items-center justify-center gap-1.5 rounded-panel border border-line p-3 text-sm font-bold text-ink-2">
+                    <Video size={16} /> Vidéo
+                  </button>
+                  <button onClick={() => galleryRef.current?.click()} className="flex items-center justify-center gap-1.5 rounded-panel border border-line p-3 text-sm font-bold text-ink-2">
+                    <Plus size={16} /> Galerie
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="text-center text-xs text-ink-4">{MAX_ITEMS} médias : c&apos;est le maximum d&apos;un carrousel Instagram.</p>
+            )}
+            <p className="text-[11px] text-ink-4">
+              « Habillée » : habillage LGEF et texte appliqués à l&apos;étape suivante. « Telle quelle » : publiée sans retouche (visuel partenaire déjà au format…).
+              {items.some((i) => i.video) && items.length > 1 ? " Dans une série, les vidéos partent sans habillage ; Facebook les publie à part de l'album photo." : ""}
+            </p>
           </div>
         )}
 
@@ -442,6 +612,32 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
 
         {step === "habillage" && (
           <div className="space-y-3">
+            {!single && (
+              <div>
+                <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  {items.map((it, i) =>
+                    it.video || !it.dress ? null : (
+                      <button
+                        key={it.id}
+                        onClick={() => {
+                          setDragMode(null);
+                          setActive(i);
+                        }}
+                        className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-btn border-2 ${i === active ? "border-red" : "border-transparent"}`}
+                        aria-label={`Photo ${i + 1}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element -- aperçu local (URL blob) */}
+                        <img src={it.url} alt="" className="h-full w-full object-cover" />
+                        <span className="absolute left-0.5 top-0.5 rounded-full bg-navy px-1 text-[9px] font-bold text-white">{i + 1}</span>
+                      </button>
+                    )
+                  )}
+                </div>
+                <p className="mt-1 text-[11px] text-ink-4">
+                  Habillage, format et texte valent pour les {items.filter((i) => !i.video && i.dress).length} photos habillées ; recadrage photo par photo ; le titre ne va que sur la photo n° {coverIndex + 1}.
+                </p>
+              </div>
+            )}
             {isVideo ? (
               <>
                 {videoUrl && file && !videoError && (
@@ -569,6 +765,8 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
                       const v = e.target.value;
                       // Premier caractère : on passe en mode « placer » — touchez l'aperçu pour poser le titre.
                       if (!title.text.trim() && v.trim()) setDragMode("title");
+                      // Série : le titre se place sur la photo de couverture.
+                      if (!single && active !== coverIndex) setActive(coverIndex);
                       setTitle((t) => ({ ...t, text: v }));
                     }}
                     placeholder="Ex. « Victoire 2-1 ! »"
@@ -674,12 +872,16 @@ export function SocialCapture({ onClose }: { onClose: () => void }) {
         {error && <p className="mt-3 rounded-btn bg-bad-bg px-3 py-2 text-xs text-bad">{error}</p>}
       </div>
 
-      {step !== "capture" && (
+      {(step !== "capture" || items.length > 0) && (
         <div className="flex shrink-0 gap-2 border-t border-line p-3" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
           <button onClick={back} disabled={!!progress} className="rounded-btn border border-line px-4 py-3 text-sm font-bold text-ink-2 disabled:opacity-50">
             Retour
           </button>
-          {step === "habillage" ? (
+          {step === "capture" ? (
+            <button onClick={continueSeries} className="flex-1 rounded-btn bg-navy py-3 text-sm font-extrabold text-white">
+              Continuer · {items.length} média{items.length > 1 ? "s" : ""}
+            </button>
+          ) : step === "habillage" ? (
             <button
               onClick={() => {
                 if (!caption) setCaption(text);
