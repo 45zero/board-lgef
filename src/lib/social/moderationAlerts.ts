@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
-import { isResendConfigured, sendResendBatch, type ResendMessage } from "@/lib/email/resend";
+import { isTransactionalEmailConfigured, sendTransactionalBatch, type EmailMessage } from "@/lib/email/transactional";
 import { networkLabel, type NetworkKey } from "@/lib/social/targets";
 
 type Client = SupabaseClient<Database>;
@@ -63,7 +63,7 @@ export async function sendModerationAlerts(client: Client, flagged: FlaggedComme
   }
 
   const boardUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/+$/, "");
-  const emails: ResendMessage[] = [];
+  const emails: EmailMessage[] = [];
   const errors: string[] = [];
 
   for (const { recipient, comments } of perRecipient.values()) {
@@ -124,9 +124,9 @@ export async function sendModerationAlerts(client: Client, flagged: FlaggedComme
   }
 
   if (emails.length > 0) {
-    if (!isResendConfigured()) errors.push("E-mails non envoyés : Resend non configuré.");
+    if (!isTransactionalEmailConfigured()) errors.push("E-mails non envoyés : envoi d'e-mails non configuré (Brevo / Resend).");
     else {
-      const res = await sendResendBatch(emails, async () => {});
+      const res = await sendTransactionalBatch(emails, async () => {});
       errors.push(...res.errors);
     }
   }

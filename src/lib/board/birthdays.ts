@@ -1,6 +1,6 @@
 import "server-only";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
-import type { ResendMessage } from "@/lib/email/resend";
+import type { EmailMessage } from "@/lib/email/transactional";
 import { parisToday } from "@/lib/board/dailyDigest";
 
 // Anniversaires (profiles.birth_date) : bandeau d'accueil du jour et mail à tout le personnel,
@@ -35,7 +35,7 @@ function escapeHtml(s: string) {
 const fullName = (b: Birthday) => `${b.firstName} ${b.lastName}`.trim();
 
 /** Mail du jour : à la personne fêtée, ses vœux ; aux autres, « c'est l'anniversaire de … ». */
-export function renderBirthdayMail(celebrants: Birthday[], recipient: { id: string; email: string }): ResendMessage {
+export function renderBirthdayMail(celebrants: Birthday[], recipient: { id: string; email: string }): EmailMessage {
   const board = (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/+$/, "");
   const self = celebrants.find((c) => c.id === recipient.id);
   const others = celebrants.filter((c) => c.id !== recipient.id);
@@ -69,7 +69,7 @@ export function renderBirthdayMail(celebrants: Birthday[], recipient: { id: stri
  * Annonce du jour (une seule fois par anniversaire) : un mail à chaque compte qui accepte les mails
  * (profiles.notify_email), la personne fêtée comprise, puis anniversaire marqué « annoncé ».
  */
-export async function announceBirthdays(service: Service, send: (messages: ResendMessage[]) => Promise<{ sent: number; errors: string[] }>) {
+export async function announceBirthdays(service: Service, send: (messages: EmailMessage[]) => Promise<{ sent: number; errors: string[] }>) {
   const today = parisToday();
   const due = (await todaysBirthdays(service)).filter((b) => b.announcedOn !== today);
   if (!due.length) return { celebrants: 0, sent: 0, errors: [] as string[] };

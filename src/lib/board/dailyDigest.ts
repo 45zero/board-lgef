@@ -1,6 +1,6 @@
 import "server-only";
 import type { Dashboard } from "@/lib/board/dashboardCore";
-import type { ResendMessage } from "@/lib/email/resend";
+import type { EmailMessage } from "@/lib/email/transactional";
 
 // Mail « Ta journée » envoyé à 7 h (heure de Paris) : les actions à faire et le programme du jour,
 // exactement ce qu'affiche le tableau de bord du board.
@@ -27,7 +27,7 @@ export function hasContent(d: Dashboard) {
   return d.actions.length > 0 || d.programme.length > 0;
 }
 
-export function renderDailyDigest(d: Dashboard, email: string): ResendMessage {
+export function renderDailyDigest(d: Dashboard, email: string): EmailMessage {
   const board = (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/+$/, "");
   const dayLabel = new Intl.DateTimeFormat("fr-FR", { timeZone: PARIS, weekday: "long", day: "numeric", month: "long" }).format(new Date());
   const total = d.actions.reduce((n, a) => n + a.count, 0);

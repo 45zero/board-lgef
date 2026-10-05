@@ -13,7 +13,7 @@ import {
   type EmailBlock,
 } from "@/lib/board/registrationEmail";
 import { personName, greetingName, normalizeFrPhone, type ClubContact } from "@/lib/board/clubContacts";
-import { isResendConfigured, sendResendBatch } from "@/lib/email/resend";
+import { isTransactionalEmailConfigured, sendTransactionalBatch } from "@/lib/email/transactional";
 import { isWhatsAppConfigured, sendWhatsAppEventInvite } from "@/lib/whatsapp";
 import type { Database, Json } from "@/lib/supabase/database.types";
 
@@ -722,12 +722,12 @@ export async function sendCampaign(campaignId: string, recipientIds?: string[]) 
   };
 
   let sent = 0;
-  if (isResendConfigured()) {
-    // Resend (domaine lgef.fr) : envoi par lots, pas de quota Gmail — les réponses « Répondre » arrivent chez l'expéditeur du board.
+  if (isTransactionalEmailConfigured()) {
+    // Brevo ou Resend (domaine lgef.fr) : envoi par lots, pas de quota Gmail — les réponses « Répondre » arrivent chez l'expéditeur du board.
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    const result = await sendResendBatch(
+    const result = await sendTransactionalBatch(
       messages.map((m) => ({ ...m, replyTo: user?.email ?? null })),
       (indexes) => markSent(indexes.map((i) => withEmail[i].id))
     );

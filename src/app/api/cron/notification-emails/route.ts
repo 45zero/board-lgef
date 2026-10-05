@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
-import { isResendConfigured, sendResendBatch, type ResendMessage } from "@/lib/email/resend";
+import { isTransactionalEmailConfigured, sendTransactionalBatch, type EmailMessage } from "@/lib/email/transactional";
 import { CHOICES, NOT_EMAILED, renderNotificationEmail, type EmailEvent, type EmailNotification } from "@/lib/email/notificationEmails";
 import { createActionToken } from "@/lib/email/actionTokens";
 
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   }
-  if (!isResendConfigured()) return NextResponse.json({ error: "Resend non configuré" }, { status: 500 });
+  if (!isTransactionalEmailConfigured()) return NextResponse.json({ error: "Envoi d'e-mails non configuré (Brevo / Resend)" }, { status: 500 });
 
   const service = createServiceClient();
   const since = new Date(Date.now() - WINDOW_MS).toISOString();
@@ -68,7 +68,7 @@ export async function GET(request: Request) {
   const eventById = new Map(((events ?? []) as EmailEvent[]).map((e) => [e.id, e]));
 
   const skipped: string[] = [];
-  const messages: ResendMessage[] = [];
+  const messages: EmailMessage[] = [];
   const messageIds: string[] = [];
   for (const r of rows) {
     const profile = profileById.get(r.user_id);
@@ -89,7 +89,7 @@ export async function GET(request: Request) {
 
   const sentIds = new Set<string>();
   const result = messages.length
-    ? await sendResendBatch(messages, async (indexes) => {
+    ? await sendTransactionalBatch(messages, async (indexes) => {
         const ids = indexes.map((i) => messageIds[i]);
         ids.forEach((id) => sentIds.add(id));
         await service.from("notifications").update({ email_status: "sent", email_sent_at: new Date().toISOString() }).in("id", ids);

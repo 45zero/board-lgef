@@ -4,7 +4,7 @@ import { toResult } from "@/lib/board/actionResult";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
-import { isResendConfigured, sendResendBatch } from "@/lib/email/resend";
+import { isTransactionalEmailConfigured, sendTransactionalBatch } from "@/lib/email/transactional";
 
 // Demandes d'accès au board (table account_requests, partagée avec calendrier-lgef — même logique
 // que son Edge Function approve-account-request). Formulaire public /demande-acces ; validation par
@@ -123,8 +123,8 @@ async function listAccessRequestsImpl(): Promise<AccessRequest[]> {
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 async function sendMail(to: string, subject: string, paragraphs: string[], link?: { href: string; label: string }) {
-  if (!isResendConfigured()) {
-    console.warn("[account-requests] Resend non configuré — e-mail non envoyé à", to);
+  if (!isTransactionalEmailConfigured()) {
+    console.warn("[account-requests] envoi d'e-mails non configuré (Brevo / Resend) — e-mail non envoyé à", to);
     return false;
   }
   const html = [
@@ -133,7 +133,7 @@ async function sendMail(to: string, subject: string, paragraphs: string[], link?
     "<p>La Ligue Grand Est de Football</p>",
   ].join("");
   const text = [...paragraphs, link ? `${link.label} : ${link.href}` : "", "La Ligue Grand Est de Football"].filter(Boolean).join("\n\n");
-  const { sent } = await sendResendBatch([{ to: [to], subject, html, text }], async () => {});
+  const { sent } = await sendTransactionalBatch([{ to: [to], subject, html, text }], async () => {});
   return sent > 0;
 }
 

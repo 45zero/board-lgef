@@ -2,13 +2,7 @@ import "server-only";
 
 /** Envoi transactionnel via Resend (domaine lgef.fr vérifié — même compte que ir2f). */
 
-export interface ResendMessage {
-  to: string[];
-  subject: string;
-  html: string;
-  text: string;
-  replyTo?: string | null;
-}
+import type { EmailMessage } from "@/lib/email/transactional";
 
 const BATCH_SIZE = 100; // limite de l'endpoint /emails/batch
 
@@ -21,7 +15,7 @@ export function isResendConfigured() {
  * pour marquer les envois au fil de l'eau. Un lot refusé n'arrête pas les suivants.
  */
 export async function sendResendBatch(
-  messages: ResendMessage[],
+  messages: EmailMessage[],
   onBatchSent: (indexes: number[]) => Promise<void>
 ): Promise<{ sent: number; errors: string[] }> {
   const apiKey = process.env.RESEND_API_KEY;

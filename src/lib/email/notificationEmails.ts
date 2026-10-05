@@ -1,5 +1,5 @@
 import "server-only";
-import type { ResendMessage } from "@/lib/email/resend";
+import type { EmailMessage } from "@/lib/email/transactional";
 
 // E-mails des notifications du board (voir /api/cron/notification-emails) : un e-mail par
 // notification, en-tête LGEF, infos de l'événement et boutons d'action directs. Les demandes qui
@@ -86,7 +86,7 @@ export function renderNotificationEmail(
   recipient: { email: string; firstName: string | null },
   event: EmailEvent | null,
   actionToken: string | null
-): ResendMessage {
+): EmailMessage {
   const site = siteUrl();
   const title = n.title?.trim() || "Notification du board";
   const message = n.message?.trim() || "";

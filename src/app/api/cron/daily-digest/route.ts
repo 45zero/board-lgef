@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { buildDashboard } from "@/lib/board/dashboardCore";
 import { hasContent, parisHour, parisToday, renderDailyDigest } from "@/lib/board/dailyDigest";
-import { isResendConfigured, sendResendBatch, type ResendMessage } from "@/lib/email/resend";
+import { isTransactionalEmailConfigured, sendTransactionalBatch, type EmailMessage } from "@/lib/email/transactional";
 import { announceBirthdays } from "@/lib/board/birthdays";
 
 export const maxDuration = 60;
@@ -24,11 +24,11 @@ export async function GET(request: Request) {
   }
   const force = new URL(request.url).searchParams.get("force") === "1";
   if (!force && parisHour() !== SEND_HOUR) return NextResponse.json({ skipped: "pas encore l'heure" });
-  if (!isResendConfigured()) return NextResponse.json({ error: "Resend non configuré" }, { status: 500 });
+  if (!isTransactionalEmailConfigured()) return NextResponse.json({ error: "Envoi d'e-mails non configuré (Brevo / Resend)" }, { status: 500 });
 
   const service = createServiceClient();
   const today = parisToday();
-  const birthdays = await announceBirthdays(service, (messages) => sendResendBatch(messages, async () => undefined)).catch((e) => {
+  const birthdays = await announceBirthdays(service, (messages) => sendTransactionalBatch(messages, async () => undefined)).catch((e) => {
     console.error("[cron/daily-digest] anniversaires", e);
     return { celebrants: 0, sent: 0, errors: [String(e)] };
   });
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
     .not("email", "is", null);
 
   const due = (subscribers ?? []).filter((s) => force || s.daily_digest_sent_on !== today);
-  const messages: ResendMessage[] = [];
+  const messages: EmailMessage[] = [];
   const ids: string[] = [];
   let empty = 0;
 
@@ -62,9 +62,9 @@ export async function GET(request: Request) {
     );
   }
 
-  // Marqués « envoyés » lot par lot, au fil des acceptations de Resend.
+  // Marqués « envoyés » lot par lot, au fil des acceptations du fournisseur d'e-mails.
   const result = messages.length
-    ? await sendResendBatch(messages, async (indexes) => {
+    ? await sendTransactionalBatch(messages, async (indexes) => {
         await service
           .from("profiles")
           .update({ daily_digest_sent_on: today })

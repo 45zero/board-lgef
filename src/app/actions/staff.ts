@@ -9,7 +9,7 @@ import { createInvoiceToken } from "@/lib/board/invoiceToken";
 import { getBoardDriveAccount } from "@/lib/board/teamDrive";
 import { archiveSubFolder, eventArchiveFolder } from "@/lib/google/archiveFolders";
 import { uploadFile } from "@/lib/google/drive";
-import { isResendConfigured, sendResendBatch } from "@/lib/email/resend";
+import { isTransactionalEmailConfigured, sendTransactionalBatch } from "@/lib/email/transactional";
 
 // Effectif (sql/2026-10-03_staff_costs.sql) : mes N-1 (profiles.expense_validator_id = moi), tout le
 // monde pour un administrateur. Le coût d'une personne = son forfait par intervention (staff_rates) —
@@ -397,7 +397,7 @@ export const requestInvoices = async (personId: string, eventIds: string[], comm
     await requireCanManage(v, personId);
     const ids = [...new Set(eventIds)].slice(0, 30);
     if (!ids.length) throw new Error("Aucune intervention à réclamer.");
-    if (!isResendConfigured()) throw new Error("L'envoi d'e-mails n'est pas configuré (Resend).");
+    if (!isTransactionalEmailConfigured()) throw new Error("L'envoi d'e-mails n'est pas configuré (Brevo / Resend).");
     const [{ data: person }, { data: me }, { data: events }] = await Promise.all([
       v.service.from("profiles").select("first_name, last_name, email").eq("id", personId).single(),
       v.service.from("profiles").select("first_name, last_name, email").eq("id", v.userId).single(),
@@ -459,7 +459,7 @@ ${steps.map(([t, d], i) => `<div style="margin:0 0 6px"><b>${i + 1}. ${esc(t)}</
       `Lien valable 45 jours. Une question ? Répondez à cet e-mail (${requester}).`,
     ].join("\n");
 
-    const { errors } = await sendResendBatch(
+    const { errors } = await sendTransactionalBatch(
       [{ to: [person.email], subject: n > 1 ? `${n} factures à déposer — Ligue du Grand Est de Football` : `Facture à déposer — ${events[0].title}`, html, text, replyTo: me?.email ?? null }],
       async () => {}
     );
@@ -547,7 +547,7 @@ export const reviewInvoice = async (invoiceId: string, decision: "approved" | "r
       p_data: { event_id: invoice.event_id, kind: "invoice_reviewed", decision, skip_email: true },
     });
 
-    if (person?.email && isResendConfigured()) {
+    if (person?.email && isTransactionalEmailConfigured()) {
       const first = person.first_name?.trim() || who;
       const link =
         decision === "rejected"
@@ -570,7 +570,7 @@ ${link ? `<p style="margin:18px 0"><a href="${link}" style="display:inline-block
 <p style="margin:12px 0 0;font-size:12px;color:#79859a">Pour toute question, répondez simplement à cet e-mail.</p>
 </td></tr></table></td></tr></table></body></html>`;
       const text = [`Bonjour ${first},`, "", ...lines, ...(link ? ["", `Déposer une facture corrigée : ${link}`] : []), "", "Pour toute question, répondez à cet e-mail."].join("\n");
-      await sendResendBatch(
+      await sendTransactionalBatch(
         [{ to: [person.email], subject: `${decision === "approved" ? "Facture validée" : "Facture refusée"} — ${eventTitle}`, html, text, replyTo: me?.email ?? null }],
         async () => {}
       ).catch((e) => console.error("[staff.reviewInvoice.mail]", e));
