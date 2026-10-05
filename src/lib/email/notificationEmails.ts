@@ -44,6 +44,7 @@ function openLink(n: EmailNotification): { label: string; url: string } {
   const site = siteUrl();
   const app = typeof n.data?.app === "string" ? n.data.app : null;
   if (app === "weekend" && (n.type !== "coverage_assignment" || n.data?.trade === "photo")) return { label: "Voir les matchs du week-end", url: `${site}/?app=weekend` };
+  if (app === "frais") return { label: "Voir mes frais", url: `${site}/?app=frais` };
   switch (n.type) {
     case "expense_to_validate":
       return { label: "Valider les frais", url: `${site}/?app=frais` };

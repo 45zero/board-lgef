@@ -4006,6 +4006,96 @@ export type Database = {
         }
         Relationships: []
       }
+      expense_mail_imports: {
+        Row: {
+          id: string
+          user_id: string
+          rule_id: string | null
+          gmail_message_id: string
+          attachment_name: string
+          mail_from: string | null
+          mail_subject: string | null
+          mail_date: string | null
+          status: string
+          detail: string | null
+          expense_ids: string[]
+          total: number | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          rule_id?: string | null
+          gmail_message_id: string
+          attachment_name: string
+          mail_from?: string | null
+          mail_subject?: string | null
+          mail_date?: string | null
+          status: string
+          detail?: string | null
+          expense_ids?: string[]
+          total?: number | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          rule_id?: string | null
+          gmail_message_id?: string
+          attachment_name?: string
+          mail_from?: string | null
+          mail_subject?: string | null
+          mail_date?: string | null
+          status?: string
+          detail?: string | null
+          expense_ids?: string[]
+          total?: number | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      expense_mail_rules: {
+        Row: {
+          id: string
+          user_id: string
+          account_id: string
+          label: string
+          from_filter: string
+          subject_filter: string
+          match_events: boolean
+          enabled: boolean
+          created_at: string
+          last_checked_at: string | null
+          last_error: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          account_id: string
+          label?: string
+          from_filter?: string
+          subject_filter?: string
+          match_events?: boolean
+          enabled?: boolean
+          created_at?: string
+          last_checked_at?: string | null
+          last_error?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          account_id?: string
+          label?: string
+          from_filter?: string
+          subject_filter?: string
+          match_events?: boolean
+          enabled?: boolean
+          created_at?: string
+          last_checked_at?: string | null
+          last_error?: string | null
+        }
+        Relationships: []
+      }
       support_tickets: {
         Row: {
           id: string

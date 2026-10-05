@@ -2,18 +2,15 @@
 
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { archiveReceipts, type ReceiptToArchive } from "@/lib/board/expenseArchive";
+import { archiveReceipts } from "@/lib/board/expenseArchive";
+import { insertExpenseLines, type NewExpenseLine } from "@/lib/board/expenseLines";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { DbEventType } from "@/lib/board/calendar";
 import { type SolicitationRole } from "@/lib/board/solicitation";
 import { computeMyExpenses, lineMonth, personName, toStatus } from "@/lib/board/expensesCore";
 import {
-  CATEGORY_META,
-  EXPENSE_CATEGORIES,
   lineParts,
   monthLabel,
-  type ExpenseAmountColumn,
-  type ExpenseCategory,
   type ExpenseTarget,
 } from "@/lib/board/expenseCategories";
 
@@ -90,18 +87,7 @@ export type SubmissionToReview = {
   attachments: ExpenseAttachment[];
 };
 
-/** Ligne à créer (saisie manuelle, justificatif lu par Claude, import). */
-export type NewExpenseLine = {
-  eventId: string | null;
-  category: ExpenseCategory;
-  amount: number;
-  /** 'YYYY-MM-DD' */
-  date: string | null;
-  merchant: string | null;
-  description: string | null;
-  distanceKm: number | null;
-  attachments: { url: string; type: string | null }[];
-};
+export type { NewExpenseLine } from "@/lib/board/expenseLines";
 
 type Service = ReturnType<typeof createServiceClient>;
 
@@ -443,59 +429,8 @@ export async function getMyExpenseLines(target: ExpenseTarget): Promise<ExpenseL
 export async function addExpenseLines(input: NewExpenseLine[]): Promise<{ error: string | null; ids: string[] }> {
   try {
     const { userId, service } = await currentUser();
-    const scansPrefix = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/expense_scans/expense_scans/${userId}/`;
-    const ids: string[] = [];
-    for (const line of input) {
-      if (!EXPENSE_CATEGORIES.includes(line.category)) throw new Error("Catégorie inconnue.");
-      if (!(line.amount > 0) || line.amount > 100_000) throw new Error("Montant invalide.");
-      if (line.date && !/^\d{4}-\d{2}-\d{2}$/.test(line.date)) throw new Error("Date invalide.");
-      // Justificatifs : uniquement des fichiers déposés par la personne elle-même.
-      if (line.attachments.some((a) => !a.url.startsWith(scansPrefix))) throw new Error("Justificatif non reconnu.");
-
-      const target: ExpenseTarget = line.eventId ? { eventId: line.eventId } : { month: (line.date ?? new Date().toISOString()).slice(0, 7) };
-      const sub = await submissionOf(service, userId, target);
-      if (sub?.status === "approved") throw new Error("Ces frais sont déjà validés : impossible d'y ajouter une ligne.");
-
-      const amount = Math.round(line.amount * 100) / 100;
-      const byCategory: Partial<Record<ExpenseAmountColumn, number>> = { [CATEGORY_META[line.category].column]: amount };
-      const { data, error } = await service
-        .from("event_expenses")
-        .insert({
-          user_id: userId,
-          event_id: line.eventId,
-          ...byCategory,
-          total_amount: amount,
-          expense_date: line.date,
-          merchant_name: line.merchant?.trim() || null,
-          description: line.description?.trim() || null,
-          other_fees_description: line.category === "other" ? line.description?.trim() || line.merchant?.trim() || null : null,
-          distance_km: line.distanceKm,
-          file_url: line.attachments[0]?.url ?? null,
-        })
-        .select("id")
-        .single();
-      if (error) throw new Error(error.message);
-      if (line.attachments.length) {
-        const { error: attErr } = await service
-          .from("event_expense_attachments")
-          .insert(line.attachments.map((a) => ({ expense_id: data.id, file_url: a.url, file_type: a.type })));
-        if (attErr) throw new Error(attErr.message);
-      }
-      ids.push(data.id);
-    }
+    const { ids, toArchive } = await insertExpenseLines(service, userId, input);
     // Copie des justificatifs dans le Drive (année / mois / événement), après la réponse.
-    const toArchive: ReceiptToArchive[] = input.flatMap((l) =>
-      l.attachments.map((a) => ({
-        userId,
-        eventId: l.eventId,
-        date: l.date,
-        category: l.category,
-        merchant: l.merchant,
-        amount: l.amount,
-        url: a.url,
-        type: a.type,
-      }))
-    );
     if (toArchive.length) after(() => archiveReceipts(toArchive));
     return { error: null, ids };
   } catch (e) {

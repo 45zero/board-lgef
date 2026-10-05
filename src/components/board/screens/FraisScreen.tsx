@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Receipt, ShieldCheck, X, Search, ChevronRight, Download } from "lucide-react";
+import { Receipt, ShieldCheck, X, Search, ChevronRight, Download, Settings, Check } from "lucide-react";
 import {
   declareExpenses,
   getMyExpenses,
@@ -17,6 +17,7 @@ import {
 import { ExpenseLinesEditor, AttachmentLinks } from "@/components/board/expenses/ExpenseLinesEditor";
 import { ExpenseImport } from "@/components/board/expenses/ExpenseImport";
 import { ExpenseExportModal } from "@/components/board/expenses/ExpenseExportModal";
+import { ExpenseMailSettings } from "@/components/board/expenses/ExpenseMailSettings";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { lineParts } from "@/lib/board/expenseCategories";
 import { ExpenseStatusBadge, EXPENSE_STATUS_META, confirmNoExpense, formatEuros } from "@/components/board/expenses/ExpenseStatus";
@@ -24,7 +25,7 @@ import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
 import { OpenEventButton } from "@/components/board/calendar/OpenEventButton";
 
-type Tab = "mine" | "validate";
+type Tab = "mine" | "validate" | "settings";
 type MineFilter = "a_declarer" | "upcoming" | "pending" | "approved" | "rejected" | "all";
 
 const MINE_FILTERS: { id: MineFilter; label: string }[] = [
@@ -532,11 +533,70 @@ export function ReviewModal({ sub, onClose, onDone }: { sub: SubmissionToReview;
   );
 }
 
+/** Refus depuis la liste : le motif est obligatoire (il est envoyé au déclarant). */
+function RejectModal({ sub, onClose, onDone }: { sub: SubmissionToReview; onClose: () => void; onDone: () => void }) {
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reject = async () => {
+    setBusy(true);
+    setError(null);
+    const res = await reviewSubmission(sub.submissionId, "rejected", comment);
+    setBusy(false);
+    if (res.error) return setError(res.error);
+    onDone();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md overflow-hidden rounded-modal bg-card shadow-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
+          <div className="min-w-0">
+            <h3 className="text-base font-extrabold text-ink">Refuser les frais</h3>
+            <div className="mt-0.5 truncate text-xs text-ink-3">
+              {sub.person.name} · {sub.event.title} · {formatEuros(sub.total)}
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-full p-1 text-ink-4 hover:bg-hover">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="space-y-2 p-5">
+          <label className="block text-xs font-semibold text-ink-3" htmlFor="reject-comment">
+            Motif du refus (obligatoire, envoyé à {sub.person.name.split(" ")[0]})
+          </label>
+          <textarea
+            id="reject-comment"
+            autoFocus
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            rows={3}
+            placeholder="ex. Justificatif du péage manquant…"
+            className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none focus:border-link"
+          />
+          {error && <p className="text-xs text-bad">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
+          <button onClick={onClose} className="rounded-btn border border-line px-4 py-2 text-sm font-semibold text-ink-2 hover:bg-hover">
+            Annuler
+          </button>
+          <button disabled={busy || !comment.trim()} onClick={reject} className="rounded-btn bg-bad px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+            {busy ? "…" : "Refuser"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Déclarations des personnes dont je suis le N+1 — uniquement elles. */
 function ToValidate({ onChanged }: { onChanged: () => void }) {
   const [status, setStatus] = useState<"pending" | "approved" | "rejected">("pending");
   const [subs, setSubs] = useState<SubmissionToReview[] | null>(null);
   const [open, setOpen] = useState<SubmissionToReview | null>(null);
+  const [rejecting, setRejecting] = useState<SubmissionToReview | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [monthIdx, setMonthIdx] = useState<number | null>(null);
@@ -549,6 +609,15 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
     void load();
     onChanged();
   });
+
+  const approve = async (s: SubmissionToReview) => {
+    setBusy(s.submissionId);
+    const res = await reviewSubmission(s.submissionId, "approved", "");
+    setBusy(null);
+    if (res.error) return alert(res.error);
+    void load();
+    onChanged();
+  };
 
   const q = normalize(query.trim());
   // Année → mois → utilisateurs.
@@ -590,10 +659,18 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
             <div key={key}>
               <GroupHeader label={g.label} count={g.items.length} total={g.items.reduce((n, s) => n + s.total, 0)} />
               {g.items.map((s) => (
-                <button
+                <div
                   key={s.submissionId}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setOpen(s)}
-                  className="flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
+                  onKeyDown={(e) => {
+                    if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+                      e.preventDefault();
+                      setOpen(s);
+                    }
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
@@ -606,8 +683,33 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
                     </div>
                   </div>
                   <span className="shrink-0 text-sm font-bold text-ink">{formatEuros(s.total)}</span>
-                  <ChevronRight size={16} className="shrink-0 text-ink-4" />
-                </button>
+                  {s.status === "pending" ? (
+                    <>
+                      <button
+                        disabled={busy === s.submissionId}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRejecting(s);
+                        }}
+                        className="shrink-0 rounded-btn border border-bad px-3 py-1.5 text-xs font-bold text-bad hover:bg-bad/5 disabled:opacity-50"
+                      >
+                        Refuser
+                      </button>
+                      <button
+                        disabled={busy === s.submissionId}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void approve(s);
+                        }}
+                        className="flex shrink-0 items-center gap-1 rounded-btn bg-good px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                      >
+                        <Check size={13} /> {busy === s.submissionId ? "…" : "Valider"}
+                      </button>
+                    </>
+                  ) : (
+                    <ChevronRight size={16} className="shrink-0 text-ink-4" />
+                  )}
+                </div>
               ))}
             </div>
           ))}
@@ -620,6 +722,18 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
           onClose={() => setOpen(null)}
           onDone={() => {
             setOpen(null);
+            void load();
+            onChanged();
+          }}
+        />
+      )}
+
+      {rejecting && (
+        <RejectModal
+          sub={rejecting}
+          onClose={() => setRejecting(null)}
+          onDone={() => {
+            setRejecting(null);
             void load();
             onChanged();
           }}
@@ -648,6 +762,7 @@ export function FraisScreen() {
   const tabs: { id: Tab; label: string; icon: typeof Receipt; badge?: number; show: boolean }[] = [
     { id: "mine", label: "Mes frais", icon: Receipt, show: true },
     { id: "validate", label: "À valider", icon: ShieldCheck, badge: scope?.pending, show: !!scope?.isValidator },
+    { id: "settings", label: "Paramètres", icon: Settings, show: true },
   ];
 
   return (
@@ -674,6 +789,7 @@ export function FraisScreen() {
 
       {tab === "mine" && <MyExpenses />}
       {tab === "validate" && <ToValidate onChanged={() => void loadScope()} />}
+      {tab === "settings" && <ExpenseMailSettings />}
     </div>
   );
 }
