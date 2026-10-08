@@ -128,30 +128,39 @@ export async function removeEventFromGoogle(eventId: string) {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Filet de sécurité : supprime de l'agenda Google de l'utilisateur les miroirs dont l'événement
- * du board n'existe plus (supprimé par un autre chemin, ou ancienne copie). Ne touche qu'aux
- * rendez-vous marqués par le board — jamais à ceux créés directement dans Google.
- * Retourne les id Google supprimés.
+ * Tri des rendez-vous de l'agenda Google affichés dans le planning :
+ * - copie d'un événement du board encore présent → masquée (l'événement est déjà affiché) ;
+ * - copie dont l'événement n'existe plus (ou ancienne copie remplacée) → supprimée de Google ;
+ * - rendez-vous créé directement dans Google → affiché, jamais touché.
+ * Une copie se reconnaît à sa marque (posée par la synchro) ou, pour les anciennes, à son id
+ * enregistré sur l'événement.
  */
-export async function removeOrphanMirrors(
+export async function reconcileGoogleMirrors(
   accountId: string,
-  mirrors: { googleEventId: string; calendarId: string; boardEventId: string }[]
+  items: { googleEventId: string; calendarId: string; boardEventId: string | null }[]
 ) {
   const userId = await requireUserId();
   const account = await getOwnedGoogleAccount(accountId, userId);
-  const candidates = mirrors.filter((m) => UUID.test(m.boardEventId));
-  if (candidates.length === 0) return [];
+  if (items.length === 0) return { hidden: [] as string[], removed: [] as string[] };
 
   // Service : un événement masqué à l'utilisateur (droits) ne doit pas passer pour supprimé.
-  const { data, error } = await createServiceClient()
-    .from("events")
-    .select("id, google_event_id")
-    .in("id", [...new Set(candidates.map((m) => m.boardEventId))]);
-  if (error) return [];
-  const currentMirror = new Map((data ?? []).map((e) => [e.id, e.google_event_id]));
+  const service = createServiceClient();
+  const tagged = items.filter((m): m is typeof m & { boardEventId: string } => !!m.boardEventId && UUID.test(m.boardEventId));
+  const [byGoogleId, byBoardId] = await Promise.all([
+    service.from("events").select("google_event_id").in("google_event_id", items.map((m) => m.googleEventId)),
+    tagged.length
+      ? service.from("events").select("id, google_event_id").in("id", [...new Set(tagged.map((m) => m.boardEventId))])
+      : Promise.resolve({ data: [] as { id: string; google_event_id: string | null }[], error: null }),
+  ]);
+  if (byGoogleId.error || byBoardId.error) return { hidden: [], removed: [] };
 
+  const liveMirrors = new Set((byGoogleId.data ?? []).map((e) => e.google_event_id));
+  const currentMirror = new Map((byBoardId.data ?? []).map((e) => [e.id, e.google_event_id]));
+
+  const hidden = items.filter((m) => liveMirrors.has(m.googleEventId)).map((m) => m.googleEventId);
   // Orphelin : l'événement n'existe plus, ou il a un autre miroir (ancienne copie restée dans Google).
-  const orphans = candidates.filter((m) => {
+  const orphans = tagged.filter((m) => {
+    if (liveMirrors.has(m.googleEventId)) return false;
     if (!currentMirror.has(m.boardEventId)) return true;
     const current = currentMirror.get(m.boardEventId);
     return !!current && current !== m.googleEventId;
@@ -164,8 +173,8 @@ export async function removeOrphanMirrors(
       removed.push(m.googleEventId);
     } catch (err) {
       if (isGone(err)) removed.push(m.googleEventId);
-      else console.error("[removeOrphanMirrors]", m.googleEventId, err);
+      else console.error("[reconcileGoogleMirrors]", m.googleEventId, err);
     }
   }
-  return removed;
+  return { hidden, removed };
 }

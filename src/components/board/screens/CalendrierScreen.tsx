@@ -32,7 +32,7 @@ import { DayWeatherBadge, useForecast } from "@/components/board/calendar/DayWea
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import { listMyCalendars, listMyEvents } from "@/app/actions/calendar";
-import { removeOrphanMirrors } from "@/app/actions/calendar-sync";
+import { reconcileGoogleMirrors } from "@/app/actions/calendar-sync";
 import { EventModal } from "@/components/board/calendar/EventModal";
 import { VoiceEventDialog } from "@/components/board/calendar/VoiceEvent";
 import type { EventDraft } from "@/app/actions/event-dictation";
@@ -158,16 +158,15 @@ export function CalendrierScreen() {
       timeMin: rangeStart.toISOString(),
       timeMax: rangeEnd.toISOString(),
     })
-      .then((items) => {
-        setGoogleEvents(items);
-        // Miroirs d'événements du board supprimés entre-temps : retirés de Google, puis de l'affichage.
-        const mirrors = items.flatMap((e) => (e.boardEventId ? [{ googleEventId: e.id, calendarId: e.calendarId, boardEventId: e.boardEventId }] : []));
-        if (mirrors.length === 0) return;
-        removeOrphanMirrors(googleAccountId, mirrors)
-          .then((removed) => {
-            if (removed.length) setGoogleEvents((prev) => prev.filter((e) => !removed.includes(e.id)));
-          })
-          .catch(() => {});
+      .then(async (items) => {
+        // Copies Google des événements du board : masquées (déjà affichées en vrai) ou, si
+        // l'événement a disparu, supprimées de Google. Seul ce qui a été créé dans Google reste.
+        const sorted = await reconcileGoogleMirrors(
+          googleAccountId,
+          items.map((e) => ({ googleEventId: e.id, calendarId: e.calendarId, boardEventId: e.boardEventId }))
+        ).catch(() => null);
+        const drop = new Set([...(sorted?.hidden ?? []), ...(sorted?.removed ?? [])]);
+        setGoogleEvents(items.filter((e) => !drop.has(e.id)));
       })
       .catch(() => setGoogleEvents([]));
   };
