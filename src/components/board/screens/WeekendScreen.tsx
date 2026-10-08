@@ -347,7 +347,12 @@ function MatchForm({
   const toggleRegion = (r: FacebookRegion) =>
     set("regions", form.regions.includes(r) ? form.regions.filter((x) => x !== r) : [...form.regions, r]);
 
+  // Verrou immédiat : `busy` ne désactive les boutons qu'au rendu suivant — un double clic (ou Entrée
+  // puis clic) créait le match en double, avec deux propositions envoyées au vidéaste.
+  const submitting = useRef(false);
   const submit = async (again: boolean) => {
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -370,6 +375,7 @@ function MatchForm({
     } catch (e) {
       setError(errorMessage(e));
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   };
