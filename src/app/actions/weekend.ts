@@ -30,13 +30,14 @@ async function getViewer() {
   const userId = data?.claims?.sub;
   if (!userId) throw new Error("Non authentifié");
   const [{ data: profile }, { data: specs }] = await Promise.all([
-    supabase.from("profiles").select("role").eq("id", userId).single(),
+    supabase.from("profiles").select("role, first_name, last_name, email").eq("id", userId).single(),
     supabase.from("profile_specialties").select("specialties(slug)").eq("user_id", userId),
   ]);
   const slugs = ((specs ?? []) as unknown as { specialties: { slug: string } | null }[]).map((s) => s.specialties?.slug);
   const isAdmin = profile?.role === "admin" || profile?.role === "super_user";
   const canCoordinate = isAdmin || slugs.includes("tech-salarie");
-  return { supabase, userId, isAdmin, canCoordinate, isPhotographer: slugs.includes(PHOTO_SLUG) };
+  const name = profile ? toPerson({ id: userId, first_name: profile.first_name, last_name: profile.last_name, email: profile.email }).name : "Quelqu'un";
+  return { supabase, userId, name, isAdmin, canCoordinate, isPhotographer: slugs.includes(PHOTO_SLUG) };
 }
 
 async function requireCoordinator() {
@@ -119,25 +120,38 @@ async function actorName(userId: string) {
   return data ? toPerson(data).name : "Quelqu'un";
 }
 
-/** Matchs du week-end [startISO, endISO[ : affiche, poste photo, vidéo, photos déposées. */
-async function getWeekendImpl(startISO: string, endISO: string): Promise<WeekendData> {
-  const { supabase, userId, isAdmin, canCoordinate, isPhotographer } = await getViewer();
-
-  const { data: events, error } = await supabase
-    .from("events")
-    .select("id, title, start_date, location")
-    .eq("event_type", "match_du_week_end")
-    .gte("start_date", startISO)
-    .lt("start_date", endISO)
-    .order("start_date");
+/**
+ * Matchs du week-end [startISO, endISO[ : affiche, poste photo, vidéo, photos déposées.
+ * `withPeople` : listes du réseau (photographes, vidéastes, relais), qui changent rarement — l'écran
+ * ne les redemande qu'à l'ouverture et quand le réseau change, pas à chaque match enregistré.
+ */
+async function getWeekendImpl(startISO: string, endISO: string, withPeople = true): Promise<WeekendData> {
+  const supabase = await createClient();
+  const [{ userId, isAdmin, canCoordinate, isPhotographer }, { data: events, error }] = await Promise.all([
+    getViewer(),
+    supabase
+      .from("events")
+      .select("id, title, start_date, location")
+      .eq("event_type", "match_du_week_end")
+      .gte("start_date", startISO)
+      .lt("start_date", endISO)
+      .order("start_date"),
+  ]);
   if (error) throw new Error(error.message);
   const ids = (events ?? []).map((e) => e.id);
 
   const service = createServiceClient();
   const [details, missions, coverage, files, publications, photographerIds, videographerIds, publisherIds] = await Promise.all([
     ids.length ? supabase.from("match_details").select("*").in("event_id", ids) : Promise.resolve({ data: [] }),
-    // RLS : les brouillons ne remontent que pour les coordinateurs.
-    ids.length ? supabase.from("photo_missions").select("*").in("event_id", ids) : Promise.resolve({ data: [] }),
+    // RLS : les brouillons ne remontent que pour les coordinateurs. Noms du photographe et du relais joints.
+    ids.length
+      ? supabase
+          .from("photo_missions")
+          .select(
+            "*, photographer:profiles!photo_missions_photographer_id_fkey(id, first_name, last_name, email), publisher:profiles!photo_missions_publisher_id_fkey(id, first_name, last_name, email)"
+          )
+          .in("event_id", ids)
+      : Promise.resolve({ data: [] }),
     ids.length
       ? supabase
           .from("coverage_requests")
@@ -149,23 +163,30 @@ async function getWeekendImpl(startISO: string, endISO: string): Promise<Weekend
     ids.length
       ? supabase.from("media_publications").select("event_id").in("event_id", ids).in("kind", ["photo", "gallery"]).eq("status", "published")
       : Promise.resolve({ data: [] }),
-    canCoordinate ? listPhotographerIds(service) : Promise.resolve([] as string[]),
-    canCoordinate ? listMemberIds(service, VIDEO_SLUG) : Promise.resolve([] as string[]),
-    canCoordinate ? listPublisherIds(service) : Promise.resolve([] as string[]),
+    canCoordinate && withPeople ? listPhotographerIds(service) : Promise.resolve([] as string[]),
+    canCoordinate && withPeople ? listMemberIds(service, VIDEO_SLUG) : Promise.resolve([] as string[]),
+    canCoordinate && withPeople ? listPublisherIds(service) : Promise.resolve([] as string[]),
   ]);
 
-  const missionRows = (missions.data ?? []) as { id: string; event_id: string; status: PhotoStatus; photographer_id: string | null; publisher_id: string | null }[];
-  const personIds = [
-    ...new Set(
-      [...missionRows.flatMap((m) => [m.photographer_id, m.publisher_id]), ...photographerIds, ...videographerIds, ...publisherIds].filter(
-        (id): id is string => !!id
-      )
-    ),
-  ];
-  const { data: profiles } = personIds.length
-    ? await service.from("profiles").select("id, first_name, last_name, email").in("id", personIds)
+  const missionRows = (missions.data ?? []) as unknown as {
+    id: string;
+    event_id: string;
+    status: PhotoStatus;
+    photographer_id: string | null;
+    publisher_id: string | null;
+    photographer: Profile | null;
+    publisher: Profile | null;
+  }[];
+  // Membres du réseau (seulement quand les listes sont demandées).
+  const networkIds = [...new Set([...photographerIds, ...videographerIds, ...publisherIds])];
+  const { data: profiles } = networkIds.length
+    ? await service.from("profiles").select("id, first_name, last_name, email").in("id", networkIds)
     : { data: [] as Profile[] };
   const people = new Map((profiles ?? []).map((p) => [p.id, toPerson(p)]));
+  for (const m of missionRows) {
+    if (m.photographer) people.set(m.photographer.id, toPerson(m.photographer));
+    if (m.publisher) people.set(m.publisher.id, toPerson(m.publisher));
+  }
 
   const detailsBy = new Map(((details.data ?? []) as { event_id: string; competition: string; home_team: string; home_level: string | null; away_team: string; away_level: string | null; regions: string[] }[]).map((d) => [d.event_id, d]));
   const missionBy = new Map(missionRows.map((m) => [m.event_id, m]));
@@ -242,9 +263,13 @@ function validate(input: MatchInput) {
   if (input.regions.length === 0) throw new Error("Choisissez au moins une page régionale.");
 }
 
-/** Crée (eventId absent) ou modifie un match du week-end. Renvoie l'id de l'événement. */
+/**
+ * Crée (eventId absent) ou modifie un match du week-end. Renvoie l'id de l'événement.
+ * Rapide : les écritures indépendantes partent ensemble (un nouveau match = 3 allers-retours :
+ * droits, événement, puis affiche + poste photo + vidéo en parallèle).
+ */
 async function saveMatchImpl(input: MatchInput, eventId?: string): Promise<string> {
-  const { supabase, userId } = await requireCoordinator();
+  const { supabase, userId, name: actor } = await requireCoordinator();
   validate(input);
 
   const start = new Date(input.start);
@@ -254,34 +279,94 @@ async function saveMatchImpl(input: MatchInput, eventId?: string): Promise<strin
     end_date: new Date(start.getTime() + MATCH_DURATION_MS).toISOString(),
     location: input.location.trim() || null,
   };
-
-  let id = eventId;
-  if (id) {
-    const { error } = await supabase.from("events").update(eventFields).eq("id", id).eq("event_type", "match_du_week_end");
-    if (error) throw new Error(error.message);
-  } else {
-    // Pas de miroir Google Calendar : une trentaine de matchs par week-end encombrerait l'agenda du coordinateur.
-    const { data, error } = await supabase
-      .from("events")
-      .insert({ ...eventFields, event_type: "match_du_week_end", organizer_id: userId, created_by: userId, status: "pending", show_in_calendar: true })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    id = data.id as string;
-  }
-
-  const { error: detailsError } = await supabase.from("match_details").upsert({
-    event_id: id,
+  const details = {
     competition: input.competition.trim(),
     home_team: input.homeTeam.trim(),
     home_level: input.homeLevel.trim() || null,
     away_team: input.awayTeam.trim(),
     away_level: input.awayLevel.trim() || null,
     regions: input.regions,
-  });
-  if (detailsError) throw new Error(detailsError.message);
+  };
+  const check = ({ error }: { error: { message: string } | null }) => {
+    if (error) throw new Error(error.message);
+  };
+  const videographer = input.video && input.videographerId ? input.videographerId : null;
 
-  const { data: mission } = await supabase.from("photo_missions").select("id, status, photographer_id").eq("event_id", id).maybeSingle();
+  // Demande vidéo adressée à un vidéaste (il l'accepte ou la refuse, trigger notify_coverage_circuit).
+  const videoAssignment = async () => {
+    const { data: tech } = await createServiceClient().from("profiles").select("id, first_name, last_name, email").eq("id", videographer!).single();
+    if (!tech) throw new Error("Vidéaste introuvable.");
+    return {
+      assigned_technician_id: tech.id,
+      technician_id: tech.id,
+      assigned_technician_name: toPerson(tech).name,
+      assigned_technician_email: tech.email,
+      technician_response: "pending",
+      status: "pending" as const,
+      coverage_symbol: null,
+    };
+  };
+  const notifyPhotographer = (id: string) =>
+    notify([input.photographerId], {
+      type: "coverage_assignment",
+      title: "Match à photographier",
+      message: `${actor} vous a désigné : ${eventFields.title}.`,
+      eventId: id,
+      trade: "photo",
+    });
+
+  /* ---------- Nouveau match ---------- */
+  if (!eventId) {
+    // Demande vidéo sans vidéaste désigné : créée par la base avec l'événement (create_coverage_request_if_needed).
+    // Pas de miroir Google Calendar : une trentaine de matchs par week-end encombrerait l'agenda du coordinateur.
+    const [{ data, error }, assignment] = await Promise.all([
+      supabase
+        .from("events")
+        .insert({
+          ...eventFields,
+          event_type: "match_du_week_end",
+          organizer_id: userId,
+          created_by: userId,
+          status: "pending",
+          show_in_calendar: true,
+          requires_coverage: input.video && !videographer,
+        })
+        .select("id")
+        .single(),
+      videographer ? videoAssignment() : Promise.resolve(null),
+    ]);
+    if (error) throw new Error(error.message);
+    const id = data.id as string;
+    const photo = input.photographerId ? { status: "taken", photographer_id: input.photographerId, taken_at: new Date().toISOString() } : {};
+    await Promise.all([
+      supabase.from("match_details").insert({ event_id: id, ...details }).then(check),
+      input.photo
+        ? supabase.from("photo_missions").insert({ event_id: id, status: "draft", ...photo, publisher_id: input.publisherId, created_by: userId }).then(check)
+        : null,
+      assignment
+        ? Promise.all([
+            supabase.from("coverage_requests").insert({ event_id: id, requester_id: userId, ...assignment }).then(check),
+            supabase.from("events").update({ requires_coverage: true }).eq("id", id).then(check),
+          ])
+        : null,
+      input.photo && input.photographerId ? notifyPhotographer(id) : null,
+    ]);
+    return id;
+  }
+
+  /* ---------- Modification ---------- */
+  const id = eventId;
+  const [, , { data: mission }, { data: request }, assignmentIfNeeded] = await Promise.all([
+    supabase.from("events").update(eventFields).eq("id", id).eq("event_type", "match_du_week_end").then(check),
+    supabase.from("match_details").upsert({ event_id: id, ...details }).then(check),
+    supabase.from("photo_missions").select("id, status, photographer_id").eq("event_id", id).maybeSingle(),
+    input.video
+      ? supabase.from("coverage_requests").select("id, assigned_technician_id, technician_response").eq("event_id", id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    videographer ? videoAssignment() : Promise.resolve(null),
+  ]);
+
+  const writes: PromiseLike<unknown>[] = [];
   if (input.photo) {
     const designated = input.photographerId;
     const assignment = designated
@@ -291,71 +376,38 @@ async function saveMatchImpl(input: MatchInput, eventId?: string): Promise<strin
       : mission?.status === "taken"
         ? { status: "open", photographer_id: null, taken_at: null }
         : {};
-    if (mission) {
-      const { error } = await supabase
-        .from("photo_missions")
-        .update({ ...assignment, publisher_id: input.publisherId, updated_at: new Date().toISOString() })
-        .eq("id", mission.id);
-      if (error) throw new Error(error.message);
-    } else {
-      const { error } = await supabase
-        .from("photo_missions")
-        .insert({ event_id: id, status: "draft", ...assignment, publisher_id: input.publisherId, created_by: userId });
-      if (error) throw new Error(error.message);
-    }
-    if (designated && designated !== mission?.photographer_id) {
-      await notify([designated], {
-        type: "coverage_assignment",
-        title: "Match à photographier",
-        message: `${await actorName(userId)} vous a désigné : ${eventFields.title}.`,
-        eventId: id,
-        trade: "photo",
-      });
-    }
+    writes.push(
+      mission
+        ? supabase
+            .from("photo_missions")
+            .update({ ...assignment, publisher_id: input.publisherId, updated_at: new Date().toISOString() })
+            .eq("id", mission.id)
+            .then(check)
+        : supabase.from("photo_missions").insert({ event_id: id, status: "draft", ...assignment, publisher_id: input.publisherId, created_by: userId }).then(check)
+    );
+    if (designated && designated !== mission?.photographer_id) writes.push(notifyPhotographer(id));
   } else if (mission) {
-    const { error } = await supabase.from("photo_missions").delete().eq("id", mission.id);
-    if (error) throw new Error(error.message);
+    writes.push(supabase.from("photo_missions").delete().eq("id", mission.id).then(check));
   }
 
   if (input.video) {
-    const { data: request } = await supabase
-      .from("coverage_requests")
-      .select("id, assigned_technician_id, technician_response")
-      .eq("event_id", id)
-      .maybeSingle();
-    // Demande d'assignation à un vidéaste : il la reçoit en notification et l'accepte ou la refuse
-    // (même flux que « Assigner » depuis la fiche événement). Sans vidéaste : proposée au réseau.
-    const designated = input.videographerId;
-    const changed = designated ? designated !== request?.assigned_technician_id || request?.technician_response === "rejected" : false;
-    let assignment = {};
-    if (changed && designated) {
-      const { data: tech } = await createServiceClient().from("profiles").select("id, first_name, last_name, email").eq("id", designated).single();
-      if (!tech) throw new Error("Vidéaste introuvable.");
-      assignment = {
-        assigned_technician_id: tech.id,
-        technician_id: tech.id,
-        assigned_technician_name: toPerson(tech).name,
-        assigned_technician_email: tech.email,
-        technician_response: "pending",
-        status: "pending",
-        coverage_symbol: null,
-      };
-    } else if (!designated && request?.assigned_technician_id && request.technician_response !== "accepted") {
-      // Retour au réseau : on retire la demande faite à un vidéaste qui n'a pas encore accepté.
-      assignment = { assigned_technician_id: null, technician_id: null, assigned_technician_name: null, assigned_technician_email: null, technician_response: null, status: "pending" };
-    }
-    if (request) {
-      if (Object.keys(assignment).length) {
-        const { error } = await supabase.from("coverage_requests").update(assignment).eq("id", request.id);
-        if (error) throw new Error(error.message);
-      }
+    const req = request as { id: string; assigned_technician_id: string | null; technician_response: string | null } | null;
+    // Sans vidéaste : la demande reste proposée ; un vidéaste qui n'a pas encore accepté est retiré.
+    const changed = videographer ? videographer !== req?.assigned_technician_id || req?.technician_response === "rejected" : false;
+    const assignment =
+      changed && assignmentIfNeeded
+        ? assignmentIfNeeded
+        : !videographer && req?.assigned_technician_id && req.technician_response !== "accepted"
+          ? { assigned_technician_id: null, technician_id: null, assigned_technician_name: null, assigned_technician_email: null, technician_response: null, status: "pending" as const }
+          : null;
+    if (req) {
+      if (assignment) writes.push(supabase.from("coverage_requests").update(assignment).eq("id", req.id).then(check));
     } else {
-      const { error } = await supabase.from("coverage_requests").insert({ event_id: id, requester_id: userId, status: "pending", ...assignment });
-      if (error) throw new Error(error.message);
+      writes.push(supabase.from("coverage_requests").insert({ event_id: id, requester_id: userId, ...(assignment ?? { status: "pending" as const }) }).then(check));
     }
-    await supabase.from("events").update({ requires_coverage: true }).eq("id", id);
-    // Le vidéaste est prévenu (Accepter / Refuser) par le trigger notify_coverage_circuit.
+    writes.push(supabase.from("events").update({ requires_coverage: true }).eq("id", id).then(check));
   }
+  await Promise.all(writes);
   return id;
 }
 
@@ -456,8 +508,8 @@ async function setCoverageMemberImpl(profileId: string, trade: "photo" | "video"
 
 /* ---------- Actions exportées : erreurs renvoyées, pas levées (voir actionResult.ts) ---------- */
 
-export async function getWeekend(startISO: string, endISO: string) {
-  return toResult(() => getWeekendImpl(startISO, endISO));
+export async function getWeekend(startISO: string, endISO: string, withPeople = true) {
+  return toResult(() => getWeekendImpl(startISO, endISO, withPeople));
 }
 
 export async function saveMatch(input: MatchInput, eventId?: string) {

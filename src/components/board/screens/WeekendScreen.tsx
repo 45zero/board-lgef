@@ -288,6 +288,42 @@ function formFromMatch(m: WeekendMatch): FormState {
   };
 }
 
+/** Le match tel qu'il vient d'être enregistré, pour l'afficher sans attendre le rechargement. */
+function savedMatch(id: string, input: MatchInput, data: WeekendData, previous: WeekendMatch | null): WeekendMatch {
+  const person = (list: PersonLite[], pid: string | null) => (pid ? list.find((p) => p.id === pid) ?? null : null);
+  const photographer = person(data.photographers, input.photographerId);
+  const videographer = person(data.videographers, input.videographerId ?? null);
+  return {
+    eventId: id,
+    title: matchLabel(input),
+    start: input.start,
+    location: input.location.trim(),
+    details: {
+      competition: input.competition.trim(),
+      homeTeam: input.homeTeam.trim(),
+      homeLevel: input.homeLevel.trim(),
+      awayTeam: input.awayTeam.trim(),
+      awayLevel: input.awayLevel.trim(),
+      regions: input.regions,
+    },
+    photo: input.photo
+      ? {
+          missionId: previous?.photo?.missionId ?? "",
+          status: photographer ? "taken" : previous?.photo?.status === "open" ? "open" : (previous?.photo?.status ?? "draft"),
+          photographer,
+          publisher: person(data.publishers, input.publisherId),
+        }
+      : null,
+    video: input.video
+      ? previous?.video && (!videographer || previous.video.technicianId === videographer.id)
+        ? previous.video
+        : { state: videographer ? "pending" : "open", technician: videographer?.name ?? null, technicianId: videographer?.id ?? null }
+      : null,
+    photoCount: previous?.photoCount ?? 0,
+    photosPublished: previous?.photosPublished ?? false,
+  };
+}
+
 function MatchForm({
   weekendStart,
   match,
@@ -299,7 +335,8 @@ function MatchForm({
   match: WeekendMatch | null;
   data: WeekendData;
   onClose: () => void;
-  onSaved: () => void;
+  /** Match tel qu'enregistré, affiché tout de suite dans la liste (avant le rechargement). */
+  onSaved: (saved: WeekendMatch) => void;
 }) {
   const [form, setForm] = useState<FormState>(() => (match ? formFromMatch(match) : emptyForm(weekendStart)));
   const [busy, setBusy] = useState(false);
@@ -315,17 +352,15 @@ function MatchForm({
     setError(null);
     try {
       const start = new Date(`${form.date}T${form.time || "15:00"}`);
-      unwrap(await saveMatch(
-        {
-          ...form,
-          start: start.toISOString(),
-          photographerId: form.photo ? form.photographerId || null : null,
-          publisherId: form.photo ? form.publisherId || null : null,
-          videographerId: form.video ? form.videographerId || null : null,
-        },
-        match?.eventId
-      ));
-      onSaved();
+      const input = {
+        ...form,
+        start: start.toISOString(),
+        photographerId: form.photo ? form.photographerId || null : null,
+        publisherId: form.photo ? form.publisherId || null : null,
+        videographerId: form.video ? form.videographerId || null : null,
+      };
+      const id = unwrap(await saveMatch(input, match?.eventId));
+      onSaved(savedMatch(id, input, data, match));
       if (again) {
         // Enchaîner la saisie : même jour, compétition, pages et relais ; équipes et lieu vidés.
         setForm((f) => emptyForm(weekendStart, f));
@@ -669,20 +704,29 @@ export function WeekendScreen() {
 
   const rangeKey = range.start.toISOString();
   const loading = loadedKey !== rangeKey;
+  // Listes du réseau (photographes, vidéastes, relais) : chargées une fois, puis seulement quand le
+  // réseau change ; les rechargements après chaque match ne demandent que les matchs.
+  const peopleLoaded = useRef(false);
   const load = useCallback(
-    () =>
-      getWeekend(range.start.toISOString(), range.end.toISOString())
+    (withPeople = false) => {
+      const people = withPeople || !peopleLoaded.current;
+      return getWeekend(range.start.toISOString(), range.end.toISOString(), people)
         .then(unwrap)
         .then((d) => {
-          setData(d);
-          writeCache(`weekend:${range.start.toISOString()}`, d);
+          if (people) peopleLoaded.current = true;
+          setData((prev) => {
+            const next = people || !prev ? d : { ...d, photographers: prev.photographers, videographers: prev.videographers, network: prev.network, publishers: prev.publishers };
+            writeCache(`weekend:${range.start.toISOString()}`, next);
+            return next;
+          });
           setError(null);
         })
         .catch((e) => setError(errorMessage(e)))
         .finally(() => {
           setLoadedKey(range.start.toISOString());
           setNow(Date.now());
-        }),
+        });
+    },
     [range]
   );
 
@@ -874,7 +918,20 @@ export function WeekendScreen() {
           match={editing === "new" ? null : editing}
           data={data}
           onClose={() => setEditing(null)}
-          onSaved={() => void load()}
+          onSaved={(saved) => {
+            // Affiché tout de suite ; le rechargement (et le direct) remet ensuite tout à jour.
+            setData((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    matches: prev.matches.some((m) => m.eventId === saved.eventId)
+                      ? prev.matches.map((m) => (m.eventId === saved.eventId ? saved : m))
+                      : [...prev.matches, saved].sort((a, b) => a.start.localeCompare(b.start)),
+                  }
+                : prev
+            );
+            void load();
+          }}
         />
       )}
       {networkOpen && data && (
@@ -883,7 +940,8 @@ export function WeekendScreen() {
           requests={requests}
           onClose={() => setNetworkOpen(false)}
           onChanged={() => {
-            void load();
+            // Le réseau a changé : listes des photographes, vidéastes et relais relues.
+            void load(true);
             if (isAdmin) void loadRequests();
           }}
         />
