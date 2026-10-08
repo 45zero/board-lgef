@@ -32,6 +32,7 @@ import { DayWeatherBadge, useForecast } from "@/components/board/calendar/DayWea
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import { listMyCalendars, listMyEvents } from "@/app/actions/calendar";
+import { removeOrphanMirrors } from "@/app/actions/calendar-sync";
 import { EventModal } from "@/components/board/calendar/EventModal";
 import { VoiceEventDialog } from "@/components/board/calendar/VoiceEvent";
 import type { EventDraft } from "@/app/actions/event-dictation";
@@ -157,7 +158,17 @@ export function CalendrierScreen() {
       timeMin: rangeStart.toISOString(),
       timeMax: rangeEnd.toISOString(),
     })
-      .then(setGoogleEvents)
+      .then((items) => {
+        setGoogleEvents(items);
+        // Miroirs d'événements du board supprimés entre-temps : retirés de Google, puis de l'affichage.
+        const mirrors = items.flatMap((e) => (e.boardEventId ? [{ googleEventId: e.id, calendarId: e.calendarId, boardEventId: e.boardEventId }] : []));
+        if (mirrors.length === 0) return;
+        removeOrphanMirrors(googleAccountId, mirrors)
+          .then((removed) => {
+            if (removed.length) setGoogleEvents((prev) => prev.filter((e) => !removed.includes(e.id)));
+          })
+          .catch(() => {});
+      })
       .catch(() => setGoogleEvents([]));
   };
 
@@ -616,7 +627,7 @@ export function CalendrierScreen() {
               return (
                 <div
                   key={week[0].toISOString()}
-                  className="grid min-h-[104px] flex-1 grid-cols-7 border-b border-line"
+                  className="grid min-h-[104px] flex-[1_0_auto] grid-cols-7 border-b border-line"
                   style={{ gridTemplateRows: `auto ${laneCount ? `repeat(${laneCount}, auto) ` : ""}1fr` }}
                 >
                   {/* Fond des cases (toute la hauteur de la semaine). */}

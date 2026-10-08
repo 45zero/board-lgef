@@ -34,6 +34,8 @@ export interface CalendarEventItem {
   allDay: boolean;
   attendees: EventAttendee[];
   htmlLink: string;
+  /** Événement du board dont ce rendez-vous est le miroir (posé par la synchro board → Google), sinon null. */
+  boardEventId: string | null;
 }
 
 function mapEvent(calendarId: string, e: calendar_v3.Schema$Event): CalendarEventItem {
@@ -51,6 +53,7 @@ function mapEvent(calendarId: string, e: calendar_v3.Schema$Event): CalendarEven
       responseStatus: a.responseStatus ?? "needsAction",
     })),
     htmlLink: e.htmlLink ?? "",
+    boardEventId: e.extendedProperties?.private?.lgefEventId ?? null,
   };
 }
 
@@ -101,6 +104,12 @@ export interface EventInput {
   allDay: boolean;
   attendees: string[];
   timeZone?: string;
+  /** Marque le rendez-vous comme miroir d'un événement du board (nettoyé si l'événement disparaît). */
+  boardEventId?: string;
+}
+
+function boardMarker(boardEventId: string | undefined) {
+  return boardEventId ? { private: { lgefEventId: boardEventId } } : undefined;
 }
 
 export async function createEvent(account: ConnectedAccount, params: EventInput) {
@@ -123,6 +132,7 @@ export async function createEvent(account: ConnectedAccount, params: EventInput)
       // Sans ça, Google applique les rappels par défaut du calendrier de l'organisateur
       // (notif surprise "à l'heure" même sans rappel réglé côté board).
       reminders: { useDefault: false, overrides: [] },
+      extendedProperties: boardMarker(params.boardEventId),
     },
   });
   return mapEvent(calendarId, data);
@@ -131,7 +141,9 @@ export async function createEvent(account: ConnectedAccount, params: EventInput)
 export async function updateEvent(account: ConnectedAccount, eventId: string, params: EventInput) {
   const calendar = await calendarClient(account);
   const calendarId = params.calendarId ?? "primary";
-  const { data } = await calendar.events.update({
+  // patch (et non update) : garde les champs non envoyés, dont la marque « miroir du board »
+  // quand le rendez-vous est modifié depuis l'agenda Google du board.
+  const { data } = await calendar.events.patch({
     calendarId,
     eventId,
     sendUpdates: "all",
@@ -147,6 +159,7 @@ export async function updateEvent(account: ConnectedAccount, eventId: string, pa
         : { dateTime: params.end, timeZone: params.timeZone ?? "Europe/Paris" },
       attendees: params.attendees.map((email) => ({ email })),
       reminders: { useDefault: false, overrides: [] },
+      extendedProperties: boardMarker(params.boardEventId),
     },
   });
   return mapEvent(calendarId, data);

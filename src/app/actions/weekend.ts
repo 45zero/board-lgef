@@ -4,6 +4,7 @@ import { toResult } from "@/lib/board/actionResult";
 import { ruleMatches } from "@/lib/board/modules";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
+import { removeEventFromGoogle } from "@/app/actions/calendar-sync";
 import type { FacebookRegion } from "@/lib/social/targets";
 import { matchLabel, type MatchInput, type PersonLite, type PhotoStatus, type WeekendData, type WeekendMatch } from "@/lib/board/weekend";
 
@@ -413,6 +414,8 @@ async function saveMatchImpl(input: MatchInput, eventId?: string): Promise<strin
 
 async function deleteMatchImpl(eventId: string) {
   await requireCoordinator();
+  // Miroir Google (si le match a été modifié depuis le calendrier) retiré avant l'événement.
+  await removeEventFromGoogle(eventId);
   // Service : un coordinateur peut retirer un match saisi par un autre (RLS events : créateur ou admin).
   const { error } = await createServiceClient().from("events").delete().eq("id", eventId).eq("event_type", "match_du_week_end");
   if (error) throw new Error(error.message);
