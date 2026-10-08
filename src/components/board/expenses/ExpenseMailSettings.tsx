@@ -117,7 +117,7 @@ function ImportRow({ i }: { i: MailImport }) {
         <div className="truncate text-[11px] text-ink-4">
           {senderName(i.mail_from)}
           {i.attachment_name && ` · ${i.attachment_name}`}
-          {i.detail && i.status !== "imported" && ` · ${i.detail}`}
+          {i.detail && (i.status !== "imported" || i.total == null) && ` · ${i.detail}`}
         </div>
       </div>
       <div className="shrink-0 text-right">
@@ -188,7 +188,9 @@ export function ExpenseMailSettings() {
       res.error
         ? res.error
         : res.imported
-          ? `${res.imported} facture${res.imported > 1 ? "s" : ""} ajoutée${res.imported > 1 ? "s" : ""} à vos frais (${formatEuros(res.total)}).`
+          ? `${res.imported} facture${res.imported > 1 ? "s" : ""} ajoutée${res.imported > 1 ? "s" : ""} à vos frais${res.toConvert < res.imported ? ` (${formatEuros(res.total)})` : ""}.${
+              res.toConvert ? ` ${res.toConvert} en devise étrangère : convertissez-${res.toConvert > 1 ? "les" : "la"} en euros dans Mes frais.` : ""
+            }`
           : "Aucune nouvelle facture."
     );
     void load();

@@ -24,6 +24,17 @@ export function ExpenseStatusBadge({ status }: { status: ExpenseStatus }) {
 }
 
 export const formatEuros = (n: number) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(n);
+/** Montant dans une devise quelconque (code ISO), ex. « 60,00 $US ». */
+export const formatMoney = (n: number, currency: string | null | undefined) => {
+  try {
+    return new Intl.NumberFormat("fr-FR", { style: "currency", currency: currency || "EUR" }).format(n);
+  } catch {
+    return `${n.toFixed(2).replace(".", ",")} ${currency}`;
+  }
+};
+/** Ligne en devise étrangère pas encore convertie en euros. */
+export const needsConversion = (l: { currency: string | null; exchange_rate: number | null }) =>
+  !!l.currency && l.currency.toUpperCase() !== "EUR" && l.exchange_rate == null;
 
 /** Confirme « Pas de frais » (les lignes déjà saisies sont supprimées). */
 export const confirmNoExpense = (lineCount: number) =>

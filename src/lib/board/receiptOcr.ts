@@ -22,7 +22,8 @@ Pour chaque dépense :
 - merchant : l'enseigne ou le fournisseur (ex. « Total Energies », « SNCF », « Ibis Metz Centre »), ou null ;
 - description : quelques mots utiles au valideur (ex. « Repas midi, 2 couverts », « Aller Metz → Reims ») ;
 - category : transport (train, avion, bus, taxi, VTC, transports en commun), fuel (carburant, recharge électrique), toll (péage), parking, car_rental (location de véhicule), hotel (hébergement), meal (restaurant, repas, boissons), other (tout le reste) ;
-- amount : le montant TTC en euros, nombre positif (ex. 23.5). Ne rends jamais une dépense sans montant lisible ;
+- amount : le montant TTC payé, dans la devise du document, nombre positif (ex. 23.5) — ne le convertis jamais. Ne rends jamais une dépense sans montant lisible ;
+- currency : la devise de ce montant en code ISO 4217 (EUR, USD, GBP, CHF…) ; EUR si le document est en euros ou si la devise n'est pas indiquée ;
 - distanceKm : kilomètres parcourus s'ils figurent sur le document (indemnités kilométriques), sinon null ;
 - place : la ville ou le lieu de la dépense s'il apparaît (adresse du commerce, gare d'arrivée, ville de l'hôtel), sinon null ;
 - eventHint : un nom d'événement, de match, de stage ou de réunion s'il est écrit sur le document, sinon null.
@@ -39,6 +40,7 @@ const ScanSchema = z.object({
       description: z.string().nullable(),
       category: z.enum(EXPENSE_CATEGORIES),
       amount: z.number(),
+      currency: z.string(),
       distanceKm: z.number().nullable(),
       place: z.string().nullable(),
       eventHint: z.string().nullable(),
@@ -94,6 +96,10 @@ export async function readReceipt(input: ReceiptInput): Promise<ReceiptScan | nu
     ...out,
     expenses: out.expenses
       .filter((e) => e.amount > 0)
-      .map((e) => ({ ...e, date: e.date && /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : null })),
+      .map((e) => ({
+        ...e,
+        date: e.date && /^\d{4}-\d{2}-\d{2}$/.test(e.date) ? e.date : null,
+        currency: /^[A-Z]{3}$/.test(e.currency.trim().toUpperCase()) ? e.currency.trim().toUpperCase() : "EUR",
+      })),
   };
 }

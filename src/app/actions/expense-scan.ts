@@ -23,6 +23,8 @@ export type ScannedExpense = {
   description: string | null;
   category: ExpenseCategory;
   amount: number;
+  /** Devise du montant (code ISO, EUR par défaut). */
+  currency: string;
   distanceKm: number | null;
   place: string | null;
   /** Événement retenu automatiquement (null : à choisir, ou hors événement). */
@@ -101,6 +103,7 @@ export async function scanReceipt(path: string, opts: { eventId?: string } = {})
           description: e.description,
           category: e.category,
           amount: Math.round(e.amount * 100) / 100,
+          currency: e.currency,
           distanceKm: e.distanceKm,
           place: e.place,
           suggestedEventId: opts.eventId!,
@@ -123,6 +126,7 @@ export async function scanReceipt(path: string, opts: { eventId?: string } = {})
         description: e.description,
         category: e.category,
         amount: Math.round(e.amount * 100) / 100,
+        currency: e.currency,
         distanceKm: e.distanceKm,
         place: e.place,
         ...rank(e),

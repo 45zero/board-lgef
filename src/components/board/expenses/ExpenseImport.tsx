@@ -18,6 +18,8 @@ type Draft = {
   error: string | null;
   category: ExpenseCategory;
   amount: string;
+  /** Devise lue sur le justificatif (EUR par défaut) : autre que l'euro, la ligne sera à convertir. */
+  currency: string;
   date: string;
   merchant: string;
   description: string;
@@ -124,6 +126,7 @@ const emptyDraft = (fileName: string): Draft => ({
   error: null,
   category: "meal",
   amount: "",
+  currency: "EUR",
   date: "",
   merchant: "",
   description: "",
@@ -167,6 +170,7 @@ export function ExpenseImport({ onAdded }: { onAdded: () => void }) {
           error: null,
           category: e.category,
           amount: String(e.amount),
+          currency: e.currency || "EUR",
           date: e.date ?? "",
           merchant: e.merchant ?? "",
           description: e.description ?? "",
@@ -211,6 +215,7 @@ export function ExpenseImport({ onAdded }: { onAdded: () => void }) {
         description: d.description || null,
         distanceKm: d.distanceKm,
         attachments: d.fileUrl ? [{ url: d.fileUrl, type: d.fileType }] : [],
+        currency: d.currency,
       }))
     );
     if (res.error) {
@@ -320,7 +325,25 @@ export function ExpenseImport({ onAdded }: { onAdded: () => void }) {
                         </option>
                       ))}
                     </select>
-                    <input inputMode="decimal" value={d.amount} onChange={(e) => patch(d.id, { amount: e.target.value })} placeholder="Montant €" className={input} />
+                    <div className="relative min-w-0">
+                      <input
+                        inputMode="decimal"
+                        value={d.amount}
+                        onChange={(e) => patch(d.id, { amount: e.target.value })}
+                        placeholder={d.currency === "EUR" ? "Montant €" : `Montant ${d.currency}`}
+                        className={`${input} w-full ${d.currency === "EUR" ? "" : "pr-14"}`}
+                      />
+                      {d.currency !== "EUR" && (
+                        <button
+                          type="button"
+                          onClick={() => patch(d.id, { currency: "EUR" })}
+                          title="Montant lu dans cette devise : la ligne sera à convertir en euros. Cliquer pour saisir en euros."
+                          className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-full bg-warn-bg px-1.5 py-0.5 text-[10px] font-bold text-warn"
+                        >
+                          {d.currency} <X size={9} />
+                        </button>
+                      )}
+                    </div>
                     <input type="date" value={d.date} onChange={(e) => patch(d.id, { date: e.target.value })} className={input} />
                     <input
                       value={d.merchant}

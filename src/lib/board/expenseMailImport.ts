@@ -4,7 +4,7 @@ import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import { getGoogleAccountById } from "@/lib/google/accounts";
 import { getAttachment, getMessage, listMessages } from "@/lib/google/gmail";
 import { archiveReceipts } from "@/lib/board/expenseArchive";
-import { insertExpenseLines, type NewExpenseLine } from "@/lib/board/expenseLines";
+import { insertExpenseLines, isForeign, type NewExpenseLine } from "@/lib/board/expenseLines";
 import { isReceiptOcrConfigured, readReceipt } from "@/lib/board/receiptOcr";
 import { eventRanker, toReceiptInput } from "@/lib/board/receiptScan";
 
@@ -63,16 +63,18 @@ function pickAttachments(atts: { attachmentId: string; filename: string; mimeTyp
 
 type ImportOutcome = { status: "imported" | "ignored" | "error"; detail: string | null; expense_ids?: string[]; total?: number | null };
 
-const euros = (n: number) => `${n.toFixed(2).replace(".", ",")} €`;
+const money = (n: number, currency: string) => new Intl.NumberFormat("fr-FR", { style: "currency", currency }).format(n);
+const euros = (n: number) => money(n, "EUR");
 
 /** Passe une règle (au plus `maxMessages` mails, les plus anciens d'abord) : renvoie le nombre de factures importées et leur total. */
 export async function runExpenseMailRule(
   service: Service,
   rule: ExpenseMailRule,
   maxMessages = MAX_MESSAGES
-): Promise<{ imported: number; total: number; error: string | null }> {
+): Promise<{ imported: number; total: number; toConvert: number; error: string | null }> {
   let imported = 0;
   let total = 0;
+  let toConvert = 0;
   try {
     if (!isReceiptOcrConfigured()) throw new Error("Lecture automatique indisponible (clé Claude absente).");
     const account = await getGoogleAccountById(rule.account_id);
@@ -117,16 +119,17 @@ export async function runExpenseMailRule(
           if (outcome.status === "imported") {
             imported++;
             total += outcome.total ?? 0;
+            if (outcome.total == null) toConvert++;
           }
         }
       }
     }
     await service.from("expense_mail_rules").update({ last_checked_at: new Date().toISOString(), last_error: null }).eq("id", rule.id);
-    return { imported, total, error: null };
+    return { imported, total, toConvert, error: null };
   } catch (e) {
     const error = e instanceof Error ? e.message : "Erreur inattendue.";
     await service.from("expense_mail_rules").update({ last_checked_at: new Date().toISOString(), last_error: error }).eq("id", rule.id);
-    return { imported, total, error };
+    return { imported, total, toConvert, error };
   }
 }
 
@@ -171,11 +174,18 @@ async function importAttachment(
       description: e.description,
       distanceKm: e.distanceKm,
       attachments: [{ url, type: att.mimeType }],
+      currency: e.currency,
     }));
     const { ids, toArchive } = await insertExpenseLines(service, rule.user_id, lines);
     await archiveReceipts(toArchive).catch(() => undefined);
-    const sum = lines.reduce((n, l) => n + l.amount, 0);
     const merchant = scan.expenses[0]?.merchant;
+    // Facture en devise : montant d'origine, total en euros inconnu tant que la ligne n'est pas convertie.
+    const foreign = lines.find((l) => isForeign(l.currency));
+    if (foreign) {
+      const amount = money(lines.filter((l) => l.currency === foreign.currency).reduce((n, l) => n + l.amount, 0), foreign.currency!);
+      return { status: "imported", detail: `${merchant ? `${merchant} · ` : ""}${amount} — à convertir en euros`, expense_ids: ids, total: null };
+    }
+    const sum = lines.reduce((n, l) => n + l.amount, 0);
     return { status: "imported", detail: merchant ? `${merchant} · ${euros(sum)}` : euros(sum), expense_ids: ids, total: sum };
   } catch (e) {
     return await drop("error", e instanceof Error ? e.message : "Erreur inattendue.");
@@ -183,10 +193,12 @@ async function importAttachment(
 }
 
 /** Prévient la personne des factures ajoutées à ses frais. */
-export async function notifyImported(service: Service, userId: string, count: number, total: number) {
+export async function notifyImported(service: Service, userId: string, count: number, total: number, toConvert = 0) {
   if (!count) return;
   const title = count > 1 ? `${count} factures ajoutées à vos frais` : "Facture ajoutée à vos frais";
-  const message = `${count > 1 ? `${count} factures reçues par e-mail ont été lues et ajoutées` : "Une facture reçue par e-mail a été lue et ajoutée"} à vos frais (${euros(total)}). Vérifiez avant de déclarer.`;
+  const convert =
+    toConvert === 0 ? "" : toConvert === 1 ? " Une facture est en devise étrangère : convertissez-la en euros." : ` ${toConvert} factures sont en devise étrangère : convertissez-les en euros.`;
+  const message = `${count > 1 ? `${count} factures reçues par e-mail ont été lues et ajoutées` : "Une facture reçue par e-mail a été lue et ajoutée"} à vos frais${toConvert < count ? ` (${euros(total)})` : ""}.${convert} Vérifiez avant de déclarer.`;
   const data = { kind: "expense_mail_import", app: "frais" };
   const { data: notif } = await service
     .from("notifications")

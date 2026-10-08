@@ -14,7 +14,7 @@ import {
   type MyExpenseItem,
   type SubmissionToReview,
 } from "@/app/actions/expenses";
-import { ExpenseLinesEditor, AttachmentLinks } from "@/components/board/expenses/ExpenseLinesEditor";
+import { ExpenseLinesEditor, AttachmentLinks, LineAmount } from "@/components/board/expenses/ExpenseLinesEditor";
 import { ExpenseImport } from "@/components/board/expenses/ExpenseImport";
 import { ExpenseExportModal } from "@/components/board/expenses/ExpenseExportModal";
 import { ExpenseMailSettings } from "@/components/board/expenses/ExpenseMailSettings";
@@ -477,7 +477,7 @@ export function ReviewModal({ sub, onClose, onDone }: { sub: SubmissionToReview;
                     {l.distance_km ? ` · ${l.distance_km} km` : ""}
                   </div>
                 </div>
-                <span className="shrink-0 font-bold text-ink">{formatEuros(Number(l.total_amount ?? 0))}</span>
+                <LineAmount line={l} />
               </div>
               {lineParts(l).length > 1 && (
                 <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-ink-2">

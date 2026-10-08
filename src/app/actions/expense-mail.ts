@@ -98,23 +98,25 @@ export async function deleteExpenseMailRule(id: string): Promise<{ error: string
 }
 
 /** « Vérifier maintenant » : passe toutes mes règles actives tout de suite. */
-export async function runMyExpenseMailRules(): Promise<{ error: string | null; imported: number; total: number }> {
+export async function runMyExpenseMailRules(): Promise<{ error: string | null; imported: number; total: number; toConvert: number }> {
   try {
     const userId = await currentUserId();
     const service = createServiceClient();
     const { data: rules } = await service.from("expense_mail_rules").select(RULE_COLUMNS).eq("user_id", userId).eq("enabled", true);
     let imported = 0;
     let total = 0;
+    let toConvert = 0;
     const errors: string[] = [];
     for (const rule of (rules ?? []) as ExpenseMailRule[]) {
       // Peu de mails à la fois (la page attend la réponse) : le reste passe avec le cron.
       const r = await runExpenseMailRule(service, rule, 3);
       imported += r.imported;
       total += r.total;
+      toConvert += r.toConvert;
       if (r.error) errors.push(r.error);
     }
-    return { error: errors[0] ?? null, imported, total };
+    return { error: errors[0] ?? null, imported, total, toConvert };
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Erreur inattendue.", imported: 0, total: 0 };
+    return { error: e instanceof Error ? e.message : "Erreur inattendue.", imported: 0, total: 0, toConvert: 0 };
   }
 }

@@ -3,16 +3,12 @@
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { archiveReceipts } from "@/lib/board/expenseArchive";
-import { insertExpenseLines, type NewExpenseLine } from "@/lib/board/expenseLines";
+import { insertExpenseLines, isForeign, type NewExpenseLine } from "@/lib/board/expenseLines";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { DbEventType } from "@/lib/board/calendar";
 import { type SolicitationRole } from "@/lib/board/solicitation";
 import { computeMyExpenses, lineMonth, personName, toStatus } from "@/lib/board/expensesCore";
-import {
-  lineParts,
-  monthLabel,
-  type ExpenseTarget,
-} from "@/lib/board/expenseCategories";
+import { EXPENSE_CATEGORIES, CATEGORY_META, lineParts, monthLabel, type ExpenseTarget } from "@/lib/board/expenseCategories";
 
 // Gestion des frais du board. Données partagées avec l'appli calendrier :
 // - event_expenses : lignes de frais d'une personne, sur un événement ou hors événement (event_id nul) ;
@@ -67,6 +63,11 @@ export type ExpenseLine = {
   description: string | null;
   merchant_name: string | null;
   expense_date: string | null;
+  /** Devise de la facture (nul = euros) ; tant que exchange_rate est nul, les montants sont dans cette devise. */
+  currency: string | null;
+  original_amount: number | null;
+  exchange_rate: number | null;
+  exchange_rate_date: string | null;
   total_amount: number | null;
   file_url: string | null;
   created_at: string;
@@ -202,6 +203,7 @@ export async function declareExpenses(target: ExpenseTarget, noExpense = false):
       lines = [];
     }
     if (!noExpense && lines.length === 0) throw new Error("Ajoutez au moins une ligne de frais avant de déclarer.");
+    if (!noExpense && lines.some(needsConversion)) throw new Error("Convertissez d'abord en euros les lignes en devise étrangère.");
 
     const payload = {
       user_id: userId,
@@ -435,6 +437,61 @@ export async function addExpenseLines(input: NewExpenseLine[]): Promise<{ error:
     return { error: null, ids };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Erreur inattendue.", ids: [] };
+  }
+}
+
+/** Ligne en devise étrangère pas encore convertie en euros. */
+const needsConversion = (l: { currency?: string | null; exchange_rate?: number | null }) => isForeign(l.currency) && l.exchange_rate == null;
+
+/**
+ * Convertit en euros une de mes lignes en devise étrangère, au cours de la BCE du jour de la
+ * dépense (dernier jour ouvré connu). Les montants de la ligne passent en euros ; la devise, le
+ * montant d'origine et le cours restent affichés. Le justificatif n'est pas touché.
+ */
+export async function convertExpenseLine(lineId: string): Promise<{ error: string | null }> {
+  try {
+    const { userId, service } = await currentUser();
+    const { data: line } = await service.from("event_expenses").select("*").eq("id", lineId).eq("user_id", userId).single();
+    if (!line) throw new Error("Ligne introuvable.");
+    if (!needsConversion(line)) throw new Error("Cette ligne est déjà en euros.");
+    const sub = await submissionOf(service, userId, line.event_id ? { eventId: line.event_id } : { month: lineMonth(line) });
+    if (sub?.status === "approved") throw new Error("Ces frais sont déjà validés.");
+
+    const currency = line.currency!.toUpperCase();
+    const day = (line.expense_date ?? line.created_at).slice(0, 10);
+    const res = await fetch(`https://api.frankfurter.dev/v1/${day > new Date().toISOString().slice(0, 10) ? "latest" : day}?base=${currency}&symbols=EUR`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null);
+    const json = res?.ok ? ((await res.json()) as { date?: string; rates?: { EUR?: number } }) : null;
+    const rate = json?.rates?.EUR;
+    if (!rate || !(rate > 0)) throw new Error(`Cours ${currency} → EUR introuvable : réessayez plus tard.`);
+
+    // Chaque montant de la ligne (une catégorie en général) est converti ; le total suit.
+    const round = (n: number) => Math.round(n * rate * 100) / 100;
+    const converted: Record<string, number> = {};
+    for (const c of EXPENSE_CATEGORIES) {
+      const col = CATEGORY_META[c].column;
+      const v = Number(line[col] ?? 0);
+      if (v > 0) converted[col] = round(v);
+    }
+    const original = Number(line.original_amount ?? line.total_amount ?? 0);
+    const { error } = await service
+      .from("event_expenses")
+      .update({
+        ...converted,
+        total_amount: round(Number(line.total_amount ?? 0)),
+        original_amount: original,
+        exchange_rate: rate,
+        exchange_rate_date: json?.date ?? day,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", lineId)
+      .eq("user_id", userId);
+    if (error) throw new Error(error.message);
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Erreur inattendue." };
   }
 }
 

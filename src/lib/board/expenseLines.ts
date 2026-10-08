@@ -18,7 +18,12 @@ export type NewExpenseLine = {
   description: string | null;
   distanceKm: number | null;
   attachments: { url: string; type: string | null }[];
+  /** Devise du montant (code ISO) si ce n'est pas l'euro : la ligne sera à convertir. */
+  currency?: string | null;
 };
+
+/** Montant dans une autre devise que l'euro. */
+export const isForeign = (currency: string | null | undefined) => !!currency && /^[A-Za-z]{3}$/.test(currency) && currency.toUpperCase() !== "EUR";
 
 /** Préfixe des justificatifs déposés par une personne (bucket public expense_scans). */
 export const receiptPrefix = (userId: string) => `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/expense_scans/expense_scans/${userId}/`;
@@ -35,6 +40,7 @@ export async function insertExpenseLines(
     if (!EXPENSE_CATEGORIES.includes(line.category)) throw new Error("Catégorie inconnue.");
     if (!(line.amount > 0) || line.amount > 100_000) throw new Error("Montant invalide.");
     if (line.date && !/^\d{4}-\d{2}-\d{2}$/.test(line.date)) throw new Error("Date invalide.");
+    if (line.currency && !/^[A-Za-z]{3}$/.test(line.currency)) throw new Error("Devise invalide.");
     // Justificatifs : uniquement des fichiers déposés par la personne elle-même.
     if (line.attachments.some((a) => !a.url.startsWith(prefix))) throw new Error("Justificatif non reconnu.");
 
@@ -59,6 +65,8 @@ export async function insertExpenseLines(
         other_fees_description: line.category === "other" ? line.description?.trim() || line.merchant?.trim() || null : null,
         distance_km: line.distanceKm,
         file_url: line.attachments[0]?.url ?? null,
+        // Devise étrangère : montant d'origine gardé, ligne à convertir en euros avant de déclarer.
+        ...(isForeign(line.currency) ? { currency: line.currency!.toUpperCase(), original_amount: amount } : {}),
       })
       .select("id")
       .single();

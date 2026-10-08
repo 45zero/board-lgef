@@ -25,12 +25,12 @@ export async function GET(request: Request) {
     .limit(BATCH);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const byUser = new Map<string, { count: number; total: number }>();
+  const byUser = new Map<string, { count: number; total: number; toConvert: number }>();
   for (const rule of (rules ?? []) as ExpenseMailRule[]) {
     const r = await runExpenseMailRule(service, rule);
-    const acc = byUser.get(rule.user_id) ?? { count: 0, total: 0 };
-    byUser.set(rule.user_id, { count: acc.count + r.imported, total: acc.total + r.total });
+    const acc = byUser.get(rule.user_id) ?? { count: 0, total: 0, toConvert: 0 };
+    byUser.set(rule.user_id, { count: acc.count + r.imported, total: acc.total + r.total, toConvert: acc.toConvert + r.toConvert });
   }
-  for (const [userId, { count, total }] of byUser) await notifyImported(service, userId, count, total);
+  for (const [userId, { count, total, toConvert }] of byUser) await notifyImported(service, userId, count, total, toConvert);
   return NextResponse.json({ rules: rules?.length ?? 0, imported: [...byUser.values()].reduce((n, u) => n + u.count, 0) });
 }

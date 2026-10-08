@@ -1120,6 +1120,10 @@ export type Database = {
           file_url: string | null
           expense_date: string | null
           merchant_name: string | null
+          currency: string | null
+          original_amount: number | null
+          exchange_rate: number | null
+          exchange_rate_date: string | null
         }
         Insert: {
           id?: string
@@ -1144,6 +1148,10 @@ export type Database = {
           file_url?: string | null
           expense_date?: string | null
           merchant_name?: string | null
+          currency?: string | null
+          original_amount?: number | null
+          exchange_rate?: number | null
+          exchange_rate_date?: string | null
         }
         Update: {
           id?: string
@@ -1168,6 +1176,10 @@ export type Database = {
           file_url?: string | null
           expense_date?: string | null
           merchant_name?: string | null
+          currency?: string | null
+          original_amount?: number | null
+          exchange_rate?: number | null
+          exchange_rate_date?: string | null
         }
         Relationships: []
       }

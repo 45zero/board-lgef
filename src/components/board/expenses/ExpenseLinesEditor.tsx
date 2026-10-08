@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, Paperclip, Sparkles, Trash2, X, Loader2, FileText } from "lucide-react";
-import { addExpenseLines, deleteExpenseLine, getMyExpenseLines, type ExpenseLine, type NewExpenseLine } from "@/app/actions/expenses";
+import { Camera, Paperclip, Sparkles, Trash2, X, Loader2, FileText, ArrowRightLeft, AlertCircle } from "lucide-react";
+import { addExpenseLines, convertExpenseLine, deleteExpenseLine, getMyExpenseLines, type ExpenseLine, type NewExpenseLine } from "@/app/actions/expenses";
 import { scanReceipt, type ScannedExpense } from "@/app/actions/expense-scan";
 import { CATEGORY_META, EXPENSE_CATEGORIES, lineParts, targetKey, type ExpenseCategory, type ExpenseTarget } from "@/lib/board/expenseCategories";
 import { uploadReceipt, RECEIPT_ACCEPT } from "@/lib/board/receiptUpload";
-import { DeclarationBar, formatEuros } from "@/components/board/expenses/ExpenseStatus";
+import { DeclarationBar, formatEuros, formatMoney, needsConversion } from "@/components/board/expenses/ExpenseStatus";
 
 type Attachment = { url: string; type: string; name: string };
 
@@ -24,6 +24,50 @@ export function AttachmentLinks({ attachments }: { attachments: { url: string; n
         </a>
       ))}
     </div>
+  );
+}
+
+/**
+ * Montant d'une ligne : en euros ; une ligne en devise étrangère affiche son montant d'origine et,
+ * tant qu'elle n'est pas convertie, le bouton « Convertir en € » (cours BCE du jour de la dépense).
+ */
+export function LineAmount({ line, onConvert }: { line: ExpenseLine; onConvert?: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const amount = Number(line.total_amount ?? 0);
+  if (needsConversion(line)) {
+    return (
+      <span className="flex shrink-0 flex-col items-end gap-1">
+        <span className="text-sm font-bold text-ink">{formatMoney(amount, line.currency)}</span>
+        {onConvert ? (
+          <button
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              const res = await convertExpenseLine(line.id);
+              setBusy(false);
+              if (res.error) return alert(res.error);
+              onConvert();
+            }}
+            title="Convertir en euros au cours de la BCE du jour de la dépense (la facture reste dans sa devise)"
+            className="flex items-center gap-1 rounded-btn bg-red px-2 py-1 text-[11px] font-bold text-white shadow-btn-red disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={11} className="animate-spin" /> : <ArrowRightLeft size={11} />} Convertir en €
+          </button>
+        ) : (
+          <span className="text-[10px] font-semibold text-warn">À convertir en €</span>
+        )}
+      </span>
+    );
+  }
+  return (
+    <span className="flex shrink-0 flex-col items-end">
+      <span className="text-sm font-bold text-ink">{formatEuros(amount)}</span>
+      {line.currency && line.exchange_rate != null && (
+        <span className="text-[10px] text-ink-4" title={`Cours BCE${line.exchange_rate_date ? ` du ${fmtDay(line.exchange_rate_date)}` : ""}`}>
+          {formatMoney(Number(line.original_amount ?? 0), line.currency)} · 1 = {Number(line.exchange_rate).toLocaleString("fr-FR", { maximumFractionDigits: 4 })} €
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -64,6 +108,8 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
   const [date, setDate] = useState(() => ("month" in target ? `${target.month}-01` : new Date().toISOString().slice(0, 10)));
   const [merchant, setMerchant] = useState("");
   const [description, setDescription] = useState("");
+  /** Devise lue sur le justificatif (EUR par défaut). */
+  const [currency, setCurrency] = useState("EUR");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [extra, setExtra] = useState<ScannedExpense[]>([]);
   const [status, setStatus] = useState<"idle" | "upload" | "scan" | "save">("idle");
@@ -88,6 +134,7 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
     setAmount("");
     setMerchant("");
     setDescription("");
+    setCurrency("EUR");
     setAttachments([]);
     setExtra([]);
     setInfo(null);
@@ -99,6 +146,7 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
     if (e.date) setDate(e.date);
     setMerchant(e.merchant ?? "");
     setDescription(e.description ?? "");
+    setCurrency(e.currency || "EUR");
   };
 
   const onFiles = async (files: File[]) => {
@@ -154,6 +202,7 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
     description: description || null,
     distanceKm: null,
     attachments: files(),
+    currency,
   });
 
   const remove = async (id: string) => {
@@ -164,7 +213,9 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
     onChanged?.();
   };
 
-  const total = (lines ?? []).reduce((n, l) => n + Number(l.total_amount ?? 0), 0);
+  // Lignes en devise pas encore converties : hors du total en euros (et déclaration bloquée).
+  const total = (lines ?? []).filter((l) => !needsConversion(l)).reduce((n, l) => n + Number(l.total_amount ?? 0), 0);
+  const toConvert = (lines ?? []).filter(needsConversion).length;
   const amountValue = parseFloat(amount.replace(",", "."));
   const busy = status !== "idle";
 
@@ -196,7 +247,17 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
                   </div>
                   <AttachmentLinks attachments={l.attachments} />
                 </div>
-                <span className="shrink-0 text-sm font-bold text-ink">{formatEuros(Number(l.total_amount ?? 0))}</span>
+                <LineAmount
+                  line={l}
+                  onConvert={
+                    locked
+                      ? undefined
+                      : () => {
+                          void load();
+                          onChanged?.();
+                        }
+                  }
+                />
                 {!locked && (
                   <button onClick={() => remove(l.id)} title="Supprimer" className="shrink-0 rounded-full p-1 text-ink-4 hover:bg-bad-bg hover:text-bad">
                     <Trash2 size={14} />
@@ -253,7 +314,25 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
                 </option>
               ))}
             </select>
-            <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Montant €" className={input} />
+            <div className="relative min-w-0">
+              <input
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder={currency === "EUR" ? "Montant €" : `Montant ${currency}`}
+                className={`${input} w-full ${currency === "EUR" ? "" : "pr-14"}`}
+              />
+              {currency !== "EUR" && (
+                <button
+                  type="button"
+                  onClick={() => setCurrency("EUR")}
+                  title="Montant lu dans cette devise : la ligne sera à convertir en euros. Cliquer pour saisir en euros."
+                  className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-full bg-warn-bg px-1.5 py-0.5 text-[10px] font-bold text-warn"
+                >
+                  {currency} <X size={9} />
+                </button>
+              )}
+            </div>
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={input} />
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -277,6 +356,7 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
                       description: e.description,
                       distanceKm: e.distanceKm,
                       attachments: files(),
+                      currency: e.currency,
                     })),
                   ])
                 }
@@ -294,6 +374,13 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
             </button>
           </div>
         </div>
+      )}
+
+      {toConvert > 0 && (
+        <p className="flex items-center gap-1.5 rounded-btn bg-warn-bg px-3 py-2 text-xs font-semibold text-warn">
+          <AlertCircle size={13} className="shrink-0" />
+          {toConvert > 1 ? `${toConvert} lignes sont` : "Une ligne est"} en devise étrangère : convertissez-{toConvert > 1 ? "les" : "la"} en euros avant de déclarer.
+        </p>
       )}
 
       {lines && <DeclarationBar key={`${key}:${lines.length}:${total}`} target={target} total={total} lineCount={lines.length} onDone={onChanged} />}

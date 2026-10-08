@@ -53,7 +53,7 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
       .from("expense_submissions")
       .select("id, event_id, period_month, status, submitted_at, reviewed_at, reviewed_by, reviewer_comments, reviewer_comment")
       .eq("user_id", userId),
-    service.from("event_expenses").select("event_id, total_amount, expense_date, created_at").eq("user_id", userId).gte("created_at", since),
+    service.from("event_expenses").select("event_id, total_amount, expense_date, created_at, currency, exchange_rate").eq("user_id", userId).gte("created_at", since),
   ]);
 
   const subs = submissions.data ?? [];
@@ -65,7 +65,10 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
     const cur = totals.get(key) ?? { total: 0, count: 0 };
     totals.set(key, { total: cur.total + amount, count: cur.count + 1 });
   };
-  for (const l of allLines.data ?? []) add(l.event_id ? `event:${l.event_id}` : `month:${lineMonth(l)}`, Number(l.total_amount ?? 0));
+  // Ligne en devise étrangère pas encore convertie : comptée dans les lignes, pas dans le total en euros.
+  const euros = (l: { total_amount: number | null; currency: string | null; exchange_rate: number | null }) =>
+    l.currency && l.currency.toUpperCase() !== "EUR" && l.exchange_rate == null ? 0 : Number(l.total_amount ?? 0);
+  for (const l of allLines.data ?? []) add(l.event_id ? `event:${l.event_id}` : `month:${lineMonth(l)}`, euros(l));
 
   const withLines = [...totals.keys()].filter((k) => k.startsWith("event:")).map((k) => k.slice(6));
   const eventIds = [...new Set([...roles.keys(), ...subByEvent.keys(), ...withLines])];
