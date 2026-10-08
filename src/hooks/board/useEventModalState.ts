@@ -2,7 +2,7 @@
 
 import { notifyEventAssignment } from "@/app/actions/event-notifications";
 import { useEffect, useState } from "react";
-import { format, parseISO } from "date-fns";
+import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { ORG_TO_EVENT_TYPE, type CalendarEvent } from "@/lib/board/calendar";
@@ -90,6 +90,8 @@ export function useEventModalState({
   const [dateStr, setDateStr] = useState(format(start, "yyyy-MM-dd"));
   const [startTime, setStartTime] = useState(format(start, "HH:mm"));
   const [endTime, setEndTime] = useState(format(end, "HH:mm"));
+  // Jours entre début et fin d'un événement existant sur plusieurs jours (la fiche n'a qu'une date).
+  const [endDayOffset] = useState(() => Math.max(0, differenceInCalendarDays(end, start)));
   const [saving, setSaving] = useState(false);
   const [reminders, setReminders] = useState<{ id: string; reminder_offset: string }[]>([]);
   const [wantsCoverage, setWantsCoverage] = useState(d?.wantsCoverage ?? false);
@@ -145,9 +147,27 @@ export function useEventModalState({
     setReminders((prev) => prev.filter((r) => r.id !== id));
   };
 
+  /** Changer l'heure de début décale la fin d'autant (durée conservée). */
+  const changeStartTime = (next: string) => {
+    const toMin = (t: string) => {
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + m;
+    };
+    if (/^\d{2}:\d{2}$/.test(next) && /^\d{2}:\d{2}$/.test(startTime) && /^\d{2}:\d{2}$/.test(endTime)) {
+      const duration = (toMin(endTime) - toMin(startTime) + 1440) % 1440;
+      const endMin = (toMin(next) + duration) % 1440;
+      setEndTime(`${String(Math.floor(endMin / 60)).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`);
+    }
+    setStartTime(next);
+  };
+
   const buildPayload = (): EventFormPayload => {
-    const startISO = new Date(`${dateStr}T${startTime}:00`).toISOString();
-    const endISO = new Date(`${dateStr}T${endTime}:00`).toISOString();
+    const startAt = new Date(`${dateStr}T${startTime}:00`);
+    let endAt = addDays(new Date(`${dateStr}T${endTime}:00`), endDayOffset);
+    // Fin avant le début (ex. 23:00 → 00:30) : l'événement se termine le lendemain.
+    if (endAt < startAt) endAt = addDays(endAt, 1);
+    const startISO = startAt.toISOString();
+    const endISO = endAt.toISOString();
     return {
       title,
       eventType: ORG_TO_EVENT_TYPE[org],
@@ -306,7 +326,7 @@ export function useEventModalState({
     dateStr,
     setDateStr,
     startTime,
-    setStartTime,
+    setStartTime: changeStartTime,
     endTime,
     setEndTime,
     saving,
