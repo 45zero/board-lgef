@@ -23,6 +23,7 @@ import {
   ChevronLeft,
   ChevronDown,
   Check,
+  Kanban,
 } from "lucide-react";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import {
@@ -42,6 +43,8 @@ import {
   deleteMyDraft,
 } from "@/app/actions/gmail";
 import { EmailBody } from "@/components/board/mail/EmailBody";
+import { LinkEmailToCardPopover } from "@/components/board/team/TeamEmails";
+import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { SenderAvatar, parseSenderName } from "@/components/board/mail/SenderAvatar";
 
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
@@ -488,6 +491,7 @@ export function MobileMailsScreen({
 
       {selected && (
         <MobileMessageDetail
+          accountId={activeAccountId}
           message={selected}
           loading={selectedLoading}
           onClose={() => setSelected(null)}
@@ -657,6 +661,7 @@ function SwipeableMailRow({
 }
 
 function MobileMessageDetail({
+  accountId,
   message,
   loading = false,
   onClose,
@@ -667,6 +672,7 @@ function MobileMessageDetail({
   onDownload,
   onPreview,
 }: {
+  accountId: string | null;
   message: MessageDetail;
   /** Corps en cours de chargement : l'aperçu de la liste est affiché en attendant. */
   loading?: boolean;
@@ -678,6 +684,9 @@ function MobileMessageDetail({
   onDownload: (messageId: string, attachmentId: string, filename: string, mimeType: string) => void;
   onPreview: (messageId: string, attachmentId: string, mimeType: string) => void;
 }) {
+  const [linking, setLinking] = useState(false);
+  const [linkNotice, setLinkNotice] = useState<{ message: string; card: { id: string; title: string } | null } | null>(null);
+  const { open: openTeamCard } = useOpenTeamCard();
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-card">
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-3 pt-[calc(env(safe-area-inset-top)+12px)]">
@@ -685,7 +694,39 @@ function MobileMessageDetail({
           <ChevronLeft size={20} />
         </button>
         <div className="min-w-0 flex-1 truncate text-sm font-bold text-ink">{message.subject}</div>
+        {accountId && (
+          <div className="relative">
+            <button
+              onClick={() => setLinking((v) => !v)}
+              className="flex h-8 items-center gap-1 rounded-full px-2 text-[11px] font-semibold text-ink-3"
+              aria-label="Lier à une carte de l'Espace Team"
+            >
+              <Kanban size={16} /> Carte
+            </button>
+            <LinkEmailToCardPopover
+              open={linking}
+              onClose={() => setLinking(false)}
+              accountId={accountId}
+              messageId={message.id}
+              hasAttachments={message.attachments.length > 0}
+              onDone={(text, card) => setLinkNotice({ message: text, card })}
+            />
+          </div>
+        )}
       </div>
+      {linkNotice && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-line bg-subtle px-4 py-2 text-xs text-ink-2">
+          <span className="min-w-0 flex-1">{linkNotice.message}</span>
+          {linkNotice.card && (
+            <button onClick={() => openTeamCard(linkNotice.card!.id)} className="shrink-0 font-semibold text-link">
+              Ouvrir
+            </button>
+          )}
+          <button onClick={() => setLinkNotice(null)} aria-label="Fermer" className="shrink-0 text-ink-4">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-4">
         <div className="mb-3 flex items-start gap-2.5">

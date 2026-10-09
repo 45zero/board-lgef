@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { Json } from "@/lib/supabase/database.types";
 import { getOwnedGoogleAccount } from "@/lib/google/accounts";
+import { getAttachment, getMessage } from "@/lib/google/gmail";
 import {
   createResumableUploadSession,
   ensurePublicViewAccess,
@@ -88,7 +89,7 @@ async function requireDrive() {
   return account;
 }
 
-async function uploaderTags(supabase: Supabase, cardId: string, userId: string, opts: { fromGed: boolean; toCenter: boolean }) {
+async function uploaderTags(supabase: Supabase, cardId: string, userId: string, opts: { source: "upload" | "ged" | "email"; toCenter: boolean }) {
   const { data: p } = await supabase.from("profiles").select("first_name, last_name, email").eq("id", userId).single();
   const name = [p?.first_name, p?.last_name].filter(Boolean).join(" ") || p?.email || "—";
   return {
@@ -97,7 +98,7 @@ async function uploaderTags(supabase: Supabase, cardId: string, userId: string, 
       [CARD_FOLDER_KEY]: cardId,
       uploadedById: userId,
       uploadedByName: name.slice(0, 100),
-      source: opts.fromGed ? "ged" : "upload",
+      source: opts.source,
       ...(opts.toCenter && { toCenter: "1" }),
     },
   };
@@ -179,7 +180,7 @@ export const startTeamAttachmentUpload = async (cardId: string, filename: string
     if (card.eventId) return { mode: "event", eventId: card.eventId };
     const account = await requireDrive();
     const folder = await ensureCardFolder(account, card);
-    const tags = await uploaderTags(supabase, cardId, userId, { fromGed: false, toCenter: isTeamMedia(mimeType) });
+    const tags = await uploaderTags(supabase, cardId, userId, { source: "upload", toCenter: isTeamMedia(mimeType) });
     const { uploadUrl } = await createResumableUploadSession(account, {
       name: filename,
       parentId: folder.id,
@@ -211,40 +212,81 @@ export const searchMyGedFiles = async (accountId: string, query: string) =>
     return (await searchFiles(account, query)).map((f) => ({ id: f.id, name: f.name, mimeType: f.mimeType, size: f.size ? Number(f.size) : null, modifiedTime: f.modifiedTime }));
   });
 
+/**
+ * Range un fichier dans l'archive de la carte (même destination qu'un dépôt) : fichier de
+ * l'événement lié, ou dossier de la carte (photo/vidéo proposée au centre de publication).
+ */
+async function storeCardFile(
+  supabase: Supabase,
+  card: CardWithEvent,
+  userId: string,
+  content: { name: string; mimeType: string; data: Buffer },
+  source: "ged" | "email"
+) {
+  const account = await requireDrive();
+  const media = isTeamMedia(content.mimeType);
+  const tags = await uploaderTags(supabase, card.id, userId, { source, toCenter: media && !card.event });
+  const parent = card.event ? await eventFilesFolder(account, card.event, content.mimeType) : await ensureCardFolder(account, card);
+  const uploaded = await uploadTaggedFile(account, {
+    name: content.name,
+    parentId: parent.id,
+    mimeType: content.mimeType,
+    data: content.data,
+    description: describe(card, tags.name),
+    appProperties: tags.appProperties,
+  });
+  if (card.eventId) {
+    // Fichier de l'événement, comme un envoi depuis sa fiche (photo/vidéo : mise en file par trigger).
+    const { error } = await supabase.from("event_files").insert({
+      event_id: card.eventId,
+      filename: content.name,
+      content_type: content.mimeType,
+      size_bytes: content.data.length,
+      storage_provider: "drive",
+      drive_file_id: uploaded.id,
+      drive_web_view_link: uploaded.webViewLink || null,
+    });
+    if (error) throw new Error(error.message);
+  } else if (media) {
+    await queueStandalone(card, userId, { drive_file_id: uploaded.id, filename: content.name, content_type: content.mimeType, web_view_link: uploaded.webViewLink || null });
+  }
+}
+
 /** Copie un fichier de la GED dans l'archive du board (même destination qu'un dépôt) ; l'original ne bouge pas. */
 export const attachTeamFileFromGed = async (cardId: string, accountId: string, fileId: string) =>
   toResult(async () => {
     const { supabase, userId } = await session();
     const card = await visibleCard(supabase, cardId);
     await requireEditable(supabase, cardId, userId);
-    const [source, account] = await Promise.all([getOwnedGoogleAccount(accountId, userId), requireDrive()]);
-    const content = await readFileContent(source, fileId, MAX_GED_BYTES);
-    const media = isTeamMedia(content.mimeType);
-    const tags = await uploaderTags(supabase, cardId, userId, { fromGed: true, toCenter: media && !card.event });
-    const parent = card.event ? await eventFilesFolder(account, card.event, content.mimeType) : await ensureCardFolder(account, card);
-    const uploaded = await uploadTaggedFile(account, {
-      name: content.name,
-      parentId: parent.id,
-      mimeType: content.mimeType,
-      data: content.data,
-      description: describe(card, tags.name),
-      appProperties: tags.appProperties,
-    });
-    if (card.eventId) {
-      // Fichier de l'événement, comme un envoi depuis sa fiche (photo/vidéo : mise en file par trigger).
-      const { error } = await supabase.from("event_files").insert({
-        event_id: card.eventId,
-        filename: content.name,
-        content_type: content.mimeType,
-        size_bytes: content.data.length,
-        storage_provider: "drive",
-        drive_file_id: uploaded.id,
-        drive_web_view_link: uploaded.webViewLink || null,
-      });
-      if (error) throw new Error(error.message);
-    } else if (media) {
-      await queueStandalone(card, userId, { drive_file_id: uploaded.id, filename: content.name, content_type: content.mimeType, web_view_link: uploaded.webViewLink || null });
+    await requireDrive();
+    const source = await getOwnedGoogleAccount(accountId, userId);
+    await storeCardFile(supabase, card, userId, await readFileContent(source, fileId, MAX_GED_BYTES), "ged");
+  });
+
+/**
+ * Copie des pièces jointes d'un e-mail (boîte Gmail connectée de l'utilisateur) dans la carte.
+ * Renvoie les noms des pièces jointes non copiées (trop lourdes ou en erreur).
+ */
+export const attachTeamFilesFromEmail = async (cardId: string, accountId: string, messageId: string, attachmentIds: string[]) =>
+  toResult(async (): Promise<string[]> => {
+    const { supabase, userId } = await session();
+    const card = await visibleCard(supabase, cardId);
+    await requireEditable(supabase, cardId, userId);
+    await requireDrive();
+    const mailbox = await getOwnedGoogleAccount(accountId, userId);
+    const message = await getMessage(mailbox, messageId);
+    const failed: string[] = [];
+    for (const a of message.attachments.filter((x) => attachmentIds.includes(x.attachmentId))) {
+      try {
+        if (a.size > MAX_GED_BYTES) throw new Error("trop lourd");
+        const { data } = await getAttachment(mailbox, messageId, a.attachmentId);
+        await storeCardFile(supabase, card, userId, { name: a.filename, mimeType: a.mimeType, data: Buffer.from(data, "base64url") }, "email");
+      } catch (e) {
+        console.error("[team] pièce jointe e-mail", a.filename, e);
+        failed.push(a.filename);
+      }
     }
+    return failed;
   });
 
 /** Retire une pièce jointe du dossier de la carte (corbeille du Drive, récupérable 30 jours). */

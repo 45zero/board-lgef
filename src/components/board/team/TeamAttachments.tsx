@@ -42,9 +42,12 @@ export function TeamAttachments({
   pickSignal,
   people,
   hasEvent,
+  reloadSignal = 0,
   onError,
 }: {
   cardId: string;
+  /** Incrémenté quand des fichiers ont été ajoutés ailleurs (pièces jointes d'un e-mail lié) : recharge la liste. */
+  reloadSignal?: number;
   canEdit: boolean;
   /** Carte liée à un événement (texte d'aide). */
   hasEvent: boolean;
@@ -74,7 +77,7 @@ export function TeamAttachments({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- l'état n'est posé qu'à la réponse du serveur
     void load();
-  }, [load]);
+  }, [load, reloadSignal]);
 
   useEffect(() => {
     if (pickSignal > 0) input.current?.click();

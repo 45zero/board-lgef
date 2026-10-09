@@ -25,6 +25,7 @@ import {
   Tag,
   Search,
   SlidersHorizontal,
+  Kanban,
 } from "lucide-react";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import {
@@ -46,6 +47,8 @@ import {
   deleteMyDraft,
 } from "@/app/actions/gmail";
 import { EmailBody } from "@/components/board/mail/EmailBody";
+import { LinkEmailToCardPopover } from "@/components/board/team/TeamEmails";
+import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { SenderAvatar, parseSenderName } from "@/components/board/mail/SenderAvatar";
 
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
@@ -97,6 +100,9 @@ export function MailsScreen() {
   const [composing, setComposing] = useState(false);
   const [replying, setReplying] = useState(false);
   const [forwarding, setForwarding] = useState<MessageDetail | null>(null);
+  const [linkingToCard, setLinkingToCard] = useState(false);
+  const [linkedCard, setLinkedCard] = useState<{ id: string; title: string } | null>(null);
+  const { open: openTeamCard } = useOpenTeamCard();
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -306,8 +312,21 @@ export function MailsScreen() {
     <div className="flex h-full flex-col gap-2">
       {banner && (
         <div className="flex items-center justify-between rounded-btn border border-line bg-card px-4 py-2 text-sm text-ink-2">
-          {banner}
-          <button onClick={() => setBanner(null)} className="text-ink-4 hover:text-ink">
+          <span className="flex items-center gap-3">
+            {banner}
+            {linkedCard && (
+              <button onClick={() => openTeamCard(linkedCard.id)} className="text-xs font-semibold text-link hover:underline">
+                Ouvrir la carte
+              </button>
+            )}
+          </span>
+          <button
+            onClick={() => {
+              setBanner(null);
+              setLinkedCard(null);
+            }}
+            className="text-ink-4 hover:text-ink"
+          >
             <X size={14} />
           </button>
         </div>
@@ -554,6 +573,28 @@ export function MailsScreen() {
                   >
                     <Forward size={13} /> Transférer
                   </button>
+                  {activeAccountId && (
+                    <div className="relative">
+                      <button
+                        onClick={() => setLinkingToCard((v) => !v)}
+                        className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"
+                        title="Lier cet e-mail à une carte de l'Espace Team"
+                      >
+                        <Kanban size={13} /> Lier à une carte
+                      </button>
+                      <LinkEmailToCardPopover
+                        open={linkingToCard}
+                        onClose={() => setLinkingToCard(false)}
+                        accountId={activeAccountId}
+                        messageId={selected.id}
+                        hasAttachments={selected.attachments.length > 0}
+                        onDone={(message, card) => {
+                          setBanner(message);
+                          setLinkedCard(card);
+                        }}
+                      />
+                    </div>
+                  )}
                   <button
                     onClick={() => handleArchive(selected.id)}
                     className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"

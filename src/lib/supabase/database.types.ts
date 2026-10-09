@@ -3916,6 +3916,63 @@ export type Database = {
         }
         Relationships: []
       }
+      team_card_emails: {
+        Row: {
+          id: string
+          card_id: string
+          linked_by: string | null
+          linked_at: string
+          account_email: string
+          gmail_message_id: string
+          gmail_thread_id: string | null
+          subject: string
+          from_header: string
+          to_header: string
+          cc_header: string
+          sent_at: string | null
+          snippet: string
+          body_text: string
+          body_html: string
+          attachments: Json
+        }
+        Insert: {
+          id?: string
+          card_id: string
+          linked_by?: string | null
+          linked_at?: string
+          account_email: string
+          gmail_message_id: string
+          gmail_thread_id?: string | null
+          subject?: string
+          from_header?: string
+          to_header?: string
+          cc_header?: string
+          sent_at?: string | null
+          snippet?: string
+          body_text?: string
+          body_html?: string
+          attachments?: Json
+        }
+        Update: {
+          id?: string
+          card_id?: string
+          linked_by?: string | null
+          linked_at?: string
+          account_email?: string
+          gmail_message_id?: string
+          gmail_thread_id?: string | null
+          subject?: string
+          from_header?: string
+          to_header?: string
+          cc_header?: string
+          sent_at?: string | null
+          snippet?: string
+          body_text?: string
+          body_html?: string
+          attachments?: Json
+        }
+        Relationships: []
+      }
       team_card_members: {
         Row: {
           card_id: string

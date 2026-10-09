@@ -41,6 +41,7 @@ import { unwrap } from "@/lib/board/actionResult";
 import { TEAM_COLORS, TEAM_COLOR_IDS, isCardDone, type TeamCard, type TeamColor, type TeamComment, type TeamWorkspace } from "@/lib/board/team";
 import { Avatar, DueChip, EventChip, LeaveBeforeEventContext, Popover } from "./TeamUi";
 import { TeamAttachments } from "./TeamAttachments";
+import { TeamEmails } from "./TeamEmails";
 
 const ago = (iso: string) => {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -105,6 +106,8 @@ export function TeamCardModal({
   const [comments, setComments] = useState<TeamComment[] | null>(null);
   const [comment, setComment] = useState("");
   const [pickSignal, setPickSignal] = useState(0);
+  const [attachmentsReload, setAttachmentsReload] = useState(0);
+  const reloadAttachments = useCallback(() => setAttachmentsReload((n) => n + 1), []);
 
   const run = useCallback(
     async (fn: () => Promise<unknown>) => {
@@ -418,7 +421,9 @@ export function TeamCardModal({
               )}
             </section>
 
-            <TeamAttachments cardId={card.id} canEdit={canEdit} pickSignal={pickSignal} people={ws.people} hasEvent={!!card.event} onError={onError} />
+            <TeamAttachments cardId={card.id} canEdit={canEdit} pickSignal={pickSignal} reloadSignal={attachmentsReload} people={ws.people} hasEvent={!!card.event} onError={onError} />
+
+            <TeamEmails cardId={card.id} canEdit={canEdit} me={me} people={ws.people} onAttachmentsAdded={reloadAttachments} onError={onError} />
 
             {/* Discussion */}
             <section>
