@@ -62,6 +62,7 @@ export type TransferRow = {
   fileCount: number;
   totalBytes: number;
   downloadCount: number;
+  viewCount: number;
   lastDownloadAt: string | null;
   archived: boolean;
   createdAt: string;
@@ -102,6 +103,7 @@ export async function listTransfers(filters: TransferFilters): Promise<ActionRes
         fileCount: t.file_count,
         totalBytes: t.total_bytes,
         downloadCount: t.download_count,
+        viewCount: t.view_count,
         lastDownloadAt: t.last_download_at,
         archived: t.archived,
         createdAt: t.created_at,
@@ -238,6 +240,209 @@ export async function getTransferStats(): Promise<ActionResult<TransferStats>> {
       last30: last30 ?? 0,
       downloads30: downloads30 ?? 0,
       byMonth: [...months.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, v]) => ({ month, ...v })),
+    };
+  });
+}
+
+/* ---------- Onglet Statistiques ---------- */
+
+export type TransferAnalytics = {
+  totals: {
+    transfers: number;
+    bytes: number;
+    files: number;
+    views: number;
+    uniqueVisitors: number;
+    downloads: number;
+    uniqueDownloaders: number;
+    senders: number;
+    memberSenders: number;
+    externalSenders: number;
+    recipients: number;
+  };
+  /** Pubs (admins) : cumul depuis leur création. */
+  ads: { impressions: number; clicks: number } | null;
+  bucket: "day" | "week" | "month";
+  series: { key: string; transfers: number; views: number; downloads: number }[];
+  topFiles: { id: string; name: string; transferTitle: string; code: string; sender: string; size: number; downloads: number; people: number }[];
+  topTransfers: { id: string; title: string; code: string; sender: string; views: number; visitors: number; downloads: number }[];
+  topSenders: { email: string; name: string; member: boolean; transfers: number; bytes: number; downloads: number }[];
+};
+
+const PAGE = 1000;
+
+/** Lecture paginée (PostgREST plafonne à 1000 lignes par requête). */
+async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>, max = 50_000) {
+  const out: T[] = [];
+  for (let from = 0; from < max; from += PAGE) {
+    const { data, error } = await page(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    out.push(...(data ?? []));
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
+
+const dayKey = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date(iso));
+function bucketKey(iso: string, bucket: TransferAnalytics["bucket"]) {
+  const d = dayKey(iso);
+  if (bucket === "month") return d.slice(0, 7);
+  if (bucket === "day") return d;
+  const date = new Date(`${d}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7)); // lundi
+  return date.toISOString().slice(0, 10);
+}
+
+export async function getTransferAnalytics(filters: { scope: "mine" | "all"; from?: string; to?: string }): Promise<ActionResult<TransferAnalytics>> {
+  return toResult(async () => {
+    const member = await requireMember();
+    const supabase = await createClient();
+    const mineOnly = filters.scope === "mine" || !member.isAdmin;
+    const fromIso = filters.from ? new Date(`${filters.from}T00:00:00`).toISOString() : null;
+    const toIso = filters.to ? new Date(new Date(`${filters.to}T00:00:00`).getTime() + 86400_000).toISOString() : null;
+
+    // Transferts concernés (tous ceux visibles ; « les miens » : envoyés par soi).
+    const all = await fetchAll((a, b) => {
+      let q = supabase
+        .from("transfers")
+        .select("id, code, title, sender_email, sender_name, sender_user_id, recipients, total_bytes, file_count, created_at, status")
+        .neq("status", "uploading")
+        .order("created_at")
+        .range(a, b);
+      if (mineOnly) q = q.eq("sender_user_id", member.id);
+      return q;
+    });
+    const byId = new Map(all.map((t) => [t.id, t]));
+    const inRange = (iso: string) => (!fromIso || iso >= fromIso) && (!toIso || iso < toIso);
+    const transfers = all.filter((t) => inRange(t.created_at));
+
+    const scoped = <T extends { transfer_id: string }>(rows: T[]) => rows.filter((r) => byId.has(r.transfer_id));
+    const [views, downloads] = await Promise.all([
+      fetchAll((a, b) => {
+        let q = supabase.from("transfer_views").select("transfer_id, visitor, at").order("at").range(a, b);
+        if (fromIso) q = q.gte("at", fromIso);
+        if (toIso) q = q.lt("at", toIso);
+        return q;
+      }).then(scoped),
+      fetchAll((a, b) => {
+        let q = supabase.from("transfer_downloads").select("transfer_id, file_id, visitor, at").order("at").range(a, b);
+        if (fromIso) q = q.gte("at", fromIso);
+        if (toIso) q = q.lt("at", toIso);
+        return q;
+      }).then(scoped),
+    ]);
+
+    // Expéditeurs : membre du board si le transfert est rattaché à un compte.
+    const senders = new Map<string, { email: string; name: string; member: boolean; transfers: number; bytes: number; downloads: number }>();
+    for (const t of transfers) {
+      const s = senders.get(t.sender_email) ?? { email: t.sender_email, name: t.sender_name, member: false, transfers: 0, bytes: 0, downloads: 0 };
+      s.transfers++;
+      s.bytes += t.total_bytes;
+      s.member ||= !!t.sender_user_id;
+      s.name ||= t.sender_name;
+      senders.set(t.sender_email, s);
+    }
+    for (const d of downloads) {
+      const s = senders.get(byId.get(d.transfer_id)!.sender_email);
+      if (s) s.downloads++;
+    }
+
+    // Courbe : par jour (≤ 3 mois), par semaine (≤ 13 mois), par mois au-delà.
+    const first = fromIso ?? all[0]?.created_at ?? new Date().toISOString();
+    const end = toIso ? new Date(toIso).getTime() - 1 : Date.now();
+    const spanDays = (end - new Date(first).getTime()) / 86400_000;
+    const bucket: TransferAnalytics["bucket"] = spanDays <= 92 ? "day" : spanDays <= 400 ? "week" : "month";
+    const series = new Map<string, { key: string; transfers: number; views: number; downloads: number }>();
+    for (let t = new Date(first).getTime(); t <= end; t += 86400_000) {
+      const key = bucketKey(new Date(t).toISOString(), bucket);
+      if (!series.has(key)) series.set(key, { key, transfers: 0, views: 0, downloads: 0 });
+    }
+    const bump = (iso: string, k: "transfers" | "views" | "downloads") => {
+      const key = bucketKey(iso, bucket);
+      const row = series.get(key) ?? { key, transfers: 0, views: 0, downloads: 0 };
+      row[k]++;
+      series.set(key, row);
+    };
+    transfers.forEach((t) => bump(t.created_at, "transfers"));
+    views.forEach((v) => bump(v.at, "views"));
+    downloads.forEach((d) => bump(d.at, "downloads"));
+
+    // Documents les plus téléchargés sur la période (personnes distinctes par empreinte).
+    const perFile = new Map<string, { downloads: number; people: Set<string>; transferId: string }>();
+    for (const d of downloads) {
+      if (!d.file_id) continue;
+      const f = perFile.get(d.file_id) ?? { downloads: 0, people: new Set<string>(), transferId: d.transfer_id };
+      f.downloads++;
+      if (d.visitor) f.people.add(d.visitor);
+      perFile.set(d.file_id, f);
+    }
+    const topFileIds = [...perFile.entries()]
+      .sort((a, b) => b[1].downloads - a[1].downloads)
+      .slice(0, 20)
+      .map(([id]) => id);
+    const { data: fileRows } = topFileIds.length ? await supabase.from("transfer_files").select("id, name, size_bytes").in("id", topFileIds) : { data: [] };
+    const fileMeta = new Map((fileRows ?? []).map((f) => [f.id, f]));
+
+    const perTransfer = new Map<string, { views: number; visitors: Set<string>; downloads: number }>();
+    const stat = (id: string) => {
+      if (!perTransfer.has(id)) perTransfer.set(id, { views: 0, visitors: new Set(), downloads: 0 });
+      return perTransfer.get(id)!;
+    };
+    views.forEach((v) => {
+      const p = stat(v.transfer_id);
+      p.views++;
+      if (v.visitor) p.visitors.add(v.visitor);
+    });
+    downloads.forEach((d) => stat(d.transfer_id).downloads++);
+
+    const recipients = new Set(transfers.flatMap((t) => t.recipients));
+    const senderList = [...senders.values()];
+
+    let ads: TransferAnalytics["ads"] = null;
+    if (!mineOnly) {
+      const { data: adRows } = await supabase.from("transfer_ads").select("impressions, clicks");
+      ads = (adRows ?? []).reduce((acc, a) => ({ impressions: acc.impressions + a.impressions, clicks: acc.clicks + a.clicks }), { impressions: 0, clicks: 0 });
+    }
+
+    return {
+      totals: {
+        transfers: transfers.length,
+        bytes: transfers.reduce((n, t) => n + t.total_bytes, 0),
+        files: transfers.reduce((n, t) => n + t.file_count, 0),
+        views: views.length,
+        uniqueVisitors: new Set(views.map((v) => v.visitor).filter(Boolean)).size,
+        downloads: downloads.length,
+        uniqueDownloaders: new Set(downloads.map((d) => d.visitor).filter(Boolean)).size,
+        senders: senderList.length,
+        memberSenders: senderList.filter((s) => s.member).length,
+        externalSenders: senderList.filter((s) => !s.member).length,
+        recipients: recipients.size,
+      },
+      ads,
+      bucket,
+      series: [...series.values()].sort((a, b) => a.key.localeCompare(b.key)),
+      topFiles: topFileIds.map((id) => {
+        const f = perFile.get(id)!;
+        const t = byId.get(f.transferId)!;
+        return {
+          id,
+          name: fileMeta.get(id)?.name ?? "Fichier",
+          size: fileMeta.get(id)?.size_bytes ?? 0,
+          transferTitle: t.title,
+          code: t.code,
+          sender: t.sender_name || t.sender_email,
+          downloads: f.downloads,
+          people: f.people.size,
+        };
+      }),
+      topTransfers: [...perTransfer.entries()]
+        .sort((a, b) => b[1].views + b[1].downloads - (a[1].views + a[1].downloads))
+        .slice(0, 15)
+        .map(([id, p]) => {
+          const t = byId.get(id)!;
+          return { id, title: t.title || `${t.file_count} fichier${t.file_count > 1 ? "s" : ""}`, code: t.code, sender: t.sender_name || t.sender_email, views: p.views, visitors: p.visitors.size, downloads: p.downloads };
+        }),
+      topSenders: senderList.sort((a, b) => b.transfers - a.transfers || b.bytes - a.bytes).slice(0, 20),
     };
   });
 }

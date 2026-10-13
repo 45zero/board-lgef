@@ -30,7 +30,7 @@ const STATUS_META: Record<TransferStatus, { label: string; tone: string }> = {
 
 const iso = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 
-const PERIODS: { id: string; label: string; range: () => { from?: string; to?: string } }[] = [
+export const PERIODS: { id: string; label: string; range: () => { from?: string; to?: string } }[] = [
   { id: "all", label: "Toutes les dates", range: () => ({}) },
   { id: "7", label: "7 derniers jours", range: () => ({ from: iso(new Date(Date.now() - 6 * 86400_000)) }) },
   { id: "30", label: "30 derniers jours", range: () => ({ from: iso(new Date(Date.now() - 29 * 86400_000)) }) },
@@ -154,8 +154,13 @@ export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; 
                   </p>
                   <p className="text-ink-4">{shortDate(t.createdAt)}</p>
                 </div>
-                <span className="flex w-14 shrink-0 items-center justify-end gap-1 text-xs font-bold text-ink" title="Téléchargements">
-                  <Download size={12} /> {t.downloadCount}
+                <span className="flex w-24 shrink-0 items-center justify-end gap-3 text-xs font-bold text-ink">
+                  <span className="flex items-center gap-1" title="Ouvertures du lien">
+                    <Eye size={12} /> {t.viewCount}
+                  </span>
+                  <span className="flex items-center gap-1" title="Téléchargements">
+                    <Download size={12} /> {t.downloadCount}
+                  </span>
                 </span>
               </button>
             </li>
@@ -238,7 +243,8 @@ function TransferDrawer({ t, isAdmin, plan, onClose, onChanged }: { t: TransferR
 
           <dl className="grid grid-cols-2 gap-2 text-xs">
             <Info label="Destinataires" value={t.recipients.length ? t.recipients.join(", ") : "Lien partagé"} icon={Users} wide />
-            <Info label="Expiration" value={t.expiresAt ? dateTime(t.expiresAt) : "Aucune"} icon={CalendarClock} />
+            <Info label="Expiration" wide value={t.expiresAt ? dateTime(t.expiresAt) : "Aucune"} icon={CalendarClock} />
+            <Info label="Ouvertures du lien" value={String(t.viewCount)} icon={Eye} />
             <Info label="Téléchargements" value={`${t.downloadCount}${t.lastDownloadAt ? ` · dernier ${shortDate(t.lastDownloadAt)}` : ""}`} icon={Download} />
           </dl>
 

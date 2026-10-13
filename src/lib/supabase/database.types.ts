@@ -4565,6 +4565,7 @@ export type Database = {
           file_count: number
           drive_folder_id: string | null
           download_count: number
+          view_count: number
           last_download_at: string | null
           expires_at: string | null
           created_at: string
@@ -4588,6 +4589,7 @@ export type Database = {
           file_count?: number
           drive_folder_id?: string | null
           download_count?: number
+          view_count?: number
           last_download_at?: string | null
           expires_at?: string | null
           created_at?: string
@@ -4611,6 +4613,7 @@ export type Database = {
           file_count?: number
           drive_folder_id?: string | null
           download_count?: number
+          view_count?: number
           last_download_at?: string | null
           expires_at?: string | null
           created_at?: string
@@ -4670,18 +4673,42 @@ export type Database = {
           id: number
           transfer_id: string
           file_id: string | null
+          visitor: string
           at: string
         }
         Insert: {
           id?: number
           transfer_id: string
           file_id?: string | null
+          visitor?: string
           at?: string
         }
         Update: {
           id?: number
           transfer_id?: string
           file_id?: string | null
+          visitor?: string
+          at?: string
+        }
+        Relationships: []
+      }
+      transfer_views: {
+        Row: {
+          id: number
+          transfer_id: string
+          visitor: string
+          at: string
+        }
+        Insert: {
+          id?: number
+          transfer_id: string
+          visitor?: string
+          at?: string
+        }
+        Update: {
+          id?: number
+          transfer_id?: string
+          visitor?: string
           at?: string
         }
         Relationships: []

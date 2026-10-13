@@ -323,9 +323,29 @@ export type PublicTransfer =
       files: PublicTransferFile[];
     };
 
-const isExpired = (t: { status: string; expires_at: string | null }) => t.status === "expired" || (t.status === "ready" && !!t.expires_at && new Date(t.expires_at).getTime() < Date.now());
+/* ---------- Visiteurs (statistiques) ---------- */
 
-export async function getPublicTransfer(code: string): Promise<PublicTransfer> {
+export type Visit = { ip: string; userAgent: string };
+
+/** Aperçus de liens et antivirus des messageries : ils ouvrent les liens reçus, ce ne sont pas des personnes. */
+const BOT = /bot|crawl|spider|preview|scanner|safelinks|proofpoint|mimecast|barracuda|slurp|facebookexternalhit|whatsapp|curl|wget|python|headless/i;
+
+/** Empreinte anonyme (IP + navigateur, salée, tronquée) : compte les personnes distinctes sans garder l'IP. */
+function visitorOf(visit?: Visit) {
+  if (!visit || !visit.userAgent || BOT.test(visit.userAgent)) return null;
+  return hmac(`visitor:${visit.ip}:${visit.userAgent}`).slice(0, 24);
+}
+
+/** En-têtes d'une requête → visite (première IP de x-forwarded-for, posée par l'hébergeur). */
+export const visitFromHeaders = (h: Headers): Visit => ({
+  ip: (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || h.get("x-real-ip") || "",
+  userAgent: h.get("user-agent") ?? "",
+});
+
+const isExpired = (t:{ status: string; expires_at: string | null }) => t.status === "expired" || (t.status === "ready" && !!t.expires_at && new Date(t.expires_at).getTime() < Date.now());
+
+/** `visit` : ouverture de la page par le destinataire — comptée (hors robots) si le transfert est actif. */
+export async function getPublicTransfer(code: string, visit?: Visit): Promise<PublicTransfer> {
   if (!/^[A-Za-z0-9]{6,20}$/.test(code)) return { state: "missing" };
   const s = svc();
   const { data: t } = await s.from("transfers").select("*").eq("code", code).maybeSingle();
@@ -334,6 +354,8 @@ export async function getPublicTransfer(code: string): Promise<PublicTransfer> {
   if (t.status === "revoked") return { state: "revoked", senderName };
   if (isExpired(t)) return { state: "expired", senderName };
   if (t.status === "uploading") return { state: "uploading", senderName };
+  const visitor = visitorOf(visit);
+  if (visitor) await s.rpc("transfer_count_view", { p_transfer: t.id, p_visitor: visitor }).then(({ error }) => error && console.error("[transfer.view]", error.message));
   const storage = await getTransferStorage();
   const { data: files } = await s.from("transfer_files").select("id, name, mime_type, size_bytes, drive_file_id").eq("transfer_id", t.id).order("position");
   return {
@@ -357,7 +379,7 @@ export async function getPublicTransfer(code: string): Promise<PublicTransfer> {
 }
 
 /** Compte le téléchargement et renvoie l'URL directe du fichier ; null si le lien n'est plus valable. */
-export async function registerDownload(code: string, fileId: string) {
+export async function registerDownload(code: string, fileId: string, visit?: Visit) {
   const s = svc();
   const { data: t } = await s
     .from("transfers")
@@ -369,7 +391,8 @@ export async function registerDownload(code: string, fileId: string) {
   if (!f?.drive_file_id) return null;
   const storage = await getTransferStorage();
   if (!storage) return null;
-  await s.rpc("transfer_count_download", { p_transfer: t.id, p_file: f.id });
+  const { error: countError } = await s.rpc("transfer_count_download", { p_transfer: t.id, p_file: f.id, p_visitor: visitorOf(visit) ?? "" });
+  if (countError) console.error("[transfer.download] compteur", countError.message);
   if (t.download_count === 0 && t.notify_on_download) {
     await sendDownloadNoticeEmail(t, f.name, transferLink(t.code)).catch((e) => console.error("[transfer.download] e-mail", e));
   }

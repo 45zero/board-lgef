@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Clock, Ban, SearchX, Loader2 } from "lucide-react";
-import { getPublicTransfer, pickAd } from "@/lib/transfer/core";
+import { headers } from "next/headers";
+import { getPublicTransfer, pickAd, visitFromHeaders } from "@/lib/transfer/core";
 import { TransferPageFrame } from "@/components/transfer/TransferAd";
 import { TransferBrand } from "@/components/transfer/TransferBrand";
 import { TransferDownload } from "@/components/transfer/TransferDownload";
@@ -16,7 +17,7 @@ export const metadata: Metadata = {
 /** Lien reçu par e-mail (…/t/<code>) : le destinataire passe toujours par cette page pour voir et télécharger. */
 export default async function TransferDownloadPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
-  const [transfer, ad] = await Promise.all([getPublicTransfer(code), pickAd("download").catch(() => null)]);
+  const [transfer, ad] = await Promise.all([getPublicTransfer(code, visitFromHeaders(await headers())), pickAd("download").catch(() => null)]);
 
   return (
     <TransferPageFrame ad={ad}>

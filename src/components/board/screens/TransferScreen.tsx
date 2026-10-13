@@ -1,27 +1,28 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Send, Plus, Layers, Megaphone, ExternalLink } from "lucide-react";
+import { Send, Plus, Layers, Megaphone, ExternalLink, BarChart3 } from "lucide-react";
 import { unwrap } from "@/lib/board/actionResult";
 import { formatBytes, type TransferPlanLimits } from "@/lib/transfer/shared";
-import { getTransferContext, getTransferStats, type TransferStats } from "@/app/actions/transfers";
+import { getTransferContext, getTransferStats, type TransferStats as TransferSummary } from "@/app/actions/transfers";
 import { TransferUploader } from "@/components/transfer/TransferUploader";
 import { TransferList } from "@/components/board/transfer/TransferList";
 import { TransferPlansAdmin } from "@/components/board/transfer/TransferPlansAdmin";
 import { TransferAdsAdmin } from "@/components/board/transfer/TransferAdsAdmin";
+import { TransferStats } from "@/components/board/transfer/TransferStats";
 
 // Module « LGEF Transfer » du board : historique des transferts (filtres), envoi depuis le board
 // (fichiers de l'ordinateur ou du Drive du board), et pour les admins formules, attributions et pubs.
 // La page publique est /transfer (transfer.lgef.fr).
 
-type Tab = "list" | "new" | "plans" | "ads";
+type Tab = "list" | "new" | "stats" | "plans" | "ads";
 
 const PUBLIC_URL = (process.env.NEXT_PUBLIC_TRANSFER_URL || "").replace(/\/+$/, "") || "/transfer";
 
 export function TransferScreen() {
   const [tab, setTab] = useState<Tab>("list");
   const [ctx, setCtx] = useState<{ isAdmin: boolean; plan: TransferPlanLimits } | null>(null);
-  const [stats, setStats] = useState<TransferStats | null>(null);
+  const [stats, setStats] = useState<TransferSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -38,6 +39,7 @@ export function TransferScreen() {
   const tabs: { id: Tab; label: string; icon: typeof Send; show: boolean }[] = [
     { id: "list", label: "Transferts", icon: Send, show: true },
     { id: "new", label: "Nouveau transfert", icon: Plus, show: true },
+    { id: "stats", label: "Statistiques", icon: BarChart3, show: !!ctx },
     { id: "plans", label: "Formules", icon: Layers, show: !!ctx?.isAdmin },
     { id: "ads", label: "Publicités", icon: Megaphone, show: !!ctx?.isAdmin },
   ];
@@ -82,6 +84,7 @@ export function TransferScreen() {
         <TransferUploader mode="board" onDone={() => setRefreshKey((k) => k + 1)} />
       </div>
 
+      {tab === "stats" && ctx && <TransferStats isAdmin={ctx.isAdmin} />}
       {tab === "plans" && ctx?.isAdmin && <TransferPlansAdmin />}
       {tab === "ads" && ctx?.isAdmin && <TransferAdsAdmin />}
     </div>
