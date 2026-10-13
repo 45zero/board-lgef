@@ -135,7 +135,14 @@ export function TransferAdsAdmin() {
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {ads?.map((a) => (
-          <button key={a.id} onClick={() => open(a)} className="overflow-hidden rounded-card border border-line bg-card text-left hover:border-line-strong">
+          <div
+            key={a.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => open(a)}
+            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), open(a))}
+            className="cursor-pointer overflow-hidden rounded-card border border-line bg-card text-left hover:border-line-strong"
+          >
             <div className="relative aspect-video bg-black/80">
               {a.mediaType === "video" ? (
                 <video src={mediaUrl(a.id, a.mediaDriveFileId)} muted loop autoPlay playsInline className="h-full w-full object-cover" />
@@ -159,8 +166,21 @@ export function TransferAdsAdmin() {
                 </span>
                 <span className="text-ink-4">Taux de clic {ctr(a)}</span>
               </div>
+              {a.linkUrl ? (
+                <a
+                  href={a.linkUrl}
+                  target="_blank"
+                  rel="noopener"
+                  onClick={(e) => e.stopPropagation()}
+                  className="mt-1.5 flex items-center gap-1 truncate text-[11px] font-semibold text-link hover:underline"
+                >
+                  <ExternalLink size={11} className="shrink-0" /> <span className="truncate">{a.linkUrl}</span>
+                </a>
+              ) : (
+                <p className="mt-1.5 text-[11px] text-warn">Pas de lien : la pub n&rsquo;est pas cliquable.</p>
+              )}
             </div>
-          </button>
+          </div>
         ))}
       </div>
 

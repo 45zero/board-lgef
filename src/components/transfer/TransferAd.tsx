@@ -12,6 +12,19 @@ function Media({ ad, className }: { ad: TransferAdView; className: string }) {
   );
 }
 
+/** Bouton visible « Découvrir » : montre que la pub est cliquable (même lien compté que le visuel). */
+const Cta = ({ ad, big }: { ad: TransferAdView; big?: boolean }) =>
+  ad.clickUrl ? (
+    <a
+      href={ad.clickUrl}
+      target="_blank"
+      rel="noopener sponsored"
+      className={`absolute z-10 flex items-center gap-1.5 rounded-full bg-white font-bold text-[#0b1d3c] shadow-lg transition hover:scale-105 ${big ? "bottom-10 right-10 px-5 py-2.5 text-sm" : "bottom-3 left-3 px-3 py-1.5 text-xs"}`}
+    >
+      Découvrir{ad.advertiser ? ` ${ad.advertiser}` : ""} <span aria-hidden>↗</span>
+    </a>
+  ) : null;
+
 const Label = ({ ad }: { ad: TransferAdView }) => (
   <span className="pointer-events-none absolute bottom-3 right-3 rounded-chip bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-white/90">
     Publicité{ad.advertiser ? ` · ${ad.advertiser}` : ""}
@@ -30,6 +43,7 @@ export function TransferWallpaper({ ad }: { ad: TransferAdView }) {
       ) : (
         media
       )}
+      <Cta ad={ad} big />
       <Label ad={ad} />
     </div>
   );
@@ -46,6 +60,7 @@ export function TransferBanner({ ad }: { ad: TransferAdView }) {
       ) : (
         media
       )}
+      <Cta ad={ad} />
       <Label ad={ad} />
     </div>
   );

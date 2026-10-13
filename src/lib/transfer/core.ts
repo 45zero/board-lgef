@@ -296,12 +296,15 @@ export async function completeTransfer(transferId: string, uploaded: { fileRowId
 }
 
 /** Renvoie l'e-mail aux destinataires (depuis le board). */
-export async function resendTransferEmails(transferId: string) {
+/** Renvoie l'e-mail aux destinataires (depuis le board) ; `onlyTo` : seulement à ces adresses (destinataires ajoutés). */
+export async function resendTransferEmails(transferId: string, onlyTo?: string[]) {
   const s = svc();
   const { data: t } = await s.from("transfers").select("*").eq("id", transferId).single();
   if (!t || t.status !== "ready") throw new Error("Ce transfert n'est pas actif.");
+  const recipients = onlyTo ? t.recipients.filter((r) => onlyTo.includes(r)) : t.recipients;
+  if (!recipients.length) throw new Error("Aucun destinataire à qui envoyer l'e-mail.");
   const { data: files } = await s.from("transfer_files").select("*").eq("transfer_id", transferId).order("position");
-  await sendTransferEmails(t, files ?? [], transferLink(t.code), { recipientsOnly: true });
+  await sendTransferEmails({ ...t, recipients }, files ?? [], transferLink(t.code), { recipientsOnly: true });
 }
 
 /* ---------- Page de téléchargement ---------- */

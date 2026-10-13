@@ -187,6 +187,45 @@ export async function extendTransfer(id: string, days: number | null): Promise<A
   });
 }
 
+/**
+ * Modifie titre, message et destinataires. Destinataires ajoutés à un transfert actif : ils reçoivent
+ * l'e-mail si `notifyAdded` (les autres ne sont pas relancés).
+ */
+export async function updateTransfer(
+  id: string,
+  patch: { title: string; message: string; recipients: string[]; notifyAdded: boolean }
+): Promise<ActionResult<{ notified: number }>> {
+  return toResult(async () => {
+    const { t } = await ownTransfer(id);
+    const recipients = [...new Set(patch.recipients.map((r) => r.trim().toLowerCase()).filter(Boolean))];
+    if (recipients.some((r) => !isEmail(r))) throw new Error("Une adresse de destinataire est invalide.");
+    if (recipients.length > 50) throw new Error("50 destinataires au maximum.");
+    const { data: before } = await createServiceClient().from("transfers").select("recipients").eq("id", id).single();
+    const added = recipients.filter((r) => !(before?.recipients ?? []).includes(r));
+    const { error } = await createServiceClient()
+      .from("transfers")
+      .update({ title: patch.title.trim().slice(0, 200), message: patch.message.trim().slice(0, 5000), recipients })
+      .eq("id", id);
+    if (error) throw new Error(error.message);
+    if (patch.notifyAdded && added.length && t.status === "ready") {
+      await resendTransferEmails(id, added);
+      return { notified: added.length };
+    }
+    return { notified: 0 };
+  });
+}
+
+/** Supprime le transfert : lien coupé, fichiers envoyés à la corbeille du Drive (sauf archivés), retiré de la liste. */
+export async function deleteTransfer(id: string): Promise<ActionResult<null>> {
+  return toResult(async () => {
+    await ownTransfer(id);
+    await closeTransfer(id, "revoked");
+    const { error } = await createServiceClient().from("transfers").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+}
+
 export async function resendTransfer(id: string): Promise<ActionResult<null>> {
   return toResult(async () => {
     await ownTransfer(id);
