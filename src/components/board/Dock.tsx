@@ -25,6 +25,7 @@ import {
   Map as MapIcon,
   Wallet,
   Camera,
+  Send,
 } from "lucide-react";
 
 const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>> = {
@@ -40,6 +41,7 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>
   arbitrage: Flag,
   ged: FolderArchive,
   drive: HardDrive,
+  transfer: Send,
   compta: Calculator,
   audiovisuel: Video,
   communication: Volume2,
@@ -61,6 +63,7 @@ const PINNED = [
   "arbitrage",
   "ged",
   "drive",
+  "transfer",
   "inscription",
   "cartographie",
   "effectif",

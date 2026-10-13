@@ -28,6 +28,7 @@ import {
   Wallet,
   Camera,
   EyeOff,
+  Send,
 } from "lucide-react";
 import { BOARD_APPS } from "@/lib/board/tokens";
 import type { NavLayout } from "./BoardShell";
@@ -47,6 +48,7 @@ const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   arbitrage: Shield,
   ged: FolderArchive,
   drive: HardDrive,
+  transfer: Send,
   compta: Calculator,
   audiovisuel: Video,
   communication: Megaphone,

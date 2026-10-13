@@ -4480,6 +4480,293 @@ export type Database = {
         }
         Relationships: []
       }
+      transfer_plans: {
+        Row: {
+          id: string
+          name: string
+          description: string
+          max_size_bytes: number | null
+          max_days: number | null
+          is_default: boolean
+          is_members_default: boolean
+          can_archive: boolean
+          position: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          description?: string
+          max_size_bytes?: number | null
+          max_days?: number | null
+          is_default?: boolean
+          is_members_default?: boolean
+          can_archive?: boolean
+          position?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          description?: string
+          max_size_bytes?: number | null
+          max_days?: number | null
+          is_default?: boolean
+          is_members_default?: boolean
+          can_archive?: boolean
+          position?: number
+          created_at?: string
+        }
+        Relationships: []
+      }
+      transfer_plan_assignments: {
+        Row: {
+          email: string
+          plan_id: string
+          valid_until: string | null
+          note: string
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          email: string
+          plan_id: string
+          valid_until?: string | null
+          note?: string
+          created_by?: string | null
+          created_at?: string
+        }
+        Update: {
+          email?: string
+          plan_id?: string
+          valid_until?: string | null
+          note?: string
+          created_by?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      transfers: {
+        Row: {
+          id: string
+          code: string
+          status: "uploading" | "ready" | "expired" | "revoked"
+          source: "public" | "board"
+          sender_email: string
+          sender_name: string
+          sender_user_id: string | null
+          plan_id: string | null
+          title: string
+          message: string
+          recipients: string[]
+          notify_on_download: boolean
+          archived: boolean
+          total_bytes: number
+          file_count: number
+          drive_folder_id: string | null
+          download_count: number
+          last_download_at: string | null
+          expires_at: string | null
+          created_at: string
+          ready_at: string | null
+        }
+        Insert: {
+          id?: string
+          code: string
+          status?: "uploading" | "ready" | "expired" | "revoked"
+          source?: "public" | "board"
+          sender_email: string
+          sender_name?: string
+          sender_user_id?: string | null
+          plan_id?: string | null
+          title?: string
+          message?: string
+          recipients?: string[]
+          notify_on_download?: boolean
+          archived?: boolean
+          total_bytes?: number
+          file_count?: number
+          drive_folder_id?: string | null
+          download_count?: number
+          last_download_at?: string | null
+          expires_at?: string | null
+          created_at?: string
+          ready_at?: string | null
+        }
+        Update: {
+          id?: string
+          code?: string
+          status?: "uploading" | "ready" | "expired" | "revoked"
+          source?: "public" | "board"
+          sender_email?: string
+          sender_name?: string
+          sender_user_id?: string | null
+          plan_id?: string | null
+          title?: string
+          message?: string
+          recipients?: string[]
+          notify_on_download?: boolean
+          archived?: boolean
+          total_bytes?: number
+          file_count?: number
+          drive_folder_id?: string | null
+          download_count?: number
+          last_download_at?: string | null
+          expires_at?: string | null
+          created_at?: string
+          ready_at?: string | null
+        }
+        Relationships: []
+      }
+      transfer_files: {
+        Row: {
+          id: string
+          transfer_id: string
+          name: string
+          mime_type: string
+          size_bytes: number
+          drive_file_id: string | null
+          from_board_drive: boolean
+          uploaded: boolean
+          download_count: number
+          position: number
+        }
+        Insert: {
+          id?: string
+          transfer_id: string
+          name: string
+          mime_type?: string
+          size_bytes?: number
+          drive_file_id?: string | null
+          from_board_drive?: boolean
+          uploaded?: boolean
+          download_count?: number
+          position?: number
+        }
+        Update: {
+          id?: string
+          transfer_id?: string
+          name?: string
+          mime_type?: string
+          size_bytes?: number
+          drive_file_id?: string | null
+          from_board_drive?: boolean
+          uploaded?: boolean
+          download_count?: number
+          position?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transfer_files_transfer_id_fkey"
+            columns: ["transfer_id"]
+            isOneToOne: false
+            referencedRelation: "transfers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      transfer_downloads: {
+        Row: {
+          id: number
+          transfer_id: string
+          file_id: string | null
+          at: string
+        }
+        Insert: {
+          id?: number
+          transfer_id: string
+          file_id?: string | null
+          at?: string
+        }
+        Update: {
+          id?: number
+          transfer_id?: string
+          file_id?: string | null
+          at?: string
+        }
+        Relationships: []
+      }
+      transfer_email_codes: {
+        Row: {
+          email: string
+          code_hash: string
+          attempts: number
+          expires_at: string
+          sent_at: string
+        }
+        Insert: {
+          email: string
+          code_hash: string
+          attempts?: number
+          expires_at: string
+          sent_at?: string
+        }
+        Update: {
+          email?: string
+          code_hash?: string
+          attempts?: number
+          expires_at?: string
+          sent_at?: string
+        }
+        Relationships: []
+      }
+      transfer_ads: {
+        Row: {
+          id: string
+          title: string
+          advertiser: string
+          media_type: "image" | "video"
+          media_drive_file_id: string
+          link_url: string | null
+          format: "wallpaper" | "banner"
+          placements: string[]
+          starts_at: string | null
+          ends_at: string | null
+          active: boolean
+          weight: number
+          impressions: number
+          clicks: number
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          title: string
+          advertiser?: string
+          media_type: "image" | "video"
+          media_drive_file_id: string
+          link_url?: string | null
+          format?: "wallpaper" | "banner"
+          placements?: string[]
+          starts_at?: string | null
+          ends_at?: string | null
+          active?: boolean
+          weight?: number
+          impressions?: number
+          clicks?: number
+          created_by?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          title?: string
+          advertiser?: string
+          media_type?: "image" | "video"
+          media_drive_file_id?: string
+          link_url?: string | null
+          format?: "wallpaper" | "banner"
+          placements?: string[]
+          starts_at?: string | null
+          ends_at?: string | null
+          active?: boolean
+          weight?: number
+          impressions?: number
+          clicks?: number
+          created_by?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       allowed_event_types_for_user: {

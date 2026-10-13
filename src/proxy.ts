@@ -10,6 +10,13 @@ import { createServerClient } from "@supabase/ssr";
  * Il ne sert qu'au rafraîchissement : l'autorisation reste vérifiée par chaque action (getClaims).
  */
 export async function proxy(request: NextRequest) {
+  // transfer.lgef.fr : la racine affiche la page d'envoi ; seules les pages et API de LGEF Transfer y sont servies.
+  if (request.headers.get("host")?.startsWith("transfer.")) {
+    const { pathname } = request.nextUrl;
+    if (pathname === "/") return NextResponse.rewrite(new URL("/transfer", request.url));
+    if (!/^\/(transfer|t\/|api\/transfer\/|privacy|terms)/.test(pathname)) return NextResponse.redirect(new URL("/", request.url));
+  }
+
   let response = NextResponse.next({ request });
   const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
