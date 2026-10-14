@@ -12,6 +12,7 @@ import { PersonName } from "@/components/board/calendar/PersonName";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { Toggle } from "@/components/board/Toggle";
 import { DraftNotice } from "@/components/board/calendar/VoiceEvent";
+import { RoutePreview, ScheduleConflictWarning } from "@/components/board/calendar/EventSchedule";
 import type { EventDraft } from "@/app/actions/event-dictation";
 import {
   personName,
@@ -218,6 +219,8 @@ export function MobileEventModal({
               </div>
             </div>
 
+            <ScheduleConflictWarning startISO={m.slot?.startISO ?? null} endISO={m.slot?.endISO ?? null} excludeEventId={event?.id} />
+
             <div>
               <div className="mb-1 flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
                 <span>Participants</span>
@@ -268,6 +271,8 @@ export function MobileEventModal({
                 <Video size={12} /> En ligne
               </button>
             </div>
+
+            {m.showRoute && !m.onlineMeeting && <RoutePreview location={m.location} startISO={m.slot?.startISO ?? null} height={160} />}
 
             <div className="flex items-center justify-between rounded-btn border border-line px-3 py-2.5">
               <span className="flex items-center gap-1.5 text-sm font-bold text-ink">

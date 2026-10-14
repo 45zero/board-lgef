@@ -17,11 +17,13 @@ import { useNotificationPreferences } from "@/hooks/board/useNotificationPrefere
 import { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
 import { useEventCoverage } from "@/hooks/board/useEventCoverage";
 import type { EventDraft } from "@/app/actions/event-dictation";
+import { getMyDepartureAt } from "@/app/actions/my-schedule";
 
 /** Préréglages de rappel façon Google Agenda — doit rester synchro avec la
- * contrainte CHECK sur event_reminders.reminder_offset. */
+ * contrainte CHECK sur event_reminders.reminder_offset (« depart » : sql/2026-10-14_departure_reminders.sql). */
 export const REMINDER_PRESETS: { value: string; label: string }[] = [
   { value: "0min", label: "À l'heure de l'événement" },
+  { value: "depart", label: "Au moment du départ (trajet)" },
   { value: "10min", label: "10 minutes avant" },
   { value: "20min", label: "20 minutes avant" },
   { value: "30min", label: "30 minutes avant" },
@@ -39,6 +41,18 @@ const REMINDER_OFFSET_MINUTES: Record<string, number> = {
   "2h": 120,
   "1d": 1440,
 };
+
+/**
+ * Heure d'envoi d'un rappel. « depart » : début − temps de route depuis le domicile − marge
+ * (null sans adresse au profil ou sans lieu joignable en voiture).
+ */
+async function remindAt(offset: string, startISO: string, location: string): Promise<string | null> {
+  if (offset === "depart") return location.trim() ? getMyDepartureAt(location, startISO).catch(() => null) : null;
+  return new Date(new Date(startISO).getTime() - (REMINDER_OFFSET_MINUTES[offset] ?? 0) * 60_000).toISOString();
+}
+
+const NO_DEPARTURE =
+  "Rappel de départ impossible : renseignez le lieu de l'événement et votre adresse dans votre profil (itinéraire en voiture).";
 
 /** Début du brouillon dicté (date du jour + heure dite, 09:00 sans heure ; rien sans date). */
 function draftStart(d: EventDraft | null) {
@@ -121,14 +135,18 @@ export function useEventModalState({
 
   const addReminder = async (offset: string) => {
     if (!event || !user || reminders.some((r) => r.reminder_offset === offset)) return;
+    const at = await remindAt(offset, event.start, event.onlineMeeting ? "" : event.location);
+    if (!at) {
+      window.alert(NO_DEPARTURE);
+      return;
+    }
     const supabase = createClient();
-    const remindAt = new Date(parseISO(event.start).getTime() - REMINDER_OFFSET_MINUTES[offset] * 60_000);
     const { data } = await supabase
       .from("event_reminders")
       .insert({
         event_id: event.id,
         user_id: user.id,
-        remind_at: remindAt.toISOString(),
+        remind_at: at,
         reminder_offset: offset,
         channels: [
           "app",
@@ -147,6 +165,24 @@ export function useEventModalState({
     setReminders((prev) => prev.filter((r) => r.id !== id));
   };
 
+  /** Heure ou lieu modifiés : mes rappels pas encore envoyés suivent (le départ dépend aussi du lieu). */
+  const rescheduleMyReminders = async (eventId: string, startISO: string) => {
+    if (!user) return;
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("event_reminders")
+      .select("id, reminder_offset, remind_at")
+      .eq("event_id", eventId)
+      .eq("user_id", user.id)
+      .is("sent_at", null);
+    await Promise.all(
+      (data ?? []).map(async (r) => {
+        const at = await remindAt(r.reminder_offset, startISO, onlineMeeting ? "" : location);
+        if (at && at !== r.remind_at) await supabase.from("event_reminders").update({ remind_at: at }).eq("id", r.id);
+      })
+    );
+  };
+
   /** Changer l'heure de début décale la fin d'autant (durée conservée). */
   const changeStartTime = (next: string) => {
     const toMin = (t: string) => {
@@ -161,13 +197,19 @@ export function useEventModalState({
     setStartTime(next);
   };
 
-  const buildPayload = (): EventFormPayload => {
+  /** Créneau saisi (null tant que la date ou une heure est incomplète). */
+  const slot = (() => {
     const startAt = new Date(`${dateStr}T${startTime}:00`);
     let endAt = addDays(new Date(`${dateStr}T${endTime}:00`), endDayOffset);
+    if (!Number.isFinite(startAt.getTime()) || !Number.isFinite(endAt.getTime())) return null;
     // Fin avant le début (ex. 23:00 → 00:30) : l'événement se termine le lendemain.
     if (endAt < startAt) endAt = addDays(endAt, 1);
-    const startISO = startAt.toISOString();
-    const endISO = endAt.toISOString();
+    return { startISO: startAt.toISOString(), endISO: endAt.toISOString() };
+  })();
+
+  const buildPayload = (): EventFormPayload => {
+    if (!slot) throw new Error("Date ou heure invalide");
+    const { startISO, endISO } = slot;
     return {
       title,
       eventType: ORG_TO_EVENT_TYPE[org],
@@ -210,6 +252,7 @@ export function useEventModalState({
       if (isEditing && event) {
         const ok = await updateEvent(event.id, payload);
         if (ok) {
+          await rescheduleMyReminders(event.id, payload.startISO);
           onSaved();
           onClose();
         }
@@ -234,21 +277,23 @@ export function useEventModalState({
 
       if (pendingReminders.length > 0 && user) {
         const supabase = createClient();
-        const startMs = new Date(payload.startISO).getTime();
         const channels = [
           "app",
           ...(notifPrefs.notifyEmail ? ["email"] : []),
           ...(notifPrefs.notifyPush ? ["push"] : []),
         ];
-        await supabase.from("event_reminders").insert(
-          pendingReminders.map((offset) => ({
+        const rows = await Promise.all(
+          pendingReminders.map(async (offset) => ({
             event_id: newId,
             user_id: user.id,
-            remind_at: new Date(startMs - REMINDER_OFFSET_MINUTES[offset] * 60_000).toISOString(),
+            remind_at: await remindAt(offset, payload.startISO, payload.onlineMeeting ? "" : payload.location),
             reminder_offset: offset,
             channels,
           }))
         );
+        const valid = rows.filter((r): r is typeof r & { remind_at: string } => !!r.remind_at);
+        if (valid.length) await supabase.from("event_reminders").insert(valid);
+        if (valid.length < rows.length) window.alert(NO_DEPARTURE);
       }
 
       if (wantsCoverage && user) {
@@ -329,6 +374,9 @@ export function useEventModalState({
     setStartTime: changeStartTime,
     endTime,
     setEndTime,
+    slot,
+    // Itinéraire depuis le domicile : à la création, ou pour un membre de l'événement (équipe, assigné, captation…).
+    showRoute: !isEditing || !!event?.solicited || team.team.some((t) => t.user_id === user?.id),
     saving,
     reminders,
     addReminder,

@@ -52,3 +52,12 @@ export function formatTravel(t: Travel) {
   const time = h > 0 ? `${h} h ${m.toString().padStart(2, "0")}` : `${m} min`;
   return `${Math.round(t.km)} km · ${time}`;
 }
+
+/** Marge ajoutée au temps de route (stationnement, imprévus) pour l'heure de départ conseillée. */
+export const DEPARTURE_MARGIN_MIN = 10;
+
+/** Heure de départ conseillée : début moins le temps de route et la marge, arrondi aux 5 minutes inférieures. */
+export function departureTime(startISO: string, minutes: number) {
+  const ms = new Date(startISO).getTime() - (minutes + DEPARTURE_MARGIN_MIN) * 60_000;
+  return new Date(Math.floor(ms / 300_000) * 300_000);
+}

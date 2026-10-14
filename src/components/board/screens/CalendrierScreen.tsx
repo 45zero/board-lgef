@@ -41,6 +41,8 @@ import { ORG_COLORS, type OrgKey } from "@/lib/board/tokens";
 import { CalendarSidebar } from "@/components/board/calendar/CalendarSidebar";
 import { StaffEventsMap } from "@/components/board/calendar/StaffEventsMap";
 import { isMultiDayEvent, layoutBanners, type CalendarEvent } from "@/lib/board/calendar";
+import { useMyTravelTimes } from "@/hooks/board/useMyTravelTimes";
+import { departureTime, formatTravel } from "@/lib/board/geo";
 
 const HOUR_START = 8;
 const HOUR_END = 20;
@@ -205,6 +207,8 @@ export function CalendrierScreen() {
   }, [events, searchQuery, hiddenOrgs, mineOnly, coverage]);
 
   const teamCards = useEventTeamCards(visibleEvents.map((e) => e.id));
+  // Temps de route depuis le domicile (événements où je suis sollicité) : bloc « départ » en pointillé.
+  const myTravel = useMyTravelTimes(viewMode === "day" || viewMode === "week" ? visibleEvents : []);
   // Les événements de plusieurs jours sont en bandeaux (layoutBanners), pas dans la case de leur premier jour.
   const eventsForDay = (day: Date) => visibleEvents.filter((e) => !isMultiDayEvent(e) && isSameDay(parseISO(e.start), day));
   const monthWeeks = useMemo(() => {
@@ -557,6 +561,31 @@ export function CalendrierScreen() {
                     {isToday && showNowLine && (
                       <div className="absolute left-0 right-0 z-[1] border-t-2 border-red" style={{ top: nowTop }} />
                     )}
+
+                    {eventsForDay(day).map((ev) => {
+                      const travel = myTravel[ev.id];
+                      if (!travel) return null;
+                      const departure = departureTime(ev.start, travel.minutes);
+                      const evTop = (hourFloat(ev.start) - HOUR_START) * PX_PER_HOUR;
+                      const depTop = Math.max(0, evTop - ((parseISO(ev.start).getTime() - departure.getTime()) / 3_600_000) * PX_PER_HOUR);
+                      const height = evTop - depTop - 2;
+                      if (height < 6) return null;
+                      const color = ORG_COLORS[ev.org];
+                      return (
+                        <div
+                          key={`travel-${ev.id}`}
+                          aria-hidden
+                          className="pointer-events-none absolute left-0.5 right-0.5 overflow-hidden rounded-chip border-2 border-dashed px-1.5"
+                          style={{ top: depTop, height, borderColor: color.base, color: color.ink }}
+                        >
+                          {height >= 16 && (
+                            <div className="truncate font-mono text-[10px] font-semibold">
+                              Départ {format(departure, "HH:mm")} · {formatTravel(travel)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
 
                     {eventsForDay(day).map((ev) => {
                       const { top, height } = blockStyle(ev.start, ev.end);

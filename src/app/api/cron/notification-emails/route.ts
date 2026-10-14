@@ -72,7 +72,9 @@ export async function GET(request: Request) {
   const messageIds: string[] = [];
   for (const r of rows) {
     const profile = profileById.get(r.user_id);
-    if (!profile?.email || profile.notify_email === false || NOT_EMAILED.has(r.type) || r.data?.skip_email === true) {
+    // Rappels envoyés par le board (/api/cron/event-reminders) : e-mailés ici, contrairement à ceux de l'ancien calendrier.
+    const boardReminder = r.type === "event_reminder" && r.data?.board_reminder === true;
+    if (!profile?.email || profile.notify_email === false || (NOT_EMAILED.has(r.type) && !boardReminder) || r.data?.skip_email === true) {
       skipped.push(r.id);
       continue;
     }
