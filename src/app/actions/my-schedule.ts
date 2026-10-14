@@ -6,8 +6,6 @@ import { getSolicitations, type SolicitationRole } from "@/lib/board/solicitatio
 import { routeFromHome, travelFromHome, type MyRoute } from "@/lib/board/travel";
 import { departureTime, type Travel } from "@/lib/board/geo";
 
-export type { MyRoute };
-
 // Agenda de l'utilisateur connecté, pour la fiche événement et la grille du calendrier :
 // créneaux déjà pris (même règle « sollicité » que le calendrier), itinéraire depuis le domicile
 // et temps de route vers les événements où il est sollicité. Rien n'est écrit en base.

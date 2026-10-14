@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
 import { AlertTriangle, Car, Navigation } from "lucide-react";
-import { getMyScheduleConflicts, type MyRoute, type ScheduleConflict } from "@/app/actions/my-schedule";
+import { getMyScheduleConflicts, type ScheduleConflict } from "@/app/actions/my-schedule";
+import type { MyRoute } from "@/lib/board/travel";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { DEPARTURE_MARGIN_MIN, departureTime, formatTravel, type LatLng } from "@/lib/board/geo";
 
