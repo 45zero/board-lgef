@@ -3,8 +3,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { getSolicitations, type SolicitationRole } from "@/lib/board/solicitation";
-import { computeRoute, geocode, homePosition, travelFromHome, type RouteResult } from "@/lib/board/travel";
+import { routeFromHome, travelFromHome, type MyRoute } from "@/lib/board/travel";
 import { departureTime, type Travel } from "@/lib/board/geo";
+
+export type { MyRoute };
 
 // Agenda de l'utilisateur connecté, pour la fiche événement et la grille du calendrier :
 // créneaux déjà pris (même règle « sollicité » que le calendrier), itinéraire depuis le domicile
@@ -46,18 +48,10 @@ export async function getMyScheduleConflicts(startISO: string, endISO: string, e
     .map((e) => ({ id: e.id, title: e.title, start: e.start_date, end: e.end_date, roles: [...roles.get(e.id)!] }));
 }
 
-export type MyRoute = { route: RouteResult } | { missing: "home" | "address" | "route" };
-
 /** Itinéraire en voiture du domicile de l'utilisateur (adresse du profil) vers une adresse. */
 export async function getMyRoute(address: string): Promise<MyRoute> {
   const { userId } = await currentUserId();
-  const dest = address.trim().slice(0, 300);
-  if (!dest) return { missing: "address" };
-  const [home, to] = await Promise.all([homePosition(createServiceClient(), userId), geocode(dest)]);
-  if (!home) return { missing: "home" };
-  if (!to) return { missing: "address" };
-  const route = await computeRoute(home.pos, to);
-  return route ? { route } : { missing: "route" };
+  return routeFromHome(userId, address);
 }
 
 /** Heure du rappel « au moment du départ » (début − trajet − marge), ou null sans itinéraire. */

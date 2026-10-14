@@ -1,5 +1,6 @@
 "use client";
 
+import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { DirectorGlyph } from "@/components/board/calendar/DirectorGlyph";
 import { CoverageToggle } from "@/components/board/calendar/CoverageToggle";
 import { TeamCardGlyph, useEventTeamCards } from "@/components/board/team/TeamCardOpener";
@@ -209,6 +210,8 @@ export function CalendrierScreen() {
   const teamCards = useEventTeamCards(visibleEvents.map((e) => e.id));
   // Temps de route depuis le domicile (événements où je suis sollicité) : bloc « départ » en pointillé.
   const myTravel = useMyTravelTimes(viewMode === "day" || viewMode === "week" ? visibleEvents : []);
+  // Google Maps préchargé : la mini-carte d'itinéraire de la fiche s'affiche sans attendre le script.
+  useGoogleMapsScript();
   // Les événements de plusieurs jours sont en bandeaux (layoutBanners), pas dans la case de leur premier jour.
   const eventsForDay = (day: Date) => visibleEvents.filter((e) => !isMultiDayEvent(e) && isSameDay(parseISO(e.start), day));
   const monthWeeks = useMemo(() => {

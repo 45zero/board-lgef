@@ -249,3 +249,16 @@ export async function travelFromHome(
   }
   return out;
 }
+
+export type MyRoute = { route: RouteResult } | { missing: "home" | "address" | "route" };
+
+/** Itinéraire en voiture du domicile d'un utilisateur (adresse du profil) vers une adresse. */
+export async function routeFromHome(userId: string, address: string): Promise<MyRoute> {
+  const dest = address.trim().slice(0, 300);
+  if (!dest) return { missing: "address" };
+  const [home, to] = await Promise.all([homePosition(createServiceClient(), userId), geocode(dest)]);
+  if (!home) return { missing: "home" };
+  if (!to) return { missing: "address" };
+  const route = await computeRoute(home.pos, to);
+  return route ? { route } : { missing: "route" };
+}

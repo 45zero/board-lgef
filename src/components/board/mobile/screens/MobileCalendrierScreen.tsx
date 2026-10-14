@@ -1,5 +1,6 @@
 "use client";
 
+import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { DirectorGlyph } from "@/components/board/calendar/DirectorGlyph";
 import { useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, ChevronDown, User, X, Plus, Camera, Video, Mic } from "lucide-react";
@@ -40,6 +41,8 @@ type View = "mois" | "semaine";
 const MOBILE_VIEW: Record<CalendarView, View> = { day: "semaine", week: "semaine", month: "mois", map: "mois" };
 
 export function MobileCalendrierScreen() {
+  // Google Maps préchargé : la mini-carte d'itinéraire de la fiche s'affiche sans attendre le script.
+  useGoogleMapsScript();
   const [calendarDefaults] = useCalendarDefaults();
   const [viewOverride, setView] = useState<View | null>(null);
   const view = viewOverride ?? MOBILE_VIEW[calendarDefaults.view];

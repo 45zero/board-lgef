@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
 import { AlertTriangle, Car, Navigation } from "lucide-react";
-import { getMyRoute, getMyScheduleConflicts, type MyRoute, type ScheduleConflict } from "@/app/actions/my-schedule";
+import { getMyScheduleConflicts, type MyRoute, type ScheduleConflict } from "@/app/actions/my-schedule";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { DEPARTURE_MARGIN_MIN, departureTime, formatTravel, type LatLng } from "@/lib/board/geo";
 
@@ -56,21 +56,79 @@ export function ScheduleConflictWarning({
   );
 }
 
+// Itinéraires déjà calculés (par adresse) : la fiche se rouvre sans attendre. Gardés aussi dans le
+// navigateur 12 h pour survivre au rechargement de la page.
+const ROUTE_TTL = 12 * 3600_000;
+const ROUTE_STORE = "lgef:my-route:";
+const routeMemo = new Map<string, MyRoute>();
+const routeInflight = new Map<string, Promise<MyRoute>>();
+
+function cachedRoute(address: string): MyRoute | null {
+  const hit = routeMemo.get(address);
+  if (hit) return hit;
+  try {
+    const raw = localStorage.getItem(ROUTE_STORE + address);
+    if (!raw) return null;
+    const { at, data } = JSON.parse(raw) as { at: number; data: MyRoute };
+    if (Date.now() - at > ROUTE_TTL) return null;
+    routeMemo.set(address, data);
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Itinéraire domicile → adresse (route GET : part en parallèle des server actions de la fiche). */
+export function fetchMyRoute(address: string): Promise<MyRoute> {
+  const hit = cachedRoute(address);
+  if (hit) return Promise.resolve(hit);
+  let p = routeInflight.get(address);
+  if (!p) {
+    p = fetch(`/api/my-route?address=${encodeURIComponent(address)}`)
+      .then((r) => (r.ok ? (r.json() as Promise<MyRoute>) : Promise.reject(new Error(String(r.status)))))
+      .then((data) => {
+        // Adresse du profil manquante : pas mise en cache, elle peut être renseignée à tout moment.
+        if (!("missing" in data && data.missing === "home")) {
+          routeMemo.set(address, data);
+          try {
+            localStorage.setItem(ROUTE_STORE + address, JSON.stringify({ at: Date.now(), data }));
+          } catch {}
+        }
+        return data;
+      })
+      .finally(() => routeInflight.delete(address));
+    routeInflight.set(address, p);
+  }
+  return p;
+}
+
 /**
  * Sous le lieu : itinéraire en voiture depuis le domicile (adresse du profil), heure de départ conseillée
  * et petite carte du trajet.
  */
 export function RoutePreview({ location, startISO, height = 180 }: { location: string; startISO: string | null; height?: number }) {
   const address = location.trim();
+  // Script Google Maps chargé dès l'ouverture, en même temps que le calcul de l'itinéraire.
+  useGoogleMapsScript();
   const [result, setResult] = useState<{ address: string; data: MyRoute } | null>(null);
+  const firstRef = useRef(true);
   useEffect(() => {
     if (!address) return;
+    if (cachedRoute(address)) {
+      firstRef.current = false;
+      return;
+    }
     let cancelled = false;
-    const t = setTimeout(() => {
-      getMyRoute(address)
-        .then((data) => !cancelled && setResult({ address, data }))
-        .catch(() => {});
-    }, 700);
+    // Lieu de la fiche à l'ouverture : tout de suite. Lieu en cours de saisie : petit délai.
+    const t = setTimeout(
+      () => {
+        fetchMyRoute(address)
+          .then((data) => !cancelled && setResult({ address, data }))
+          .catch(() => {});
+      },
+      firstRef.current ? 0 : 700
+    );
+    firstRef.current = false;
     return () => {
       cancelled = true;
       clearTimeout(t);
@@ -78,10 +136,21 @@ export function RoutePreview({ location, startISO, height = 180 }: { location: s
   }, [address]);
 
   if (!address) return null;
-  const data = result?.address === address ? result.data : null;
+  // Itinéraire déjà connu : affiché dès le premier rendu.
+  const data = result?.address === address ? result.data : cachedRoute(address);
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
 
-  if (!data) return <div className="text-xs text-ink-4">Calcul de l&rsquo;itinéraire…</div>;
+  if (!data) {
+    // Même encombrement que la carte : rien ne saute quand l'itinéraire arrive.
+    return (
+      <div className="overflow-hidden rounded-btn border border-line">
+        <div className="flex items-center gap-1.5 bg-subtle px-3 py-2 text-xs text-ink-4">
+          <Car size={13} className="shrink-0" /> Calcul de l&rsquo;itinéraire…
+        </div>
+        <div style={{ height }} className="w-full animate-pulse bg-subtle" />
+      </div>
+    );
+  }
   if ("missing" in data) {
     return (
       <div className="text-xs text-ink-4">
