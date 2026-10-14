@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Notification « nouveau mail » d'un compte Gmail : le M de Gmail (silhouette, teintée par Android). -->
+<!-- Notification « nouveau mail » Gmail : pastille (carré arrondi plein) avec le M découpé dedans.
+     Teintée en bleu LGEF dans le volet ; la barre d'état Android l'affiche en une seule couleur. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#FFFFFFFF" android:pathData="M24,5.457v13.909c0,0.904 -0.732,1.636 -1.636,1.636h-3.819V11.73L12,16.64l-6.545,-4.91v9.273H1.636A1.636,1.636 0,0 1,0 19.366V5.457c0,-2.023 2.309,-3.178 3.927,-1.964L5.455,4.64 12,9.548l6.545,-4.91 1.528,-1.145C21.69,2.28 24,3.434 24,5.457z" />
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M5,1h14a4,4 0,0 1,4 4v14a4,4 0,0 1,-4 4H5a4,4 0,0 1,-4 -4V5a4,4 0,0 1,4 -4z
+            M5.5,17.5V6.5h2.3L12,11.2l4.2,-4.7h2.3v11h-2.4V10.3L12,14.8L7.9,10.3v7.2z" />
 </vector>
