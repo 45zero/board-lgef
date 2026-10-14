@@ -67,7 +67,8 @@ export function TopBar({
 
   return (
     <>
-      <header className="mx-4 mt-4 flex h-[62px] items-center gap-4 rounded-btn border border-line bg-card/80 px-4 shadow-bar backdrop-blur">
+      {/* relative z-40 : le backdrop-blur crée un contexte d'empilement — sans z-index, le volet des notifications passerait sous le contenu. */}
+      <header className="relative z-40 mx-4 mt-4 flex h-[62px] items-center gap-4 rounded-btn border border-line bg-card/80 px-4 shadow-bar backdrop-blur">
         <div className="flex items-center gap-2">
           <Image src="/lgef-logo.png" alt="Ligue Grand Est de Football" width={34} height={34} className="rounded-lg" />
 
