@@ -20,7 +20,6 @@ import {
   ShieldCheck,
   List,
   LayoutGrid,
-  HardDrive,
   ClipboardCheck,
   Map as MapIcon,
   Receipt,
@@ -31,6 +30,7 @@ import {
 } from "lucide-react";
 import { BOARD_APPS } from "@/lib/board/tokens";
 import { MailBrandIcon } from "@/components/board/mail/MailBrandIcon";
+import { DriveBrandIcon } from "@/components/board/DriveBrandIcon";
 import type { NavLayout } from "./BoardShell";
 
 const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
@@ -47,7 +47,7 @@ const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   formations: GraduationCap,
   arbitrage: Shield,
   ged: FolderArchive,
-  drive: HardDrive,
+  drive: DriveBrandIcon,
   transfer: Send,
   compta: Calculator,
   audiovisuel: Video,

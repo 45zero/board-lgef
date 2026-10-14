@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
+import { prisma } from "@/lib/prisma";
 import type { Json } from "@/lib/supabase/database.types";
 import type { HabillageSettings } from "@/lib/board/habillage";
 import { getBoardDriveAccount } from "@/lib/board/teamDrive";
@@ -82,6 +83,15 @@ export async function getBoardDriveAccountId() {
   const supabase = await createClient();
   const { data } = await supabase.from("board_settings").select("drive_connected_account_id").eq("id", true).single();
   return data?.drive_connected_account_id ?? null;
+}
+
+/** Service du Drive du board (logo du module Drive : Google Drive, OneDrive), null s'il n'est pas désigné. */
+export async function getBoardDriveProvider(): Promise<"google" | "microsoft" | null> {
+  const id = await getBoardDriveAccountId();
+  if (!id) return null;
+  const account = await prisma.connectedAccount.findFirst({ where: { id }, select: { provider: true } });
+  const p = account?.provider;
+  return p === "google" ? "google" : p === "microsoft" || p === "azure" || p === "outlook" ? "microsoft" : null;
 }
 
 export async function setBoardDriveAccount(accountId: string | null) {

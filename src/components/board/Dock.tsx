@@ -4,6 +4,7 @@ import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModule
 import { useAppBadges, type AppBadge } from "@/hooks/board/useAppBadges";
 import { AppBadgePills } from "@/components/board/AppBadgePills";
 import { MailBrandIcon } from "@/components/board/mail/MailBrandIcon";
+import { DriveBrandIcon } from "@/components/board/DriveBrandIcon";
 import type { ComponentType } from "react";
 import {
   Home,
@@ -20,7 +21,6 @@ import {
   Volume2,
   Sun,
   Plus,
-  HardDrive,
   ClipboardCheck,
   Map as MapIcon,
   Wallet,
@@ -40,7 +40,7 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>
   formations: GraduationCap,
   arbitrage: Flag,
   ged: FolderArchive,
-  drive: HardDrive,
+  drive: DriveBrandIcon,
   transfer: Send,
   compta: Calculator,
   audiovisuel: Video,
