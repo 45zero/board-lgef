@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
-import { Archive, ArchiveRestore, ArrowUpRight, CalendarDays, CheckSquare, MessageSquare } from "lucide-react";
+import { Archive, ArrowUpRight, CalendarDays, CheckSquare, MessageSquare, Trash2 } from "lucide-react";
 import { useOpenEvent } from "@/components/board/calendar/EventOpener";
 import { TEAM_COLORS, dueInfo, type TeamCard, type TeamPerson } from "@/lib/board/team";
 
@@ -143,7 +143,7 @@ export function CardTile({
   onDragStart,
   onDragEnd,
   isNew,
-  onArchive,
+  shortcut,
 }: {
   card: TeamCard;
   done: boolean;
@@ -153,8 +153,8 @@ export function CardTile({
   onDragStart?: (e: React.DragEvent) => void;
   onDragEnd?: () => void;
   isNew?: boolean;
-  /** Raccourci archiver / restaurer (toujours visible sur mobile, au survol sur ordinateur). */
-  onArchive?: () => void;
+  /** Raccourci posé sur la carte : « Archiver » (vers Terminé), puis « Supprimer » une fois terminée. */
+  shortcut?: CardShortcutAction;
 }) {
   return (
     <div
@@ -188,15 +188,18 @@ export function CardTile({
         <span className="ml-auto">
           <AvatarStack people={card.members.map((m) => peopleById.get(m.userId))} />
         </span>
-        {onArchive && <ArchiveShortcut archived={!!card.archivedAt} onClick={onArchive} />}
+        {shortcut && <CardShortcut {...shortcut} />}
       </div>
     </div>
   );
 }
 
-/** Petit bouton archiver / restaurer posé sur une carte (sans ouvrir la carte). */
-export function ArchiveShortcut({ archived, onClick }: { archived: boolean; onClick: () => void }) {
-  const Icon = archived ? ArchiveRestore : Archive;
+export type CardShortcutAction = { kind: "archive" | "delete"; onClick: () => void };
+
+/** Bouton posé sur une carte (sans l'ouvrir) : « Archiver » une carte en cours, « Supprimer » une carte terminée. */
+export function CardShortcut({ kind, onClick }: CardShortcutAction) {
+  const del = kind === "delete";
+  const Icon = del ? Trash2 : Archive;
   return (
     <button
       type="button"
@@ -206,11 +209,12 @@ export function ArchiveShortcut({ archived, onClick }: { archived: boolean; onCl
         onClick();
       }}
       onKeyDown={(e) => e.stopPropagation()}
-      title={archived ? "Restaurer la carte" : "Archiver la carte"}
-      aria-label={archived ? "Restaurer la carte" : "Archiver la carte"}
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-btn text-ink-4 hover:bg-hover hover:text-ink md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
+      title={del ? "Supprimer définitivement la carte" : "Archiver : ranger la carte dans Terminé"}
+      className={`flex shrink-0 items-center gap-1 rounded-chip border px-1.5 py-0.5 text-[10px] font-bold ${
+        del ? "border-bad/30 text-bad hover:bg-bad-bg" : "border-line text-ink-3 hover:bg-hover hover:text-ink"
+      }`}
     >
-      <Icon size={14} />
+      <Icon size={11} /> {del ? "Supprimer" : "Archiver"}
     </button>
   );
 }

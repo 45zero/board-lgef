@@ -17,10 +17,11 @@ import {
   renameTeamBoard,
   reorderTeamLists,
   updateTeamCard,
+  deleteTeamCard,
   updateTeamList,
 } from "@/app/actions/team";
 import { TEAM_COLORS, isCardDone, type TeamBoard, type TeamCard, type TeamList, type TeamPerson, type TeamWorkspace } from "@/lib/board/team";
-import { ArchiveShortcut, Avatar, CardTile, ChecklistChip, DueChip, EventChip, Popover } from "@/components/board/team/TeamUi";
+import { CardShortcut, type CardShortcutAction, Avatar, CardTile, ChecklistChip, DueChip, EventChip, Popover } from "@/components/board/team/TeamUi";
 import { TeamCardModal } from "@/components/board/team/TeamCardModal";
 
 // Espace Team : chacun organise ses tableaux ; une carte assignée reste sur le tableau de son
@@ -131,16 +132,40 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
     subtitle = `${n} carte${n > 1 ? "s" : ""} en cours${mgr ? ` · N+1 : ${mgr.name}` : ""}.`;
   }
 
-  /** Raccourci des cartes : archiver (ou restaurer), sans ouvrir la carte. */
-  const archiveCard = (card: TeamCard) => {
-    const archived = !card.archivedAt;
-    patchLocal(card.id, { archivedAt: archived ? new Date().toISOString() : null });
-    void updateTeamCard(card.id, { archived }).then((r) => {
+  /** « Archiver » : la carte va dans la colonne Terminé de son tableau (archivée s'il n'y en a pas). */
+  const finishCard = (card: TeamCard) => {
+    const doneList = boardsById.get(card.boardId)?.lists.find((l) => l.isDone);
+    const after = (r: { ok: boolean; error?: string }) => {
+      if (!r.ok) toast(r.error ?? "Archivage impossible.");
+      else toast(`« ${card.title} » rangée dans Terminé.`);
+      void load();
+    };
+    if (doneList) {
+      const position = Math.max(0, ...ws.cards.filter((c) => c.listId === doneList.id).map((c) => c.position)) + 1000;
+      patchLocal(card.id, { listId: doneList.id, position });
+      void moveTeamCard(card.id, doneList.id, position).then(after);
+    } else {
+      patchLocal(card.id, { archivedAt: new Date().toISOString() });
+      void updateTeamCard(card.id, { archived: true }).then(after);
+    }
+  };
+  /** « Supprimer » une carte terminée : créateur, propriétaire du tableau ou administrateur. */
+  const deleteCard = (card: TeamCard) => {
+    if (!window.confirm(`Supprimer définitivement « ${card.title} » ?`)) return;
+    setWs((prev) => (prev ? { ...prev, cards: prev.cards.filter((c) => c.id !== card.id) } : prev));
+    void deleteTeamCard(card.id).then((r) => {
       if (!r.ok) toast(r.error);
-      else toast(archived ? `« ${card.title} » archivée.` : `« ${card.title} » restaurée.`);
+      else toast(`« ${card.title} » supprimée.`);
       void load();
     });
   };
+  const canDeleteCard = (card: TeamCard) => card.createdBy === ws.meId || boardsById.get(card.boardId)?.ownerId === ws.meId || !!ws.isAdmin;
+  const shortcutFor = (card: TeamCard): CardShortcutAction | undefined =>
+    isCardDone(card, listsById)
+      ? canDeleteCard(card)
+        ? { kind: "delete", onClick: () => deleteCard(card) }
+        : undefined
+      : { kind: "archive", onClick: () => finishCard(card) };
   const newCard = () => setNewCardFor(currentPerson ? { personId: currentPerson.id } : currentBoard ? { boardId: currentBoard.id } : {});
   const content = currentBoard ? (
     <BoardView
@@ -154,12 +179,12 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
       onMoveLocal={(id, listId, position) => patchLocal(id, { listId, position })}
       onChanged={load}
       onError={toast}
-      onArchive={archiveCard}
+      shortcutFor={shortcutFor}
     />
   ) : (
     <CardInbox
       compact={mobile}
-      onArchive={archiveCard}
+      shortcutFor={shortcutFor}
       cards={(currentPerson ? assignedTo(currentPerson.id) : mine).filter(matches)}
       personId={currentPerson?.id ?? ws.meId}
       isMe={!currentPerson}
@@ -394,7 +419,7 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
 
 function CardInbox({
   compact = false,
-  onArchive,
+  shortcutFor,
   cards,
   personId,
   isMe,
@@ -413,7 +438,7 @@ function CardInbox({
   boardsById: Map<string, TeamBoard>;
   onOpen: (id: string) => void;
   compact?: boolean;
-  onArchive?: (card: TeamCard) => void;
+  shortcutFor?: (card: TeamCard) => CardShortcutAction | undefined;
 }) {
   const [showDone, setShowDone] = useState(false);
   const membership = (c: TeamCard) => c.members.find((m) => m.userId === personId);
@@ -429,7 +454,7 @@ function CardInbox({
   const done = cards.filter((c) => isCardDone(c, listsById)).sort(byAssigned);
 
   const row = (c: TeamCard) => (
-    <CardRow key={c.id} card={c} member={membership(c)} isNew={isNew(c)} ws={ws} peopleById={peopleById} listsById={listsById} boardsById={boardsById} onOpen={() => onOpen(c.id)} onArchive={onArchive ? () => onArchive(c) : undefined} />
+    <CardRow key={c.id} card={c} member={membership(c)} isNew={isNew(c)} ws={ws} peopleById={peopleById} listsById={listsById} boardsById={boardsById} onOpen={() => onOpen(c.id)} shortcut={shortcutFor?.(c)} />
   );
 
   if (!cards.length)
@@ -472,7 +497,7 @@ function CardInbox({
 }
 
 function CardRow({
-  onArchive,
+  shortcut,
   card,
   member,
   isNew,
@@ -490,7 +515,7 @@ function CardRow({
   listsById: Map<string, TeamList>;
   boardsById: Map<string, TeamBoard>;
   onOpen: () => void;
-  onArchive?: () => void;
+  shortcut?: CardShortcutAction;
 }) {
   const creator = card.createdBy ? peopleById.get(card.createdBy) : undefined;
   const assigner = member?.assignedBy ? peopleById.get(member.assignedBy) : undefined;
@@ -531,7 +556,7 @@ function CardRow({
             <ChecklistChip card={card} />
           </div>
         </div>
-        {onArchive && <ArchiveShortcut archived={!!card.archivedAt} onClick={onArchive} />}
+        {shortcut && <CardShortcut {...shortcut} />}
         <span className="hidden shrink-0 items-center gap-1 rounded-btn border border-line px-3 py-1.5 text-xs font-bold text-link group-hover:border-link sm:flex">
           Ouvrir <ArrowUpRight size={13} />
         </span>
@@ -546,7 +571,7 @@ type DropTarget = { listId: string; beforeId: string | null } | null;
 
 function BoardView({
   compact = false,
-  onArchive,
+  shortcutFor,
   board,
   cards,
   ws,
@@ -567,7 +592,7 @@ function BoardView({
   onChanged: () => Promise<void>;
   onError: (m: string) => void;
   compact?: boolean;
-  onArchive?: (card: TeamCard) => void;
+  shortcutFor?: (card: TeamCard) => CardShortcutAction | undefined;
 }) {
   const [showArchived, setShowArchived] = useState(false);
   const [drop, setDrop] = useState<DropTarget>(null);
@@ -670,7 +695,7 @@ function BoardView({
                         setDrop(null);
                       }}
                       isNew={c.members.some((m) => m.userId === ws.meId && !m.seenAt && m.assignedBy !== ws.meId)}
-                      onArchive={onArchive ? () => onArchive(c) : undefined}
+                      shortcut={shortcutFor?.(c)}
                     />
                   </div>
                 ))}
