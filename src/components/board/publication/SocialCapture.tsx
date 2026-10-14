@@ -266,6 +266,8 @@ export function SocialCapture({
   const setLivePreview = (on: boolean) => setLivePreviewKey(on ? previewKey : null);
   const [preDone, setPreDone] = useState(false);
   const [animDone, setAnimDone] = useState(false);
+  const [liveLoading, setLiveLoading] = useState(false);
+  // Pré-roll et animation : montés (cachés) dès l'étape Habillage pour être téléchargés avant le clic.
   const animVideoRef = useRef<HTMLVideoElement>(null);
   const preVideoRef = useRef<HTMLVideoElement>(null);
   const canLivePreview = alphaVideo && !!(anim || pre);
@@ -276,6 +278,7 @@ export function SocialCapture({
     v.currentTime = 0;
     setPreDone(false);
     setAnimDone(false);
+    setLiveLoading(true);
     setLivePreview(true);
   };
   useEffect(() => {
@@ -283,23 +286,46 @@ export function SocialCapture({
     const v = previewVideoRef.current;
     const a = animVideoRef.current;
     const p = preVideoRef.current;
-    for (const el of [a, p]) {
-      if (!el) continue;
-      el.currentTime = 0;
-      void el.play().catch(() => undefined);
-    }
-    // La vidéo apparaît à revealAt (comme le tpad du serveur) ; sans son si le navigateur refuse.
-    const t = window.setTimeout(() => {
-      void v?.play().catch(() => {
-        if (!v) return;
+    let cancelled = false;
+    let raf = 0;
+    let fallback = 0;
+    // Attente que le pré-roll et l'animation puissent jouer (8 s au plus, réseau mobile).
+    const canPlay = (el: HTMLVideoElement | null) =>
+      !el || el.readyState >= 3
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => el.addEventListener("canplaythrough", () => resolve(), { once: true }));
+    const startMain = () => {
+      if (cancelled || !v || !v.paused) return;
+      void v.play().catch(() => {
         v.muted = true;
         void v.play().catch(() => undefined);
       });
-    }, (pre?.revealAt ?? 0) * 1000);
+    };
+    void Promise.race([Promise.all([canPlay(a), canPlay(p)]), new Promise((r) => window.setTimeout(r, 8000))]).then(() => {
+      if (cancelled) return;
+      setLiveLoading(false);
+      for (const el of [a, p]) {
+        if (!el) continue;
+        el.currentTime = 0;
+        void el.play().catch(() => undefined);
+      }
+      // La vidéo apparaît quand le pré-roll atteint revealAt (comme le tpad du serveur).
+      const reveal = pre?.revealAt ?? 0;
+      if (!p || reveal <= 0) return startMain();
+      const check = () => {
+        if (cancelled) return;
+        if (p.currentTime >= reveal || p.ended) startMain();
+        else raf = requestAnimationFrame(check);
+      };
+      raf = requestAnimationFrame(check);
+      fallback = window.setTimeout(startMain, (reveal + 2) * 1000);
+    });
     const stop = () => setLivePreview(false);
     v?.addEventListener("ended", stop);
     return () => {
-      window.clearTimeout(t);
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      window.clearTimeout(fallback);
       v?.removeEventListener("ended", stop);
       a?.pause();
       p?.pause();
@@ -961,15 +987,16 @@ export function SocialCapture({
                       <source src={`${videoUrl}#t=0.1`} type={playableType(file)} />
                     </video>
                     {/* Aperçu de l'animation : son image clé (Safari ne lit pas le VP9 transparent). */}
-                    {videoHabillage && anim && livePreview && !animDone && (
+                    {videoHabillage && anim && canLivePreview && (
                       <video
                         ref={animVideoRef}
                         src={anim.url}
+                        preload="auto"
                         muted
                         playsInline
                         loop={anim.mode === "loop"}
                         onEnded={() => setAnimDone(true)}
-                        className="pointer-events-none absolute max-w-none object-fill"
+                        className={`pointer-events-none absolute max-w-none object-fill ${livePreview && !liveLoading && !animDone ? "" : "invisible"}`}
                         style={{
                           left: `${(layer.x - layer.scale / 2) * 100}%`,
                           top: `${(layer.y - layer.scale / 2) * 100}%`,
@@ -978,7 +1005,7 @@ export function SocialCapture({
                         }}
                       />
                     )}
-                    {videoHabillage && anim && !livePreview && (
+                    {videoHabillage && anim && (!livePreview || liveLoading) && (
                       // eslint-disable-next-line @next/next/no-img-element -- image distante du bucket, superposée à la vidéo
                       <img
                         src={anim.preview}
@@ -1004,14 +1031,15 @@ export function SocialCapture({
                         />
                       </>
                     )}
-                    {videoHabillage && pre && livePreview && !preDone && (
+                    {videoHabillage && pre && canLivePreview && (
                       <video
                         ref={preVideoRef}
                         src={pre.url}
+                        preload="auto"
                         muted
                         playsInline
                         onEnded={() => setPreDone(true)}
-                        className="pointer-events-none absolute inset-0 h-full w-full object-fill"
+                        className={`pointer-events-none absolute inset-0 h-full w-full object-fill ${livePreview && !liveLoading && !preDone ? "" : "invisible"}`}
                       />
                     )}
                   </div>
@@ -1022,7 +1050,7 @@ export function SocialCapture({
                     onClick={() => (livePreview ? setLivePreview(false) : startLivePreview())}
                     className="mx-auto flex items-center gap-1.5 rounded-full bg-navy px-4 py-2 text-xs font-bold text-white"
                   >
-                    {livePreview ? "■ Arrêter l'aperçu" : `▶ Lire avec l'habillage${pre ? " (pré-roll compris)" : ""}`}
+                    {livePreview ? (liveLoading ? "Chargement de l'habillage…" : "■ Arrêter l'aperçu") : `▶ Lire avec l'habillage${pre ? " (pré-roll compris)" : ""}`}
                   </button>
                 )}
                 {videoError && (
