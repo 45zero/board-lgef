@@ -1,7 +1,9 @@
 "use client";
 
 import { useRef } from "react";
-import { Calendar, Home, Mail, Kanban } from "lucide-react";
+import { Calendar, Home, Kanban } from "lucide-react";
+import type { ComponentType } from "react";
+import { MailBrandIcon } from "@/components/board/mail/MailBrandIcon";
 import { CENTER_ACTIONS, type CenterAction } from "@/components/board/mobile/MobileSettingsSheet";
 import { useAppBadges, type AppBadge } from "@/hooks/board/useAppBadges";
 import { AppBadgePills } from "@/components/board/AppBadgePills";
@@ -11,13 +13,13 @@ import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModule
 export type MobileTab = "calendrier" | "accueil" | "mails" | "weekend" | "team" | "transfer";
 
 /** `module` : identifiant du module (droits d'accès, pastilles), ex. « trello » pour l'Espace Team. */
-type Slot = { id: MobileTab; module: string; label: string; icon: typeof Calendar };
+type Slot = { id: MobileTab; module: string; label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }> };
 const SLOTS: Slot[] = [
   { id: "calendrier", module: "calendrier", label: "Calendrier", icon: Calendar },
   { id: "accueil", module: "accueil", label: "Dashboard", icon: Home },
 ];
 const SLOTS_RIGHT: Slot[] = [
-  { id: "mails", module: "mails", label: "Mails", icon: Mail },
+  { id: "mails", module: "mails", label: "Mails", icon: MailBrandIcon },
   { id: "team", module: "trello", label: "Team", icon: Kanban },
 ];
 

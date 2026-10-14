@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notification Espace Team (carte assignée, mention…) : sigle « ET ». -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M2.5,5h7.5v2.3H5v3.5h4.5v2.3H5v3.6h5v2.3H2.5z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M11.5,5h10v2.3h-3.75V19h-2.5V7.3H11.5z" />
+</vector>

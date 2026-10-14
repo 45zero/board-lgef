@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { listNewPrimaryInbox, type NewInboxMail } from "@/lib/google/gmail";
+import { sendPush } from "@/lib/push/sendPush";
 
 export const maxDuration = 60;
 
@@ -36,14 +37,9 @@ export async function GET(request: Request) {
   const withApp = new Set((tokens ?? []).map((t) => t.user_id));
   const muted = new Set((profiles ?? []).filter((p) => p.notify_push === false).map((p) => p.id));
 
-  const functionsUrl = (process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL || `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1`).replace(/\/+$/, "");
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  // Canal « mail » ; icône de la messagerie du compte (le M de Gmail pour un compte Google).
   const push = (userId: string, title: string, body: string, data: Record<string, string>) =>
-    fetch(`${functionsUrl}/send_push_v1`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
-      body: JSON.stringify({ user_id: userId, title, body, type: "mail", channel_id: "mail", data }),
-    }).then((r) => r.ok);
+    sendPush({ userId, title, body, type: "mail", channel: "mail", icon: "ic_stat_gmail", data });
 
   let pushed = 0;
   const errors: string[] = [];
@@ -66,11 +62,11 @@ export async function GET(request: Request) {
       const data = { route: "/?app=mails", account_id: account.id };
       if (fresh.length <= MAX_SINGLE) {
         for (const m of fresh) {
-          if (await push(account.user_id, `✉️ ${senderName(m.from)}`, m.subject, { ...data, message_id: m.id })) pushed++;
+          if (await push(account.user_id, senderName(m.from), m.subject, { ...data, message_id: m.id })) pushed++;
         }
       } else {
         const senders = [...new Set(fresh.map((m) => senderName(m.from)))].slice(0, 4).join(", ");
-        if (await push(account.user_id, `✉️ ${fresh.length} nouveaux mails`, senders, data)) pushed++;
+        if (await push(account.user_id, `${fresh.length} nouveaux mails`, senders, data)) pushed++;
       }
       await prisma.$executeRaw`
         update public.mail_push_state

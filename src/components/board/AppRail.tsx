@@ -6,7 +6,6 @@ import { AppBadgePills } from "@/components/board/AppBadgePills";
 import type { ComponentType } from "react";
 import {
   Home,
-  Mail,
   Kanban,
   CalendarRange,
   Calendar,
@@ -31,13 +30,14 @@ import {
   Send,
 } from "lucide-react";
 import { BOARD_APPS } from "@/lib/board/tokens";
+import { MailBrandIcon } from "@/components/board/mail/MailBrandIcon";
 import type { NavLayout } from "./BoardShell";
 
 const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   frais: Receipt,
   effectif: Wallet,
   accueil: Home,
-  mails: Mail,
+  mails: MailBrandIcon,
   trello: Kanban,
   planning: CalendarRange,
   calendrier: Calendar,

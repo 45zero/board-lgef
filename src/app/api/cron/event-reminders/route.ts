@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { travelFromHome } from "@/lib/board/travel";
 import { DEPARTURE_MARGIN_MIN, formatTravel } from "@/lib/board/geo";
+import { sendPush } from "@/lib/push/sendPush";
 
 export const maxDuration = 60;
 
@@ -101,31 +102,10 @@ export async function GET(request: Request) {
     if (insertError) console.error("[event-reminders] notifications", insertError);
   }
 
-  // Push mobile : même service que l'ancien calendrier (fonction Supabase send_push_v1).
-  const functionsUrl = (process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL || `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1`).replace(/\/+$/, "");
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  // Push mobile : service commun (fonction Supabase send_push_v1), icône LGEF par défaut.
   let pushed = 0;
-  if (anonKey) {
-    await Promise.all(
-      pushes.map(async (p) => {
-        try {
-          const res = await fetch(`${functionsUrl}/send_push_v1`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${anonKey}` },
-            body: JSON.stringify({
-              user_id: p.userId,
-              title: p.title,
-              body: p.body,
-              type: "event_reminder",
-              data: { event_id: p.eventId, route: `/?openEvent=${p.eventId}` },
-            }),
-          });
-          if (res.ok) pushed++;
-        } catch (e) {
-          console.error("[event-reminders] push", e);
-        }
-      })
-    );
+  for (const p of pushes) {
+    if (await sendPush({ userId: p.userId, title: p.title, body: p.body, type: "event_reminder", data: { event_id: p.eventId, route: `/?openEvent=${p.eventId}` } })) pushed++;
   }
 
   return NextResponse.json({ sent: notifications.length, pushed });

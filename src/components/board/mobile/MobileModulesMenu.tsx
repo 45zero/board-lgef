@@ -1,16 +1,18 @@
 "use client";
 
-import { Calendar, Home, Mail, Kanban, Camera, Send, Receipt, Megaphone } from "lucide-react";
+import { Calendar, Home, Kanban, Camera, Send, Receipt, Megaphone } from "lucide-react";
+import type { ComponentType } from "react";
+import { MailBrandIcon } from "@/components/board/mail/MailBrandIcon";
 import type { MobileTab } from "@/components/board/mobile/MobileBottomNav";
 import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
 
 type Target = MobileTab | "frais" | "audiovisuel";
 
 /** `module` : identifiant des droits d'accès (module_access), ex. « trello » pour l'Espace Team. */
-const ITEMS: { id: Target; module: string; label: string; icon: typeof Calendar }[] = [
+const ITEMS: { id: Target; module: string; label: string; icon: ComponentType<{ size?: number }> }[] = [
   { id: "calendrier", module: "calendrier", label: "Calendrier", icon: Calendar },
   { id: "accueil", module: "accueil", label: "Dashboard", icon: Home },
-  { id: "mails", module: "mails", label: "Mails", icon: Mail },
+  { id: "mails", module: "mails", label: "Mails", icon: MailBrandIcon },
   { id: "team", module: "trello", label: "Espace Team", icon: Kanban },
   { id: "weekend", module: "weekend", label: "Week-end", icon: Camera },
   { id: "transfer", module: "transfer", label: "Transferts", icon: Send },

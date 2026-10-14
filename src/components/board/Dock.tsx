@@ -3,10 +3,10 @@
 import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
 import { useAppBadges, type AppBadge } from "@/hooks/board/useAppBadges";
 import { AppBadgePills } from "@/components/board/AppBadgePills";
+import { MailBrandIcon } from "@/components/board/mail/MailBrandIcon";
 import type { ComponentType } from "react";
 import {
   Home,
-  Mail,
   Kanban,
   ArrowLeftRight,
   Calendar,
@@ -30,7 +30,7 @@ import {
 
 const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>> = {
   accueil: Home,
-  mails: Mail,
+  mails: MailBrandIcon,
   trello: Kanban,
   planning: ArrowLeftRight,
   calendrier: Calendar,

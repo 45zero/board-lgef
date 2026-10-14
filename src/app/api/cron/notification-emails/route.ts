@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { isTransactionalEmailConfigured, sendTransactionalBatch, type EmailMessage } from "@/lib/email/transactional";
 import { CHOICES, NOT_EMAILED, renderNotificationEmail, type EmailEvent, type EmailNotification } from "@/lib/email/notificationEmails";
 import { createActionToken } from "@/lib/email/actionTokens";
+import { sendNotificationPushes } from "@/lib/push/notificationPush";
 
 export const maxDuration = 60;
 
@@ -22,6 +23,8 @@ export async function GET(request: Request) {
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   }
+  // Push (publication, Espace Team) : indépendants des e-mails, une erreur ne bloque pas l'envoi des e-mails.
+  await sendNotificationPushes(createServiceClient()).catch((e) => console.error("[notification-push]", e));
   if (!isTransactionalEmailConfigured()) return NextResponse.json({ error: "Envoi d'e-mails non configuré (Brevo / Resend)" }, { status: 500 });
 
   const service = createServiceClient();
