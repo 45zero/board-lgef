@@ -6,14 +6,25 @@ export type MailDetail = Awaited<ReturnType<typeof getMyMessage>>;
 export type MailList = Awaited<ReturnType<typeof listMyMessages>>;
 
 /** Liste d'un dossier via la route GET (parallèle aux autres chargements, contrairement aux server actions). */
-export async function loadMailList(accountId: string, opts: { labelIds?: string[]; query?: string } = {}): Promise<MailList> {
+export async function loadMailList(accountId: string, opts: { labelIds?: string[]; query?: string; pageToken?: string } = {}): Promise<MailList> {
   const params = new URLSearchParams({ account: accountId });
   for (const l of opts.labelIds ?? []) params.append("label", l);
   if (opts.query) params.set("q", opts.query);
+  if (opts.pageToken) params.set("page", opts.pageToken);
   const res = await fetch(`/api/mail/list?${params}`);
   const body = await res.json();
   if (!res.ok) throw new Error(body?.error ?? "Impossible de charger les mails.");
   return body as MailList;
+}
+
+/**
+ * Mise à jour en direct de la première page sans perdre les pages déjà chargées plus bas : la nouvelle
+ * première page, puis les mails qui suivaient son dernier élément. `null` : liste à remplacer.
+ */
+export function mergeFirstPage<T extends { id: string }>(prev: T[], first: T[]): T[] | null {
+  if (prev.length <= first.length || first.length === 0) return null;
+  const k = prev.findIndex((m) => m.id === first[first.length - 1].id);
+  return k === -1 ? null : [...first, ...prev.slice(k + 1)];
 }
 
 // Partagé par les écrans Mails ordinateur et mobile, au niveau du module : survit aux changements

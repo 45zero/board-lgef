@@ -1,9 +1,10 @@
 "use client";
 
+import { LoadMoreMails } from "@/components/board/mail/LoadMoreMails";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useEffect, useRef, useState } from "react";
 import { readCache, writeCache } from "@/lib/board/localCache";
-import { getCachedMail, loadMail, loadMailList, prefetchMails } from "@/lib/board/mailClient";
+import { mergeFirstPage, getCachedMail, loadMail, loadMailList, prefetchMails } from "@/lib/board/mailClient";
 import {
   Mail,
   Plus,
@@ -98,6 +99,10 @@ export function MobileMailsScreen({
   });
 
   const [messages, setMessages] = useState<MessageListItem[]>([]);
+  // Pages suivantes du dossier (Gmail renvoie 25 mails à la fois) : chargées en arrivant en bas de la liste.
+  const [nextPage, setNextPage] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const listKey = useRef("");
   const [drafts, setDrafts] = useState<DraftListItem[]>([]);
   const [selected, setSelected] = useState<MessageDetail | null>(null);
   const [selectedLoading, setSelectedLoading] = useState(false);
@@ -154,8 +159,12 @@ export function MobileMailsScreen({
     }
     const systemFolder = SYSTEM_FOLDERS.find((f) => f.id === folder);
     const labelIds: string[] = systemFolder ? [...systemFolder.labelIds] : [folder];
+    listKey.current = cacheKey;
+    setNextPage(null);
     loadMailList(activeAccountId, { labelIds })
       .then((res) => {
+        if (listKey.current !== cacheKey) return;
+        setNextPage(res.nextPageToken);
         messagesCache.set(cacheKey, res.messages);
         writeCache(`mail:list:${cacheKey}`, res.messages);
         setMessages(res.messages);
@@ -180,10 +189,31 @@ export function MobileMailsScreen({
       .then((res) => {
         messagesCache.set(cacheKey, res.messages);
         writeCache(`mail:list:${cacheKey}`, res.messages);
-        setMessages(res.messages);
+        // Pages déjà chargées plus bas : gardées sous la nouvelle première page.
+        const merged = mergeFirstPage(messages, res.messages);
+        setMessages(merged ?? res.messages);
+        if (!merged) setNextPage(res.nextPageToken);
       })
       .catch(() => undefined);
   });
+
+  const loadMore = () => {
+    if (!activeAccountId || !nextPage || loadingMore || folder === "DRAFTS") return;
+    const key = listKey.current;
+    const systemFolder = SYSTEM_FOLDERS.find((f) => f.id === folder);
+    setLoadingMore(true);
+    loadMailList(activeAccountId, { labelIds: systemFolder ? [...systemFolder.labelIds] : [folder], query: undefined, pageToken: nextPage })
+      .then((res) => {
+        if (listKey.current !== key) return;
+        setMessages((prev) => {
+          const seen = new Set(prev.map((m) => m.id));
+          return [...prev, ...res.messages.filter((m) => !seen.has(m.id))];
+        });
+        setNextPage(res.nextPageToken);
+      })
+      .catch(() => undefined)
+      .finally(() => setLoadingMore(false));
+  };
 
   const openMessage = async (id: string) => {
     if (!activeAccountId) return;
@@ -448,6 +478,7 @@ export function MobileMailsScreen({
               <div className="truncate text-xs text-ink-4">{m.snippet}</div>
             </SwipeableMailRow>
           ))}
+        {!loading && folder !== "DRAFTS" && nextPage && <LoadMoreMails loading={loadingMore} onLoad={loadMore} />}
       </div>
 
       {selectMode ? (
