@@ -219,7 +219,7 @@ export function MobileEventModal({
               </div>
             </div>
 
-            <ScheduleConflictWarning startISO={m.slot?.startISO ?? null} endISO={m.slot?.endISO ?? null} excludeEventId={event?.id} />
+            <ScheduleConflictWarning startISO={m.slot?.startISO ?? null} endISO={m.slot?.endISO ?? null} excludeEventId={event?.id} location={m.onlineMeeting ? "" : m.location} />
 
             <div>
               <div className="mb-1 flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">

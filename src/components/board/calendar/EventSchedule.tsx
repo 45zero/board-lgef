@@ -9,24 +9,48 @@ import type { MyRoute } from "@/lib/board/travel";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { DEPARTURE_MARGIN_MIN, departureTime, formatTravel, type LatLng } from "@/lib/board/geo";
 
-/** Bandeau « vous avez déjà un événement sur ce créneau » (événements où l'utilisateur est sollicité). */
+const hm = (iso: string) => format(parseISO(iso), "HH:mm");
+
+/** Explication d'un conflit : chevauchement, ou temps de trajet qui manque. */
+function conflictText(c: ScheduleConflict) {
+  const travel = c.travel ? `${formatTravel(c.travel)} de route` : "";
+  switch (c.kind) {
+    case "after":
+      return `à ${hm(c.start)} : ${travel} depuis ce lieu (+${DEPARTURE_MARGIN_MIN} min), il faudrait finir avant ${hm(c.limit!)}`;
+    case "before":
+      return `se termine à ${hm(c.end)} : ${travel} jusqu'ici (+${DEPARTURE_MARGIN_MIN} min), arrivée au plus tôt à ${hm(c.limit!)}`;
+    case "departure":
+      return `à ${hm(c.start)} : départ de chez vous à ${hm(c.limit!)} (${travel})`;
+    default:
+      return `${format(parseISO(c.start), "EEE d MMM HH:mm", { locale: fr })} à ${hm(c.end)}`;
+  }
+}
+
+/**
+ * Bandeau d'alerte du créneau, sur les événements où l'utilisateur est sollicité : chevauchement, ou
+ * trajet impossible depuis / vers le lieu saisi (événement juste avant ou juste après, départ de chez soi).
+ */
 export function ScheduleConflictWarning({
   startISO,
   endISO,
   excludeEventId,
+  location = "",
 }: {
   startISO: string | null;
   endISO: string | null;
   excludeEventId?: string | null;
+  /** Lieu saisi (vide : réunion en ligne ou pas encore renseigné). */
+  location?: string;
 }) {
-  const key = `${startISO}|${endISO}|${excludeEventId ?? ""}`;
+  const place = location.trim();
+  const key = `${startISO}|${endISO}|${excludeEventId ?? ""}|${place}`;
   const [result, setResult] = useState<{ key: string; conflicts: ScheduleConflict[] } | null>(null);
   useEffect(() => {
     if (!startISO || !endISO) return;
     let cancelled = false;
     // Petit délai : pas d'appel serveur à chaque frappe dans les champs d'heure.
     const t = setTimeout(() => {
-      getMyScheduleConflicts(startISO, endISO, excludeEventId)
+      getMyScheduleConflicts(startISO, endISO, excludeEventId, place || null)
         .then((conflicts) => !cancelled && setResult({ key, conflicts }))
         .catch(() => {});
     }, 400);
@@ -43,13 +67,15 @@ export function ScheduleConflictWarning({
     <div role="alert" className="rounded-btn border border-warn bg-warn-bg px-3 py-2 text-sm text-warn">
       <div className="flex items-center gap-1.5 font-bold">
         <AlertTriangle size={14} className="shrink-0" />
-        Attention, vous avez déjà {conflicts.length > 1 ? `${conflicts.length} événements` : "un événement"} sur ce créneau
+        {conflicts.every((c) => c.kind === "overlap")
+          ? `Attention, vous avez déjà ${conflicts.length > 1 ? `${conflicts.length} événements` : "un événement"} sur ce créneau`
+          : "Attention, ce créneau ne laisse pas le temps de trajet"}
       </div>
       <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-ink-2">
         {conflicts.map((c) => (
           <li key={c.id}>
-            <span className="font-semibold text-ink">{c.title}</span> — {format(parseISO(c.start), "EEE d MMM HH:mm", { locale: fr })} à{" "}
-            {format(parseISO(c.end), "HH:mm")} <span className="text-ink-4">({c.roles.join(", ")})</span>
+            <span className="font-semibold text-ink">{c.title}</span> {c.kind === "overlap" ? "— " : ""}
+            {conflictText(c)} <span className="text-ink-4">({c.roles.join(", ")})</span>
           </li>
         ))}
       </ul>
