@@ -71,9 +71,14 @@ export function InAppCamera({
   const shownZoom = digital && mode === "video" ? 1 : zoom;
 
   // Flux caméra (+ micro pour les vidéos ; sans micro si refusé), zoom matériel s'il est exposé.
+  // Vidéo en 1080p / 30 i/s : en 4K, l'encodeur du navigateur saute des images sur téléphone (vidéo
+  // saccadée), et l'habillage la ramène de toute façon à 1080 px. Photos en pleine définition.
   useEffect(() => {
     let alive = true;
-    const video = { facingMode: { ideal: facing }, width: { ideal: 3840 }, height: { ideal: 2160 } };
+    const video =
+      mode === "video"
+        ? { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }
+        : { facingMode: { ideal: facing }, width: { ideal: 3840 }, height: { ideal: 2160 } };
     navigator.mediaDevices
       .getUserMedia({ video, audio: !!mp4 })
       .catch(() => navigator.mediaDevices.getUserMedia({ video, audio: false }))
@@ -95,8 +100,8 @@ export function InAppCamera({
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onUnavailable : rappel du parent, seul le côté de la caméra relance le flux
-  }, [facing, mp4]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onUnavailable : rappel du parent ; côté, mode (définition) et format relancent le flux
+  }, [facing, mp4, mode]);
 
   // Zoom matériel appliqué au capteur (photo et vidéo).
   useEffect(() => {
@@ -152,7 +157,7 @@ export function InAppCamera({
     if (!stream || full) return;
     if (!mp4) return onNativeVideo();
     const chunks: Blob[] = [];
-    const rec = new MediaRecorder(stream, { mimeType: mp4, videoBitsPerSecond: 8_000_000 });
+    const rec = new MediaRecorder(stream, { mimeType: mp4, videoBitsPerSecond: 6_000_000 });
     rec.ondataavailable = (e) => {
       if (e.data.size) chunks.push(e.data);
     };

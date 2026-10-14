@@ -380,9 +380,13 @@ export function SocialCapture({
     const tick = () => {
       const v = previewVideoRef.current;
       const playing = !!v && !v.paused && !v.ended;
+      // Styles réécrits seulement s'ils changent : pas de recalcul des calques plein format à chaque image.
       const apply = (el: HTMLCanvasElement | null, timing: TextTiming | undefined) => {
         if (!el) return;
         const st = playing ? textStateAt(timing, v!.currentTime) : { opacity: 1, dx: 0, dy: 0 };
+        const state = `${st.opacity}|${st.dx}|${st.dy}`;
+        if (el.dataset.state === state) return;
+        el.dataset.state = state;
         el.style.opacity = String(st.opacity);
         el.style.transform = `translate(${st.dx * 100}%, ${st.dy * 100}%)`;
       };

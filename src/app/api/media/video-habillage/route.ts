@@ -93,7 +93,8 @@ export async function POST(request: Request) {
     const pre = preroll?.url ? { url: preroll.url, revealAt: Math.min(30, Math.max(0, Number(preroll.revealAt) || 0)) } : null;
     const loop = anim?.mode === "loop";
     const inputs: string[] = [];
-    const chain: string[] = [`[0:v]scale=1080:-2,setsar=1${pre ? `,tpad=start_duration=${pre.revealAt}:start_mode=clone` : ""}[s0]`];
+    // fps=30 : cadence fixe, les vidéos enregistrées par un navigateur ont une cadence irrégulière (saccades).
+    const chain: string[] = [`[0:v]scale=1080:-2,setsar=1,fps=30${pre ? `,tpad=start_duration=${pre.revealAt}:start_mode=clone` : ""}[s0]`];
     let cur = "s0";
     let next = 2;
     if (anim) {
