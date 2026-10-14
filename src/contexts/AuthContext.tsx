@@ -4,6 +4,7 @@ import { clearLocalCache } from "@/lib/board/localCache";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { User, Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import { registerNativePush, unregisterNativePush } from "@/lib/native/push";
 
 interface AuthContextType {
   user: User | null;
@@ -51,7 +52,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Appli mobile : le téléphone reçoit les push du compte connecté.
+  const userId = user?.id;
+  useEffect(() => {
+    if (userId) void registerNativePush();
+  }, [userId]);
+
   const logout = async () => {
+    await unregisterNativePush().catch(() => {});
     const supabase = createClient();
     await supabase.auth.signOut({ scope: "local" });
     // Les mails/événements mis en cache pour l'affichage instantané ne doivent pas survivre à la session.
