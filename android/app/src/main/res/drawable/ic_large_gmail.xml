@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vignette en couleurs des notifications de mails Gmail (à droite du texte) : logo sur un rond blanc. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="96dp" android:height="96dp" android:viewportWidth="96" android:viewportHeight="96">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M48,0a48,48 0,1 0,0.01 0z" />
+    <group android:translateX="-34" android:translateY="-18" android:scaleX="1" android:scaleY="1">
+        <group android:scaleX="0.75" android:scaleY="0.75" android:pivotX="96" android:pivotY="75">
+            <path android:fillColor="#4285F4" android:pathData="M58,108h14V74L52,59v43c0,3.32 2.69,6 6,6" />
+            <path android:fillColor="#34A853" android:pathData="M120,108h14c3.32,0 6,-2.69 6,-6V59l-20,15" />
+            <path android:fillColor="#FBBC04" android:pathData="M120,48v26l20,-15v-8c0,-7.42 -8.47,-11.65 -14.4,-7.2" />
+            <path android:fillColor="#EA4335" android:pathData="M72,74V48l24,18 24,-18v26L96,92" />
+            <path android:fillColor="#C5221F" android:pathData="M52,51v8l20,15V48l-5.6,-4.2c-5.94,-4.45 -14.4,-0.22 -14.4,7.2" />
+        </group>
+    </group>
+</vector>

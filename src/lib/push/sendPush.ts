@@ -16,6 +16,8 @@ export async function sendPush(params: {
   channel?: "mail";
   icon?: PushIcon;
   data?: Record<string, string>;
+  /** Notification affichée par l'appli Android (vignette en couleurs, texte sur plusieurs lignes). */
+  native?: boolean;
 }): Promise<boolean> {
   const functionsUrl = (process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL || `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1`).replace(/\/+$/, "");
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -32,6 +34,7 @@ export async function sendPush(params: {
         data: params.data ?? {},
         ...(params.channel ? { channel_id: params.channel } : {}),
         ...(params.icon ? { icon: params.icon } : {}),
+        ...(params.native ? { native_notification: true } : {}),
       }),
     });
     return res.ok;

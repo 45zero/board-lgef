@@ -39,7 +39,7 @@ export async function GET(request: Request) {
 
   // Canal « mail » ; icône de la messagerie du compte (le M de Gmail pour un compte Google).
   const push = (userId: string, title: string, body: string, data: Record<string, string>) =>
-    sendPush({ userId, title, body, type: "mail", channel: "mail", icon: "ic_stat_gmail", data });
+    sendPush({ userId, title, body, type: "mail", channel: "mail", icon: "ic_stat_gmail", native: true, data: { ...data, large_icon: "gmail" } });
 
   let pushed = 0;
   const errors: string[] = [];
@@ -62,7 +62,9 @@ export async function GET(request: Request) {
       const data = { route: "/?app=mails", account_id: account.id };
       if (fresh.length <= MAX_SINGLE) {
         for (const m of fresh) {
-          if (await push(account.user_id, senderName(m.from), m.subject, { ...data, message_id: m.id })) pushed++;
+          // Objet, puis le début du mail (quelques lignes visibles en dépliant la notification).
+          const body = [m.subject, m.snippet.slice(0, 280)].filter(Boolean).join("\n");
+          if (await push(account.user_id, senderName(m.from), body, { ...data, message_id: m.id })) pushed++;
         }
       } else {
         const senders = [...new Set(fresh.map((m) => senderName(m.from)))].slice(0, 4).join(", ");

@@ -535,13 +535,17 @@ export async function deleteDraft(account: ConnectedAccount, draftId: string) {
   await gmail.users.drafts.delete({ userId: "me", id: draftId });
 }
 
-export type NewInboxMail = { id: string; from: string; subject: string; internalDate: number };
+export type NewInboxMail = { id: string; from: string; subject: string; snippet: string; internalDate: number };
 
 /**
  * Mails arrivés dans l'onglet « Principal » de la boîte de réception après `afterMs` (push des mails,
  * /api/cron/mail-push), du plus ancien au plus récent. `after:` de Gmail est à la seconde : le filtre
  * exact se fait sur internalDate.
  */
+/** Extrait Gmail (snippet) : entités HTML courantes remises en texte. */
+const decodeEntities = (s: string) =>
+  s.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
+
 export async function listNewPrimaryInbox(account: ConnectedAccount, afterMs: number): Promise<NewInboxMail[]> {
   const gmail = await gmailClient(account);
   const list = await gmail.users.messages.list({
@@ -556,6 +560,7 @@ export async function listNewPrimaryInbox(account: ConnectedAccount, afterMs: nu
         id: data.id!,
         from: headerValue(data.payload?.headers, "From"),
         subject: headerValue(data.payload?.headers, "Subject") || "(sans objet)",
+        snippet: decodeEntities(data.snippet ?? ""),
         internalDate: Number(data.internalDate ?? 0),
       };
     })
