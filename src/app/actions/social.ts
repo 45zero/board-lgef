@@ -2,6 +2,7 @@
 
 import { isPublisher } from "@/lib/board/publishers";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/serviceClient";
 import {
   publishPublicationToSocial,
   refreshPublicationStats,
@@ -49,6 +50,41 @@ async function requirePublisher() {
   if (!user) throw new Error("Non authentifié");
   if (!(await isPublisher(supabase, user.id))) throw new Error("Vous n'êtes pas habilité à publier.");
   return supabase;
+}
+
+/**
+ * Prévient des personnes que des médias attendent dans le centre de publication : notification
+ * du board (cloche, e-mail selon leurs préférences) qui ouvre le centre.
+ */
+export async function notifyToPublish(userIds: string[], message: string): Promise<{ error: string | null; sent: number }> {
+  try {
+    const supabase = await requireUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const ids = [...new Set(userIds)].filter((id) => id !== user!.id).slice(0, 30);
+    if (!ids.length) return { error: "Choisissez au moins une personne.", sent: 0 };
+    const { data: me } = await supabase.from("profiles").select("first_name, last_name").eq("id", user!.id).single();
+    const name = [me?.first_name, me?.last_name].filter(Boolean).join(" ") || "Un membre du board";
+    const text = message.trim().slice(0, 500);
+    const { error } = await createServiceClient()
+      .from("notifications")
+      .insert(
+        ids.map((id) => ({
+          user_id: id,
+          type: "publication_to_publish" as const,
+          title: `${name} : publications à publier`,
+          message: text || "Des médias vous attendent dans le centre de publication.",
+          actor_name: name,
+          data: { app: "audiovisuel", from: user!.id },
+          read: false,
+        }))
+      );
+    if (error) throw new Error(error.message);
+    return { error: null, sent: ids.length };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Envoi impossible.", sent: 0 };
+  }
 }
 
 /** Publie sur les pages Facebook / le compte Instagram sélectionnés (un résultat par cible). */

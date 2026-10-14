@@ -31,6 +31,8 @@ import {
   Settings,
   Search,
   AlertTriangle,
+  BellRing,
+  Pencil,
 } from "lucide-react";
 import {
   listMediaPublications,
@@ -70,6 +72,7 @@ import {
   resolveFacebookMention,
   listFlaggedComments,
   moderateComment,
+  notifyToPublish,
   type ModerationRow,
 } from "@/app/actions/social";
 import {
@@ -98,7 +101,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useBackgroundTasks } from "@/contexts/BackgroundTasksContext";
 import { pdfToJpegFiles } from "@/lib/board/pdfToImages";
 import { createClient } from "@/lib/supabase/client";
-import { personName } from "@/components/board/calendar/EventTabs";
+import { ParticipantsField, personName } from "@/components/board/calendar/EventTabs";
 import { useOversizedVideo } from "@/hooks/board/useOversizedVideo";
 import { AlbumEditor } from "@/components/board/publication/AlbumEditor";
 import { YoutubeIcon, FacebookIcon, TiktokIcon, InstagramIcon } from "@/components/board/publication/BrandIcons";
@@ -1082,7 +1085,12 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
     }
     setMentionState({ loading: false, error: res.error });
   };
-  const [scheduledAt, setScheduledAt] = useState("");
+  // Publication déjà programmée : on reprend sa date (champ datetime-local, heure locale).
+  const [scheduledAt, setScheduledAt] = useState(() => {
+    if (!pub.scheduled_at) return "";
+    const d = new Date(pub.scheduled_at);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  });
   const [busy, setBusy] = useState(false);
 
   // Types des médias réellement publiés (galerie composée ici pour une publication d'événement).
@@ -1393,7 +1401,7 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
             disabled={busy || !scheduledAt || !anyTarget}
             className="rounded-btn border border-line px-4 py-2 text-sm font-bold text-ink-2 disabled:opacity-50"
           >
-            Programmer
+            {pub.status === "scheduled" ? "Enregistrer la programmation" : "Programmer"}
           </button>
           <button
             onClick={publishNow}
@@ -1403,6 +1411,72 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
             {busy ? "…" : "Publier maintenant"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Notifier ---------- */
+
+/** Prévenir une ou plusieurs personnes que des médias attendent dans le centre (cloche + e-mail). */
+function NotifyDialog({ onClose }: { onClose: () => void }) {
+  const [people, setPeople] = useState<{ id: string; name: string; role: "membre" }[]>([]);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const send = async () => {
+    setBusy(true);
+    const res = await notifyToPublish(
+      people.map((p) => p.id),
+      message
+    );
+    setBusy(false);
+    if (res.error) return alert(res.error);
+    setDone(`${res.sent} personne${res.sent > 1 ? "s" : ""} prévenue${res.sent > 1 ? "s" : ""}.`);
+    window.setTimeout(onClose, 1200);
+  };
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md space-y-3 rounded-modal bg-card p-5 shadow-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-ink">Notifier quelqu&rsquo;un</h3>
+            <p className="mt-0.5 text-xs text-ink-3">Il reçoit une notification (et un e-mail selon ses réglages) qui ouvre le centre de publication.</p>
+          </div>
+          <button onClick={onClose} className="text-ink-4 hover:text-ink" aria-label="Fermer">
+            <X size={16} />
+          </button>
+        </div>
+        <ParticipantsField
+          members={people}
+          canManage
+          onAdd={(p) => setPeople((list) => (list.some((x) => x.id === p.id) ? list : [...list, { id: p.id, name: personName(p), role: "membre" }]))}
+          onRemove={(m) => setPeople((list) => list.filter((x) => x.id !== m.id))}
+          onSetResponsable={() => undefined}
+        />
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          rows={3}
+          placeholder="Message (optionnel) — ex. Les photos du match R1 sont prêtes, tu peux les publier ?"
+          className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
+        />
+        {done ? (
+          <p className="text-right text-sm font-semibold text-good">{done}</p>
+        ) : (
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="rounded-btn border border-line px-4 py-2 text-sm text-ink-2">
+              Annuler
+            </button>
+            <button
+              onClick={send}
+              disabled={busy || people.length === 0}
+              className="flex items-center gap-1.5 rounded-btn bg-navy px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+            >
+              <BellRing size={14} /> {busy ? "Envoi…" : "Notifier"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1824,9 +1898,15 @@ function PublicationCard({
           </>
         )}
         {tab === "scheduled" && (
-          <button onClick={onCancelSchedule} className="ml-auto rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 md:ml-0">
-            Annuler
-          </button>
+          <>
+            <button onClick={onCancelSchedule} className="ml-auto rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 md:ml-0">
+              Annuler
+            </button>
+            {/* Revoir ce qui a été choisi (texte, réseaux, date) et le modifier. */}
+            <button onClick={onOpenComposer} className="flex items-center gap-1 rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white">
+              <Pencil size={12} /> Voir / modifier
+            </button>
+          </>
         )}
       </div>
     </div>
@@ -1846,6 +1926,7 @@ export function PublicationScreen() {
   const [loading, setLoading] = useState(true);
   const [composerFor, setComposerFor] = useState<MediaPublication | null>(null);
   const [creating, setCreating] = useState(false);
+  const [notifying, setNotifying] = useState(false);
   const [refreshingStats, setRefreshingStats] = useState(false);
   const [filters, setFilters] = useState<Filters>({ category: "all", competition: "all", kind: "all" });
   const { completions } = useBackgroundTasks();
@@ -1967,6 +2048,7 @@ export function PublicationScreen() {
         />
       )}
 
+      {notifying && <NotifyDialog onClose={() => setNotifying(false)} />}
       {creating && (
         <NewPublicationDialog
           onClose={() => setCreating(false)}
@@ -2014,6 +2096,14 @@ export function PublicationScreen() {
               );
             })}
           </div>
+          <button
+            onClick={() => setNotifying(true)}
+            className="flex w-11 shrink-0 items-center justify-center rounded-panel border border-line bg-card text-ink-2"
+            aria-label="Notifier quelqu'un"
+            title="Notifier quelqu'un"
+          >
+            <BellRing size={17} />
+          </button>
           {role.isSuperUser && (
             <button
               onClick={() => setSettingsSection((s) => (s ? null : "habillages"))}
@@ -2040,6 +2130,12 @@ export function PublicationScreen() {
           className="mb-3 flex w-full items-center justify-center gap-1.5 rounded-btn bg-red px-3 py-2 text-sm font-bold text-white shadow-btn-red"
         >
           <Plus size={15} /> Nouvelle publication
+        </button>
+        <button
+          onClick={() => setNotifying(true)}
+          className="mb-3 flex w-full items-center justify-center gap-1.5 rounded-btn border border-line px-3 py-2 text-sm font-semibold text-ink-2 hover:bg-hover"
+        >
+          <BellRing size={15} /> Notifier quelqu&rsquo;un
         </button>
         <div className="space-y-1">
           {TABS.map((t) => {

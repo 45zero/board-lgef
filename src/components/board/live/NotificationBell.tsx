@@ -44,6 +44,10 @@ export function NotificationBell({ variant = "desktop" }: { variant?: "desktop" 
     } else if (n.event_id) {
       setOpen(false);
       void openEvent(n.event_id);
+    } else if (n.data?.app && /^[a-z]+$/.test(n.data.app)) {
+      // Module à ouvrir (ex. centre de publication) : même lien que dans l'e-mail.
+      setOpen(false);
+      window.location.assign(`/?app=${n.data.app}`);
     }
   };
 

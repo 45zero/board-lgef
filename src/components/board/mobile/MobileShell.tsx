@@ -55,7 +55,7 @@ export function MobileShell() {
   // Publication dont les médias ont fini de s'envoyer en arrière-plan : choix des réseaux.
   const [composerPub, setComposerPub] = useState<MediaPublication | null>(null);
   // Centre de publication, ouvert depuis l'écran du bouton central.
-  const [centerOpen, setCenterOpen] = useState(false);
+  const [centerOpen, setCenterOpen] = useState(linkedApp === "audiovisuel");
   // Appli mobile : la page elle-même ne défile ni ne rebondit jamais (seules les listes internes
   // défilent). Sans ce verrou, Chrome / Samsung Internet / Safari laissent un léger défilement de
   // la page entière (hauteur d'écran arrondie, effet élastique).

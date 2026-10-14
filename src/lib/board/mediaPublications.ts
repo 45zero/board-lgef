@@ -110,7 +110,25 @@ export async function listMediaPublications(status: PublicationStatus): Promise<
     console.error("[mediaPublications.listMediaPublications]", error);
     return [];
   }
-  const rows = (data as unknown as Omit<MediaPublication, "files">[]) ?? [];
+  return withFiles((data as unknown as Omit<MediaPublication, "files">[]) ?? []);
+}
+
+/** Une publication avec ses fichiers (compositeur ouvert depuis la fiche d'un événement). */
+export async function getMediaPublication(id: string): Promise<MediaPublication | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("media_publications")
+    .select(
+      `*, event_files(${FILE_SELECT}), events(title, start_date, event_type), creator:profiles!media_publications_created_by_fkey(${PERSON}), publisher:profiles!media_publications_published_by_fkey(${PERSON})`
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) return null;
+  return (await withFiles([data as unknown as Omit<MediaPublication, "files">]))[0] ?? null;
+}
+
+async function withFiles(rows: Omit<MediaPublication, "files">[]): Promise<MediaPublication[]> {
+  const supabase = createClient();
 
   // Fichiers des galeries (au-delà du fichier principal déjà joint) : une seule requête.
   const extraIds = [...new Set(rows.flatMap((r) => (r.file_ids ?? []).filter((id) => id !== r.event_file_id)))];

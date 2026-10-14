@@ -30,6 +30,8 @@ import { useEventTeam } from "@/hooks/board/useEventTeam";
 import { useEventComments } from "@/hooks/board/useEventComments";
 import { useEventFiles } from "@/hooks/board/useEventFiles";
 import { getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
+import { ensureFilePublication, getMediaPublication, type MediaPublication } from "@/lib/board/mediaPublications";
+import dynamic from "next/dynamic";
 import { getPublishedForFile, detachFileFromPublications } from "@/app/actions/social";
 import { describeFailures, getNetworkEntry, networkLabel, networkUrl, NETWORK_KEYS, type NetworkKey } from "@/lib/social/targets";
 import { REMINDER_PRESETS } from "@/hooks/board/useEventModalState";
@@ -854,148 +856,8 @@ const FACEBOOK_REGIONS: { key: "lorraine" | "champagne_ardenne" | "alsace"; labe
   { key: "alsace", label: "Alsace" },
 ];
 
-/** lucide-react n'expose plus les logos de marque — badges texte colorés à la place. */
-function YoutubeBadge({ size = 14 }: { size?: number }) {
-  return (
-    <span
-      className="flex shrink-0 items-center justify-center rounded-[3px] bg-red font-black text-white"
-      style={{ width: size, height: size * 0.7, fontSize: size * 0.5 }}
-    >
-      YT
-    </span>
-  );
-}
-
-function FacebookBadge({ size = 14 }: { size?: number }) {
-  return (
-    <span
-      className="flex shrink-0 items-center justify-center rounded-full bg-link font-black text-white"
-      style={{ width: size, height: size, fontSize: size * 0.7 }}
-    >
-      f
-    </span>
-  );
-}
-
-function PublishPanel({
-  file,
-  eventTitle,
-  publishing,
-  onClose,
-  onPublishYoutube,
-  onPublishFacebook,
-}: {
-  file: EventFile;
-  eventTitle: string;
-  publishing: boolean;
-  onClose: () => void;
-  onPublishYoutube: (data: { title: string; description?: string }) => Promise<unknown>;
-  onPublishFacebook: (
-    selection: Partial<Record<"lorraine" | "champagne_ardenne" | "alsace", { enabled: boolean; message: string }>>
-  ) => Promise<unknown>;
-}) {
-  const [ytTitle, setYtTitle] = useState(eventTitle);
-  const [ytDescription, setYtDescription] = useState("");
-  const [fbSelection, setFbSelection] = useState<
-    Record<"lorraine" | "champagne_ardenne" | "alsace", { enabled: boolean; message: string }>
-  >({
-    lorraine: { enabled: false, message: eventTitle },
-    champagne_ardenne: { enabled: false, message: eventTitle },
-    alsace: { enabled: false, message: eventTitle },
-  });
-
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div
-        className="w-full max-w-md space-y-4 rounded-modal border border-line bg-card p-4 shadow-modal"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-ink">Publier « {file.filename} »</h3>
-          <button onClick={onClose} className="text-ink-4 hover:text-ink">
-            <X size={16} />
-          </button>
-        </div>
-        <p className="text-xs text-ink-3">
-          Cette action publie réellement la vidéo sur le réseau choisi — visible publiquement, action non réversible.
-        </p>
-
-        <div className="space-y-2 rounded-btn border border-line p-3">
-          <div className="flex items-center gap-1.5 text-sm font-bold text-ink">
-            <YoutubeBadge size={16} /> YouTube
-          </div>
-          <input
-            value={ytTitle}
-            onChange={(e) => setYtTitle(e.target.value)}
-            placeholder="Titre de la vidéo"
-            className="w-full rounded-btn border border-line px-2.5 py-1.5 text-sm outline-none"
-          />
-          <textarea
-            value={ytDescription}
-            onChange={(e) => setYtDescription(e.target.value)}
-            rows={2}
-            placeholder="Description (optionnel)"
-            className="w-full rounded-btn border border-line px-2.5 py-1.5 text-sm outline-none"
-          />
-          <button
-            type="button"
-            disabled={publishing || !ytTitle.trim()}
-            onClick={() => {
-              if (!confirm(`Publier « ${ytTitle} » sur YouTube ? Cette vidéo deviendra publique.`)) return;
-              onPublishYoutube({ title: ytTitle.trim(), description: ytDescription.trim() || undefined });
-            }}
-            className="w-full rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
-          >
-            {publishing ? "Publication…" : "Publier sur YouTube"}
-          </button>
-        </div>
-
-        <div className="space-y-2 rounded-btn border border-line p-3">
-          <div className="flex items-center gap-1.5 text-sm font-bold text-ink">
-            <FacebookBadge size={14} /> Facebook
-          </div>
-          {FACEBOOK_REGIONS.map((r) => (
-            <div key={r.key} className="space-y-1">
-              <label className="flex items-center gap-2 text-xs font-semibold text-ink-2">
-                <input
-                  type="checkbox"
-                  checked={fbSelection[r.key].enabled}
-                  onChange={(e) =>
-                    setFbSelection((prev) => ({ ...prev, [r.key]: { ...prev[r.key], enabled: e.target.checked } }))
-                  }
-                />
-                {r.label}
-              </label>
-              {fbSelection[r.key].enabled && (
-                <textarea
-                  value={fbSelection[r.key].message}
-                  onChange={(e) =>
-                    setFbSelection((prev) => ({ ...prev, [r.key]: { ...prev[r.key], message: e.target.value } }))
-                  }
-                  rows={2}
-                  placeholder={`Message pour la page ${r.label}`}
-                  className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
-                />
-              )}
-            </div>
-          ))}
-          <button
-            type="button"
-            disabled={publishing || !Object.values(fbSelection).some((s) => s.enabled && s.message.trim())}
-            onClick={() => {
-              const pages = Object.values(fbSelection).filter((s) => s.enabled).length;
-              if (!confirm(`Publier sur ${pages} page(s) Facebook ? Ce post sera public.`)) return;
-              onPublishFacebook(fbSelection);
-            }}
-            className="w-full rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
-          >
-            {publishing ? "Publication…" : "Publier sur Facebook"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// Compositeur du centre de publication, chargé à la demande (l'écran du centre importe ce fichier).
+const PublicationComposer = dynamic(() => import("@/components/board/screens/PublicationScreen").then((m) => m.Composer), { ssr: false });
 
 /** « 26/09/2026 à 21:10 » — date et heure d'un ajout ou d'une publication. */
 function formatDateTime(iso: string | null | undefined) {
@@ -1215,7 +1077,6 @@ const isMediaFile = (f: EventFile) => /^(image|video)\//.test(f.content_type ?? 
  */
 export function AttachmentsField({
   eventId,
-  eventTitle,
   canManage,
   canPublish,
 }: {
@@ -1226,8 +1087,21 @@ export function AttachmentsField({
 }) {
   const hook = useEventFiles(eventId, canManage);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [publishingFileId, setPublishingFileId] = useState<string | null>(null);
-  const publishingFile = hook.files.find((f) => f.id === publishingFileId) ?? null;
+  // Publier un média : même compositeur que le centre de publication (réseaux, publier ou programmer).
+  const [composerPub, setComposerPub] = useState<MediaPublication | null>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const openComposer = async (file: EventFile) => {
+    setOpeningId(file.id);
+    try {
+      const pub = await getMediaPublication(await ensureFilePublication(file));
+      if (!pub) throw new Error("Publication introuvable.");
+      setComposerPub(pub);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Impossible d'ouvrir la publication.");
+    } finally {
+      setOpeningId(null);
+    }
+  };
   const [removing, setRemoving] = useState<{ file: EventFile; networks: NetworkKey[] } | null>(null);
 
   const askRemove = async (file: EventFile) => {
@@ -1259,7 +1133,7 @@ export function AttachmentsField({
                 canManage={canManage}
                 canPublish={canPublish}
                 onRemove={() => askRemove(f)}
-                onPublishClick={() => setPublishingFileId(f.id)}
+                onPublishClick={() => openingId !== f.id && void openComposer(f)}
               />
             ))}
           </div>
@@ -1308,22 +1182,7 @@ export function AttachmentsField({
         />
       )}
 
-      {publishingFile && (
-        <PublishPanel
-          file={publishingFile}
-          eventTitle={eventTitle}
-          publishing={hook.publishing === publishingFile.id}
-          onClose={() => setPublishingFileId(null)}
-          onPublishYoutube={async (data) => {
-            await hook.publishYoutube(publishingFile, data);
-            setPublishingFileId(null);
-          }}
-          onPublishFacebook={async (sel) => {
-            await hook.publishFacebook(publishingFile, sel);
-            setPublishingFileId(null);
-          }}
-        />
-      )}
+      {composerPub && <PublicationComposer pub={composerPub} onClose={() => setComposerPub(null)} onDone={() => setComposerPub(null)} />}
     </div>
   );
 }
