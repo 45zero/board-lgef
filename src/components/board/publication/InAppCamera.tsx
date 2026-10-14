@@ -5,8 +5,9 @@ import { Loader2, RefreshCw, X } from "lucide-react";
 
 // Caméra intégrée (publication réseaux, mobile) : image en direct, mode Photo (appui = photo
 // instantanée, tirée du flux sans aller-retour par l'appareil du téléphone) ou Vidéo (un appui lance,
-// un appui arrête), zoom (pincement ou 1× / 2× / 5×). Les prises s'empilent en bas à gauche sans
-// quitter la caméra ; la pile s'ouvre dans la visionneuse (recadrer, filtre, supprimer).
+// un appui arrête), zoom (pincement ou paliers, 0,5× sur l'ultra grand-angle quand le téléphone
+// l'expose). Les prises s'empilent en bas à gauche sans quitter la caméra ; la pile s'ouvre dans la
+// visionneuse (recadrer, filtre, supprimer).
 
 /** Durée maximale d'une vidéo filmée ici. */
 const MAX_VIDEO_S = 120;
@@ -22,8 +23,48 @@ export function cameraSupported() {
 }
 
 type ZoomRange = { min: number; max: number; hardware: boolean };
-/** Zoom numérique (téléphones sans zoom matériel exposé, ex. Safari) : photos seulement, jusqu'à 4×. */
+/** Zoom numérique (téléphones sans zoom matériel exposé : WebView Android, Safari) : recadrage jusqu'à 4×. */
 const DIGITAL_ZOOM: ZoomRange = { min: 1, max: 4, hardware: false };
+/** Champ de l'ultra grand-angle par rapport à l'objectif principal (palier « 0,5× »). */
+const ULTRA_WIDE = 0.5;
+
+type BackCameras = { main?: string; ultra?: string };
+let backCamerasPromise: Promise<BackCameras> | null = null;
+
+/**
+ * Caméras arrière : objectif principal (mise au point automatique) et ultra grand-angle (mise au point
+ * fixe). Sans ça, le navigateur peut ouvrir l'ultra grand-angle pour une demande en haute définition
+ * (photos moins nettes). Cherché une fois par session ; rien si le téléphone ne les distingue pas.
+ */
+function detectBackCameras(): Promise<BackCameras> {
+  backCamerasPromise ??= (async () => {
+    const list = async () => (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+    let devices = await list();
+    // Noms des caméras visibles seulement après une autorisation.
+    if (devices.every((d) => !d.label)) {
+      const s = await navigator.mediaDevices.getUserMedia({ video: true });
+      s.getTracks().forEach((t) => t.stop());
+      devices = await list();
+    }
+    const back = devices.filter((d) => /back|rear|environment|arrière/i.test(d.label));
+    const out: BackCameras = {};
+    if (back.length < 2) return out;
+    for (const d of back) {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: d.deviceId } } });
+        const focus = (s.getVideoTracks()[0]?.getCapabilities?.() as { focusMode?: string[] } | undefined)?.focusMode;
+        s.getTracks().forEach((t) => t.stop());
+        if (!focus) continue;
+        if (focus.includes("continuous")) out.main ??= d.deviceId;
+        else out.ultra ??= d.deviceId;
+      } catch {
+        // caméra occupée ou refusée : ignorée
+      }
+    }
+    return out.main ? out : {};
+  })().catch(() => ({}));
+  return backCamerasPromise;
+}
 
 export function InAppCamera({
   count,
@@ -63,31 +104,44 @@ export function InAppCamera({
   const [mp4] = useState(mp4Type);
   const [zoomRange, setZoomRange] = useState<ZoomRange>(DIGITAL_ZOOM);
   const [zoom, setZoom] = useState(1);
+  const [cams, setCams] = useState<BackCameras>({});
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
   const full = count >= max;
-  // Zoom numérique : sans effet sur l'enregistrement vidéo, donc limité au mode Photo.
   const digital = !zoomRange.hardware;
-  const shownZoom = digital && mode === "video" ? 1 : zoom;
+  // Sous 1× : ultra grand-angle (s'il existe), recadré entre 0,5× et 1× ; au-delà, objectif principal recadré.
+  const hasUltra = digital && facing === "environment" && !!cams.ultra;
+  const lens: "main" | "ultra" = hasUltra && zoom < 1 ? "ultra" : "main";
+  const crop = digital ? (lens === "ultra" ? zoom / ULTRA_WIDE : zoom) : 1;
+  const cropRef = useRef(crop);
+  useEffect(() => {
+    cropRef.current = crop;
+  }, [crop]);
+  const minZoom = hasUltra && recording === null ? ULTRA_WIDE : lens === "ultra" ? ULTRA_WIDE : zoomRange.min;
+  const maxZoom = lens === "ultra" && recording !== null ? 0.99 : zoomRange.max;
 
   // Flux caméra (+ micro pour les vidéos ; sans micro si refusé), zoom matériel s'il est exposé.
   // Vidéo en 1080p / 30 i/s : en 4K, l'encodeur du navigateur saute des images sur téléphone (vidéo
   // saccadée), et l'habillage la ramène de toute façon à 1080 px. Photos en pleine définition.
   useEffect(() => {
     let alive = true;
-    const video =
-      mode === "video"
-        ? { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }
-        : { facingMode: { ideal: facing }, width: { ideal: 3840 }, height: { ideal: 2160 } };
-    navigator.mediaDevices
-      .getUserMedia({ video, audio: !!mp4 })
-      .catch(() => navigator.mediaDevices.getUserMedia({ video, audio: false }))
+    const size = mode === "video" ? { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } } : { width: { ideal: 3840 }, height: { ideal: 2160 } };
+    (facing === "environment" ? detectBackCameras() : Promise.resolve({} as BackCameras))
+      .then((found) => {
+        if (!alive) return null;
+        setCams(found);
+        const id = lens === "ultra" ? found.ultra : found.main;
+        const video = id ? { deviceId: { exact: id }, ...size } : { facingMode: { ideal: facing }, ...size };
+        return navigator.mediaDevices.getUserMedia({ video, audio: !!mp4 }).catch(() => navigator.mediaDevices.getUserMedia({ video, audio: false }));
+      })
       .then((stream) => {
+        if (!stream) return;
         if (!alive) return stream.getTracks().forEach((t) => t.stop());
         streamRef.current = stream;
         const caps = (stream.getVideoTracks()[0]?.getCapabilities?.() ?? {}) as { zoom?: { min: number; max: number } };
-        setZoomRange(caps.zoom && caps.zoom.max > caps.zoom.min ? { min: caps.zoom.min, max: caps.zoom.max, hardware: true } : DIGITAL_ZOOM);
-        setZoom(caps.zoom ? Math.max(1, caps.zoom.min) : 1);
+        const hardware = !!caps.zoom && caps.zoom.max > caps.zoom.min;
+        setZoomRange(hardware ? { min: caps.zoom!.min, max: caps.zoom!.max, hardware: true } : DIGITAL_ZOOM);
+        if (hardware) setZoom(Math.max(1, caps.zoom!.min));
         const el = videoRef.current;
         if (el) {
           el.srcObject = stream;
@@ -100,8 +154,8 @@ export function InAppCamera({
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onUnavailable : rappel du parent ; côté, mode (définition) et format relancent le flux
-  }, [facing, mp4, mode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onUnavailable : rappel du parent ; côté, mode (définition), objectif et format relancent le flux
+  }, [facing, mp4, mode, lens]);
 
   // Zoom matériel appliqué au capteur (photo et vidéo).
   useEffect(() => {
@@ -128,13 +182,12 @@ export function InAppCamera({
     []
   );
 
-  const clampZoom = (z: number) => Math.min(zoomRange.max, Math.max(zoomRange.min, z));
+  const clampZoom = (z: number) => Math.min(maxZoom, Math.max(minZoom, z));
 
   /** Photo : image courante du flux (recadrée au centre en zoom numérique). */
   const takePhoto = () => {
     const v = videoRef.current;
     if (!v || !v.videoWidth || full) return;
-    const crop = digital ? zoom : 1;
     const sw = Math.round(v.videoWidth / crop);
     const sh = Math.round(v.videoHeight / crop);
     const canvas = document.createElement("canvas");
@@ -154,14 +207,45 @@ export function InAppCamera({
 
   const startVideo = () => {
     const stream = streamRef.current;
-    if (!stream || full) return;
+    const v = videoRef.current;
+    if (!stream || !v || full) return;
     if (!mp4) return onNativeVideo();
+    // Zoom numérique : on enregistre une image recadrée (canvas) qui suit le zoom pendant la prise ;
+    // le son vient toujours du micro.
+    let source = stream;
+    let stopDrawing = () => undefined as void;
+    const canvas = digital && v.videoWidth ? document.createElement("canvas") : null;
+    const capture = canvas as (HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream }) | null;
+    if (capture?.captureStream) {
+      capture.width = v.videoWidth;
+      capture.height = v.videoHeight;
+      const ctx = capture.getContext("2d")!;
+      let alive = true;
+      const vfc = (v as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number }).requestVideoFrameCallback?.bind(v);
+      const draw = () => {
+        if (!alive) return;
+        const c = cropRef.current;
+        const sw = v.videoWidth / c;
+        const sh = v.videoHeight / c;
+        ctx.drawImage(v, (v.videoWidth - sw) / 2, (v.videoHeight - sh) / 2, sw, sh, 0, 0, capture.width, capture.height);
+        if (vfc) vfc(draw);
+        else requestAnimationFrame(draw);
+      };
+      draw();
+      const canvasStream = capture.captureStream(30);
+      source = new MediaStream([...canvasStream.getVideoTracks(), ...stream.getAudioTracks()]);
+      stopDrawing = () => {
+        alive = false;
+        canvasStream.getTracks().forEach((t) => t.stop());
+      };
+    }
     const chunks: Blob[] = [];
-    const rec = new MediaRecorder(stream, { mimeType: mp4, videoBitsPerSecond: 6_000_000 });
+    const rec = new MediaRecorder(source, { mimeType: mp4, videoBitsPerSecond: 6_000_000 });
     rec.ondataavailable = (e) => {
       if (e.data.size) chunks.push(e.data);
     };
     rec.onstop = () => {
+      stopDrawing();
       setRecording(null);
       recorderRef.current = null;
       if (chunks.length) onCapture(new File(chunks, `video-${Date.now()}.mp4`, { type: mp4.split(";")[0] }));
@@ -201,7 +285,9 @@ export function InAppCamera({
     },
   };
 
-  const presets = [1, 2, 5].filter((z) => z >= zoomRange.min && z <= zoomRange.max);
+  const presets = digital ? [...(hasUltra ? [ULTRA_WIDE] : []), 1, 2, 3] : [1, 2, 5].filter((z) => z >= zoomRange.min && z <= zoomRange.max);
+  // Pendant une vidéo, pas de changement d'objectif (il relancerait la caméra).
+  const presetDisabled = (z: number) => recording !== null && (z < 1) !== (lens === "ultra");
   const atPreset = (z: number) => Math.abs(zoom - z) < 0.05;
 
   return (
@@ -216,7 +302,7 @@ export function InAppCamera({
           poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
           onPlaying={() => setReady(true)}
           className="h-full w-full object-cover"
-          style={{ transform: `${facing === "user" ? "scaleX(-1) " : ""}${digital ? `scale(${shownZoom})` : ""}` || undefined }}
+          style={{ transform: `${facing === "user" ? "scaleX(-1) " : ""}${digital ? `scale(${crop})` : ""}` || undefined }}
         />
       </div>
       {flash && <div className="pointer-events-none absolute inset-0 bg-white/80" />}
@@ -235,6 +321,7 @@ export function InAppCamera({
         <button
           onClick={() => {
             setReady(false);
+            setZoom(1);
             setFacing((f) => (f === "environment" ? "user" : "environment"));
           }}
           disabled={recording !== null}
@@ -247,21 +334,26 @@ export function InAppCamera({
 
       <div className="relative mt-auto flex flex-col items-center gap-3 px-4" style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}>
         {/* Zoom : boutons rapides (le pincement règle finement). */}
-        {!(digital && mode === "video") && (
-          <div className="flex items-center gap-1 rounded-full bg-black/40 p-1">
-            {presets.map((z) => (
-              <button
-                key={z}
-                onClick={() => setZoom(clampZoom(z))}
-                className={`h-9 min-w-9 rounded-full px-2 text-xs font-extrabold ${atPreset(z) ? "bg-white text-black" : "text-white"}`}
-              >
-                {z}×
-              </button>
-            ))}
-            {/* Zoom réglé au pincement, entre deux paliers. */}
-            {!presets.some(atPreset) && <span className="rounded-full bg-white px-2 py-1.5 text-xs font-extrabold text-black">{zoom.toFixed(1)}×</span>}
-          </div>
-        )}
+        <div className="flex items-center gap-1 rounded-full bg-black/40 p-1">
+          {presets.map((z) => (
+            <button
+              key={z}
+              onClick={() => {
+                if (presetDisabled(z)) return;
+                if ((z < 1) !== (lens === "ultra")) setReady(false);
+                setZoom(z);
+              }}
+              disabled={presetDisabled(z)}
+              className={`h-9 min-w-9 rounded-full px-2 text-xs font-extrabold disabled:opacity-40 ${atPreset(z) ? "bg-white text-black" : "text-white"}`}
+            >
+              {String(z).replace(".", ",")}×
+            </button>
+          ))}
+          {/* Zoom réglé au pincement, entre deux paliers. */}
+          {!presets.some(atPreset) && (
+            <span className="rounded-full bg-white px-2 py-1.5 text-xs font-extrabold text-black">{zoom.toFixed(1).replace(".", ",")}×</span>
+          )}
+        </div>
 
         <div className="flex w-full items-center justify-between">
           {/* Pile des prises : la dernière en vignette, appui = visionneuse (recadrer, filtre, supprimer). */}

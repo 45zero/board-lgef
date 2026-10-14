@@ -251,6 +251,61 @@ export function SocialCapture({
   const layer = item?.layer ?? defaultLayer;
   const setLayer = (u: LayerPlacement | null | ((l: LayerPlacement) => LayerPlacement)) =>
     setItems((list) => list.map((it, i) => (i === active ? { ...it, layer: typeof u === "function" ? u(it.layer ?? defaultLayer) : u } : it)));
+  // Aperçu animé : pré-roll, animation du gabarit et vidéo lus ensemble, comme le montage du serveur.
+  // Pas sur Safari / iPhone, qui ne lit pas les vidéos à fond transparent (VP9 alpha) : image clé.
+  const [alphaVideo] = useState(() => {
+    if (typeof document === "undefined") return false;
+    const ua = navigator.userAgent;
+    const webkitOnly = /iPhone|iPad|iPod/.test(ua) || (/Safari/.test(ua) && !/Chrome|Chromium|Android/.test(ua));
+    return !webkitOnly && !!document.createElement("video").canPlayType('video/webm; codecs="vp09.00.10.08"');
+  });
+  // Lié au média, au gabarit et à l'étape : en changer arrête l'aperçu animé.
+  const previewKey = `${active}|${template}|${step}`;
+  const [livePreviewKey, setLivePreviewKey] = useState<string | null>(null);
+  const livePreview = livePreviewKey === previewKey;
+  const setLivePreview = (on: boolean) => setLivePreviewKey(on ? previewKey : null);
+  const [preDone, setPreDone] = useState(false);
+  const [animDone, setAnimDone] = useState(false);
+  const animVideoRef = useRef<HTMLVideoElement>(null);
+  const preVideoRef = useRef<HTMLVideoElement>(null);
+  const canLivePreview = alphaVideo && !!(anim || pre);
+  const startLivePreview = () => {
+    const v = previewVideoRef.current;
+    if (!v) return;
+    v.pause();
+    v.currentTime = 0;
+    setPreDone(false);
+    setAnimDone(false);
+    setLivePreview(true);
+  };
+  useEffect(() => {
+    if (!livePreview) return;
+    const v = previewVideoRef.current;
+    const a = animVideoRef.current;
+    const p = preVideoRef.current;
+    for (const el of [a, p]) {
+      if (!el) continue;
+      el.currentTime = 0;
+      void el.play().catch(() => undefined);
+    }
+    // La vidéo apparaît à revealAt (comme le tpad du serveur) ; sans son si le navigateur refuse.
+    const t = window.setTimeout(() => {
+      void v?.play().catch(() => {
+        if (!v) return;
+        v.muted = true;
+        void v.play().catch(() => undefined);
+      });
+    }, (pre?.revealAt ?? 0) * 1000);
+    const stop = () => setLivePreview(false);
+    v?.addEventListener("ended", stop);
+    return () => {
+      window.clearTimeout(t);
+      v?.removeEventListener("ended", stop);
+      a?.pause();
+      p?.pause();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- relancé seulement au démarrage / à l'arrêt de l'aperçu
+  }, [livePreview]);
   // Texte de l'habillage (environnement) et titre : apparition minutée dans les vidéos.
   const textTiming = customTpl && customTpl.textPosition !== "none" ? customTpl.textTiming : undefined;
 
@@ -906,7 +961,24 @@ export function SocialCapture({
                       <source src={`${videoUrl}#t=0.1`} type={playableType(file)} />
                     </video>
                     {/* Aperçu de l'animation : son image clé (Safari ne lit pas le VP9 transparent). */}
-                    {videoHabillage && anim && (
+                    {videoHabillage && anim && livePreview && !animDone && (
+                      <video
+                        ref={animVideoRef}
+                        src={anim.url}
+                        muted
+                        playsInline
+                        loop={anim.mode === "loop"}
+                        onEnded={() => setAnimDone(true)}
+                        className="pointer-events-none absolute max-w-none object-fill"
+                        style={{
+                          left: `${(layer.x - layer.scale / 2) * 100}%`,
+                          top: `${(layer.y - layer.scale / 2) * 100}%`,
+                          width: `${layer.scale * 100}%`,
+                          height: `${layer.scale * 100}%`,
+                        }}
+                      />
+                    )}
+                    {videoHabillage && anim && !livePreview && (
                       // eslint-disable-next-line @next/next/no-img-element -- image distante du bucket, superposée à la vidéo
                       <img
                         src={anim.preview}
@@ -932,7 +1004,26 @@ export function SocialCapture({
                         />
                       </>
                     )}
+                    {videoHabillage && pre && livePreview && !preDone && (
+                      <video
+                        ref={preVideoRef}
+                        src={pre.url}
+                        muted
+                        playsInline
+                        onEnded={() => setPreDone(true)}
+                        className="pointer-events-none absolute inset-0 h-full w-full object-fill"
+                      />
+                    )}
                   </div>
+                )}
+                {videoHabillage && canLivePreview && (
+                  <button
+                    type="button"
+                    onClick={() => (livePreview ? setLivePreview(false) : startLivePreview())}
+                    className="mx-auto flex items-center gap-1.5 rounded-full bg-navy px-4 py-2 text-xs font-bold text-white"
+                  >
+                    {livePreview ? "■ Arrêter l'aperçu" : `▶ Lire avec l'habillage${pre ? " (pré-roll compris)" : ""}`}
+                  </button>
                 )}
                 {videoError && (
                   <div className="rounded-panel bg-subtle p-4 text-sm text-ink-2">
@@ -962,7 +1053,9 @@ export function SocialCapture({
                     </div>
                     <p className="mt-1.5 text-[11px] text-ink-4">
                       {anim
-                        ? `Habillage animé (${anim.mode === "loop" ? "en boucle" : `${anim.duration} s au début`}) : l'aperçu montre une image clé.`
+                        ? `Habillage animé (${anim.mode === "loop" ? "en boucle" : `${anim.duration} s au début`}) : ${
+                            canLivePreview ? "« Lire avec l'habillage » le montre en mouvement." : "l'aperçu montre une image clé."
+                          }`
                         : "L'habillage est incrusté dans la vidéo au moment de publier."}{" "}
                       {pre ? `Pré-roll ajouté au début (${pre.duration} s). ` : ""}Traitement : 1 à 3 minutes.
                     </p>
