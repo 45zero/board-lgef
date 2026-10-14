@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
-import { ArrowUpRight, CalendarDays, CheckSquare, MessageSquare } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowUpRight, CalendarDays, CheckSquare, MessageSquare } from "lucide-react";
 import { useOpenEvent } from "@/components/board/calendar/EventOpener";
 import { TEAM_COLORS, dueInfo, type TeamCard, type TeamPerson } from "@/lib/board/team";
 
@@ -143,6 +143,7 @@ export function CardTile({
   onDragStart,
   onDragEnd,
   isNew,
+  onArchive,
 }: {
   card: TeamCard;
   done: boolean;
@@ -152,6 +153,8 @@ export function CardTile({
   onDragStart?: (e: React.DragEvent) => void;
   onDragEnd?: () => void;
   isNew?: boolean;
+  /** Raccourci archiver / restaurer (toujours visible sur mobile, au survol sur ordinateur). */
+  onArchive?: () => void;
 }) {
   return (
     <div
@@ -185,7 +188,29 @@ export function CardTile({
         <span className="ml-auto">
           <AvatarStack people={card.members.map((m) => peopleById.get(m.userId))} />
         </span>
+        {onArchive && <ArchiveShortcut archived={!!card.archivedAt} onClick={onArchive} />}
       </div>
     </div>
+  );
+}
+
+/** Petit bouton archiver / restaurer posé sur une carte (sans ouvrir la carte). */
+export function ArchiveShortcut({ archived, onClick }: { archived: boolean; onClick: () => void }) {
+  const Icon = archived ? ArchiveRestore : Archive;
+  return (
+    <button
+      type="button"
+      draggable={false}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+      title={archived ? "Restaurer la carte" : "Archiver la carte"}
+      aria-label={archived ? "Restaurer la carte" : "Archiver la carte"}
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-btn text-ink-4 hover:bg-hover hover:text-ink md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
+    >
+      <Icon size={14} />
+    </button>
   );
 }
