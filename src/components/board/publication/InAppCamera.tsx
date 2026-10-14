@@ -212,6 +212,8 @@ export function InAppCamera({
           playsInline
           muted
           autoPlay
+          // Image d'attente transparente : sinon la WebView Android affiche une grosse icône ▶ grise avant le flux.
+          poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
           onPlaying={() => setReady(true)}
           className="h-full w-full object-cover"
           style={{ transform: `${facing === "user" ? "scaleX(-1) " : ""}${digital ? `scale(${shownZoom})` : ""}` || undefined }}
