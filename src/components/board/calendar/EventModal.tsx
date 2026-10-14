@@ -6,7 +6,7 @@ import { EventTeamCards } from "@/components/board/team/TeamCardOpener";
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
-import { X, Trash2, MapPin, ChevronDown, Camera, Video, ClipboardCheck } from "lucide-react";
+import { X, Trash2, MapPin, ChevronDown, Camera, Video, ClipboardCheck, FileText, MessageSquare, Users, Receipt, Wallet, Map as MapIcon } from "lucide-react";
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
 import { CALENDAR_ORG_KEYS, type CalendarEvent } from "@/lib/board/calendar";
 import { useEventModalState } from "@/hooks/board/useEventModalState";
@@ -32,13 +32,14 @@ import {
 
 type Tab = "details" | "discussion" | "equipe" | "frais" | "gestion" | "carte";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "details", label: "Détails" },
-  { id: "discussion", label: "Discussion" },
-  { id: "equipe", label: "Équipe" },
-  { id: "frais", label: "Mes frais" },
-  { id: "gestion", label: "Gestion frais" },
-  { id: "carte", label: "Carte" },
+// Onglets en icônes (le nom en info-bulle et pour les lecteurs d'écran).
+const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
+  { id: "details", label: "Détails", icon: FileText },
+  { id: "discussion", label: "Discussion", icon: MessageSquare },
+  { id: "equipe", label: "Équipe", icon: Users },
+  { id: "frais", label: "Mes frais", icon: Receipt },
+  { id: "gestion", label: "Gestion frais", icon: Wallet },
+  { id: "carte", label: "Carte", icon: MapIcon },
 ];
 
 export function EventModal({
@@ -127,19 +128,21 @@ export function EventModal({
                     ? m.expenses.expenses.length
                     : null;
             const disabled = !isEditing && t.id !== "details";
+            const Icon = t.icon;
             return (
               <button
                 key={t.id}
                 disabled={disabled}
                 onClick={() => setTab(t.id)}
-                title={disabled ? "Disponible après la création de l'événement" : undefined}
-                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                  tab === t.id ? "bg-card text-ink shadow-card ring-1 ring-line" : "text-ink-3 hover:bg-hover"
+                title={disabled ? `${t.label} — disponible après la création de l'événement` : t.label}
+                aria-label={t.label}
+                className={`relative flex h-9 w-11 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  tab === t.id ? "bg-card text-navy shadow-card ring-1 ring-line" : "text-ink-3 hover:bg-hover"
                 }`}
               >
-                {t.label}
+                <Icon size={17} />
                 {count !== null && count > 0 && (
-                  <span className="rounded-full bg-subtle px-1.5 text-[10px] text-ink-3">{count}</span>
+                  <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-navy px-1 text-[9px] font-bold leading-4 text-white">{count}</span>
                 )}
               </button>
             );

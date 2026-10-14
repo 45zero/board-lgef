@@ -4,7 +4,7 @@ import { EventWeather } from "@/components/board/calendar/DayWeather";
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
-import { X, Trash2, MapPin, ChevronDown, Camera, Video, ClipboardCheck } from "lucide-react";
+import { X, Trash2, MapPin, ChevronDown, Camera, Video, ClipboardCheck, FileText, MessageSquare, Users, Receipt, Wallet, Map as MapIcon } from "lucide-react";
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
 import { CALENDAR_ORG_KEYS, type CalendarEvent } from "@/lib/board/calendar";
 import { useEventModalState } from "@/hooks/board/useEventModalState";
@@ -30,13 +30,14 @@ import {
 
 type Tab = "details" | "discussion" | "equipe" | "frais" | "gestion" | "carte";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "details", label: "Détails" },
-  { id: "discussion", label: "Discussion" },
-  { id: "equipe", label: "Équipe" },
-  { id: "frais", label: "Mes frais" },
-  { id: "gestion", label: "Gestion frais" },
-  { id: "carte", label: "Carte" },
+// Onglets en icônes (le nom en info-bulle et pour les lecteurs d'écran).
+const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
+  { id: "details", label: "Détails", icon: FileText },
+  { id: "discussion", label: "Discussion", icon: MessageSquare },
+  { id: "equipe", label: "Équipe", icon: Users },
+  { id: "frais", label: "Mes frais", icon: Receipt },
+  { id: "gestion", label: "Gestion frais", icon: Wallet },
+  { id: "carte", label: "Carte", icon: MapIcon },
 ];
 
 export function MobileEventModal({
@@ -121,7 +122,7 @@ export function MobileEventModal({
           )}
       </div>
 
-      <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-3 pb-2">
+      <div className="grid shrink-0 grid-cols-6 gap-1 border-b border-line px-3 pb-2">
         {TABS.map((t) => {
           const count =
             t.id === "equipe"
@@ -132,18 +133,23 @@ export function MobileEventModal({
                   ? m.expenses.expenses.length
                   : null;
           const disabled = !isEditing && t.id !== "details";
+          const Icon = t.icon;
           return (
             <button
               key={t.id}
               disabled={disabled}
               onClick={() => setTab(t.id)}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold disabled:opacity-40 ${
+              aria-label={t.label}
+              title={t.label}
+              className={`relative flex h-10 items-center justify-center rounded-full disabled:opacity-40 ${
                 tab === t.id ? "bg-navy text-white" : "bg-subtle text-ink-3"
               }`}
             >
-              {t.label}
+              <Icon size={18} />
               {count !== null && count > 0 && (
-                <span className="rounded-full bg-white/25 px-1.5 text-[10px]">{count}</span>
+                <span className={`absolute right-1 top-0.5 min-w-4 rounded-full px-1 text-[9px] font-bold leading-4 ${tab === t.id ? "bg-white text-navy" : "bg-navy text-white"}`}>
+                  {count}
+                </span>
               )}
             </button>
           );
