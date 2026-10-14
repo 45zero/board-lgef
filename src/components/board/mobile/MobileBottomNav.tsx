@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { Calendar, Home, Mail, Camera } from "lucide-react";
 import { CENTER_ACTIONS, type CenterAction } from "@/components/board/mobile/MobileSettingsSheet";
 import { useAppBadges, type AppBadge } from "@/hooks/board/useAppBadges";
@@ -21,11 +22,14 @@ export function MobileBottomNav({
   active,
   onSelect,
   onCenterPress,
+  onCenterLongPress,
   center = "frais",
 }: {
   active: MobileTab;
   onSelect: (tab: MobileTab) => void;
   onCenterPress: () => void;
+  /** Appui long sur le bouton central : bascule Frais / Publication réseaux. */
+  onCenterLongPress?: () => void;
   /** Action du bouton central (réglable dans Paramètres) ; « off » : barre à quatre modules. */
   center?: CenterAction;
 }) {
@@ -33,6 +37,24 @@ export function MobileBottomNav({
   const visible = useVisibleModules();
   const action = CENTER_ACTIONS.find((a) => a.id === center) ?? CENTER_ACTIONS[0];
   const CenterIcon = action.icon;
+  // Appui long (0,5 s) : l'appui court qui suit le relâchement est ignoré.
+  const holdTimer = useRef<number | null>(null);
+  const held = useRef(false);
+  const cancelHold = () => {
+    if (holdTimer.current !== null) window.clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+  };
+  const startHold = () => {
+    held.current = false;
+    if (!onCenterLongPress) return;
+    cancelHold();
+    holdTimer.current = window.setTimeout(() => {
+      held.current = true;
+      holdTimer.current = null;
+      navigator.vibrate?.(30);
+      onCenterLongPress();
+    }, 500);
+  };
   return (
     <div
       className="relative border-t border-line bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
@@ -46,9 +68,20 @@ export function MobileBottomNav({
         {center !== "off" && (
           <div className="flex items-center justify-center">
             <button
-              onClick={onCenterPress}
-              aria-label={action.title}
-              className="flex -translate-y-4 flex-col items-center justify-center gap-0.5 rounded-[22px] text-white"
+              onClick={() => {
+                if (held.current) {
+                  held.current = false;
+                  return;
+                }
+                onCenterPress();
+              }}
+              onPointerDown={startHold}
+              onPointerUp={cancelHold}
+              onPointerLeave={cancelHold}
+              onPointerCancel={cancelHold}
+              onContextMenu={(e) => e.preventDefault()}
+              aria-label={onCenterLongPress ? `${action.title} (appui long : changer de raccourci)` : action.title}
+              className="flex -translate-y-4 select-none flex-col items-center justify-center gap-0.5 rounded-[22px] text-white [-webkit-touch-callout:none]"
               style={{ width: 62, height: 62, background: action.bg, boxShadow: `0 14px 28px ${center === "frais" ? "rgba(225,20,27,0.38)" : "rgba(11,29,60,0.38)"}` }}
             >
               <CenterIcon size={22} />

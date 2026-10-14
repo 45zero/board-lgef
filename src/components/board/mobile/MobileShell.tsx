@@ -165,7 +165,14 @@ export function MobileShell() {
         />
       )}
 
-      <MobileBottomNav active={tab} onSelect={selectTab} onCenterPress={handleCenterPress} center={center} />
+      <MobileBottomNav
+        active={tab}
+        onSelect={selectTab}
+        onCenterPress={handleCenterPress}
+        // Appui long : Frais ↔ Publication réseaux (seulement pour qui peut publier).
+        onCenterLongPress={canPublish && center !== "off" ? () => setCenter(center === "frais" ? "social" : "frais") : undefined}
+        center={center}
+      />
     </div>
   );
 }
