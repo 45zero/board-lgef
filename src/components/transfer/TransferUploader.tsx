@@ -6,6 +6,7 @@ import { durationChoices, durationLabel, fileKind, formatBytes, GB, isEmail, typ
 import { uploadFileToTransfer } from "@/lib/transfer/uploadClient";
 import { KindIcon, LocalPreviewModal, LocalThumb } from "@/components/transfer/FilePreview";
 import { searchTransferDriveFiles, type DriveFileForTransfer } from "@/app/actions/transfers";
+import { createClient } from "@/lib/supabase/client";
 
 // Formulaire d'envoi de LGEF Transfer — page publique (transfer.lgef.fr) et onglet du board.
 // Les fichiers partent du navigateur vers le Drive du board (voir src/lib/transfer/uploadClient.ts).
@@ -117,6 +118,29 @@ export function TransferUploader({ mode, onDone }: { mode: "public" | "board"; o
     setItems((cur) => [...cur, ...next]);
     setError(null);
   }, []);
+
+  // Board : membres proposés en tapant un nom ou le début d'une adresse (leur e-mail est ajouté).
+  const [members, setMembers] = useState<{ name: string; email: string }[]>([]);
+  useEffect(() => {
+    if (mode !== "board") return;
+    void createClient()
+      .from("profiles")
+      .select("first_name, last_name, email")
+      .not("email", "is", null)
+      .order("first_name")
+      .limit(500)
+      .then(({ data }) =>
+        setMembers(
+          (data ?? [])
+            .filter((p) => p.email)
+            .map((p) => ({ name: [p.first_name, p.last_name].filter(Boolean).join(" ") || p.email!, email: p.email!.toLowerCase() }))
+        )
+      );
+  }, [mode]);
+  const memberNeedle = recipientDraft.trim().toLowerCase();
+  const memberMatches = memberNeedle
+    ? members.filter((m) => !recipients.includes(m.email) && `${m.name} ${m.email}`.toLowerCase().includes(memberNeedle)).slice(0, 6)
+    : [];
 
   const commitRecipients = (raw: string) => {
     const parts = raw
@@ -573,12 +597,31 @@ export function TransferUploader({ mode, onDone }: { mode: "public" | "board"; o
                     e.preventDefault();
                     commitRecipients(`${recipientDraft} ${e.clipboardData.getData("text")}`);
                   }}
-                  type="email"
-                  placeholder={recipients.length ? "Ajouter…" : "E-mail des destinataires"}
+                  type={mode === "board" ? "text" : "email"}
+                  placeholder={recipients.length ? "Ajouter…" : mode === "board" ? "E-mail ou nom d'un membre du board" : "E-mail des destinataires"}
                   aria-label="E-mail des destinataires"
                   className="min-w-[140px] flex-1 bg-transparent px-1 py-1 text-sm text-ink outline-none"
                 />
               </div>
+              {memberMatches.length > 0 && (
+                <div className="mt-1 border-t border-line pt-1">
+                  {memberMatches.map((m) => (
+                    <button
+                      key={m.email}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setRecipients((r) => [...new Set([...r, m.email])].slice(0, 50));
+                        setRecipientDraft("");
+                      }}
+                      className="flex w-full items-center justify-between gap-2 rounded-btn px-2 py-1.5 text-left text-sm hover:bg-hover"
+                    >
+                      <span className="truncate font-semibold text-ink">{m.name}</span>
+                      <span className="truncate text-xs text-ink-4">{m.email}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {session?.member ? (

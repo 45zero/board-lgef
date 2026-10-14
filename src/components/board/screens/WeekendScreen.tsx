@@ -1,5 +1,6 @@
 "use client";
 
+import { PlaceInput } from "@/components/board/PlaceInput";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { getPeriodCosts } from "@/app/actions/staff";
 import { euros } from "@/lib/board/staff";
@@ -438,7 +439,7 @@ function MatchForm({
 
           <div>
             <label className={label}>Stade / adresse</label>
-            <input value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Stade municipal, 67160 Seebach" className={input} />
+            <PlaceInput value={form.location} onChange={(v) => set("location", v)} placeholder="Stade municipal, 67160 Seebach" className={input} />
           </div>
 
           <div>
