@@ -251,9 +251,10 @@ export function ExpenseImport({ onAdded }: { onAdded: () => void }) {
         <Upload size={20} className="shrink-0 text-ink-4" />
         <div className="min-w-0 flex-1">
           <div className="text-sm font-bold text-ink">Importer des justificatifs</div>
-          <div className="text-[11px] text-ink-4">
+          <div className="hidden text-[11px] text-ink-4 md:block">
             Glissez tickets, factures ou feuilles de frais (photo, PDF, Excel) : Claude les lit et les rattache à vos événements.
           </div>
+          <div className="text-[11px] text-ink-4 md:hidden">Photographiez un ticket ou joignez un PDF / Excel : Claude le lit et le rattache à vos événements.</div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <ReceiptButtons onFiles={addFiles} />

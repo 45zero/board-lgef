@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ChevronDown, Settings } from "lucide-react";
+import { ChevronDown, ChevronLeft, Settings } from "lucide-react";
 import { NotificationBell } from "@/components/board/live/NotificationBell";
 import { SupportButton } from "@/components/board/support/SupportButton";
 
@@ -13,6 +13,7 @@ export function MobileHeader({
   menuOpen = false,
   onSettings,
   app = null,
+  onBack,
 }: {
   title: string;
   kicker: string;
@@ -22,12 +23,20 @@ export function MobileHeader({
   onSettings?: () => void;
   /** Module affiché, joint aux signalements du centre d'aide. */
   app?: string | null;
+  /** Flèche retour avant le logo (écrans ouverts par-dessus, ex. Frais). */
+  onBack?: () => void;
 }) {
   return (
     <div
       className="flex items-center justify-between px-4 pb-4 pt-[calc(env(safe-area-inset-top)+12px)] text-white"
       style={{ background: "linear-gradient(160deg, var(--navy) 0%, var(--navy-500) 100%)" }}
     >
+      <div className="flex min-w-0 items-center gap-1">
+      {onBack && (
+        <button type="button" onClick={onBack} aria-label="Retour" className="-ml-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white hover:bg-white/10">
+          <ChevronLeft size={22} />
+        </button>
+      )}
       <button
         type="button"
         onClick={onLogoClick}
@@ -44,6 +53,7 @@ export function MobileHeader({
           <div className="truncate font-mono text-[9px] uppercase tracking-[0.12em] text-white/70">{kicker}</div>
         </div>
       </button>
+      </div>
 
       <div className="flex items-center gap-1.5">
         <button onClick={onSettings} className="flex h-8 w-8 items-center justify-center rounded-full text-white/85 hover:bg-white/10" aria-label="Paramètres">

@@ -111,16 +111,10 @@ export function MobileShell() {
 
       {fraisOpen && (
         <div className="absolute inset-0 z-40 flex flex-col bg-shell">
-          <MobileHeader title="Frais" kicker="NOTES DE FRAIS" app="frais" />
-          <div className="flex-1 overflow-y-auto pb-20">
+          <MobileHeader title="Frais" kicker="NOTES DE FRAIS" app="frais" onBack={() => setFraisOpen(false)} />
+          <div className="flex-1 overflow-y-auto pb-6">
             <FraisScreen />
           </div>
-          <button
-            onClick={() => setFraisOpen(false)}
-            className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-navy px-5 py-2.5 text-sm font-bold text-white shadow-modal"
-          >
-            Fermer
-          </button>
         </div>
       )}
 
