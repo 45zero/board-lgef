@@ -39,7 +39,8 @@ const navItem = (active: boolean) =>
 
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 
-export function TeamScreen() {
+/** `mobile` : appli mobile — sections en pastilles qui défilent, une colonne de tableau par écran. */
+export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
   const { user } = useAuth();
   // Dernier état connu affiché tout de suite (navigateur), puis remplacé par le frais.
   const cacheKey = `team:${user?.id ?? ""}`;
@@ -127,6 +128,132 @@ export function TeamScreen() {
     const n = active(assignedTo(currentPerson.id)).length;
     const mgr = currentPerson.managerId ? peopleById.get(currentPerson.managerId) : undefined;
     subtitle = `${n} carte${n > 1 ? "s" : ""} en cours${mgr ? ` · N+1 : ${mgr.name}` : ""}.`;
+  }
+
+  const newCard = () => setNewCardFor(currentPerson ? { personId: currentPerson.id } : currentBoard ? { boardId: currentBoard.id } : {});
+  const content = currentBoard ? (
+    <BoardView
+      compact={mobile}
+      board={currentBoard}
+      cards={ws.cards.filter((c) => c.boardId === currentBoard.id && matches(c))}
+      ws={ws}
+      peopleById={peopleById}
+      listsById={listsById}
+      onOpen={setOpenCardId}
+      onMoveLocal={(id, listId, position) => patchLocal(id, { listId, position })}
+      onChanged={load}
+      onError={toast}
+    />
+  ) : (
+    <CardInbox
+      compact={mobile}
+      cards={(currentPerson ? assignedTo(currentPerson.id) : mine).filter(matches)}
+      personId={currentPerson?.id ?? ws.meId}
+      isMe={!currentPerson}
+      ws={ws}
+      peopleById={peopleById}
+      listsById={listsById}
+      boardsById={boardsById}
+      onOpen={setOpenCardId}
+    />
+  );
+  const overlays = (
+    <>
+      {openCard && (
+        <TeamCardModal card={openCard} ws={ws} onClose={() => setOpenCardId(null)} onLocalPatch={patchLocal} onRefresh={() => void load()} onError={toast} />
+      )}
+      {newCardFor && (
+        <NewCardDialog
+          ws={ws}
+          myBoards={myBoards}
+          initial={newCardFor}
+          onClose={() => setNewCardFor(null)}
+          onCreated={async (id) => {
+            setNewCardFor(null);
+            await load();
+            setOpenCardId(id);
+          }}
+          onError={toast}
+        />
+      )}
+      {error && ws && (
+        <div className={`fixed z-[90] max-w-sm rounded-btn bg-ink px-4 py-3 text-sm text-white shadow-card ${mobile ? "bottom-24 left-3 right-3" : "bottom-6 right-6"}`}>{error}</div>
+      )}
+    </>
+  );
+
+  if (mobile) {
+    const chip = (active: boolean) =>
+      `flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${active ? "bg-navy text-white" : "bg-subtle text-ink-2"}`;
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="shrink-0 space-y-2 border-b border-line bg-card px-3 pb-2.5 pt-3">
+          {/* Sections : mes cartes, mes tableaux, mon équipe (la barre latérale de l'ordinateur). */}
+          <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3">
+            <button onClick={() => setView({ kind: "mine" })} className={chip(view.kind === "mine")}>
+              <Inbox size={13} /> Mes cartes
+              {unseen.length > 0 ? (
+                <span className="rounded-full bg-red px-1.5 text-[10px] font-bold text-white">{unseen.length}</span>
+              ) : (
+                <span className="opacity-70">{active(mine).length}</span>
+              )}
+            </button>
+            {myBoards.map((b) => (
+              <button key={b.id} onClick={() => setView({ kind: "board", id: b.id })} className={chip(view.kind === "board" && view.id === b.id)}>
+                <Kanban size={13} /> <span className="max-w-[140px] truncate">{b.title}</span>
+              </button>
+            ))}
+            <button
+              onClick={async () => {
+                const t = window.prompt("Nom du nouveau tableau")?.trim();
+                if (!t) return;
+                try {
+                  const id = unwrap(await createTeamBoard(t));
+                  await load();
+                  setView({ kind: "board", id });
+                } catch (e) {
+                  toast(e instanceof Error ? e.message : "Création impossible.");
+                }
+              }}
+              className={`${chip(false)} border border-dashed border-line bg-transparent`}
+              aria-label="Nouveau tableau"
+            >
+              <Plus size={13} /> Tableau
+            </button>
+            {team.map(({ person }) => (
+              <button key={person.id} onClick={() => setView({ kind: "person", id: person.id })} className={chip(view.kind === "person" && view.id === person.id)}>
+                <Avatar person={person} size={18} /> {person.name.split(" ")[0]}
+              </button>
+            ))}
+          </div>
+          <div className="flex min-w-0 items-center gap-2">
+            {currentBoard ? (
+              <div className="min-w-0 flex-1 [&_h1]:text-lg [&_input]:text-lg">
+                <BoardTitle board={currentBoard} onError={toast} onChanged={load} canDelete={myBoards.length > 1} onDeleted={() => setView({ kind: "mine" })} />
+              </div>
+            ) : (
+              <p className="min-w-0 flex-1 truncate text-xs text-ink-3">{subtitle}</p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-btn border border-line bg-panel px-3 py-2">
+              <Search size={14} className="shrink-0 text-ink-4" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher une carte…" className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
+              {query && (
+                <button onClick={() => setQuery("")} aria-label="Effacer">
+                  <X size={13} className="text-ink-4" />
+                </button>
+              )}
+            </div>
+            <button onClick={newCard} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-btn bg-red text-white shadow-btn-red" aria-label="Nouvelle carte">
+              <Plus size={18} />
+            </button>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto pb-20">{content}</div>
+        {overlays}
+      </div>
+    );
   }
 
   return (
@@ -243,54 +370,9 @@ export function TeamScreen() {
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-auto">
-          {currentBoard ? (
-            <BoardView
-              board={currentBoard}
-              cards={ws.cards.filter((c) => c.boardId === currentBoard.id && matches(c))}
-              ws={ws}
-              peopleById={peopleById}
-              listsById={listsById}
-              onOpen={setOpenCardId}
-              onMoveLocal={(id, listId, position) => patchLocal(id, { listId, position })}
-              onChanged={load}
-              onError={toast}
-            />
-          ) : (
-            <CardInbox
-              cards={(currentPerson ? assignedTo(currentPerson.id) : mine).filter(matches)}
-              personId={currentPerson?.id ?? ws.meId}
-              isMe={!currentPerson}
-              ws={ws}
-              peopleById={peopleById}
-              listsById={listsById}
-              boardsById={boardsById}
-              onOpen={setOpenCardId}
-            />
-          )}
-        </div>
+        <div className="min-h-0 flex-1 overflow-auto">{content}</div>
       </section>
-
-      {openCard && (
-        <TeamCardModal card={openCard} ws={ws} onClose={() => setOpenCardId(null)} onLocalPatch={patchLocal} onRefresh={() => void load()} onError={toast} />
-      )}
-      {newCardFor && (
-        <NewCardDialog
-          ws={ws}
-          myBoards={myBoards}
-          initial={newCardFor}
-          onClose={() => setNewCardFor(null)}
-          onCreated={async (id) => {
-            setNewCardFor(null);
-            await load();
-            setOpenCardId(id);
-          }}
-          onError={toast}
-        />
-      )}
-      {error && ws && (
-        <div className="fixed bottom-6 right-6 z-[90] max-w-sm rounded-btn bg-ink px-4 py-3 text-sm text-white shadow-card">{error}</div>
-      )}
+      {overlays}
     </div>
   );
 }
@@ -298,6 +380,7 @@ export function TeamScreen() {
 /* ---------- Mes cartes / cartes d'une personne ---------- */
 
 function CardInbox({
+  compact = false,
   cards,
   personId,
   isMe,
@@ -315,6 +398,7 @@ function CardInbox({
   listsById: Map<string, TeamList>;
   boardsById: Map<string, TeamBoard>;
   onOpen: (id: string) => void;
+  compact?: boolean;
 }) {
   const [showDone, setShowDone] = useState(false);
   const membership = (c: TeamCard) => c.members.find((m) => m.userId === personId);
@@ -347,7 +431,7 @@ function CardInbox({
     );
 
   return (
-    <div className="mx-auto max-w-[980px] space-y-6 px-7 py-6">
+    <div className={`mx-auto max-w-[980px] ${compact ? "space-y-4 px-3 py-3" : "space-y-6 px-7 py-6"}`}>
       {fresh.length > 0 && (
         <div>
           <p className="mb-2 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-red">
@@ -443,6 +527,7 @@ function CardRow({
 type DropTarget = { listId: string; beforeId: string | null } | null;
 
 function BoardView({
+  compact = false,
   board,
   cards,
   ws,
@@ -462,6 +547,7 @@ function BoardView({
   onMoveLocal: (id: string, listId: string, position: number) => void;
   onChanged: () => Promise<void>;
   onError: (m: string) => void;
+  compact?: boolean;
 }) {
   const [showArchived, setShowArchived] = useState(false);
   const [drop, setDrop] = useState<DropTarget>(null);
@@ -501,13 +587,13 @@ function BoardView({
   return (
     <div className="flex h-full flex-col">
       {archivedCount > 0 && (
-        <div className="px-7 pt-3">
+        <div className={compact ? "px-3 pt-2" : "px-7 pt-3"}>
           <button onClick={() => setShowArchived((s) => !s)} className="text-xs font-semibold text-ink-3 hover:text-ink">
             {showArchived ? "Masquer" : "Afficher"} les cartes archivées ({archivedCount})
           </button>
         </div>
       )}
-      <div className="flex min-h-0 flex-1 items-start gap-4 overflow-x-auto px-7 py-5">
+      <div className={`flex min-h-0 flex-1 items-start overflow-x-auto ${compact ? "snap-x snap-mandatory gap-3 px-3 py-3" : "gap-4 px-7 py-5"}`}>
         {board.lists.map((list, index) => {
           const column = visible.filter((c) => c.listId === list.id).sort((a, b) => a.position - b.position);
           const lastPos = column.at(-1)?.position ?? 0;
@@ -522,7 +608,7 @@ function BoardView({
                 e.preventDefault();
                 doDrop(drop?.listId === list.id ? drop : { listId: list.id, beforeId: null });
               }}
-              className={`flex max-h-full w-[290px] shrink-0 flex-col rounded-card border bg-panel ${drop?.listId === list.id ? "border-navy/40" : "border-line"}`}
+              className={`flex max-h-full shrink-0 flex-col rounded-card border bg-panel ${compact ? "w-[85vw] snap-center" : "w-[290px]"} ${drop?.listId === list.id ? "border-navy/40" : "border-line"}`}
             >
               <ListHeader
                 list={list}
@@ -579,7 +665,7 @@ function BoardView({
             </div>
           );
         })}
-        <div className="w-[290px] shrink-0">
+        <div className={`shrink-0 ${compact ? "w-[85vw] snap-center" : "w-[290px]"}`}>
           <InlineCreate
             boxed
             placeholder="Ajouter une liste"

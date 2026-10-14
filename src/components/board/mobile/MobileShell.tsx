@@ -9,6 +9,9 @@ import { MobileMailsScreen } from "@/components/board/mobile/screens/MobileMails
 import { FraisScreen } from "@/components/board/screens/FraisScreen";
 import { AccueilScreen } from "@/components/board/screens/AccueilScreen";
 import { WeekendScreen } from "@/components/board/screens/WeekendScreen";
+import { TeamScreen } from "@/components/board/screens/TeamScreen";
+import { TransferScreen } from "@/components/board/screens/TransferScreen";
+import { MobileModulesMenu } from "@/components/board/mobile/MobileModulesMenu";
 import { MobileSettingsSheet, useCenterAction } from "@/components/board/mobile/MobileSettingsSheet";
 import { readAppParam } from "@/lib/board/deepLink";
 import { SocialCapture } from "@/components/board/publication/SocialCapture";
@@ -21,16 +24,21 @@ const TITLES: Record<MobileTab, { title: string; kicker: string }> = {
   accueil: { title: "Dashboard", kicker: "ESPACE DE TRAVAIL" },
   mails: { title: "Mails", kicker: "MESSAGERIE" },
   weekend: { title: "Week-end", kicker: "MATCHS & COUVERTURE" },
+  team: { title: "Espace Team", kicker: "CARTES & TABLEAUX" },
+  transfer: { title: "Transferts", kicker: "LGEF TRANSFER" },
 };
+
+/** Lien direct (/?app=…) → écran mobile. */
+const LINKED_TABS: Record<string, MobileTab> = { accueil: "accueil", mails: "mails", weekend: "weekend", trello: "team", transfer: "transfer" };
 
 /** Coque mobile — même app Next.js, bascule vers cette coque sous ~768px (voir useIsMobile). */
 export function MobileShell() {
   // Lien direct depuis un e-mail (/?app=weekend, /?app=frais…).
   const [linkedApp] = useState(readAppParam);
-  const [tab, setTab] = useState<MobileTab>(() =>
-    linkedApp === "accueil" || linkedApp === "mails" || linkedApp === "weekend" ? linkedApp : "calendrier"
-  );
+  const [tab, setTab] = useState<MobileTab>(() => (linkedApp && LINKED_TABS[linkedApp]) || "calendrier");
   const [mailMenuOpen, setMailMenuOpen] = useState(false);
+  // Menu des modules (logo de l'en-tête, hors Mails qui y garde ses dossiers) : Week-end, Transferts…
+  const [modulesOpen, setModulesOpen] = useState(false);
   const [punchedIn, setPunchedIn] = useState(true);
   const [mailContext, setMailContext] = useState<string | null>(null);
   const closeMailMenu = useCallback(() => setMailMenuOpen(false), []);
@@ -40,6 +48,7 @@ export function MobileShell() {
 
   const selectTab = (next: MobileTab) => {
     setMailMenuOpen(false);
+    setModulesOpen(false);
     setTab(next);
   };
 
@@ -75,8 +84,8 @@ export function MobileShell() {
       <MobileHeader
         title={title}
         kicker={kicker}
-        onLogoClick={tab === "mails" ? () => setMailMenuOpen((o) => !o) : undefined}
-        menuOpen={mailMenuOpen}
+        onLogoClick={tab === "mails" ? () => setMailMenuOpen((o) => !o) : () => setModulesOpen((o) => !o)}
+        menuOpen={tab === "mails" ? mailMenuOpen : modulesOpen}
         onSettings={() => setSettingsOpen(true)}
         app={tab}
       />
@@ -106,6 +115,29 @@ export function MobileShell() {
           <div className="h-full overflow-y-auto pb-20">
             <WeekendScreen />
           </div>
+        )}
+        {tab === "team" && (
+          <div className="h-full">
+            <TeamScreen mobile />
+          </div>
+        )}
+        {tab === "transfer" && (
+          <div className="h-full overflow-y-auto px-3 pb-20 pt-3">
+            <TransferScreen />
+          </div>
+        )}
+        {modulesOpen && tab !== "mails" && (
+          <MobileModulesMenu
+            active={tab}
+            canPublish={canPublish}
+            onClose={() => setModulesOpen(false)}
+            onSelect={(target) => {
+              setModulesOpen(false);
+              if (target === "frais") setFraisOpen(true);
+              else if (target === "audiovisuel") setCenterOpen(true);
+              else selectTab(target);
+            }}
+          />
         )}
       </main>
 

@@ -1,21 +1,24 @@
 "use client";
 
 import { useRef } from "react";
-import { Calendar, Home, Mail, Camera } from "lucide-react";
+import { Calendar, Home, Mail, Kanban } from "lucide-react";
 import { CENTER_ACTIONS, type CenterAction } from "@/components/board/mobile/MobileSettingsSheet";
 import { useAppBadges, type AppBadge } from "@/hooks/board/useAppBadges";
 import { AppBadgePills } from "@/components/board/AppBadgePills";
 import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
 
-export type MobileTab = "calendrier" | "accueil" | "mails" | "weekend";
+/** Écrans de la coque mobile (Week-end et Transferts s'ouvrent depuis le menu de l'en-tête). */
+export type MobileTab = "calendrier" | "accueil" | "mails" | "weekend" | "team" | "transfer";
 
-const SLOTS: { id: MobileTab; label: string; icon: typeof Calendar }[] = [
-  { id: "calendrier", label: "Calendrier", icon: Calendar },
-  { id: "accueil", label: "Dashboard", icon: Home },
+/** `module` : identifiant du module (droits d'accès, pastilles), ex. « trello » pour l'Espace Team. */
+type Slot = { id: MobileTab; module: string; label: string; icon: typeof Calendar };
+const SLOTS: Slot[] = [
+  { id: "calendrier", module: "calendrier", label: "Calendrier", icon: Calendar },
+  { id: "accueil", module: "accueil", label: "Dashboard", icon: Home },
 ];
-const SLOTS_RIGHT: { id: MobileTab; label: string; icon: typeof Calendar }[] = [
-  { id: "mails", label: "Mails", icon: Mail },
-  { id: "weekend", label: "Week-end", icon: Camera },
+const SLOTS_RIGHT: Slot[] = [
+  { id: "mails", module: "mails", label: "Mails", icon: Mail },
+  { id: "team", module: "trello", label: "Team", icon: Kanban },
 ];
 
 export function MobileBottomNav({
@@ -61,8 +64,8 @@ export function MobileBottomNav({
       style={{ boxShadow: "0 -10px 30px rgba(11,29,60,0.10)" }}
     >
       <div className={`grid h-16 items-center px-1 ${center === "off" ? "grid-cols-4" : "grid-cols-[1fr_1fr_1.1fr_1fr_1fr]"}`}>
-        {SLOTS.filter((slot) => canShowModule(visible, slot.id)).map((slot) => (
-          <NavSlot key={slot.id} slot={slot} badges={badges[slot.id]} active={active === slot.id} onClick={() => onSelect(slot.id)} />
+        {SLOTS.filter((slot) => canShowModule(visible, slot.module)).map((slot) => (
+          <NavSlot key={slot.id} slot={slot} badges={badges[slot.module]} active={active === slot.id} onClick={() => onSelect(slot.id)} />
         ))}
 
         {center !== "off" && (
@@ -90,8 +93,8 @@ export function MobileBottomNav({
           </div>
         )}
 
-        {SLOTS_RIGHT.filter((slot) => canShowModule(visible, slot.id)).map((slot) => (
-          <NavSlot key={slot.id} slot={slot} badges={badges[slot.id]} active={active === slot.id} onClick={() => onSelect(slot.id)} />
+        {SLOTS_RIGHT.filter((slot) => canShowModule(visible, slot.module)).map((slot) => (
+          <NavSlot key={slot.id} slot={slot} badges={badges[slot.module]} active={active === slot.id} onClick={() => onSelect(slot.id)} />
         ))}
       </div>
       <div className="mx-auto mb-1.5 h-1 w-[120px] rounded-full bg-ink-4/30" />
@@ -105,7 +108,7 @@ function NavSlot({
   badges,
   onClick,
 }: {
-  slot: { id: MobileTab; label: string; icon: typeof Calendar };
+  slot: Slot;
   active: boolean;
   badges?: AppBadge[];
   onClick: () => void;
