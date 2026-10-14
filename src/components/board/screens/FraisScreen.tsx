@@ -4,7 +4,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Receipt, ShieldCheck, X, Search, ChevronRight, Download, Settings, Check } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Receipt, ShieldCheck, X, Search, ChevronRight, Download, Settings, Check, Camera, Paperclip } from "lucide-react";
 import {
   declareExpenses,
   getMyExpenses,
@@ -15,7 +16,9 @@ import {
   type SubmissionToReview,
 } from "@/app/actions/expenses";
 import { ExpenseLinesEditor, AttachmentLinks, LineAmount } from "@/components/board/expenses/ExpenseLinesEditor";
-import { ExpenseImport } from "@/components/board/expenses/ExpenseImport";
+import { ExpenseImport, type ExpenseImportHandle } from "@/components/board/expenses/ExpenseImport";
+import { MobileHeader } from "@/components/board/mobile/MobileHeader";
+import { RECEIPT_ACCEPT } from "@/lib/board/receiptUpload";
 import { ExpenseExportModal } from "@/components/board/expenses/ExpenseExportModal";
 import { ExpenseMailSettings } from "@/components/board/expenses/ExpenseMailSettings";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
@@ -26,6 +29,12 @@ import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
 import { OpenEventButton } from "@/components/board/calendar/OpenEventButton";
 
 type Tab = "mine" | "validate" | "settings";
+
+/** Période choisie (année, mois ou toute l'année), commune aux onglets. */
+type Period = { year: number; monthIdx: number | null; setYear: (y: number) => void; setMonthIdx: (m: number | null) => void };
+
+/** Appli mobile : la période se choisit dans un menu déroulé depuis l'en-tête (comme les dossiers de Mails). */
+type MobileMenu = { host: HTMLElement | null; open: boolean; onClose: () => void };
 type MineFilter = "a_declarer" | "upcoming" | "pending" | "approved" | "rejected" | "all";
 
 const MINE_FILTERS: { id: MineFilter; label: string }[] = [
@@ -172,6 +181,61 @@ function YearMonthBar({
   );
 }
 
+/** Mobile : menu déroulé sous l'en-tête — l'année, puis « Toute l'année » et les douze mois avec leurs totaux. */
+function PeriodMenu({
+  menu,
+  period,
+  stats,
+}: {
+  menu: MobileMenu;
+  period: Period;
+  stats: (m: number | null) => { count: number; total: number };
+}) {
+  if (!menu.host || !menu.open) return null;
+  const { year, monthIdx, setYear, setMonthIdx } = period;
+  const row = (key: string, active: boolean, label: string, st: { count: number; total: number }, onClick: () => void) => (
+    <button
+      key={key}
+      onClick={onClick}
+      className={`flex w-full items-center justify-between gap-2 rounded-btn px-3 py-2.5 text-left text-sm font-semibold ${
+        active ? "bg-sel-bg text-link" : st.count ? "text-ink-2 active:bg-hover" : "text-ink-4 active:bg-hover"
+      }`}
+    >
+      <span>{label}</span>
+      <span className="font-mono text-[11px] font-normal">
+        {st.count ? `${formatEuros(st.total)} · ${st.count} fiche${st.count > 1 ? "s" : ""}` : "—"}
+      </span>
+    </button>
+  );
+  const pick = (m: number | null) => {
+    setMonthIdx(m);
+    menu.onClose();
+  };
+  return createPortal(
+    <>
+      <div className="absolute inset-0 z-30 bg-black/30" onClick={menu.onClose} />
+      <div className="absolute inset-x-0 top-0 z-40 max-h-[80%] overflow-y-auto rounded-b-modal border-b border-line bg-card pb-3 shadow-modal">
+        <div className="px-4 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">Année</div>
+        <div className="mx-4 flex items-center justify-between rounded-btn bg-subtle px-1 py-1">
+          <button onClick={() => setYear(year - 1)} aria-label="Année précédente" className="rounded-md p-2 text-ink-3">
+            <ChevronRight size={16} className="rotate-180" />
+          </button>
+          <span className="text-base font-extrabold text-ink">{year}</span>
+          <button onClick={() => setYear(year + 1)} aria-label="Année suivante" className="rounded-md p-2 text-ink-3">
+            <ChevronRight size={16} />
+          </button>
+        </div>
+        <div className="px-4 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">Mois</div>
+        <div className="px-2">
+          {row("all", monthIdx === null, "Toute l'année", stats(null), () => pick(null))}
+          {MONTH_LONG.map((label, i) => row(label, monthIdx === i, label, stats(i), () => pick(i)))}
+        </div>
+      </div>
+    </>,
+    menu.host
+  );
+}
+
 const MONTH_SHORT = ["Janv.", "Févr.", "Mars", "Avr.", "Mai", "Juin", "Juil.", "Août", "Sept.", "Oct.", "Nov.", "Déc."];
 
 /** Mobile : l'année (flèches + total), puis les mois en bandeau qui défile, le mois choisi centré. */
@@ -298,15 +362,16 @@ export function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpens
   );
 }
 
-function MyExpenses() {
+function MyExpenses({ period, menu, reloadKey = 0 }: { period: Period; menu?: MobileMenu; reloadKey?: number }) {
   const { user } = useAuth();
   // Dernière liste connue affichée tout de suite (navigateur), puis rafraîchie.
   const cacheKey = `frais:mine:${user?.id ?? ""}`;
   const [items, setItems] = useState<MyExpenseItem[] | null>(() => readCache<MyExpenseItem[]>(cacheKey) ?? null);
   const [filter, setFilter] = useState<MineFilter>("a_declarer");
   const [query, setQuery] = useState("");
-  const [year, setYear] = useState(() => new Date().getFullYear());
-  const [monthIdx, setMonthIdx] = useState<number | null>(null);
+  const { year, monthIdx } = period;
+  // Mobile : les événements à venir sont dans « À déclarer » (pas de filtre « À venir »).
+  const mergeUpcoming = !!menu;
   const month = monthIdx === null ? "" : `${year}-${String(monthIdx + 1).padStart(2, "0")}`;
   const [open, setOpen] = useState<MyExpenseItem | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -324,7 +389,7 @@ function MyExpenses() {
   );
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, reloadKey]);
   useLiveRefresh(
     ["event_expenses", "expense_submissions", "notifications", "event_team_members", "event_assignments", "coverage_requests", "director_attendance", "photo_missions"],
     () => void load()
@@ -338,17 +403,17 @@ function MyExpenses() {
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     for (const i of inPeriod) {
-      const k = i.upcoming ? "upcoming" : i.status;
+      const k = i.upcoming && !mergeUpcoming ? "upcoming" : i.status;
       c[k] = (c[k] ?? 0) + 1;
     }
     return c;
-  }, [inPeriod]);
+  }, [inPeriod, mergeUpcoming]);
   // Mois exportables : ceux où des frais ont été saisis.
   const exportMonths = useMemo(() => [...new Set((items ?? []).filter((i) => i.lineCount > 0).map((i) => monthKey(i.start)))].sort().reverse(), [items]);
   const q = normalize(query.trim());
   // Statut et recherche, puis l'année : base des compteurs de la barre des mois.
   const inYear = (items ?? []).filter(
-    (i) => (filter === "all" || (filter === "upcoming" ? !!i.upcoming : !i.upcoming && i.status === filter)) && (!q || normalize(i.title).includes(q)) && yearOf(i.start) === year
+    (i) => (filter === "all" || (filter === "upcoming" ? !!i.upcoming : (!i.upcoming || mergeUpcoming) && i.status === filter)) && (!q || normalize(i.title).includes(q)) && yearOf(i.start) === year
   );
   const visible = inYear.filter((i) => monthIdx === null || monthIndexOf(i.start) === monthIdx);
   const monthStats = (m: number | null) => {
@@ -363,11 +428,15 @@ function MyExpenses() {
 
   return (
     <div className="space-y-3 md:flex md:items-start md:gap-4 md:space-y-0">
-      <YearMonthBar year={year} onYear={setYear} month={monthIdx} onMonth={setMonthIdx} stats={monthStats} />
+      {menu ? (
+        <PeriodMenu menu={menu} period={period} stats={monthStats} />
+      ) : (
+        <YearMonthBar year={year} onYear={period.setYear} month={monthIdx} onMonth={period.setMonthIdx} stats={monthStats} />
+      )}
       <div className="min-w-0 flex-1 space-y-3">
-      <ExpenseImport onAdded={() => void load()} />
+      {!menu && <ExpenseImport onAdded={() => void load()} />}
       <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 md:mx-0 md:flex-wrap md:px-0">
-        {MINE_FILTERS.map((f) => (
+        {MINE_FILTERS.filter((f) => !(mergeUpcoming && f.id === "upcoming")).map((f) => (
           <FilterChip key={f.id} active={filter === f.id} onClick={() => setFilter(f.id)}>
             {f.label}
             {f.id !== "all" && counts[f.id] ? ` (${counts[f.id]})` : f.id === "all" ? ` (${inPeriod.length})` : ""}
@@ -387,7 +456,11 @@ function MyExpenses() {
 
       {visible.length === 0 ? (
         <div className="rounded-panel border border-dashed border-line p-8 text-center text-sm text-ink-4">
-          {filter === "a_declarer" && !q && !month ? "Rien à déclarer : tous vos frais sont à jour. 👍" : "Aucune note de frais ici."}
+          {filter === "a_declarer" && !q
+            ? month
+              ? "Rien à déclarer ce mois-ci. 👍"
+              : "Rien à déclarer : tous vos frais sont à jour. 👍"
+            : "Aucune note de frais ici."}
         </div>
       ) : (
         <div className="overflow-hidden rounded-panel border border-line bg-card">
@@ -652,15 +725,14 @@ function RejectModal({ sub, onClose, onDone }: { sub: SubmissionToReview; onClos
 }
 
 /** Déclarations des personnes dont je suis le N+1 — uniquement elles. */
-function ToValidate({ onChanged }: { onChanged: () => void }) {
+function ToValidate({ onChanged, period, menu }: { onChanged: () => void; period: Period; menu?: MobileMenu }) {
   const [status, setStatus] = useState<"pending" | "approved" | "rejected">("pending");
   const [subs, setSubs] = useState<SubmissionToReview[] | null>(null);
   const [open, setOpen] = useState<SubmissionToReview | null>(null);
   const [rejecting, setRejecting] = useState<SubmissionToReview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [year, setYear] = useState(() => new Date().getFullYear());
-  const [monthIdx, setMonthIdx] = useState<number | null>(null);
+  const { year, monthIdx } = period;
 
   const load = useCallback(() => getSubmissionsToReview(status, "mine").then(setSubs).catch(() => setSubs([])), [status]);
   useEffect(() => {
@@ -697,7 +769,11 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
 
   return (
     <div className="space-y-3 md:flex md:items-start md:gap-4 md:space-y-0">
-      <YearMonthBar year={year} onYear={setYear} month={monthIdx} onMonth={setMonthIdx} stats={monthStats} />
+      {menu ? (
+        <PeriodMenu menu={menu} period={period} stats={monthStats} />
+      ) : (
+        <YearMonthBar year={year} onYear={period.setYear} month={monthIdx} onMonth={period.setMonthIdx} stats={monthStats} />
+      )}
       <div className="min-w-0 flex-1 space-y-3">
       <div className="-mx-3 flex items-center gap-1.5 overflow-x-auto px-3 md:mx-0 md:flex-wrap md:px-0">
         {(["pending", "approved", "rejected"] as const).map((st) => (
@@ -807,13 +883,27 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
 
 /* ---------- Écran ---------- */
 
+const headerBtn = "flex h-8 w-8 items-center justify-center rounded-full text-white/85 hover:bg-white/10";
+
 /**
  * Frais : « Mes frais » (événements où je suis sollicité → déclarer), « À valider » (si je suis N+1
  * de quelqu'un, ou admin). Le N+1 de chacun se règle dans Administration → Utilisateurs.
+ * `mobile` (appli mobile) : en-tête propre — retour, période dans le menu du titre, Photo / Joindre
+ * et Paramètres en haut —, mois en cours par défaut et événements à venir dans « À déclarer ».
  */
-export function FraisScreen() {
+export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}) {
   const [tab, setTab] = useState<Tab>("mine");
   const [scope, setScope] = useState<Awaited<ReturnType<typeof getMyValidatorScope>> | null>(null);
+  const [year, setYear] = useState(() => new Date().getFullYear());
+  const [monthIdx, setMonthIdx] = useState<number | null>(() => (mobile ? new Date().getMonth() : null));
+  const period: Period = { year, monthIdx, setYear, setMonthIdx };
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuHost, setMenuHost] = useState<HTMLDivElement | null>(null);
+  const menu: MobileMenu | undefined = mobile ? { host: menuHost, open: menuOpen, onClose: () => setMenuOpen(false) } : undefined;
+  const [reloadKey, setReloadKey] = useState(0);
+  const importRef = useRef<ExpenseImportHandle>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const loadScope = useCallback(() => getMyValidatorScope().then(setScope).catch(() => undefined), []);
   useEffect(() => {
@@ -823,15 +913,24 @@ export function FraisScreen() {
   const tabs: { id: Tab; label: string; icon: typeof Receipt; badge?: number; show: boolean }[] = [
     { id: "mine", label: "Mes frais", icon: Receipt, show: true },
     { id: "validate", label: "À valider", icon: ShieldCheck, badge: scope?.pending, show: !!scope?.isValidator },
-    { id: "settings", label: "Paramètres", icon: Settings, show: true },
+    // Mobile : Paramètres est la roue crantée de l'en-tête.
+    { id: "settings", label: "Paramètres", icon: Settings, show: !mobile },
   ];
+  const shownTabs = tabs.filter((t) => t.show);
 
-  return (
+  const pickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = [...(e.target.files ?? [])];
+    e.target.value = "";
+    if (!files.length) return;
+    setTab("mine");
+    importRef.current?.addFiles(files);
+  };
+
+  const body = (
     <div className="mx-auto max-w-6xl space-y-3 p-3 md:space-y-4 md:p-4">
-      <div className="-mx-3 flex items-center gap-2 overflow-x-auto px-3 md:mx-0 md:flex-wrap md:px-0">
-        {tabs
-          .filter((t) => t.show)
-          .map((t) => {
+      {shownTabs.length > 1 && (
+        <div className="-mx-3 flex items-center gap-2 overflow-x-auto px-3 md:mx-0 md:flex-wrap md:px-0">
+          {shownTabs.map((t) => {
             const Icon = t.icon;
             return (
               <button
@@ -846,11 +945,53 @@ export function FraisScreen() {
               </button>
             );
           })}
-      </div>
+        </div>
+      )}
 
-      {tab === "mine" && <MyExpenses />}
-      {tab === "validate" && <ToValidate onChanged={() => void loadScope()} />}
+      {/* Mobile : justificatifs pris par les boutons de l'en-tête, à vérifier avant ajout (reste monté d'un onglet à l'autre). */}
+      {mobile && <ExpenseImport ref={importRef} hideDropzone onAdded={() => setReloadKey((k) => k + 1)} />}
+
+      {tab === "mine" && <MyExpenses period={period} menu={menu} reloadKey={reloadKey} />}
+      {tab === "validate" && <ToValidate onChanged={() => void loadScope()} period={period} menu={menu} />}
       {tab === "settings" && <ExpenseMailSettings />}
+    </div>
+  );
+
+  if (!mobile) return body;
+
+  const periodLabel = monthIdx === null ? `Année ${year}` : `${MONTH_LONG[monthIdx]} ${year}`;
+  return (
+    <div className="flex h-full flex-col">
+      <MobileHeader
+        title="Frais"
+        kicker={tab === "settings" ? "Paramètres" : periodLabel}
+        onBack={mobile.onBack}
+        onLogoClick={() => {
+          if (tab === "settings") setTab("mine");
+          setMenuOpen((o) => !o);
+        }}
+        menuOpen={menuOpen}
+        onSettings={() => {
+          setMenuOpen(false);
+          setTab((t) => (t === "settings" ? "mine" : "settings"));
+        }}
+        app="frais"
+        actions={
+          <>
+            <button type="button" onClick={() => cameraRef.current?.click()} className={headerBtn} aria-label="Photo d'un justificatif">
+              <Camera size={17} />
+            </button>
+            <button type="button" onClick={() => fileRef.current?.click()} className={headerBtn} aria-label="Joindre un justificatif">
+              <Paperclip size={17} />
+            </button>
+            <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={pickFiles} />
+            <input ref={fileRef} type="file" accept={RECEIPT_ACCEPT} multiple hidden onChange={pickFiles} />
+          </>
+        }
+      />
+      <div ref={setMenuHost} className="relative min-h-0 flex-1">
+        <div className="h-full overflow-y-auto pb-6">{body}</div>
+      </div>
     </div>
   );
 }

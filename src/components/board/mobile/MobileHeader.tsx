@@ -14,6 +14,7 @@ export function MobileHeader({
   onSettings,
   app = null,
   onBack,
+  actions,
 }: {
   title: string;
   kicker: string;
@@ -25,6 +26,8 @@ export function MobileHeader({
   app?: string | null;
   /** Flèche retour avant le logo (écrans ouverts par-dessus, ex. Frais). */
   onBack?: () => void;
+  /** Boutons propres à l'écran, placés avant la roue crantée (ex. Photo / Joindre dans Frais). */
+  actions?: React.ReactNode;
 }) {
   return (
     <div
@@ -55,7 +58,8 @@ export function MobileHeader({
       </button>
       </div>
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5">
+        {actions}
         <button onClick={onSettings} className="flex h-8 w-8 items-center justify-center rounded-full text-white/85 hover:bg-white/10" aria-label="Paramètres">
           <Settings size={17} />
         </button>

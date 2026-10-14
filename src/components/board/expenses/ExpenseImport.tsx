@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Upload, Loader2, X, Search, Sparkles, CalendarDays, Check, FileText, AlertCircle } from "lucide-react";
 import { addExpenseLines } from "@/app/actions/expenses";
 import { scanReceipt, searchEventsForExpense, type EventCandidate } from "@/app/actions/expense-scan";
@@ -141,7 +141,19 @@ const emptyDraft = (fileName: string): Draft => ({
  * factures ou feuilles de frais. Chaque document est lu par Claude, chaque dépense est rapprochée
  * de l'événement correspondant (ou laissée hors événement), puis ajoutée après vérification.
  */
-export function ExpenseImport({ onAdded }: { onAdded: () => void }) {
+/** Ajout de justificatifs depuis l'extérieur (boutons Photo / Joindre de l'en-tête mobile). */
+export type ExpenseImportHandle = { addFiles: (files: File[]) => void };
+
+export function ExpenseImport({
+  onAdded,
+  hideDropzone = false,
+  ref,
+}: {
+  onAdded: () => void;
+  /** Mobile : pas d'encart, seulement les dépenses lues à vérifier (fichiers reçus via `ref`). */
+  hideDropzone?: boolean;
+  ref?: React.Ref<ExpenseImportHandle>;
+}) {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -198,6 +210,8 @@ export function ExpenseImport({ onAdded }: { onAdded: () => void }) {
     queue.current = queue.current.then(() => Promise.all([worker(), worker(), worker()]).then(() => undefined));
   };
 
+  useImperativeHandle(ref, () => ({ addFiles }));
+
   const valid = (d: Draft) => d.state === "ready" && parseFloat(d.amount.replace(",", ".")) > 0;
 
   const save = async (list: Draft[]) => {
@@ -230,8 +244,11 @@ export function ExpenseImport({ onAdded }: { onAdded: () => void }) {
   const ready = drafts.filter(valid);
   const working = drafts.some((d) => d.state === "upload" || d.state === "scan");
 
+  if (hideDropzone && drafts.length === 0) return null;
+
   return (
     <div className="space-y-2">
+      {!hideDropzone && (
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -260,6 +277,7 @@ export function ExpenseImport({ onAdded }: { onAdded: () => void }) {
           <ReceiptButtons onFiles={addFiles} />
         </div>
       </div>
+      )}
 
       {drafts.length > 0 && (
         <div className="rounded-panel border border-line bg-card">

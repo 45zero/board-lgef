@@ -110,11 +110,8 @@ export function MobileShell() {
       </main>
 
       {fraisOpen && (
-        <div className="absolute inset-0 z-40 flex flex-col bg-shell">
-          <MobileHeader title="Frais" kicker="NOTES DE FRAIS" app="frais" onBack={() => setFraisOpen(false)} />
-          <div className="flex-1 overflow-y-auto pb-6">
-            <FraisScreen />
-          </div>
+        <div className="absolute inset-0 z-40 bg-shell">
+          <FraisScreen mobile={{ onBack: () => setFraisOpen(false) }} />
         </div>
       )}
 
