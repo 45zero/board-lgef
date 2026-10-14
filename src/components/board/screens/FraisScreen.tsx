@@ -3,7 +3,7 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Receipt, ShieldCheck, X, Search, ChevronRight, Download, Settings, Check } from "lucide-react";
 import {
   declareExpenses,
@@ -141,7 +141,9 @@ function YearMonthBar({
   );
   const all = stats(null);
   return (
-    <aside className="sticky top-0 w-[200px] shrink-0 self-start rounded-panel border border-line bg-card p-2">
+    <>
+      <MobileYearMonthBar year={year} onYear={onYear} month={month} onMonth={onMonth} stats={stats} />
+    <aside className="sticky top-0 hidden w-[200px] shrink-0 self-start rounded-panel border border-line bg-card p-2 md:block">
       <div className="mb-2 flex items-center justify-between rounded-btn bg-subtle px-1 py-1">
         <button onClick={() => onYear(year - 1)} aria-label="Année précédente" className="rounded-md p-1 text-ink-3 hover:bg-hover">
           <ChevronRight size={14} className="rotate-180" />
@@ -166,6 +168,65 @@ function YearMonthBar({
         );
       })}
     </aside>
+    </>
+  );
+}
+
+const MONTH_SHORT = ["Janv.", "Févr.", "Mars", "Avr.", "Mai", "Juin", "Juil.", "Août", "Sept.", "Oct.", "Nov.", "Déc."];
+
+/** Mobile : l'année (flèches + total), puis les mois en bandeau qui défile, le mois choisi centré. */
+function MobileYearMonthBar({
+  year,
+  onYear,
+  month,
+  onMonth,
+  stats,
+}: {
+  year: number;
+  onYear: (y: number) => void;
+  month: number | null;
+  onMonth: (m: number | null) => void;
+  stats: (m: number | null) => { count: number; total: number };
+}) {
+  const stripRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    stripRef.current?.querySelector<HTMLElement>("[data-active='true']")?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [month, year]);
+  const all = stats(null);
+  const chip = (key: string, active: boolean, label: string, st: { count: number; total: number }, onClick: () => void) => (
+    <button
+      key={key}
+      data-active={active}
+      onClick={onClick}
+      className={`flex shrink-0 flex-col items-center rounded-btn px-3 py-1.5 ${
+        active ? "bg-navy text-white" : st.count ? "bg-card text-ink-2 ring-1 ring-line" : "bg-card text-ink-4 ring-1 ring-line"
+      }`}
+    >
+      <span className="text-xs font-bold">{label}</span>
+      <span className={`font-mono text-[10px] ${active ? "text-white/80" : "text-ink-4"}`}>{st.count ? formatEuros(st.total) : "—"}</span>
+    </button>
+  );
+  return (
+    <div className="space-y-2 md:hidden">
+      <div className="flex items-center justify-between rounded-btn border border-line bg-card px-1 py-1">
+        <button onClick={() => onYear(year - 1)} aria-label="Année précédente" className="rounded-md p-2 text-ink-3">
+          <ChevronRight size={16} className="rotate-180" />
+        </button>
+        <div className="text-center">
+          <div className="text-base font-extrabold text-ink">{year}</div>
+          <div className="font-mono text-[10px] text-ink-4">
+            {all.count ? `${formatEuros(all.total)} · ${all.count} fiche${all.count > 1 ? "s" : ""}` : "Aucune fiche"}
+          </div>
+        </div>
+        <button onClick={() => onYear(year + 1)} aria-label="Année suivante" className="rounded-md p-2 text-ink-3">
+          <ChevronRight size={16} />
+        </button>
+      </div>
+      <div ref={stripRef} className="-mx-3 flex gap-1.5 overflow-x-auto px-3 py-0.5">
+        {chip("all", month === null, "Année", all, () => onMonth(null))}
+        {MONTH_SHORT.map((label, i) => chip(label, month === i, label, stats(i), () => onMonth(i)))}
+      </div>
+    </div>
   );
 }
 
@@ -301,11 +362,11 @@ function MyExpenses() {
   if (!items) return <div className="p-6 text-sm text-ink-4">Chargement…</div>;
 
   return (
-    <div className="flex items-start gap-4">
+    <div className="space-y-3 md:flex md:items-start md:gap-4 md:space-y-0">
       <YearMonthBar year={year} onYear={setYear} month={monthIdx} onMonth={setMonthIdx} stats={monthStats} />
       <div className="min-w-0 flex-1 space-y-3">
       <ExpenseImport onAdded={() => void load()} />
-      <div className="flex flex-wrap gap-1.5">
+      <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 md:mx-0 md:flex-wrap md:px-0">
         {MINE_FILTERS.map((f) => (
           <FilterChip key={f.id} active={filter === f.id} onClick={() => setFilter(f.id)}>
             {f.label}
@@ -345,9 +406,9 @@ function MyExpenses() {
                       setOpen(i);
                     }
                   }}
-                  className="flex w-full cursor-pointer items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
+                  className="flex w-full cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover md:flex-nowrap"
                 >
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 basis-full md:flex-1 md:basis-auto">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="truncate text-sm font-bold text-ink">{i.title}</span>
                       <OrgChip eventType={i.eventType} />
@@ -359,7 +420,7 @@ function MyExpenses() {
                     </div>
                     {i.status === "rejected" && i.reviewerComment && <div className="mt-0.5 truncate text-[11px] text-bad">Motif : {i.reviewerComment}</div>}
                   </div>
-                  <span className="shrink-0 text-sm font-bold text-ink">{i.total > 0 ? formatEuros(i.total) : ""}</span>
+                  <span className="mr-auto shrink-0 text-sm font-bold text-ink md:mr-0">{i.total > 0 ? formatEuros(i.total) : ""}</span>
                   {i.status === "a_declarer" || i.status === "rejected" ? (
                     <>
                       {i.eventId && (i.status === "rejected" || i.lineCount === 0) && (
@@ -635,10 +696,10 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
   }
 
   return (
-    <div className="flex items-start gap-4">
+    <div className="space-y-3 md:flex md:items-start md:gap-4 md:space-y-0">
       <YearMonthBar year={year} onYear={setYear} month={monthIdx} onMonth={setMonthIdx} stats={monthStats} />
       <div className="min-w-0 flex-1 space-y-3">
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="-mx-3 flex items-center gap-1.5 overflow-x-auto px-3 md:mx-0 md:flex-wrap md:px-0">
         {(["pending", "approved", "rejected"] as const).map((st) => (
           <FilterChip key={st} active={status === st} onClick={() => setStatus(st)}>
             {EXPENSE_STATUS_META[st].label}
@@ -670,9 +731,9 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
                       setOpen(s);
                     }
                   }}
-                  className="flex w-full cursor-pointer items-center gap-3 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover"
+                  className="flex w-full cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover md:flex-nowrap"
                 >
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 basis-full md:flex-1 md:basis-auto">
                     <div className="flex items-center gap-1.5">
                       <span className="truncate text-sm font-bold text-ink">{s.event.title}</span>
                       {s.event.id && <EventArrow eventId={s.event.id} className="h-6 w-6" />}
@@ -682,7 +743,7 @@ function ToValidate({ onChanged }: { onChanged: () => void }) {
                       {s.submittedAt && ` · déclaré le ${new Date(s.submittedAt).toLocaleDateString("fr-FR")}`}
                     </div>
                   </div>
-                  <span className="shrink-0 text-sm font-bold text-ink">{formatEuros(s.total)}</span>
+                  <span className="mr-auto shrink-0 text-sm font-bold text-ink md:mr-0">{formatEuros(s.total)}</span>
                   {s.status === "pending" ? (
                     <>
                       <button
@@ -766,8 +827,8 @@ export function FraisScreen() {
   ];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="mx-auto max-w-6xl space-y-3 p-3 md:space-y-4 md:p-4">
+      <div className="-mx-3 flex items-center gap-2 overflow-x-auto px-3 md:mx-0 md:flex-wrap md:px-0">
         {tabs
           .filter((t) => t.show)
           .map((t) => {
@@ -776,7 +837,7 @@ export function FraisScreen() {
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
-                className={`flex items-center gap-2 rounded-btn px-3.5 py-2 text-sm font-semibold ${
+                className={`flex shrink-0 items-center gap-2 rounded-btn px-3.5 py-2 text-sm font-semibold ${
                   tab === t.id ? "bg-navy text-white" : "bg-card text-ink-2 hover:bg-hover"
                 }`}
               >
