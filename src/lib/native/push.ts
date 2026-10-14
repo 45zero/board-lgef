@@ -48,6 +48,17 @@ export async function registerNativePush() {
         lights: true,
         vibration: true,
       }).catch(() => {});
+      // Nouveaux mails (/api/cron/mail-push) : canal à part, réglable seul dans les paramètres Android.
+      await PushNotifications.createChannel({
+        id: "mail",
+        name: "Mails",
+        description: "Nouveaux mails de la boîte de réception (onglet Principal)",
+        importance: 4,
+        visibility: 0,
+        sound: "default",
+        lights: true,
+        vibration: true,
+      }).catch(() => {});
     }
 
     if (!listenersReady) {

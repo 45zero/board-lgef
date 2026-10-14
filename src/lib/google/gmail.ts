@@ -534,3 +534,31 @@ export async function deleteDraft(account: ConnectedAccount, draftId: string) {
   const gmail = await gmailClient(account);
   await gmail.users.drafts.delete({ userId: "me", id: draftId });
 }
+
+export type NewInboxMail = { id: string; from: string; subject: string; internalDate: number };
+
+/**
+ * Mails arrivés dans l'onglet « Principal » de la boîte de réception après `afterMs` (push des mails,
+ * /api/cron/mail-push), du plus ancien au plus récent. `after:` de Gmail est à la seconde : le filtre
+ * exact se fait sur internalDate.
+ */
+export async function listNewPrimaryInbox(account: ConnectedAccount, afterMs: number): Promise<NewInboxMail[]> {
+  const gmail = await gmailClient(account);
+  const list = await gmail.users.messages.list({
+    userId: "me",
+    maxResults: 20,
+    q: `in:inbox category:primary after:${Math.floor(afterMs / 1000)}`,
+  });
+  const out = await Promise.all(
+    (list.data.messages ?? []).map(async (m) => {
+      const { data } = await gmail.users.messages.get({ userId: "me", id: m.id!, format: "metadata", metadataHeaders: ["Subject", "From"] });
+      return {
+        id: data.id!,
+        from: headerValue(data.payload?.headers, "From"),
+        subject: headerValue(data.payload?.headers, "Subject") || "(sans objet)",
+        internalDate: Number(data.internalDate ?? 0),
+      };
+    })
+  );
+  return out.filter((m) => m.internalDate > afterMs).sort((a, b) => a.internalDate - b.internalDate);
+}
