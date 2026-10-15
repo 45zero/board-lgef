@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef } from "react";
-import { Calendar, Home, Kanban } from "lucide-react";
+import { useRef, useState } from "react";
+import { Calendar, Home, Kanban, Camera, Send } from "lucide-react";
 import type { ComponentType } from "react";
 import { MailBrandIcon } from "@/components/board/mail/MailBrandIcon";
 import { CENTER_ACTIONS, type CenterAction } from "@/components/board/mobile/MobileSettingsSheet";
@@ -13,15 +13,47 @@ import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModule
 export type MobileTab = "calendrier" | "accueil" | "mails" | "weekend" | "team" | "transfer";
 
 /** `module` : identifiant du module (droits d'accès, pastilles), ex. « trello » pour l'Espace Team. */
-type Slot = { id: MobileTab; module: string; label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }> };
-const SLOTS: Slot[] = [
+export type NavSlotDef = { id: MobileTab; module: string; label: string; icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }> };
+export const NAV_SLOTS: NavSlotDef[] = [
   { id: "calendrier", module: "calendrier", label: "Calendrier", icon: Calendar },
   { id: "accueil", module: "accueil", label: "Dashboard", icon: Home },
-];
-const SLOTS_RIGHT: Slot[] = [
   { id: "mails", module: "mails", label: "Mails", icon: MailBrandIcon },
   { id: "team", module: "trello", label: "Team", icon: Kanban },
+  { id: "weekend", module: "weekend", label: "Week-end", icon: Camera },
+  { id: "transfer", module: "transfer", label: "Transferts", icon: Send },
 ];
+
+/** Modules dans la barre du bas (les autres restent dans le menu de l'en-tête). */
+export const NAV_BAR_SIZE = 4;
+const NAV_KEY = "lgef-board:mobile-nav-order";
+const DEFAULT_ORDER: MobileTab[] = NAV_SLOTS.map((s) => s.id);
+
+/**
+ * Ordre des modules de la barre du bas, choisi par chacun dans Paramètres et mémorisé sur
+ * l'appareil : les quatre premiers (accessibles) occupent la barre, de gauche à droite.
+ */
+export function useNavOrder(): [MobileTab[], (order: MobileTab[]) => void] {
+  const [order, setOrder] = useState<MobileTab[]>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(NAV_KEY) ?? "null") as MobileTab[] | null;
+      if (!Array.isArray(stored)) return DEFAULT_ORDER;
+      const known = stored.filter((id) => DEFAULT_ORDER.includes(id));
+      // Module ajouté depuis le dernier réglage : placé à la fin.
+      return [...new Set([...known, ...DEFAULT_ORDER])];
+    } catch {
+      return DEFAULT_ORDER;
+    }
+  });
+  const set = (next: MobileTab[]) => {
+    setOrder(next);
+    try {
+      localStorage.setItem(NAV_KEY, JSON.stringify(next));
+    } catch {
+      // stockage indisponible : le choix vaut pour la session
+    }
+  };
+  return [order, set];
+}
 
 export function MobileBottomNav({
   active,
@@ -29,6 +61,7 @@ export function MobileBottomNav({
   onCenterPress,
   onCenterLongPress,
   center = "frais",
+  order,
 }: {
   active: MobileTab;
   onSelect: (tab: MobileTab) => void;
@@ -37,9 +70,16 @@ export function MobileBottomNav({
   onCenterLongPress?: () => void;
   /** Action du bouton central (réglable dans Paramètres) ; « off » : barre à quatre modules. */
   center?: CenterAction;
+  /** Ordre choisi dans Paramètres (voir useNavOrder). */
+  order: MobileTab[];
 }) {
   const badges = useAppBadges();
   const visible = useVisibleModules();
+  const slots = order
+    .map((id) => NAV_SLOTS.find((s) => s.id === id)!)
+    .filter((slot) => slot && canShowModule(visible, slot.module))
+    .slice(0, NAV_BAR_SIZE);
+  const half = Math.ceil(slots.length / 2);
   const action = CENTER_ACTIONS.find((a) => a.id === center) ?? CENTER_ACTIONS[0];
   const CenterIcon = action.icon;
   // Appui long (0,5 s) : l'appui court qui suit le relâchement est ignoré.
@@ -66,7 +106,7 @@ export function MobileBottomNav({
       style={{ boxShadow: "0 -10px 30px rgba(11,29,60,0.10)" }}
     >
       <div className={`grid h-16 items-center px-1 ${center === "off" ? "grid-cols-4" : "grid-cols-[1fr_1fr_1.1fr_1fr_1fr]"}`}>
-        {SLOTS.filter((slot) => canShowModule(visible, slot.module)).map((slot) => (
+        {(center === "off" ? slots : slots.slice(0, half)).map((slot) => (
           <NavSlot key={slot.id} slot={slot} badges={badges[slot.module]} active={active === slot.id} onClick={() => onSelect(slot.id)} />
         ))}
 
@@ -95,7 +135,7 @@ export function MobileBottomNav({
           </div>
         )}
 
-        {SLOTS_RIGHT.filter((slot) => canShowModule(visible, slot.module)).map((slot) => (
+        {center !== "off" && slots.slice(half).map((slot) => (
           <NavSlot key={slot.id} slot={slot} badges={badges[slot.module]} active={active === slot.id} onClick={() => onSelect(slot.id)} />
         ))}
       </div>
@@ -110,7 +150,7 @@ function NavSlot({
   badges,
   onClick,
 }: {
-  slot: Slot;
+  slot: NavSlotDef;
   active: boolean;
   badges?: AppBadge[];
   onClick: () => void;

@@ -3,7 +3,7 @@
 import { useCanPublish } from "@/hooks/board/useCanPublish";
 import { useCallback, useEffect, useState } from "react";
 import { MobileHeader } from "@/components/board/mobile/MobileHeader";
-import { MobileBottomNav, type MobileTab } from "@/components/board/mobile/MobileBottomNav";
+import { MobileBottomNav, useNavOrder, type MobileTab } from "@/components/board/mobile/MobileBottomNav";
 import { MobileCalendrierScreen } from "@/components/board/mobile/screens/MobileCalendrierScreen";
 import { MobileMailsScreen } from "@/components/board/mobile/screens/MobileMailsScreen";
 import { FraisScreen } from "@/components/board/screens/FraisScreen";
@@ -55,6 +55,7 @@ export function MobileShell() {
   // Bouton central, réglable dans Paramètres : « Frais » ouvre Mes frais (photo d'un justificatif,
   // déclaration…) ; « Publication réseaux » ouvre la caméra puis le centre de publication.
   const [centerPref, setCenter] = useCenterAction();
+  const [navOrder, setNavOrder] = useNavOrder();
   const canPublish = !!useCanPublish();
   // Publication réseaux réservée aux personnes habilitées : sinon, bouton Frais.
   const center = centerPref === "social" && !canPublish ? "frais" : centerPref;
@@ -188,6 +189,8 @@ export function MobileShell() {
       {settingsOpen && (
         <MobileSettingsSheet
           canPublish={canPublish}
+          navOrder={navOrder}
+          onNavOrderChange={setNavOrder}
           value={center}
           onChange={(a) => {
             setCenter(a);
@@ -204,6 +207,7 @@ export function MobileShell() {
         // Appui long : Frais ↔ Publication réseaux (seulement pour qui peut publier).
         onCenterLongPress={canPublish && center !== "off" ? () => setCenter(center === "frais" ? "social" : "frais") : undefined}
         center={center}
+        order={navOrder}
       />
     </div>
   );
