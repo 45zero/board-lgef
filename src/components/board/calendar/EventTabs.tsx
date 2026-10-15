@@ -29,7 +29,7 @@ import { formatTravel, type Travel } from "@/lib/board/geo";
 import { useEventTeam } from "@/hooks/board/useEventTeam";
 import { useEventComments } from "@/hooks/board/useEventComments";
 import { useEventFiles } from "@/hooks/board/useEventFiles";
-import { getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
+import { openEventFile, type EventFile } from "@/lib/board/eventFiles";
 import { ensureFilePublication, getMediaPublication, type MediaPublication } from "@/lib/board/mediaPublications";
 import dynamic from "next/dynamic";
 import { getPublishedForFile, detachFileFromPublications } from "@/app/actions/social";
@@ -1017,10 +1017,7 @@ function AttachmentRow({
   const isDrive = file.storage_provider === "drive";
   const uploader = personName(file.uploaded_by_profile);
 
-  const open = async (download: boolean) => {
-    const url = await getEventFileViewUrl(file, download ? file.filename : undefined);
-    if (url) window.open(url, "_blank", "noreferrer");
-  };
+  const open = (download: boolean) => openEventFile(file, download);
 
   return (
     <div className="rounded-btn border border-line px-3 py-2">

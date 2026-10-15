@@ -17,7 +17,7 @@ import {
   Receipt,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { listEventFiles, getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
+import { listEventFiles, openEventFile, type EventFile } from "@/lib/board/eventFiles";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { getArchivedReceipts, type ArchivedReceipt } from "@/app/actions/expenses";
 
@@ -122,10 +122,7 @@ function FileRow({ file }: { file: EventFile }) {
   const isVideo = (file.content_type ?? "").startsWith("video");
   const isImage = (file.content_type ?? "").startsWith("image");
 
-  const open = async (download: boolean) => {
-    const url = await getEventFileViewUrl(file, download && file.storage_provider === "supabase" ? file.filename : undefined);
-    if (url) window.open(url, "_blank", "noreferrer");
-  };
+  const open = (download: boolean) => openEventFile(file, download);
 
   return (
     <div className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0 hover:bg-hover">

@@ -56,12 +56,14 @@ import {
 } from "@/lib/board/mediaPublications";
 import {
   getEventFileViewUrl,
+  openEventFile,
   createEventFileShareUrl,
   uploadEventFiles,
   uploadStandaloneMedia,
   type EventFile,
 } from "@/lib/board/eventFiles";
 import { shareBoardDriveFile } from "@/app/actions/drive-share";
+import { getDriveStreamUrl } from "@/app/actions/media-stream";
 import {
   publishSocial,
   finishInstagram,
@@ -1938,8 +1940,12 @@ function PublicationCard({
   const hasMedia = !!first || !!standalone;
 
   const openMedia = async () => {
-    const url = first ? await getEventFileViewUrl(first) : standalone?.web_view_link;
-    if (url) window.open(url, "_blank", "noreferrer");
+    if (first) return openEventFile(first);
+    if (!standalone) return;
+    const win = window.open("", "_blank");
+    const url = await getDriveStreamUrl("publication", standalone.drive_file_id).catch(() => null);
+    if (!url) return win?.close();
+    if (win) win.location.href = url;
   };
 
   const share = async () => {

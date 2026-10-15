@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import { getDriveStreamUrl } from "@/app/actions/media-stream";
 import { publishSocial } from "@/app/actions/social";
 import { ensureFilePublication, publishPublicationToYoutube } from "@/lib/board/mediaPublications";
 import { describeFailures, type FacebookRegion, type PublishInfo, type StandaloneMedia } from "@/lib/social/targets";
@@ -244,12 +245,39 @@ export async function deleteEventFile(file: { id: string; path: string | null })
   }
 }
 
-/** Lien d'accès au fichier — URL signée pour Supabase Storage, lien Drive natif sinon. */
+/**
+ * Lien d'accès au fichier — URL signée pour Supabase Storage ; pour le Drive du board, relais signé
+ * du board (le lien Drive natif imposerait une demande d'accès à quiconque n'est pas le compte du board).
+ */
 export async function getEventFileViewUrl(file: EventFile, downloadAs?: string) {
   if (file.drive_purged_at) return null;
-  if (file.storage_provider === "drive") return file.drive_web_view_link;
+  if (file.storage_provider === "drive") {
+    return file.drive_file_id ? getDriveStreamUrl(file.event_id, file.drive_file_id, downloadAs) : file.drive_web_view_link;
+  }
   if (!file.path) return null;
   return createEventFileUrl(file.path, downloadAs);
+}
+
+/**
+ * Ouvre (ou télécharge) un fichier dont le lien se calcule côté serveur : l'onglet est ouvert tout
+ * de suite, sinon le navigateur le bloque une fois la réponse arrivée.
+ */
+export async function openEventFile(file: EventFile, download = false) {
+  if (download) {
+    const url = await getEventFileViewUrl(file, file.filename);
+    if (!url) return;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.filename;
+    a.rel = "noreferrer";
+    a.click();
+    return;
+  }
+  const win = window.open("", "_blank");
+  const url = await getEventFileViewUrl(file).catch(() => null);
+  if (!url) return win?.close();
+  if (win) win.location.href = url;
+  else window.open(url, "_blank", "noreferrer");
 }
 
 /** URL signée temporaire — `downloadAs` force le téléchargement sous ce nom au lieu d'un affichage inline. */
