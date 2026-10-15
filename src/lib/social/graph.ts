@@ -144,7 +144,9 @@ async function containerStatus(containerId: string, accessToken: string): Promis
 function instagramFailure(detail: string | undefined): string {
   const hint = /2207026/.test(detail ?? "")
     ? "vidéo hors normes Instagram : 1920 px max de large, H.264, 60 i/s max — exportez-la en 1080p"
-    : "format non supporté ?";
+    : /2207053/.test(detail ?? "")
+      ? "vidéo refusée par Instagram, souvent à plus de 60 images/s (ralenti 100/120p) ou trop lourde — réexportez-la en 1080p à 25 ou 50 i/s"
+      : "format non supporté ?";
   return `Le traitement du média Instagram a échoué — ${hint}${detail ? ` (${detail})` : ""}.`;
 }
 
