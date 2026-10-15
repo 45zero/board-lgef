@@ -5,6 +5,7 @@ import type { ComponentType } from "react";
 import { MailBrandIcon } from "@/components/board/mail/MailBrandIcon";
 import type { MobileTab } from "@/components/board/mobile/MobileBottomNav";
 import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
+import { useAppLabel } from "@/hooks/board/useFraisFlavor";
 
 type Target = MobileTab | "frais" | "audiovisuel";
 
@@ -33,6 +34,7 @@ export function MobileModulesMenu({
   onClose: () => void;
 }) {
   const visible = useVisibleModules();
+  const labelOf = useAppLabel();
   const items = ITEMS.filter((i) => canShowModule(visible, i.module) && (i.id !== "audiovisuel" || canPublish));
   return (
     <>
@@ -52,7 +54,7 @@ export function MobileModulesMenu({
                 }`}
               >
                 <Icon size={20} />
-                {i.label}
+                {labelOf({ id: i.module, label: i.label }).label}
               </button>
             );
           })}

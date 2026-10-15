@@ -134,7 +134,7 @@ export function TeamAttachments({
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-bold text-ink">{f.name}</p>
                   <p className="truncate text-[11px] text-ink-4">
-                    {[kind(f.mimeType, f.name), size(f.size), `ajouté par ${f.uploadedBy}`, f.fromGed ? "depuis la GED" : ""].filter(Boolean).join(" · ")}
+                    {[kind(f.mimeType, f.name), size(f.size), `ajouté par ${f.uploadedBy}`, f.fromGed ? "depuis mon Drive" : ""].filter(Boolean).join(" · ")}
                   </p>
                   {(f.place === "event" || f.toCenter) && (
                     <p className="mt-0.5 flex flex-wrap gap-1">
@@ -198,7 +198,7 @@ export function TeamAttachments({
               </button>
               <span>ou</span>
               <button type="button" disabled={!!progress} onClick={() => setGedOpen(true)} className="hover:text-ink hover:underline disabled:opacity-50">
-                choisir dans la GED
+                choisir dans mon Drive
               </button>
               <div className="absolute left-1/2 top-full -translate-x-1/2">
                 <GedPicker
@@ -274,9 +274,9 @@ function GedPicker({ open, onClose, onPick }: { open: boolean; onClose: () => vo
 
   return (
     <Popover open={open} onClose={onClose} width={340}>
-      <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-4">Choisir dans la GED</p>
+      <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-4">Choisir dans mon Drive</p>
       {accounts?.length === 0 ? (
-        <p className="text-xs text-ink-4">Aucun Drive personnel connecté — connectez un compte Google depuis la GED.</p>
+        <p className="text-xs text-ink-4">Aucun Drive personnel connecté — connectez un compte Google depuis l&rsquo;Explorateur.</p>
       ) : (
         <>
           {accounts && accounts.length > 1 && (

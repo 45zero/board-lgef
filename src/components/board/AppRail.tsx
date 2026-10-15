@@ -28,6 +28,7 @@ import {
   EyeOff,
   Send,
 } from "lucide-react";
+import { useAppLabel } from "@/hooks/board/useFraisFlavor";
 import { BOARD_APPS } from "@/lib/board/tokens";
 import { MailBrandIcon } from "@/components/board/mail/MailBrandIcon";
 import { DriveBrandIcon } from "@/components/board/DriveBrandIcon";
@@ -73,6 +74,7 @@ export function AppRail({
   const badges = useAppBadges();
   const visible = useVisibleModules();
   const hidden = useHiddenModules();
+  const labelOf = useAppLabel();
   return (
     <aside
       className={`flex min-h-0 shrink-0 flex-col justify-between gap-2 rounded-panel border border-line bg-card/70 py-3 shadow-bar backdrop-blur ${
@@ -102,7 +104,7 @@ export function AppRail({
             <button
               key={item.id}
               type="button"
-              title={[item.label, ...(hidden.has(item.id) ? ["masqué : visible seulement des administrateurs"] : []), ...(itemBadges ?? []).map((b) => b.title)].join(" — ")}
+              title={[labelOf(item).label, ...(hidden.has(item.id) ? ["masqué : visible seulement des administrateurs"] : []), ...(itemBadges ?? []).map((b) => b.title)].join(" — ")}
               onClick={() => onSelectApp(item.id)}
               className={`group relative flex items-center rounded-btn transition-colors ${
                 nav === "rail" ? "h-[50px] w-[50px] justify-center" : "gap-3 px-3 py-2.5"
@@ -115,7 +117,7 @@ export function AppRail({
               <span className={hidden.has(item.id) ? "opacity-50" : ""}>
                 <Icon size={18} />
               </span>
-              {nav === "list" && <span className={`text-sm font-semibold ${hidden.has(item.id) ? "opacity-60" : ""}`}>{item.label}</span>}
+              {nav === "list" && <span className={`text-sm font-semibold ${hidden.has(item.id) ? "opacity-60" : ""}`}>{labelOf(item).label}</span>}
               {hidden.has(item.id) && (
                 <EyeOff size={10} className={`absolute ${nav === "rail" ? "bottom-1 right-1" : "right-2 top-1/2 -translate-y-1/2"} ${isActive ? "text-white" : "text-warn"}`} />
               )}

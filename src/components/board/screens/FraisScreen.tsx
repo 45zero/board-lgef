@@ -4,8 +4,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { Receipt, ShieldCheck, X, Search, ChevronRight, Download, Settings, Check, Camera, Paperclip } from "lucide-react";
+import { Receipt, ShieldCheck, X, ChevronRight, Download, Settings, Check, Camera, Paperclip, FileText, Wallet, Briefcase } from "lucide-react";
+import { useFraisFlavor } from "@/hooks/board/useFraisFlavor";
+import { FRAIS_FLAVORS } from "@/lib/board/fraisFlavor";
+import { MyInvoices, PrestataireInvoices } from "@/components/board/invoices/InvoiceTabs";
 import {
   declareExpenses,
   getMyExpenses,
@@ -27,14 +29,25 @@ import { ExpenseStatusBadge, EXPENSE_STATUS_META, confirmNoExpense, formatEuros 
 import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
 import { OpenEventButton } from "@/components/board/calendar/OpenEventButton";
+import {
+  FilterChip,
+  FiltersRow,
+  GroupHeader,
+  MONTH_LONG,
+  PeriodMenu,
+  YearMonthBar,
+  fmtDate,
+  monthIndexOf,
+  monthKey,
+  monthLabel,
+  normalize,
+  yearOf,
+  type MobileMenu,
+  type Period,
+} from "@/components/board/expenses/PeriodNav";
 
-type Tab = "mine" | "validate" | "settings";
+type Tab = "invoices" | "mine" | "validate" | "allFrais" | "prestataires" | "settings";
 
-/** Période choisie (année, mois ou toute l'année), commune aux onglets. */
-type Period = { year: number; monthIdx: number | null; setYear: (y: number) => void; setMonthIdx: (m: number | null) => void };
-
-/** Appli mobile : la période se choisit dans un menu déroulé depuis l'en-tête (comme les dossiers de Mails). */
-type MobileMenu = { host: HTMLElement | null; open: boolean; onClose: () => void };
 type MineFilter = "a_declarer" | "upcoming" | "pending" | "approved" | "rejected" | "all";
 
 const MINE_FILTERS: { id: MineFilter; label: string }[] = [
@@ -46,265 +59,6 @@ const MINE_FILTERS: { id: MineFilter; label: string }[] = [
   { id: "all", label: "Tous" },
 ];
 
-const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
-
-const monthKey = (iso: string) => iso.slice(0, 7);
-const monthLabel = (key: string) => {
-  const [y, m] = key.split("-").map(Number);
-  const label = new Date(y, m - 1, 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
-  return label.charAt(0).toUpperCase() + label.slice(1);
-};
-const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-
-/** Recherche + mois (+ personne) : barre de filtres commune à « Mes frais » et « À valider ». */
-function FiltersRow({
-  query,
-  onQuery,
-  months,
-  month,
-  onMonth,
-  people,
-  person,
-  onPerson,
-  children,
-}: {
-  query: string;
-  onQuery: (v: string) => void;
-  months?: string[];
-  month?: string;
-  onMonth?: (v: string) => void;
-  people?: { id: string; name: string }[];
-  person?: string;
-  onPerson?: (v: string) => void;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="flex min-w-[200px] flex-1 items-center gap-2 rounded-btn border border-line bg-card px-2.5 py-1.5">
-        <Search size={13} className="text-ink-4" />
-        <input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Rechercher…" className="w-full bg-transparent text-sm outline-none" />
-      </div>
-      {months && onMonth && (
-        <select value={month} onChange={(e) => onMonth(e.target.value)} className="rounded-btn border border-line bg-card px-2 py-1.5 text-sm outline-none">
-          <option value="">Tous les mois</option>
-          {months.map((m) => (
-            <option key={m} value={m}>
-              {monthLabel(m)}
-            </option>
-          ))}
-        </select>
-      )}
-      {people && onPerson && (
-        <select value={person} onChange={(e) => onPerson(e.target.value)} className="max-w-[200px] rounded-btn border border-line bg-card px-2 py-1.5 text-sm outline-none">
-          <option value="">Toutes les personnes</option>
-          {people.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      )}
-      {children}
-    </div>
-  );
-}
-
-const MONTH_LONG = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
-const yearOf = (iso: string) => Number(iso.slice(0, 4));
-const monthIndexOf = (iso: string) => Number(iso.slice(5, 7)) - 1;
-
-/**
- * Navigation commune de Frais, en colonne à gauche : l'année, puis ses mois (total et nombre de
- * fiches de chacun) ; « Toute l'année » sans mois choisi.
- */
-function YearMonthBar({
-  year,
-  onYear,
-  month,
-  onMonth,
-  stats,
-}: {
-  year: number;
-  onYear: (y: number) => void;
-  month: number | null;
-  onMonth: (m: number | null) => void;
-  stats: (m: number | null) => { count: number; total: number };
-}) {
-  const row = (active: boolean, empty: boolean) =>
-    `flex w-full items-center justify-between gap-2 rounded-btn px-3 py-2 text-left text-[13px] ${
-      active ? "bg-navy font-bold text-white" : empty ? "text-ink-4 hover:bg-hover" : "font-semibold text-ink-2 hover:bg-hover"
-    }`;
-  const figure = (active: boolean, st: { count: number; total: number }) => (
-    <span className={`shrink-0 text-right font-mono text-[10px] leading-tight ${active ? "text-white/80" : "text-ink-4"}`}>
-      {st.count ? (
-        <>
-          {formatEuros(st.total)}
-          <span className="block">
-            {st.count} fiche{st.count > 1 ? "s" : ""}
-          </span>
-        </>
-      ) : (
-        "—"
-      )}
-    </span>
-  );
-  const all = stats(null);
-  return (
-    <>
-      <MobileYearMonthBar year={year} onYear={onYear} month={month} onMonth={onMonth} stats={stats} />
-    <aside className="sticky top-0 hidden w-[200px] shrink-0 self-start rounded-panel border border-line bg-card p-2 md:block">
-      <div className="mb-2 flex items-center justify-between rounded-btn bg-subtle px-1 py-1">
-        <button onClick={() => onYear(year - 1)} aria-label="Année précédente" className="rounded-md p-1 text-ink-3 hover:bg-hover">
-          <ChevronRight size={14} className="rotate-180" />
-        </button>
-        <span className="text-base font-extrabold text-ink">{year}</span>
-        <button onClick={() => onYear(year + 1)} aria-label="Année suivante" className="rounded-md p-1 text-ink-3 hover:bg-hover">
-          <ChevronRight size={14} />
-        </button>
-      </div>
-      <button onClick={() => onMonth(null)} className={row(month === null, all.count === 0)}>
-        <span>Toute l&rsquo;année</span>
-        {figure(month === null, all)}
-      </button>
-      <div className="my-1 border-t border-line" />
-      {MONTH_LONG.map((label, i) => {
-        const st = stats(i);
-        return (
-          <button key={label} onClick={() => onMonth(i)} className={row(month === i, st.count === 0)}>
-            <span>{label}</span>
-            {figure(month === i, st)}
-          </button>
-        );
-      })}
-    </aside>
-    </>
-  );
-}
-
-/** Mobile : menu déroulé sous l'en-tête — l'année, puis « Toute l'année » et les douze mois avec leurs totaux. */
-function PeriodMenu({
-  menu,
-  period,
-  stats,
-}: {
-  menu: MobileMenu;
-  period: Period;
-  stats: (m: number | null) => { count: number; total: number };
-}) {
-  if (!menu.host || !menu.open) return null;
-  const { year, monthIdx, setYear, setMonthIdx } = period;
-  const row = (key: string, active: boolean, label: string, st: { count: number; total: number }, onClick: () => void) => (
-    <button
-      key={key}
-      onClick={onClick}
-      className={`flex w-full items-center justify-between gap-2 rounded-btn px-3 py-2.5 text-left text-sm font-semibold ${
-        active ? "bg-sel-bg text-link" : st.count ? "text-ink-2 active:bg-hover" : "text-ink-4 active:bg-hover"
-      }`}
-    >
-      <span>{label}</span>
-      <span className="font-mono text-[11px] font-normal">
-        {st.count ? `${formatEuros(st.total)} · ${st.count} fiche${st.count > 1 ? "s" : ""}` : "—"}
-      </span>
-    </button>
-  );
-  const pick = (m: number | null) => {
-    setMonthIdx(m);
-    menu.onClose();
-  };
-  return createPortal(
-    <>
-      <div className="absolute inset-0 z-30 bg-black/30" onClick={menu.onClose} />
-      <div className="absolute inset-x-0 top-0 z-40 max-h-[80%] overflow-y-auto rounded-b-modal border-b border-line bg-card pb-3 shadow-modal">
-        <div className="px-4 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">Année</div>
-        <div className="mx-4 flex items-center justify-between rounded-btn bg-subtle px-1 py-1">
-          <button onClick={() => setYear(year - 1)} aria-label="Année précédente" className="rounded-md p-2 text-ink-3">
-            <ChevronRight size={16} className="rotate-180" />
-          </button>
-          <span className="text-base font-extrabold text-ink">{year}</span>
-          <button onClick={() => setYear(year + 1)} aria-label="Année suivante" className="rounded-md p-2 text-ink-3">
-            <ChevronRight size={16} />
-          </button>
-        </div>
-        <div className="px-4 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">Mois</div>
-        <div className="px-2">
-          {row("all", monthIdx === null, "Toute l'année", stats(null), () => pick(null))}
-          {MONTH_LONG.map((label, i) => row(label, monthIdx === i, label, stats(i), () => pick(i)))}
-        </div>
-      </div>
-    </>,
-    menu.host
-  );
-}
-
-const MONTH_SHORT = ["Janv.", "Févr.", "Mars", "Avr.", "Mai", "Juin", "Juil.", "Août", "Sept.", "Oct.", "Nov.", "Déc."];
-
-/** Mobile : l'année (flèches + total), puis les mois en bandeau qui défile, le mois choisi centré. */
-function MobileYearMonthBar({
-  year,
-  onYear,
-  month,
-  onMonth,
-  stats,
-}: {
-  year: number;
-  onYear: (y: number) => void;
-  month: number | null;
-  onMonth: (m: number | null) => void;
-  stats: (m: number | null) => { count: number; total: number };
-}) {
-  const stripRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    stripRef.current?.querySelector<HTMLElement>("[data-active='true']")?.scrollIntoView({ inline: "center", block: "nearest" });
-  }, [month, year]);
-  const all = stats(null);
-  const chip = (key: string, active: boolean, label: string, st: { count: number; total: number }, onClick: () => void) => (
-    <button
-      key={key}
-      data-active={active}
-      onClick={onClick}
-      className={`flex shrink-0 flex-col items-center rounded-btn px-3 py-1.5 ${
-        active ? "bg-navy text-white" : st.count ? "bg-card text-ink-2 ring-1 ring-line" : "bg-card text-ink-4 ring-1 ring-line"
-      }`}
-    >
-      <span className="text-xs font-bold">{label}</span>
-      <span className={`font-mono text-[10px] ${active ? "text-white/80" : "text-ink-4"}`}>{st.count ? formatEuros(st.total) : "—"}</span>
-    </button>
-  );
-  return (
-    <div className="space-y-2 md:hidden">
-      <div className="flex items-center justify-between rounded-btn border border-line bg-card px-1 py-1">
-        <button onClick={() => onYear(year - 1)} aria-label="Année précédente" className="rounded-md p-2 text-ink-3">
-          <ChevronRight size={16} className="rotate-180" />
-        </button>
-        <div className="text-center">
-          <div className="text-base font-extrabold text-ink">{year}</div>
-          <div className="font-mono text-[10px] text-ink-4">
-            {all.count ? `${formatEuros(all.total)} · ${all.count} fiche${all.count > 1 ? "s" : ""}` : "Aucune fiche"}
-          </div>
-        </div>
-        <button onClick={() => onYear(year + 1)} aria-label="Année suivante" className="rounded-md p-2 text-ink-3">
-          <ChevronRight size={16} />
-        </button>
-      </div>
-      <div ref={stripRef} className="-mx-3 flex gap-1.5 overflow-x-auto px-3 py-0.5">
-        {chip("all", month === null, "Année", all, () => onMonth(null))}
-        {MONTH_SHORT.map((label, i) => chip(label, month === i, label, stats(i), () => onMonth(i)))}
-      </div>
-    </div>
-  );
-}
-
-function GroupHeader({ label, total, count }: { label: string; total: number; count: number }) {
-  return (
-    <div className="flex items-center justify-between bg-subtle px-4 py-1.5 text-[11px] font-bold text-ink-3">
-      <span>{label}</span>
-      <span>
-        {count} fiche{count > 1 ? "s" : ""} · {formatEuros(total)}
-      </span>
-    </div>
-  );
-}
-
 function OrgChip({ eventType }: { eventType: MyExpenseItem["eventType"] }) {
   if (!eventType) return null;
   const org = EVENT_TYPE_TO_ORG[eventType];
@@ -313,19 +67,6 @@ function OrgChip({ eventType }: { eventType: MyExpenseItem["eventType"] }) {
     <span className="rounded-full px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: c.bg, color: c.ink }}>
       {ORG_LABELS[org]}
     </span>
-  );
-}
-
-function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
-        active ? "bg-navy text-white" : "bg-subtle text-ink-3 hover:bg-hover"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -724,8 +465,8 @@ function RejectModal({ sub, onClose, onDone }: { sub: SubmissionToReview; onClos
   );
 }
 
-/** Déclarations des personnes dont je suis le N+1 — uniquement elles. */
-function ToValidate({ onChanged, period, menu }: { onChanged: () => void; period: Period; menu?: MobileMenu }) {
+/** Déclarations des personnes dont je suis le N+1 (`scope` « mine »), ou de tout le monde (GED, « all »). */
+function ToValidate({ onChanged, period, menu, scope = "mine" }: { onChanged: () => void; period: Period; menu?: MobileMenu; scope?: "mine" | "all" }) {
   const [status, setStatus] = useState<"pending" | "approved" | "rejected">("pending");
   const [subs, setSubs] = useState<SubmissionToReview[] | null>(null);
   const [open, setOpen] = useState<SubmissionToReview | null>(null);
@@ -734,7 +475,7 @@ function ToValidate({ onChanged, period, menu }: { onChanged: () => void; period
   const [query, setQuery] = useState("");
   const { year, monthIdx } = period;
 
-  const load = useCallback(() => getSubmissionsToReview(status, "mine").then(setSubs).catch(() => setSubs([])), [status]);
+  const load = useCallback(() => getSubmissionsToReview(status, scope).then(setSubs).catch(() => setSubs([])), [status, scope]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -788,7 +529,7 @@ function ToValidate({ onChanged, period, menu }: { onChanged: () => void; period
         <div className="p-6 text-sm text-ink-4">Chargement…</div>
       ) : visible.length === 0 ? (
         <div className="rounded-panel border border-dashed border-line p-8 text-center text-sm text-ink-4">
-          {status === "pending" ? "Aucune note de frais de votre équipe en attente de validation." : "Aucune note de frais."}
+          {status === "pending" ? (scope === "all" ? "Aucune note de frais en attente de validation." : "Aucune note de frais de votre équipe en attente de validation.") : "Aucune note de frais."}
         </div>
       ) : (
         <div className="overflow-hidden rounded-panel border border-line bg-card">
@@ -886,13 +627,19 @@ function ToValidate({ onChanged, period, menu }: { onChanged: () => void; period
 const headerBtn = "flex h-8 w-8 items-center justify-center rounded-full text-white/85 hover:bg-white/10";
 
 /**
- * Frais : « Mes frais » (événements où je suis sollicité → déclarer), « À valider » (si je suis N+1
- * de quelqu'un, ou admin). Le N+1 de chacun se règle dans Administration → Utilisateurs.
+ * Module Frais, nommé selon le profil (fraisFlavor.ts) :
+ * - Frais (salariés, réseau, bénévoles) : « Mes frais », « À valider » si je suis N+1, Paramètres ;
+ * - Factures (prestataires) : « Mes factures » d'abord, puis les mêmes onglets ;
+ * - GED (administrateurs) : en plus, « Frais » et « Prestataires » de tout le monde.
+ * « À valider » regroupe les notes de frais et, si j'ai des prestataires, leurs factures.
+ * Le N+1 de chacun se règle dans Administration → Utilisateurs.
  * `mobile` (appli mobile) : en-tête propre — retour, période dans le menu du titre, Photo / Joindre
  * et Paramètres en haut —, mois en cours par défaut et événements à venir dans « À déclarer ».
  */
 export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}) {
-  const [tab, setTab] = useState<Tab>("mine");
+  const flavor = useFraisFlavor();
+  const [tab, setTab] = useState<Tab>(flavor === "factures" ? "invoices" : "mine");
+  const [validateKind, setValidateKind] = useState<"frais" | "factures">("frais");
   const [scope, setScope] = useState<Awaited<ReturnType<typeof getMyValidatorScope>> | null>(null);
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [monthIdx, setMonthIdx] = useState<number | null>(() => (mobile ? new Date().getMonth() : null));
@@ -909,10 +656,20 @@ export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}
   useEffect(() => {
     void loadScope();
   }, [loadScope]);
+  // Profil connu après coup (tout premier chargement) : un prestataire arrive sur ses factures.
+  const [flavorSeen, setFlavorSeen] = useState(flavor);
+  if (flavorSeen !== flavor) {
+    setFlavorSeen(flavor);
+    setTab(flavor === "factures" ? "invoices" : "mine");
+  }
 
+  const isGed = flavor === "ged";
   const tabs: { id: Tab; label: string; icon: typeof Receipt; badge?: number; show: boolean }[] = [
+    { id: "invoices", label: "Mes factures", icon: FileText, show: flavor === "factures" },
     { id: "mine", label: "Mes frais", icon: Receipt, show: true },
-    { id: "validate", label: "À valider", icon: ShieldCheck, badge: scope?.pending, show: !!scope?.isValidator },
+    { id: "validate", label: "À valider", icon: ShieldCheck, badge: (scope?.pending ?? 0) + (scope?.pendingInvoices ?? 0), show: !!scope?.isValidator },
+    { id: "allFrais", label: "Frais", icon: Wallet, show: isGed },
+    { id: "prestataires", label: "Prestataires", icon: Briefcase, show: isGed },
     // Mobile : Paramètres est la roue crantée de l'en-tête.
     { id: "settings", label: "Paramètres", icon: Settings, show: !mobile },
   ];
@@ -951,8 +708,26 @@ export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}
       {/* Mobile : justificatifs pris par les boutons de l'en-tête, à vérifier avant ajout (reste monté d'un onglet à l'autre). */}
       {mobile && <ExpenseImport ref={importRef} hideDropzone onAdded={() => setReloadKey((k) => k + 1)} />}
 
+      {tab === "invoices" && <MyInvoices period={period} menu={menu} />}
       {tab === "mine" && <MyExpenses period={period} menu={menu} reloadKey={reloadKey} />}
-      {tab === "validate" && <ToValidate onChanged={() => void loadScope()} period={period} menu={menu} />}
+      {tab === "validate" && scope?.hasPrestataireReports && (
+        <div className="flex gap-1.5">
+          <FilterChip active={validateKind === "frais"} onClick={() => setValidateKind("frais")}>
+            Notes de frais{scope.pending ? ` (${scope.pending})` : ""}
+          </FilterChip>
+          <FilterChip active={validateKind === "factures"} onClick={() => setValidateKind("factures")}>
+            Factures prestataires{scope.pendingInvoices ? ` (${scope.pendingInvoices})` : ""}
+          </FilterChip>
+        </div>
+      )}
+      {tab === "validate" &&
+        (validateKind === "factures" && scope?.hasPrestataireReports ? (
+          <PrestataireInvoices scope="mine" period={period} menu={menu} onChanged={() => void loadScope()} />
+        ) : (
+          <ToValidate onChanged={() => void loadScope()} period={period} menu={menu} />
+        ))}
+      {tab === "allFrais" && <ToValidate scope="all" onChanged={() => void loadScope()} period={period} menu={menu} />}
+      {tab === "prestataires" && <PrestataireInvoices scope="all" period={period} menu={menu} onChanged={() => void loadScope()} />}
       {tab === "settings" && <ExpenseMailSettings />}
     </div>
   );
@@ -963,17 +738,17 @@ export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}
   return (
     <div className="flex h-full flex-col">
       <MobileHeader
-        title="Frais"
+        title={FRAIS_FLAVORS[flavor].label}
         kicker={tab === "settings" ? "Paramètres" : periodLabel}
         onBack={mobile.onBack}
         onLogoClick={() => {
-          if (tab === "settings") setTab("mine");
+          if (tab === "settings") setTab(flavor === "factures" ? "invoices" : "mine");
           setMenuOpen((o) => !o);
         }}
         menuOpen={menuOpen}
         onSettings={() => {
           setMenuOpen(false);
-          setTab((t) => (t === "settings" ? "mine" : "settings"));
+          setTab((t) => (t === "settings" ? (flavor === "factures" ? "invoices" : "mine") : "settings"));
         }}
         app="frais"
         actions={

@@ -3,13 +3,15 @@
 import { useRef, useState } from "react";
 import { CalendarDays, Check, FileUp, Loader2, MapPin, MessageSquareQuote } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import type { ActionResult } from "@/lib/board/actionResult";
 import { confirmInvoiceUpload, prepareInvoiceUpload, type InvoiceRequestInfo, type InvoiceRequestItem } from "@/app/actions/invoice-public";
 
 const euros = (n: number) => n.toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
 const longDate = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-type State = "todo" | "pending" | "approved" | "rejected" | "sent";
-const stateOf = (item: InvoiceRequestItem): State =>
+export type InvoiceItemState = "todo" | "pending" | "approved" | "rejected" | "sent";
+type State = InvoiceItemState;
+export const stateOf = (item: InvoiceRequestItem): State =>
   !item.existing ? "todo" : item.existing.status === "approved" ? "approved" : item.existing.status === "rejected" ? "rejected" : "pending";
 
 /**
@@ -61,7 +63,16 @@ export function InvoiceUploadCard({ token, info }: { token: string; info: Invoic
 
         <div className="space-y-3">
           {info.items.map((item) => (
-            <ItemCard key={item.eventId} token={token} item={item} state={states[item.eventId]} onSent={() => setStates((s) => ({ ...s, [item.eventId]: "sent" }))} />
+            <InvoiceItemCard
+              key={item.eventId}
+              item={item}
+              state={states[item.eventId]}
+              upload={{
+                prepare: (f) => prepareInvoiceUpload(token, item.eventId, f.name, f.type, f.size),
+                confirm: (path, amount, comment) => confirmInvoiceUpload(token, item.eventId, path, amount, comment),
+              }}
+              onSent={() => setStates((s) => ({ ...s, [item.eventId]: "sent" }))}
+            />
           ))}
         </div>
 
@@ -75,7 +86,14 @@ export function InvoiceUploadCard({ token, info }: { token: string; info: Invoic
   );
 }
 
-function ItemCard({ token, item, state, onSent }: { token: string; item: InvoiceRequestItem; state: State; onSent: () => void }) {
+/** Envoi d'une facture : lien signé puis enregistrement (lien sans compte, ou prestataire connecté). */
+export type InvoiceUpload = {
+  prepare: (file: File) => Promise<ActionResult<{ path: string; uploadToken: string }>>;
+  confirm: (path: string, amountTtc: number, comment: string) => Promise<ActionResult<void>>;
+};
+
+/** Une intervention : date, lieu, montant convenu, statut, et son dépôt de facture. */
+export function InvoiceItemCard({ item, state, upload, onSent }: { item: InvoiceRequestItem; state: State; upload: InvoiceUpload; onSent: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [amount, setAmount] = useState(item.expectedAmount !== null ? String(item.expectedAmount).replace(".", ",") : "");
   const [comment, setComment] = useState("");
@@ -91,11 +109,11 @@ function ItemCard({ token, item, state, onSent }: { token: string; item: Invoice
     setBusy(true);
     setError(null);
     try {
-      const prep = await prepareInvoiceUpload(token, item.eventId, file.name, file.type, file.size);
+      const prep = await upload.prepare(file);
       if (!prep.ok) throw new Error(prep.error);
       const { error: upErr } = await createClient().storage.from("invoices").uploadToSignedUrl(prep.data.path, prep.data.uploadToken, file, { contentType: file.type });
       if (upErr) throw new Error(upErr.message);
-      const conf = await confirmInvoiceUpload(token, item.eventId, prep.data.path, parsed, comment);
+      const conf = await upload.confirm(prep.data.path, parsed, comment);
       if (!conf.ok) throw new Error(conf.error);
       onSent();
     } catch (e) {

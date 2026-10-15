@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { ALL_MODULE_IDS, type DirectoryPerson, type ModuleRule } from "@/lib/board/modules";
 import type { SpecialtyLite } from "@/lib/board/poles";
+import { COMPTA_SLUG, fraisFlavorOf, type FraisFlavor } from "@/lib/board/fraisFlavor";
 
 // Accès aux modules (sql/2026-09-29_module_access.sql). Lecture de ses propres modules pour tout
 // le monde ; règles, annuaire et modifications réservés aux administrateurs et super users.
@@ -121,6 +122,18 @@ async function getUserModulesImpl(userId: string): Promise<string[]> {
   return modulesVisibleTo(userId);
 }
 
+/** Module Frais selon le profil (voir fraisFlavor.ts) : GED pour les administrateurs et la compta, Factures pour les prestataires. */
+async function getMyFraisFlavorImpl(): Promise<FraisFlavor> {
+  const { userId } = await currentUser();
+  const service = createServiceClient();
+  const [{ data: me }, { data: links }] = await Promise.all([
+    service.from("profiles").select("role").eq("id", userId).single(),
+    service.from("profile_specialties").select("specialties!inner(slug)").eq("user_id", userId).in("specialties.slug", ["tech-prestataire", COMPTA_SLUG]),
+  ]);
+  const slugs = ((links ?? []) as unknown as { specialties: { slug: string } }[]).map((l) => l.specialties.slug);
+  return fraisFlavorOf(me?.role ?? "user", slugs);
+}
+
 /* ---------- Actions exportées : erreurs renvoyées, pas levées (voir actionResult.ts) ---------- */
 
 export async function getMyVisibleModules() {
@@ -133,6 +146,10 @@ export async function getModuleAccessAdmin() {
 
 export async function saveModuleRule(rule: ModuleRule) {
   return toResult(() => saveModuleRuleImpl(rule));
+}
+
+export async function getMyFraisFlavor() {
+  return toResult(() => getMyFraisFlavorImpl());
 }
 
 export async function getUserModules(userId: string) {

@@ -78,7 +78,7 @@ export const BOARD_APPS: BoardApp[] = [
   { id: "pointage", label: "Pointage", kicker: "TEMPS DE TRAVAIL" },
   { id: "formations", label: "Formations", kicker: "PARCOURS" },
   { id: "arbitrage", label: "Arbitrage", kicker: "DESIGNATIONS" },
-  { id: "ged", label: "GED", kicker: "DOCUMENTS" },
+  { id: "ged", label: "Explorateur", kicker: "GOOGLE DRIVE" },
   { id: "drive", label: "Drive", kicker: "ARCHIVAGE AUTO" },
   { id: "transfer", label: "LGEF Transfer", kicker: "ENVOI DE FICHIERS" },
   { id: "inscription", label: "Inscription", kicker: "RSVP CLUBS" },

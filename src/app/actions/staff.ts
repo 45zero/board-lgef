@@ -10,6 +10,9 @@ import { getBoardDriveAccount } from "@/lib/board/teamDrive";
 import { archiveSubFolder, eventArchiveFolder } from "@/lib/google/archiveFolders";
 import { uploadFile } from "@/lib/google/drive";
 import { isTransactionalEmailConfigured, sendTransactionalBatch } from "@/lib/email/transactional";
+import { prepareInvoiceDeposit, recordInvoiceDeposit } from "@/lib/board/invoiceDeposit";
+import { COMPTA_SLUG } from "@/lib/board/fraisFlavor";
+import type { InvoiceRequestItem } from "@/app/actions/invoice-public";
 
 // Effectif (sql/2026-10-03_staff_costs.sql) : mes N-1 (profiles.expense_validator_id = moi), tout le
 // monde pour un administrateur. Le coût d'une personne = son forfait par intervention (staff_rates) —
@@ -30,18 +33,21 @@ async function viewer() {
   const userId = data?.claims?.sub;
   if (!userId) throw new Error("Non authentifié");
   const service = createServiceClient();
-  const [{ data: me }, { data: reports }] = await Promise.all([
+  const [{ data: me }, { data: reports }, { data: compta }] = await Promise.all([
     service.from("profiles").select("role").eq("id", userId).single(),
     service.from("profiles").select("id").eq("expense_validator_id", userId),
+    service.from("profile_specialties").select("user_id, specialties!inner(slug)").eq("user_id", userId).eq("specialties.slug", COMPTA_SLUG),
   ]);
   const isAdmin = me?.role === "admin" || me?.role === "super_user";
+  // Compta (GED) : voit et valide les factures de tous les prestataires, comme un administrateur.
+  const isCompta = (compta ?? []).length > 0;
   const reportIds = (reports ?? []).map((r) => r.id).filter((id) => id !== userId);
-  return { userId, service, isAdmin, reportIds };
+  return { userId, service, isAdmin, isCompta, reportIds };
 }
 type Viewer = Awaited<ReturnType<typeof viewer>>;
 
 async function requireCanManage(v: Viewer, personId: string) {
-  if (v.isAdmin || v.reportIds.includes(personId)) return;
+  if (v.isAdmin || v.isCompta || v.reportIds.includes(personId)) return;
   throw new Error("Vous n'êtes ni le N+1 de cette personne ni administrateur.");
 }
 
@@ -240,7 +246,7 @@ async function loadPeople(service: Service, ids: string[] | null): Promise<Staff
 export const getStaffOverview = async (year: number, scope: "mine" | "all") =>
   toResult(async (): Promise<StaffOverview> => {
     const v = await viewer();
-    const all = scope === "all" && v.isAdmin;
+    const all = scope === "all" && (v.isAdmin || v.isCompta);
     const loaded = await loadPeople(v.service, all ? null : v.reportIds);
     // Vue « tous » : les personnes qui ont un statut (salarié, réseau, prestataire, bénévole).
     const people = all ? loaded.filter((p) => p.status) : loaded;
@@ -578,4 +584,47 @@ ${link ? `<p style="margin:18px 0"><a href="${link}" style="display:inline-block
 
     const archived = decision === "approved" && event ? await archiveInvoice(v.service, invoice, who, event).catch((e) => (console.error("[staff.reviewInvoice.archive]", e), 0)) : 0;
     return { archived };
+  });
+
+/* ---------- Factures : le prestataire connecté (module Frais → « Factures ») ---------- */
+
+/** Mes interventions confirmées de l'année, avec la facture déposée pour chacune. */
+export const getMyInvoiceItems = async (year: number) =>
+  toResult(async (): Promise<InvoiceRequestItem[]> => {
+    const v = await viewer();
+    const list = (await loadEngagements(v.service, [v.userId], new Date(year, 0, 1).toISOString(), new Date(year + 1, 0, 1).toISOString())).filter((e) => e.confirmed);
+    if (!list.length) return [];
+    const ids = list.map((e) => e.eventId);
+    const { data: events } = await v.service.from("events").select("id, location").in("id", ids);
+    const locationBy = new Map((events ?? []).map((e) => [e.id, e.location as string | null]));
+    return list.map((e) => ({
+      eventId: e.eventId,
+      eventTitle: e.title,
+      eventStart: e.start,
+      location: locationBy.get(e.eventId) ?? null,
+      expectedAmount: e.amount || null,
+      existing: e.invoice ? { status: e.invoice.status, amountTtc: e.invoice.amountTtc, comment: e.invoice.comment } : null,
+    }));
+  });
+
+/** Je dépose une facture : seulement pour un événement où j'interviens. */
+async function requireMyEngagement(v: Viewer, eventId: string) {
+  const mine = await loadEngagements(v.service, [v.userId], "1970-01-01T00:00:00.000Z", "2100-01-01T00:00:00.000Z", [eventId]);
+  if (!mine.some((e) => e.confirmed)) throw new Error("Vous n'intervenez pas sur cet événement.");
+}
+
+export const prepareMyInvoiceUpload = async (eventId: string, filename: string, contentType: string, size: number) =>
+  toResult(async () => {
+    const v = await viewer();
+    await requireMyEngagement(v, eventId);
+    return prepareInvoiceDeposit(v.userId, filename, contentType, size);
+  });
+
+/** Enregistre ma facture ; mon N+1 est prévenu. */
+export const confirmMyInvoiceUpload = async (eventId: string, path: string, amountTtc: number | null, comment: string) =>
+  toResult(async () => {
+    const v = await viewer();
+    await requireMyEngagement(v, eventId);
+    const { data: me } = await v.service.from("profiles").select("expense_validator_id").eq("id", v.userId).single();
+    await recordInvoiceDeposit({ userId: v.userId, eventId, path, amountTtc, comment }, me?.expense_validator_id ? [me.expense_validator_id] : []);
   });

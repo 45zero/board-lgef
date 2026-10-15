@@ -1,5 +1,6 @@
 "use server";
 
+import { COMPTA_SLUG } from "@/lib/board/fraisFlavor";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { archiveReceipts } from "@/lib/board/expenseArchive";
@@ -99,14 +100,17 @@ async function currentUser() {
   const userId = data?.claims?.sub;
   if (!userId) throw new Error("Non authentifié");
   const service = createServiceClient();
-  const [{ data: profile }, { data: settings }] = await Promise.all([
+  const [{ data: profile }, { data: settings }, { data: compta }] = await Promise.all([
     service.from("profiles").select("id, role").eq("id", userId).single(),
     service.from("board_settings").select("expense_manager_ids").eq("id", true).single(),
+    service.from("profile_specialties").select("user_id, specialties!inner(slug)").eq("user_id", userId).eq("specialties.slug", COMPTA_SLUG),
   ]);
   const isAdmin = profile?.role === "admin" || profile?.role === "super_user";
   // Régler les N+1 : administrateurs + personnes désignées par un administrateur.
   const canManageValidators = isAdmin || (settings?.expense_manager_ids ?? []).includes(userId);
-  return { userId, isAdmin, canManageValidators, service };
+  // Voir et valider les frais de tout le monde (GED) : administrateurs et compta.
+  const seesAll = isAdmin || (compta ?? []).length > 0;
+  return { userId, isAdmin, seesAll, canManageValidators, service };
 }
 
 
@@ -241,21 +245,37 @@ export async function declareExpenses(target: ExpenseTarget, noExpense = false):
   }
 }
 
-/** Suis-je N+1 d'au moins une personne (ou admin) ? — affiche l'onglet « À valider ». */
-export async function getMyValidatorScope(): Promise<{ isValidator: boolean; isAdmin: boolean; canManageValidators: boolean; pending: number }> {
+/**
+ * Suis-je N+1 d'au moins une personne (ou admin) ? — affiche l'onglet « À valider ». Avec les factures
+ * de mes prestataires (spécialité tech-prestataire) : en attente, et s'il y en a à suivre.
+ */
+export async function getMyValidatorScope(): Promise<{
+  isValidator: boolean;
+  isAdmin: boolean;
+  canManageValidators: boolean;
+  pending: number;
+  hasPrestataireReports: boolean;
+  pendingInvoices: number;
+}> {
   const { userId, isAdmin, canManageValidators, service } = await currentUser();
   const { data: reports } = await service.from("profiles").select("id").eq("expense_validator_id", userId);
   const ids = (reports ?? []).map((r) => r.id);
   let pending = 0;
+  let prestataires: string[] = [];
+  let pendingInvoices = 0;
   if (ids.length > 0) {
-    const { count } = await service
-      .from("expense_submissions")
-      .select("id", { count: "exact", head: true })
-      .in("status", ["pending", "revision_requested"])
-      .in("user_id", ids);
+    const [{ count }, { data: links }] = await Promise.all([
+      service.from("expense_submissions").select("id", { count: "exact", head: true }).in("status", ["pending", "revision_requested"]).in("user_id", ids),
+      service.from("profile_specialties").select("user_id, specialties!inner(slug)").eq("specialties.slug", "tech-prestataire").in("user_id", ids),
+    ]);
     pending = count ?? 0;
+    prestataires = (links ?? []).map((l) => l.user_id);
+    if (prestataires.length) {
+      const { count: inv } = await service.from("event_invoices").select("id", { count: "exact", head: true }).eq("status", "pending").in("user_id", prestataires);
+      pendingInvoices = inv ?? 0;
+    }
   }
-  return { isValidator: ids.length > 0, isAdmin, canManageValidators, pending };
+  return { isValidator: ids.length > 0, isAdmin, canManageValidators, pending, hasPrestataireReports: prestataires.length > 0, pendingInvoices };
 }
 
 /**
@@ -266,9 +286,9 @@ export async function getSubmissionsToReview(
   status: "pending" | "approved" | "rejected",
   scope: "mine" | "all" = "mine"
 ): Promise<SubmissionToReview[]> {
-  const { userId, isAdmin, service } = await currentUser();
+  const { userId, seesAll, service } = await currentUser();
   let userIds: string[] | null = null;
-  if (scope === "mine" || !isAdmin) {
+  if (scope === "mine" || !seesAll) {
     const { data: reports } = await service.from("profiles").select("id").eq("expense_validator_id", userId);
     userIds = (reports ?? []).map((r) => r.id);
     if (userIds.length === 0) return [];
@@ -333,14 +353,14 @@ export async function reviewSubmission(
   comment: string
 ): Promise<{ error: string | null }> {
   try {
-    const { userId, isAdmin, service } = await currentUser();
+    const { userId, seesAll, service } = await currentUser();
     const { data: sub } = await service
       .from("expense_submissions")
       .select("id, user_id, event_id, period_month, total_amount")
       .eq("id", submissionId)
       .single();
     if (!sub) throw new Error("Déclaration introuvable.");
-    if (!isAdmin) {
+    if (!seesAll) {
       const { data: owner } = await service.from("profiles").select("expense_validator_id").eq("id", sub.user_id).single();
       if (owner?.expense_validator_id !== userId) throw new Error("Vous n'êtes pas le responsable de cette personne.");
     }

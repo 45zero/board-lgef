@@ -1,5 +1,6 @@
 "use client";
 
+import { useAppLabel } from "@/hooks/board/useFraisFlavor";
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { Search, Moon, Sun, ChevronRight, Settings, Lock } from "lucide-react";
@@ -64,6 +65,7 @@ export function TopBar({
 }) {
   const { name, initials, avatarUrl } = useCurrentProfile();
   const [profileOpen, setProfileOpen] = useState(false);
+  const { label: appLabel, kicker: appKicker } = useAppLabel()(currentApp);
 
   return (
     <>
@@ -82,14 +84,14 @@ export function TopBar({
 
         <div className="flex items-center gap-1 rounded-full border border-line bg-subtle px-2.5 py-1 text-xs font-semibold text-ink-2">
           <span className="h-1.5 w-1.5 rounded-full bg-good" />
-          {currentApp.label}
+          {appLabel}
           <ChevronRight size={11} className="text-ink-4" />
-          <span className="text-ink-3">{currentApp.kicker}</span>
+          <span className="text-ink-3">{appKicker}</span>
           {onOpenModuleAccess && (
             <button
               onClick={onOpenModuleAccess}
-              title={`Qui voit « ${currentApp.label} »`}
-              aria-label={`Accès au module ${currentApp.label}`}
+              title={`Qui voit « ${appLabel} »`}
+              aria-label={`Accès au module ${appLabel}`}
               className="ml-1 rounded-full p-0.5 text-ink-4 hover:bg-hover hover:text-ink"
             >
               <Lock size={11} />
