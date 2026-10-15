@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BadgeCheck, CircleHelp, Loader2 } from "lucide-react";
+import { CaptionToolbar } from "@/components/board/publication/CaptionToolbar";
 import { checkInstagramHandle, getInstagramHandles, type HandleCheck, type HandleSuggestion } from "@/app/actions/instagram-mentions";
 
 // Comptes déjà cités et vérifications partagés par tous les champs de la page.
@@ -32,6 +33,7 @@ export function InstagramMentionField({
   value,
   onChange,
   multiline = false,
+  toolbar = false,
   rows,
   placeholder,
   className,
@@ -39,6 +41,8 @@ export function InstagramMentionField({
   value: string;
   onChange: (value: string) => void;
   multiline?: boolean;
+  /** Barre gras / italique / emojis au-dessus du champ (texte des publications). */
+  toolbar?: boolean;
   rows?: number;
   placeholder?: string;
   className?: string;
@@ -127,6 +131,7 @@ export function InstagramMentionField({
 
   return (
     <div className="relative">
+      {toolbar && <CaptionToolbar fieldRef={ref} value={value} onChange={onChange} />}
       {multiline ? <textarea rows={rows} {...common} /> : <input {...common} />}
       {showPanel && (
         <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-btn border border-line bg-card shadow-card">

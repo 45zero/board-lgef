@@ -765,6 +765,7 @@ function PublishElsewhere({ pub, onChanged }: { pub: MediaPublication; onChanged
       )}
       <InstagramMentionField
         multiline
+        toolbar
         value={caption}
         onChange={setCaption}
         rows={3}
@@ -1305,6 +1306,7 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
 
         <InstagramMentionField
           multiline
+          toolbar
           value={caption}
           onChange={setCaption}
           rows={4}
@@ -1718,6 +1720,7 @@ function NewPublicationDialog({ onClose, onCreated }: { onClose: () => void; onC
 
             <InstagramMentionField
               multiline
+              toolbar
               value={caption}
               onChange={setCaption}
               rows={4}
