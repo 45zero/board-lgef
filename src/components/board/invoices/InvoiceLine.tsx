@@ -110,6 +110,7 @@ export function InvoiceLine({
         {inv.files > 1 && <span className="font-normal text-ink-4">({inv.files} fichiers)</span>}
       </button>
       <span className={`rounded-chip px-1.5 py-0.5 text-[10px] font-bold ${tone}`}>{INVOICE_STATUS_LABELS[inv.status ?? ""] ?? inv.status ?? "—"}</span>
+      {inv.paidAt && <span className="rounded-chip bg-good-bg px-1.5 py-0.5 text-[10px] font-bold text-good">Payée le {new Date(inv.paidAt).toLocaleDateString("fr-FR")}</span>}
       {inv.amountTtc !== null && (
         <span className={`text-[11px] ${inv.amountTtc !== e.amount ? "font-bold text-warn" : "text-ink-4"}`} title={inv.amountTtc !== e.amount ? "Montant facturé différent du montant prévu" : undefined}>
           {euros(inv.amountTtc)} TTC

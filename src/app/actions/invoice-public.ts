@@ -80,5 +80,5 @@ export const prepareInvoiceUpload = async (token: string, eventId: string, filen
 export const confirmInvoiceUpload = async (token: string, eventId: string, path: string, amountTtc: number | null, comment: string) =>
   toResult(async () => {
     const p = payload(token, eventId);
-    await recordInvoiceDeposit({ userId: p.userId, eventId, path, amountTtc, comment }, p.requesterId ? [p.requesterId] : []);
+    await recordInvoiceDeposit({ userId: p.userId, eventId, path, amountTtc, comment, source: "link" }, p.requesterId ? [p.requesterId] : []);
   });

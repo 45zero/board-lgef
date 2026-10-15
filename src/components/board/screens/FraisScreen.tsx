@@ -4,10 +4,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Receipt, ShieldCheck, X, ChevronRight, Download, Settings, Check, Camera, Paperclip, FileText, Wallet, Briefcase } from "lucide-react";
+import { Receipt, ShieldCheck, X, ChevronRight, Download, Settings, Check, Camera, Paperclip, FileText, Wallet, Briefcase, Banknote } from "lucide-react";
 import { useFraisFlavor } from "@/hooks/board/useFraisFlavor";
 import { FRAIS_FLAVORS } from "@/lib/board/fraisFlavor";
-import { MyInvoices, PrestataireInvoices } from "@/components/board/invoices/InvoiceTabs";
+import { MyInvoices, Payables, PrestataireInvoices } from "@/components/board/invoices/InvoiceTabs";
 import {
   declareExpenses,
   getMyExpenses,
@@ -46,7 +46,7 @@ import {
   type Period,
 } from "@/components/board/expenses/PeriodNav";
 
-type Tab = "invoices" | "mine" | "validate" | "allFrais" | "prestataires" | "settings";
+type Tab = "invoices" | "mine" | "validate" | "allFrais" | "prestataires" | "payables" | "settings";
 
 type MineFilter = "a_declarer" | "upcoming" | "pending" | "approved" | "rejected" | "all";
 
@@ -630,7 +630,8 @@ const headerBtn = "flex h-8 w-8 items-center justify-center rounded-full text-wh
  * Module Frais, nommé selon le profil (fraisFlavor.ts) :
  * - Frais (salariés, réseau, bénévoles) : « Mes frais », « À valider » si je suis N+1, Paramètres ;
  * - Factures (prestataires) : « Mes factures » d'abord, puis les mêmes onglets ;
- * - GED (administrateurs) : en plus, « Frais » et « Prestataires » de tout le monde.
+ * - GED (administrateurs et compta) : en plus, « Frais » et « Prestataires » de tout le monde, et
+ *   « À payer » (factures et notes de frais validées, à marquer payées).
  * « À valider » regroupe les notes de frais et, si j'ai des prestataires, leurs factures.
  * Le N+1 de chacun se règle dans Administration → Utilisateurs.
  * `mobile` (appli mobile) : en-tête propre — retour, période dans le menu du titre, Photo / Joindre
@@ -670,6 +671,7 @@ export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}
     { id: "validate", label: "À valider", icon: ShieldCheck, badge: (scope?.pending ?? 0) + (scope?.pendingInvoices ?? 0), show: !!scope?.isValidator },
     { id: "allFrais", label: "Frais", icon: Wallet, show: isGed },
     { id: "prestataires", label: "Prestataires", icon: Briefcase, show: isGed },
+    { id: "payables", label: "À payer", icon: Banknote, show: isGed },
     // Mobile : Paramètres est la roue crantée de l'en-tête.
     { id: "settings", label: "Paramètres", icon: Settings, show: !mobile },
   ];
@@ -728,6 +730,7 @@ export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}
         ))}
       {tab === "allFrais" && <ToValidate scope="all" onChanged={() => void loadScope()} period={period} menu={menu} />}
       {tab === "prestataires" && <PrestataireInvoices scope="all" period={period} menu={menu} onChanged={() => void loadScope()} />}
+      {tab === "payables" && <Payables period={period} menu={menu} />}
       {tab === "settings" && <ExpenseMailSettings />}
     </div>
   );

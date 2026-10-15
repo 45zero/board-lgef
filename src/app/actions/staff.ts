@@ -3,14 +3,26 @@
 import { toResult } from "@/lib/board/actionResult";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
-import { KM_RATE, STAFF_STATUSES, type Engagement, type EngagementRole, type StaffInvoice, type StaffOverview, type StaffPerson, type StaffStatus } from "@/lib/board/staff";
+import {
+  KM_RATE,
+  STAFF_STATUSES,
+  type Engagement,
+  type EngagementRole,
+  type Payable,
+  type PrestataireCompany,
+  type StaffInvoice,
+  type StaffOverview,
+  type StaffPerson,
+  type StaffStatus,
+  type StandaloneInvoice,
+} from "@/lib/board/staff";
 import { travelToEvent } from "@/lib/board/travel";
 import { createInvoiceToken } from "@/lib/board/invoiceToken";
 import { getBoardDriveAccount } from "@/lib/board/teamDrive";
 import { archiveSubFolder, eventArchiveFolder } from "@/lib/google/archiveFolders";
 import { uploadFile } from "@/lib/google/drive";
 import { isTransactionalEmailConfigured, sendTransactionalBatch } from "@/lib/email/transactional";
-import { prepareInvoiceDeposit, recordInvoiceDeposit } from "@/lib/board/invoiceDeposit";
+import { invoiceValidatorIds, prepareInvoiceDeposit, recordInvoiceDeposit, recordStandaloneInvoice, type StandaloneInput } from "@/lib/board/invoiceDeposit";
 import { COMPTA_SLUG } from "@/lib/board/fraisFlavor";
 import type { InvoiceRequestItem } from "@/app/actions/invoice-public";
 
@@ -188,11 +200,11 @@ async function invoices(service: Service, list: { userId: string; eventId: strin
   const eventIds = [...new Set(list.map((e) => e.eventId))];
   const userIds = [...new Set(list.map((e) => e.userId))];
   if (!eventIds.length) return out;
-  const rows: { id: string; event_id: string | null; user_id: string | null; status: string | null; amount_ttc: number | null; file_url: string | null; created_at: string | null; admin_comment: string | null }[] = [];
+  const rows: { id: string; event_id: string | null; user_id: string | null; status: string | null; amount_ttc: number | null; file_url: string | null; created_at: string | null; admin_comment: string | null; payment_status: string | null; paid_at: string | null }[] = [];
   for (let i = 0; i < eventIds.length; i += 200) {
     const { data } = await service
       .from("event_invoices")
-      .select("id, event_id, user_id, status, amount_ttc, file_url, created_at, admin_comment")
+      .select("id, event_id, user_id, status, amount_ttc, file_url, created_at, admin_comment, payment_status, paid_at")
       .in("event_id", eventIds.slice(i, i + 200))
       .in("user_id", userIds)
       .order("created_at");
@@ -210,6 +222,7 @@ async function invoices(service: Service, list: { userId: string; eventId: strin
       amountTtc: r.amount_ttc === null ? null : Number(r.amount_ttc),
       files: (r.file_url ? 1 : 0) + (attCount.get(r.id) ?? 0),
       comment: r.admin_comment,
+      paidAt: r.payment_status === "paid" ? (r.paid_at ?? r.created_at) : null,
     });
   }
   return out;
@@ -518,8 +531,8 @@ async function archiveInvoice(service: Service, invoice: { id: string; file_url:
 export const reviewInvoice = async (invoiceId: string, decision: "approved" | "rejected", comment?: string) =>
   toResult(async (): Promise<{ archived: number }> => {
     const v = await viewer();
-    const { data: invoice } = await v.service.from("event_invoices").select("id, user_id, event_id, file_url, amount_ttc, status").eq("id", invoiceId).maybeSingle();
-    if (!invoice?.user_id || !invoice.event_id) throw new Error("Facture introuvable.");
+    const { data: invoice } = await v.service.from("event_invoices").select("id, user_id, event_id, file_url, amount_ttc, status, label").eq("id", invoiceId).maybeSingle();
+    if (!invoice?.user_id) throw new Error("Facture introuvable.");
     await requireCanManage(v, invoice.user_id);
     const motive = comment?.trim() ?? "";
     if (decision === "rejected" && !motive) throw new Error("Indiquez le motif du refus.");
@@ -533,11 +546,12 @@ export const reviewInvoice = async (invoiceId: string, decision: "approved" | "r
     const [{ data: person }, { data: me }, { data: event }] = await Promise.all([
       v.service.from("profiles").select("first_name, last_name, email").eq("id", invoice.user_id).single(),
       v.service.from("profiles").select("first_name, last_name, email").eq("id", v.userId).single(),
-      v.service.from("events").select("title, start_date").eq("id", invoice.event_id).single(),
+      invoice.event_id ? v.service.from("events").select("title, start_date").eq("id", invoice.event_id).single() : Promise.resolve({ data: null }),
     ]);
     const who = person ? personName(person) : "—";
     const reviewer = me ? personName(me) : "Votre responsable";
-    const eventTitle = event?.title ?? "l'événement";
+    // Facture sans événement : son objet (forfait, matériel…).
+    const eventTitle = event?.title ?? invoice.label ?? "votre facture";
     const amount = invoice.amount_ttc !== null ? Number(invoice.amount_ttc).toLocaleString("fr-FR", { style: "currency", currency: "EUR" }) : null;
 
     await v.service.rpc("create_notification", {
@@ -556,13 +570,13 @@ export const reviewInvoice = async (invoiceId: string, decision: "approved" | "r
     if (person?.email && isTransactionalEmailConfigured()) {
       const first = person.first_name?.trim() || who;
       const link =
-        decision === "rejected"
+        decision === "rejected" && invoice.event_id
           ? `${(process.env.NEXT_PUBLIC_SITE_URL || "https://board.lgef.fr").replace(/\/$/, "")}/facture/${createInvoiceToken({ eventIds: [invoice.event_id], userId: invoice.user_id, requesterId: v.userId, comment: null })}`
           : null;
       const lines =
         decision === "approved"
           ? [`Votre facture pour « ${eventTitle} »${amount ? ` (${amount})` : ""} a été validée par ${reviewer}.`, "Elle sera transmise pour paiement."]
-          : [`Votre facture pour « ${eventTitle} » a été refusée par ${reviewer}.`, `Motif : ${motive}`, "Vous pouvez déposer une facture corrigée avec le bouton ci-dessous."];
+          : [`Votre facture pour « ${eventTitle} » a été refusée par ${reviewer}.`, `Motif : ${motive}`, link ? "Vous pouvez déposer une facture corrigée avec le bouton ci-dessous." : "Vous pouvez déposer une facture corrigée depuis le board (Factures)."];
       const html = `<!doctype html><html><body style="margin:0;background:#f2f5fb;font-family:Arial,Helvetica,sans-serif;color:#07172e">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5fb;padding:24px 0"><tr><td align="center">
 <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden">
@@ -620,11 +634,228 @@ export const prepareMyInvoiceUpload = async (eventId: string, filename: string, 
     return prepareInvoiceDeposit(v.userId, filename, contentType, size);
   });
 
-/** Enregistre ma facture ; mon N+1 est prévenu. */
+/** Enregistre ma facture ; mon N+1 est prévenu (la compta si je n'en ai pas). */
 export const confirmMyInvoiceUpload = async (eventId: string, path: string, amountTtc: number | null, comment: string) =>
   toResult(async () => {
     const v = await viewer();
     await requireMyEngagement(v, eventId);
-    const { data: me } = await v.service.from("profiles").select("expense_validator_id").eq("id", v.userId).single();
-    await recordInvoiceDeposit({ userId: v.userId, eventId, path, amountTtc, comment }, me?.expense_validator_id ? [me.expense_validator_id] : []);
+    await recordInvoiceDeposit({ userId: v.userId, eventId, path, amountTtc, comment, source: "board" }, await invoiceValidatorIds(v.userId));
+  });
+
+/* ---------- Factures sans intervention, paiement, fiche société (GED) ---------- */
+
+const requireCompta = (v: Viewer) => {
+  if (!v.isAdmin && !v.isCompta) throw new Error("Réservé à la compta et aux administrateurs.");
+};
+
+/** Pour qui je dépose : moi, ou (N+1, compta) un prestataire que je gère. */
+async function depositTarget(v: Viewer, forUserId: string | null | undefined) {
+  if (!forUserId || forUserId === v.userId) return v.userId;
+  await requireCanManage(v, forUserId);
+  return forUserId;
+}
+
+export const prepareStandaloneUpload = async (forUserId: string | null, filename: string, contentType: string, size: number) =>
+  toResult(async () => {
+    const v = await viewer();
+    return prepareInvoiceDeposit(await depositTarget(v, forUserId), filename, contentType, size);
+  });
+
+/**
+ * Facture sans intervention, déposée par le prestataire (ses valideurs sont prévenus) ou saisie pour
+ * lui par son N+1 / la compta. Doublon probable : erreur « DOUBLON : … », à confirmer avec `force`.
+ */
+export const createStandaloneInvoice = async (input: Omit<StandaloneInput, "userId" | "source"> & { forUserId: string | null }) =>
+  toResult(async () => {
+    const v = await viewer();
+    const userId = await depositTarget(v, input.forUserId);
+    await recordStandaloneInvoice({ ...input, userId, source: "board" }, userId === v.userId ? await invoiceValidatorIds(userId) : []);
+  });
+
+type InvoiceRow = {
+  id: string;
+  user_id: string | null;
+  event_id: string | null;
+  label: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  amount_ttc: number | null;
+  amount_ht: number | null;
+  status: string | null;
+  admin_comment: string | null;
+  payment_status: string | null;
+  paid_at: string | null;
+  file_url: string | null;
+  created_at: string | null;
+};
+const INVOICE_COLUMNS = "id, user_id, event_id, label, invoice_number, invoice_date, amount_ttc, amount_ht, status, admin_comment, payment_status, paid_at, file_url, created_at";
+const invoiceDay = (r: InvoiceRow) => r.invoice_date ?? (r.created_at ?? new Date().toISOString()).slice(0, 10);
+
+/** Factures sans intervention de l'année : les miennes (« me »), de mes prestataires (« mine ») ou de tous (« all », compta). */
+export const getStandaloneInvoices = async (year: number, scope: "me" | "mine" | "all") =>
+  toResult(async (): Promise<StandaloneInvoice[]> => {
+    const v = await viewer();
+    if (scope === "all") requireCompta(v);
+    const ids = scope === "me" ? [v.userId] : scope === "mine" ? v.reportIds : null;
+    if (ids && !ids.length) return [];
+    let q = v.service.from("event_invoices").select(INVOICE_COLUMNS).is("event_id", null).order("created_at");
+    if (ids) q = q.in("user_id", ids);
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    const rows = ((data ?? []) as InvoiceRow[]).filter((r) => r.user_id && invoiceDay(r).startsWith(String(year)));
+    if (!rows.length) return [];
+    const [{ data: people }, { data: atts }] = await Promise.all([
+      v.service.from("profiles").select("id, first_name, last_name, email").in("id", [...new Set(rows.map((r) => r.user_id!))]),
+      v.service.from("event_invoice_attachments").select("invoice_id").in("invoice_id", rows.map((r) => r.id)),
+    ]);
+    const nameBy = new Map((people ?? []).map((p) => [p.id, personName(p)]));
+    const attCount = new Map<string, number>();
+    for (const a of atts ?? []) if (a.invoice_id) attCount.set(a.invoice_id, (attCount.get(a.invoice_id) ?? 0) + 1);
+    return rows.map((r) => ({
+      id: r.id,
+      userId: r.user_id!,
+      personName: nameBy.get(r.user_id!) ?? "—",
+      label: r.label ?? "Facture",
+      invoiceNumber: r.invoice_number,
+      date: invoiceDay(r),
+      amountTtc: Number(r.amount_ttc ?? 0),
+      amountHt: r.amount_ht === null ? null : Number(r.amount_ht),
+      invoice: {
+        id: r.id,
+        status: r.status,
+        amountTtc: r.amount_ttc === null ? null : Number(r.amount_ttc),
+        files: (r.file_url ? 1 : 0) + (attCount.get(r.id) ?? 0),
+        comment: r.admin_comment,
+        paidAt: r.payment_status === "paid" ? (r.paid_at ?? r.created_at) : null,
+      },
+    }));
+  });
+
+/** À payer (compta) : factures et notes de frais validées de l'année, payées ou non. */
+export const getPayables = async (year: number) =>
+  toResult(async (): Promise<Payable[]> => {
+    const v = await viewer();
+    requireCompta(v);
+    const [{ data: invs, error: e1 }, { data: subs, error: e2 }] = await Promise.all([
+      v.service.from("event_invoices").select(INVOICE_COLUMNS).eq("status", "approved"),
+      v.service.from("expense_submissions").select("id, user_id, event_id, period_month, total_amount, paid_at, submitted_at").eq("status", "approved"),
+    ]);
+    if (e1 || e2) throw new Error((e1 ?? e2)!.message);
+    const eventIds = [...new Set([...(invs ?? []), ...(subs ?? [])].map((r) => r.event_id).filter((id): id is string => !!id))];
+    const events: { id: string; title: string; start_date: string }[] = [];
+    for (let i = 0; i < eventIds.length; i += 200) {
+      const { data } = await v.service.from("events").select("id, title, start_date").in("id", eventIds.slice(i, i + 200));
+      events.push(...(data ?? []));
+    }
+    const eventBy = new Map(events.map((e) => [e.id, e]));
+    const personIds = [...new Set([...(invs ?? []).map((r) => r.user_id), ...(subs ?? []).map((r) => r.user_id)].filter((id): id is string => !!id))];
+    const { data: people } = personIds.length ? await v.service.from("profiles").select("id, first_name, last_name, email").in("id", personIds) : { data: [] };
+    const nameBy = new Map((people ?? []).map((p) => [p.id, personName(p)]));
+    const out: Payable[] = [];
+    for (const r of (invs ?? []) as InvoiceRow[]) {
+      if (!r.user_id) continue;
+      const ev = r.event_id ? eventBy.get(r.event_id) : null;
+      out.push({
+        kind: "invoice",
+        id: r.id,
+        personId: r.user_id,
+        personName: nameBy.get(r.user_id) ?? "—",
+        title: ev?.title ?? r.label ?? "Facture",
+        eventId: ev ? r.event_id : null,
+        date: ev?.start_date ?? `${invoiceDay(r)}T12:00:00.000Z`,
+        amount: Number(r.amount_ttc ?? 0),
+        paidAt: r.payment_status === "paid" ? (r.paid_at ?? r.created_at) : null,
+      });
+    }
+    for (const r of subs ?? []) {
+      const ev = r.event_id ? eventBy.get(r.event_id) : null;
+      if (r.event_id && !ev) continue;
+      out.push({
+        kind: "expense",
+        id: r.id,
+        personId: r.user_id,
+        personName: nameBy.get(r.user_id) ?? "—",
+        title: ev?.title ?? `Frais hors événement`,
+        eventId: ev ? r.event_id : null,
+        date: ev?.start_date ?? (r.period_month ? `${r.period_month}-01T12:00:00.000Z` : r.submitted_at),
+        amount: Number(r.total_amount ?? 0),
+        paidAt: r.paid_at,
+      });
+    }
+    return out.filter((p) => p.date.startsWith(String(year))).sort((a, b) => a.date.localeCompare(b.date));
+  });
+
+/**
+ * Marque payée (date AAAA-MM-JJ) ou non payée (null) une facture validée ou une note de frais
+ * validée (remboursée). La personne est prévenue du paiement.
+ */
+export const setPaid = async (kind: "invoice" | "expense", id: string, paidOn: string | null) =>
+  toResult(async () => {
+    const v = await viewer();
+    requireCompta(v);
+    if (paidOn !== null && !/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) throw new Error("Date de paiement invalide.");
+    const paidAt = paidOn ? new Date(`${paidOn}T12:00:00`).toISOString() : null;
+    const table = kind === "invoice" ? "event_invoices" : "expense_submissions";
+    const { data: row } = await v.service.from(table).select("id, user_id, status").eq("id", id).maybeSingle();
+    if (!row?.user_id) throw new Error("Introuvable.");
+    if (row.status !== "approved") throw new Error("Seul ce qui est validé peut être payé.");
+    const paidBy = paidAt ? v.userId : null;
+    const { error } =
+      kind === "invoice"
+        ? await v.service.from("event_invoices").update({ payment_status: paidAt ? "paid" : "unpaid", paid_at: paidAt, paid_by: paidBy, updated_at: new Date().toISOString() }).eq("id", id)
+        : await v.service.from("expense_submissions").update({ paid_at: paidAt, paid_by: paidBy }).eq("id", id);
+    if (error) throw new Error(error.message);
+    if (paidOn) {
+      const { error: nErr } = await v.service.rpc("create_notification", {
+        p_user_id: row.user_id,
+        p_type: "expense_approved",
+        p_title: kind === "invoice" ? "Facture payée" : "Frais remboursés",
+        p_message: `${kind === "invoice" ? "Votre facture a été payée" : "Vos frais ont été remboursés"} le ${new Date(`${paidOn}T12:00:00`).toLocaleDateString("fr-FR")}.`,
+        p_actor_name: "Comptabilité",
+        p_data: { kind: kind === "invoice" ? "invoice_paid" : "expense_paid", id },
+      });
+      if (nErr) console.error("[staff.setPaid.notify]", nErr);
+    }
+  });
+
+const emptyCompany: PrestataireCompany = { companyName: "", siret: "", vatNumber: "", iban: "", billingAddress: "", mailDomains: [] };
+
+/** Fiche société d'un prestataire (la mienne si `userId` est vide) : lui, son N+1, la compta. */
+export const getPrestataireCompany = async (userId: string | null) =>
+  toResult(async (): Promise<PrestataireCompany> => {
+    const v = await viewer();
+    const id = await depositTarget(v, userId);
+    const { data } = await v.service.from("prestataire_profiles").select("*").eq("user_id", id).maybeSingle();
+    if (!data) return emptyCompany;
+    return {
+      companyName: data.company_name ?? "",
+      siret: data.siret ?? "",
+      vatNumber: data.vat_number ?? "",
+      iban: data.iban ?? "",
+      billingAddress: data.billing_address ?? "",
+      mailDomains: data.mail_domains ?? [],
+    };
+  });
+
+export const savePrestataireCompany = async (userId: string | null, c: PrestataireCompany) =>
+  toResult(async () => {
+    const v = await viewer();
+    const id = await depositTarget(v, userId);
+    const siret = c.siret.replace(/\s/g, "");
+    if (siret && !/^\d{14}$/.test(siret)) throw new Error("Le SIRET compte 14 chiffres.");
+    const domains = [...new Set(c.mailDomains.map((d) => d.trim().toLowerCase().replace(/^.*@/, "")).filter(Boolean))];
+    if (domains.some((d) => !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d))) throw new Error("Domaine e-mail invalide (ex. traiteurmarie.com).");
+    const clean = (x: string) => x.trim() || null;
+    const { error } = await v.service.from("prestataire_profiles").upsert({
+      user_id: id,
+      company_name: clean(c.companyName),
+      siret: siret || null,
+      vat_number: clean(c.vatNumber),
+      iban: c.iban.replace(/\s/g, "").toUpperCase() || null,
+      billing_address: clean(c.billingAddress),
+      mail_domains: domains,
+      updated_by: v.userId,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) throw new Error(error.message);
   });

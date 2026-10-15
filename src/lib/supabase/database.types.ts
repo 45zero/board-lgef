@@ -1335,6 +1335,12 @@ export type Database = {
           payment_status: string | null
           paid_at: string | null
           submitted_at: string | null
+          paid_by: string | null
+          invoice_number: string | null
+          invoice_date: string | null
+          label: string | null
+          amount_ht: number | null
+          source: string
         }
         Insert: {
           id?: string
@@ -1352,6 +1358,12 @@ export type Database = {
           payment_status?: string | null
           paid_at?: string | null
           submitted_at?: string | null
+          paid_by?: string | null
+          invoice_number?: string | null
+          invoice_date?: string | null
+          label?: string | null
+          amount_ht?: number | null
+          source?: string
         }
         Update: {
           id?: string
@@ -1369,6 +1381,12 @@ export type Database = {
           payment_status?: string | null
           paid_at?: string | null
           submitted_at?: string | null
+          paid_by?: string | null
+          invoice_number?: string | null
+          invoice_date?: string | null
+          label?: string | null
+          amount_ht?: number | null
+          source?: string
         }
         Relationships: []
       }
@@ -1811,6 +1829,8 @@ export type Database = {
           notified_at: string | null
           notified_month: string | null
           period_month: string | null
+          paid_at: string | null
+          paid_by: string | null
         }
         Insert: {
           id?: string
@@ -1836,6 +1856,8 @@ export type Database = {
           notified_at?: string | null
           notified_month?: string | null
           period_month?: string | null
+          paid_at?: string | null
+          paid_by?: string | null
         }
         Update: {
           id?: string
@@ -1861,6 +1883,8 @@ export type Database = {
           notified_at?: string | null
           notified_month?: string | null
           period_month?: string | null
+          paid_at?: string | null
+          paid_by?: string | null
         }
         Relationships: []
       }
@@ -2398,6 +2422,42 @@ export type Database = {
           user_id?: string
           specialty_id?: string
           created_at?: string
+        }
+        Relationships: []
+      }
+      prestataire_profiles: {
+        Row: {
+          user_id: string
+          company_name: string | null
+          siret: string | null
+          vat_number: string | null
+          iban: string | null
+          billing_address: string | null
+          mail_domains: string[]
+          updated_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          company_name?: string | null
+          siret?: string | null
+          vat_number?: string | null
+          iban?: string | null
+          billing_address?: string | null
+          mail_domains?: string[]
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          company_name?: string | null
+          siret?: string | null
+          vat_number?: string | null
+          iban?: string | null
+          billing_address?: string | null
+          mail_domains?: string[]
+          updated_by?: string | null
+          updated_at?: string
         }
         Relationships: []
       }

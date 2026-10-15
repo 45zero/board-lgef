@@ -36,7 +36,72 @@ export type Engagement = {
   invoice: StaffInvoice | null;
 };
 
-export type StaffInvoice = { id: string; status: "pending" | "approved" | "rejected" | string | null; amountTtc: number | null; files: number; comment: string | null };
+export type StaffInvoice = {
+  id: string;
+  status: "pending" | "approved" | "rejected" | string | null;
+  amountTtc: number | null;
+  files: number;
+  comment: string | null;
+  /** Date de paiement (GED → À payer), null tant que la facture n'est pas payée. */
+  paidAt: string | null;
+};
+
+/**
+ * Facture sans intervention (event_id vide) : forfait, matériel, traiteur… rangée au mois de la
+ * facture. Affichée comme une intervention (pseudo-engagement) dans les listes de factures.
+ */
+export type StandaloneInvoice = {
+  id: string;
+  userId: string;
+  personName: string;
+  label: string;
+  invoiceNumber: string | null;
+  /** Date de la facture (AAAA-MM-JJ), sinon du dépôt. */
+  date: string;
+  amountTtc: number;
+  amountHt: number | null;
+  invoice: StaffInvoice;
+};
+
+/** Pseudo-intervention d'une facture sans événement (eventId vide), pour InvoiceLine et les listes. */
+export const standaloneAsEngagement = (i: StandaloneInvoice): Engagement => ({
+  userId: i.userId,
+  eventId: "",
+  title: i.label,
+  start: `${i.date}T12:00:00.000Z`,
+  roles: [],
+  confirmed: true,
+  amount: i.amountTtc,
+  adjusted: false,
+  note: i.invoiceNumber ? `Facture n° ${i.invoiceNumber}` : null,
+  km: null,
+  invoice: i.invoice,
+});
+
+/** À payer (GED) : facture validée ou note de frais validée, payée ou non. */
+export type Payable = {
+  kind: "invoice" | "expense";
+  id: string;
+  personId: string;
+  personName: string;
+  title: string;
+  eventId: string | null;
+  /** Date de rattachement (événement, facture ou mois des frais), ISO. */
+  date: string;
+  amount: number;
+  paidAt: string | null;
+};
+
+/** Fiche société d'un prestataire (prestataire_profiles). */
+export type PrestataireCompany = {
+  companyName: string;
+  siret: string;
+  vatNumber: string;
+  iban: string;
+  billingAddress: string;
+  /** Domaines d'où arrivent ses factures par e-mail (ex. traiteurmarie.com). */
+  mailDomains: string[];
+};
 
 export const INVOICE_STATUS_LABELS: Record<string, string> = { pending: "À valider", approved: "Validée", rejected: "Refusée" };
 
