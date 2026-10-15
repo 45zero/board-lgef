@@ -122,7 +122,7 @@ export function MobileSettingsSheet({
         </div>
         <div className="mb-2 mt-4 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-4">Barre du bas</div>
         <p className="mb-2 text-xs text-ink-3">
-          Les {NAV_BAR_SIZE} premiers modules s&rsquo;affichent dans la barre, de gauche à droite ; les autres restent dans le menu du logo.
+          Les {NAV_BAR_SIZE}&nbsp;premiers modules s&rsquo;affichent dans la barre, de gauche à droite ; les autres restent dans le menu du logo.
         </p>
         <div className="flex flex-col overflow-hidden rounded-[14px] border border-line">
           {navItems.map((slot, i) => {
