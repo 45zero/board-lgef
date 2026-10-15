@@ -102,27 +102,89 @@ const CHUNK_SIZE = 3 * 1024 * 1024; // 3 Mio — multiple de 256 Kio (requis par
 /** Progression d'un envoi : octets envoyés / total, et nom du fichier en cours. */
 export type UploadProgress = (sentBytes: number, totalBytes: number, currentFile: string) => void;
 
+/**
+ * Attend que l'appareil soit en ligne et l'appli au premier plan (téléphone verrouillé, appli en
+ * arrière-plan, passage Wi-Fi → 4G…), au plus `maxMs` : « ready » si c'était déjà le cas,
+ * « back » au retour, « timeout » sinon.
+ */
+function waitForConnection(maxMs: number): Promise<"ready" | "back" | "timeout"> {
+  const ready = () => navigator.onLine && document.visibilityState === "visible";
+  if (ready()) return Promise.resolve("ready");
+  return new Promise((resolve) => {
+    const done = () => {
+      if (!ready()) return;
+      cleanup();
+      resolve("back");
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve("timeout");
+    }, maxMs);
+    const cleanup = () => {
+      clearTimeout(timer);
+      window.removeEventListener("online", done);
+      document.removeEventListener("visibilitychange", done);
+    };
+    window.addEventListener("online", done);
+    document.addEventListener("visibilitychange", done);
+  });
+}
+
 export async function putFileToDriveViaRelay(
   chunkEndpoint: string,
   uploadUrl: string,
   file: File,
   onChunk?: (sentInFile: number) => void
 ): Promise<{ id: string; webViewLink?: string }> {
+  const contentType = file.type || "application/octet-stream";
+  const send = (contentRange: string, body?: Blob) =>
+    fetch(chunkEndpoint, {
+      method: "PUT",
+      headers: { "X-Upload-Url": uploadUrl, "X-File-Content-Type": contentType, "Content-Range": contentRange },
+      body,
+    });
+  // Octets reçus par Drive d'après sa réponse 308 (« bytes=0-N ») ; aucun en-tête = rien de reçu.
+  const receivedFrom = (res: Response) => {
+    const m = /bytes=0-(\d+)/.exec(res.headers.get("range") ?? "");
+    return m ? Number(m[1]) + 1 : 0;
+  };
+
   let offset = 0;
+  let failures = 0;
   while (offset < file.size) {
     const end = Math.min(offset + CHUNK_SIZE, file.size);
-    const chunk = file.slice(offset, end);
-    const res = await fetch(chunkEndpoint, {
-      method: "PUT",
-      headers: {
-        "X-Upload-Url": uploadUrl,
-        "X-File-Content-Type": file.type || "application/octet-stream",
-        "Content-Range": `bytes ${offset}-${end - 1}/${file.size}`,
-      },
-      body: chunk,
-    });
+    let res: Response;
+    try {
+      res = await send(`bytes ${offset}-${end - 1}/${file.size}`, file.slice(offset, end));
+      if (res.status >= 500) throw new Error(`Drive indisponible (${res.status}).`);
+    } catch (e) {
+      // Coupure réseau ou Drive momentanément indisponible (un gros fichier = des centaines de
+      // morceaux) : on attend, on demande à Drive où il en est, et on reprend de là. Hors ligne ou
+      // appli en arrière-plan (mobile), l'attente ne compte pas comme un échec : la session d'envoi
+      // Drive reste valable une semaine, on reprend au retour (30 min d'attente au plus).
+      const connection = await waitForConnection(30 * 60_000);
+      if (connection === "back") failures = Math.max(0, failures - 1);
+      if (connection === "timeout") failures = 6;
+      if (++failures > 6) {
+        throw new Error(
+          e instanceof TypeError
+            ? "Connexion interrompue pendant l'envoi vers le Drive — vérifiez la connexion puis réessayez."
+            : e instanceof Error ? e.message : "Échec de l'envoi vers Drive."
+        );
+      }
+      await new Promise((r) => setTimeout(r, Math.min(2000 * 2 ** (failures - 1), 30_000)));
+      try {
+        const status = await send(`bytes */${file.size}`);
+        if (status.status === 308) offset = receivedFrom(status);
+        else if (status.ok) return status.json();
+      } catch {
+        // Toujours hors ligne : nouvelle tentative au tour suivant, depuis le même point.
+      }
+      continue;
+    }
     if (res.status === 308) {
-      offset = end;
+      failures = 0;
+      offset = res.headers.has("range") ? receivedFrom(res) : end;
       onChunk?.(offset);
       continue;
     }

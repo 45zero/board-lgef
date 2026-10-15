@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
  * Nécessaire car l'API Drive n'autorise pas le PUT direct navigateur→Google
  * (CORS bloqué) et qu'un fichier entier dépasserait la limite de taille de
  * requête de l'hébergeur — chaque morceau reste petit, transite par ici.
+ * Un corps vide avec « Content-Range: bytes *\/total » demande l'état de l'envoi.
  */
 export async function PUT(request: Request) {
   const supabase = await createClient();
@@ -39,8 +40,11 @@ export async function PUT(request: Request) {
     body: buffer,
   });
 
+  // `Range` : octets réellement reçus par Drive (« bytes=0-N », absent si aucun) — le navigateur
+  // reprend de là, notamment après une coupure (requête d'état « bytes */total » sans contenu).
   if (googleRes.status === 308) {
-    return new NextResponse(null, { status: 308 });
+    const range = googleRes.headers.get("range");
+    return new NextResponse(null, { status: 308, headers: range ? { Range: range } : undefined });
   }
   if (!googleRes.ok) {
     const text = await googleRes.text();
