@@ -589,29 +589,37 @@ export function MailsScreen() {
             </div>
           ) : (
             <div>
-              <div className="flex items-start justify-between gap-2">
-                <h2 className="text-lg font-bold text-ink">{selected.subject}</h2>
-                <div className="flex shrink-0 items-center gap-2">
-                  <button
-                    onClick={() => setReplying(true)}
-                    className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"
-                  >
-                    <Reply size={13} /> Répondre
+              {/* Objet sur toute la largeur ; actions en icônes sur la ligne de l'expéditeur. */}
+              <h2 className="text-lg font-bold text-ink [overflow-wrap:anywhere]">{selected.subject}</h2>
+              <div className="mt-2 flex items-center gap-2.5">
+                <SenderAvatar name={selected.from} size={32} />
+                <div className="min-w-0 flex-1 text-xs text-ink-3">
+                  <div className="truncate" title={selected.from}>
+                    De : {selected.from} — {selected.date}
+                  </div>
+                  {(selected.to || selected.cc) && (
+                    <div className="mt-0.5 truncate">
+                      À : {selected.to}
+                      {selected.cc ? ` · Cc : ${selected.cc}` : ""}
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <button onClick={() => setReplying(true)} className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-2 hover:bg-hover" title="Répondre" aria-label="Répondre">
+                    <Reply size={15} />
                   </button>
-                  <button
-                    onClick={() => setForwarding(selected)}
-                    className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"
-                  >
-                    <Forward size={13} /> Transférer
+                  <button onClick={() => setForwarding(selected)} className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-2 hover:bg-hover" title="Transférer" aria-label="Transférer">
+                    <Forward size={15} />
                   </button>
                   {activeAccountId && (
                     <div className="relative">
                       <button
                         onClick={() => setLinkingToCard((v) => !v)}
-                        className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"
+                        className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-2 hover:bg-hover"
                         title="Lier cet e-mail à une carte de l'Espace Team"
+                        aria-label="Lier à une carte"
                       >
-                        <Kanban size={13} /> Lier à une carte
+                        <Kanban size={15} />
                       </button>
                       <LinkEmailToCardPopover
                         open={linkingToCard}
@@ -626,32 +634,12 @@ export function MailsScreen() {
                       />
                     </div>
                   )}
-                  <button
-                    onClick={() => handleArchive(selected.id)}
-                    className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"
-                  >
-                    <Archive size={13} /> Archiver
+                  <button onClick={() => handleArchive(selected.id)} className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-2 hover:bg-hover" title="Archiver" aria-label="Archiver">
+                    <Archive size={15} />
                   </button>
-                  <button
-                    onClick={() => handleTrash(selected.id)}
-                    className="flex items-center gap-1.5 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"
-                  >
-                    <Trash2 size={13} /> Supprimer
+                  <button onClick={() => handleTrash(selected.id)} className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-2 hover:bg-hover" title="Supprimer" aria-label="Supprimer">
+                    <Trash2 size={15} />
                   </button>
-                </div>
-              </div>
-              <div className="mt-2 flex items-center gap-2.5">
-                <SenderAvatar name={selected.from} size={32} />
-                <div className="text-xs text-ink-3">
-                  <div>
-                    De : {selected.from} — {selected.date}
-                  </div>
-                  {(selected.to || selected.cc) && (
-                    <div className="mt-0.5">
-                      À : {selected.to}
-                      {selected.cc ? ` · Cc : ${selected.cc}` : ""}
-                    </div>
-                  )}
                 </div>
               </div>
 

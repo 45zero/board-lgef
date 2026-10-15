@@ -724,15 +724,16 @@ function MobileMessageDetail({
         <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full text-ink-3">
           <ChevronLeft size={20} />
         </button>
-        <div className="min-w-0 flex-1 truncate text-sm font-bold text-ink">{message.subject}</div>
+        <div className="line-clamp-2 min-w-0 flex-1 text-sm font-bold leading-snug text-ink [overflow-wrap:anywhere]">{message.subject}</div>
         {accountId && (
           <div className="relative">
             <button
               onClick={() => setLinking((v) => !v)}
-              className="flex h-8 items-center gap-1 rounded-full px-2 text-[11px] font-semibold text-ink-3"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-ink-3"
               aria-label="Lier à une carte de l'Espace Team"
+              title="Lier à une carte de l'Espace Team"
             >
-              <Kanban size={16} /> Carte
+              <Kanban size={17} />
             </button>
             <LinkEmailToCardPopover
               open={linking}
