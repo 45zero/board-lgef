@@ -118,9 +118,6 @@ export function BoardShell() {
       </>
     );
 
-  const showContextPanel =
-    prefs.contextPanelOpen && (app === "accueil" || app === "mails" || app === "calendrier");
-
   return (
     <div data-theme={theme} className="min-h-screen bg-shell relative overflow-hidden">
       <div className="relative flex h-screen flex-col">
@@ -152,14 +149,15 @@ export function BoardShell() {
             )}
           </main>
 
-          {showContextPanel && (
+          {/* Récapitulatif disponible sur tous les onglets ; ouvert ou refermé, l'état est commun. */}
+          {prefs.contextPanelOpen && (
             <ContextPanel
               widgets={prefs.contextPanelWidgets}
               onClose={() => update({ contextPanelOpen: false })}
             />
           )}
           {/* Panneau refermé : languette pour le rouvrir (sinon il n'était récupérable que dans les paramètres). */}
-          {!prefs.contextPanelOpen && (app === "accueil" || app === "mails" || app === "calendrier") && (
+          {!prefs.contextPanelOpen && (
             <button
               type="button"
               onClick={() => update({ contextPanelOpen: true })}
