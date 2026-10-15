@@ -17,7 +17,8 @@ import {
   Receipt,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { listEventFiles, openEventFile, type EventFile } from "@/lib/board/eventFiles";
+import { listEventFiles, openEventFile, getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
+import { FileViewer } from "@/components/board/FileViewer";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { getArchivedReceipts, type ArchivedReceipt } from "@/app/actions/expenses";
 
@@ -122,7 +123,8 @@ function FileRow({ file }: { file: EventFile }) {
   const isVideo = (file.content_type ?? "").startsWith("video");
   const isImage = (file.content_type ?? "").startsWith("image");
 
-  const open = (download: boolean) => openEventFile(file, download);
+  const [viewing, setViewing] = useState(false);
+  const open = (download: boolean) => (download ? openEventFile(file, true) : setViewing(true));
 
   return (
     <div className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0 hover:bg-hover">
@@ -140,6 +142,14 @@ function FileRow({ file }: { file: EventFile }) {
       <button onClick={() => open(true)} className="flex items-center gap-1 text-[11px] font-semibold text-ink-3 hover:text-ink">
         <Download size={12} /> Télécharger
       </button>
+      {viewing && (
+        <FileViewer
+          name={file.filename}
+          contentType={file.content_type}
+          getUrl={(downloadAs) => getEventFileViewUrl(file, downloadAs)}
+          onClose={() => setViewing(false)}
+        />
+      )}
     </div>
   );
 }

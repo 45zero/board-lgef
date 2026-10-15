@@ -29,7 +29,8 @@ import { formatTravel, type Travel } from "@/lib/board/geo";
 import { useEventTeam } from "@/hooks/board/useEventTeam";
 import { useEventComments } from "@/hooks/board/useEventComments";
 import { useEventFiles } from "@/hooks/board/useEventFiles";
-import { openEventFile, type EventFile } from "@/lib/board/eventFiles";
+import { openEventFile, getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
+import { FileViewer } from "@/components/board/FileViewer";
 import { ensureFilePublication, getMediaPublication, type MediaPublication } from "@/lib/board/mediaPublications";
 import dynamic from "next/dynamic";
 import { getPublishedForFile, detachFileFromPublications } from "@/app/actions/social";
@@ -1017,7 +1018,8 @@ function AttachmentRow({
   const isDrive = file.storage_provider === "drive";
   const uploader = personName(file.uploaded_by_profile);
 
-  const open = (download: boolean) => openEventFile(file, download);
+  const [viewing, setViewing] = useState(false);
+  const open = (download: boolean) => (download ? openEventFile(file, true) : setViewing(true));
 
   return (
     <div className="rounded-btn border border-line px-3 py-2">
@@ -1061,6 +1063,14 @@ function AttachmentRow({
           )}
         </div>
       </div>
+      {viewing && (
+        <FileViewer
+          name={file.filename}
+          contentType={file.content_type}
+          getUrl={(downloadAs) => getEventFileViewUrl(file, downloadAs)}
+          onClose={() => setViewing(false)}
+        />
+      )}
     </div>
   );
 }

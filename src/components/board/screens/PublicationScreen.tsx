@@ -56,7 +56,6 @@ import {
 } from "@/lib/board/mediaPublications";
 import {
   getEventFileViewUrl,
-  openEventFile,
   createEventFileShareUrl,
   uploadEventFiles,
   uploadStandaloneMedia,
@@ -64,6 +63,7 @@ import {
 } from "@/lib/board/eventFiles";
 import { shareBoardDriveFile } from "@/app/actions/drive-share";
 import { getDriveStreamUrl } from "@/app/actions/media-stream";
+import { FileViewer } from "@/components/board/FileViewer";
 import {
   publishSocial,
   finishInstagram,
@@ -1939,14 +1939,8 @@ function PublicationCard({
   const publishedAt = pub.published_at ?? firstEntry?.info.at ?? null;
   const hasMedia = !!first || !!standalone;
 
-  const openMedia = async () => {
-    if (first) return openEventFile(first);
-    if (!standalone) return;
-    const win = window.open("", "_blank");
-    const url = await getDriveStreamUrl("publication", standalone.drive_file_id).catch(() => null);
-    if (!url) return win?.close();
-    if (win) win.location.href = url;
-  };
+  const [viewing, setViewing] = useState(false);
+  const openMedia = () => setViewing(true);
 
   const share = async () => {
     setSharing(true);
@@ -2034,9 +2028,19 @@ function PublicationCard({
       <div className="flex w-full shrink-0 items-center gap-3 self-center empty:hidden md:w-auto">
         {hasMedia && (
           <button onClick={openMedia} className="flex items-center gap-1 text-[11px] font-semibold text-ink-3 hover:text-ink">
-            {isDrive ? <ExternalLink size={12} /> : <Play size={12} />}
-            {isDrive ? "Voir sur Drive" : "Lire"}
+            {kind === "video" ? <Play size={12} /> : <Eye size={12} />}
+            {kind === "video" ? "Lire" : "Voir"}
           </button>
+        )}
+        {viewing && (first || standalone) && (
+          <FileViewer
+            name={first?.filename ?? standalone!.filename}
+            contentType={first?.content_type ?? standalone!.content_type}
+            getUrl={(downloadAs) =>
+              first ? getEventFileViewUrl(first, downloadAs) : getDriveStreamUrl("publication", standalone!.drive_file_id, downloadAs)
+            }
+            onClose={() => setViewing(false)}
+          />
         )}
         {hasMedia && (
           <button
