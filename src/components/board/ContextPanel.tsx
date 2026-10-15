@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, CalendarDays, ChevronRight, MapPin, SquareKanban, X } from "lucide-react";
+import { Archive, Bell, CalendarDays, ChevronRight, MapPin, Plus, SquareKanban, X } from "lucide-react";
+import { finishTeamCard } from "@/app/actions/team";
 import type { ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import type { Recap } from "@/app/api/dashboard/recap/route";
 import { useLive, useLiveRefresh } from "@/components/board/live/LiveProvider";
@@ -12,7 +13,8 @@ import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
 
 // Récapitulatif (colonne de droite de l'accueil, des Mails et du Calendrier) : événements du jour,
-// mes cartes de l'Espace Team à traiter, et l'activité (mes dernières notifications).
+// mes cartes de l'Espace Team à traiter (« + » : nouvelle carte dans un de mes tableaux ;
+// icône archive : la carte part dans Terminé), et l'activité (mes dernières notifications).
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
@@ -49,7 +51,7 @@ export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidget
   const [now, setNow] = useState(() => Date.now());
   const { notifications, removeNotifications } = useLive();
   const { open: openEvent } = useOpenEvent();
-  const { open: openCard } = useOpenTeamCard();
+  const { open: openCard, create: createCard } = useOpenTeamCard();
   // Une carte, un événement ou une notification qui change : récapitulatif relu.
   useLiveRefresh(null, () => setReloadKey((k) => k + 1), 1500);
 
@@ -70,6 +72,12 @@ export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidget
   }, [reloadKey]);
 
   const activity = notifications.slice(0, 6);
+
+  // Retirée tout de suite de la liste ; le récapitulatif est relu au retour (remise en place si refus).
+  const archiveCard = (id: string) => {
+    setRecap((r) => (r ? { ...r, cards: r.cards.filter((c) => c.id !== id) } : r));
+    void finishTeamCard(id).then(() => setReloadKey((k) => k + 1));
+  };
 
   return (
     <aside className="hidden w-[280px] shrink-0 flex-col gap-5 overflow-y-auto rounded-panel border border-line bg-card/70 p-4 shadow-bar backdrop-blur xl:flex">
@@ -124,7 +132,17 @@ export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidget
 
       {widgets.cards && (
         <div>
-          <Title count={recap?.cards.length}>Mes cartes</Title>
+          <div className="flex items-start justify-between">
+            <Title count={recap?.cards.length}>Mes cartes</Title>
+            <button
+              onClick={createCard}
+              title="Nouvelle carte dans l'Espace Team"
+              aria-label="Nouvelle carte"
+              className="-mt-0.5 flex items-center gap-0.5 rounded-btn px-1 py-0.5 text-[10px] font-semibold text-ink-4 hover:bg-hover hover:text-ink"
+            >
+              <Plus size={12} /> Carte
+            </button>
+          </div>
           {!recap ? (
             <div className="h-12 animate-pulse rounded-btn bg-subtle" />
           ) : recap.cards.length === 0 ? (
@@ -134,7 +152,8 @@ export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidget
               {recap.cards.map((c) => {
                 const late = !!c.dueAt && new Date(c.dueAt).getTime() < now;
                 return (
-                  <button key={c.id} onClick={() => openCard(c.id)} className="block w-full border-b border-line px-2.5 py-2 text-left last:border-b-0 hover:bg-hover">
+                  <div key={c.id} className="group relative border-b border-line last:border-b-0">
+                  <button onClick={() => openCard(c.id)} className="block w-full py-2 pl-2.5 pr-7 text-left hover:bg-hover">
                     <div className="flex items-start gap-1.5">
                       {c.isNew && <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red" title="Nouvelle carte" />}
                       <span className="line-clamp-2 text-xs font-bold leading-tight text-ink">{c.title}</span>
@@ -148,6 +167,15 @@ export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidget
                       )}
                     </div>
                   </button>
+                  <button
+                    onClick={() => archiveCard(c.id)}
+                    title="Archiver : ranger la carte dans Terminé"
+                    aria-label={`Archiver « ${c.title} »`}
+                    className="absolute right-1.5 top-1.5 rounded-btn p-1 text-ink-4 opacity-0 hover:bg-card hover:text-ink focus:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+                  >
+                    <Archive size={12} />
+                  </button>
+                  </div>
                 );
               })}
             </div>

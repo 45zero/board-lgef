@@ -9,21 +9,32 @@ import { getTeamWorkspace, listTeamCardsForEvents } from "@/app/actions/team";
 import { unwrap } from "@/lib/board/actionResult";
 import type { TeamCard, TeamWorkspace } from "@/lib/board/team";
 import { TeamCardModal } from "./TeamCardModal";
+import { NewCardDialog } from "./NewCardDialog";
 
 // Ouverture d'une carte de l'Espace Team en popup, depuis n'importe quel écran (fiche événement,
 // calendrier, notifications). Le fournisseur porte l'état ; l'hôte, monté sous l'EventOpenerProvider,
-// affiche la fiche par-dessus la fiche événement (z-90 > z-80).
+// affiche la fiche par-dessus la fiche événement (z-90 > z-80). `create` ouvre la fenêtre « Nouvelle carte »
+// (raccourci « + » de Mes cartes dans le récapitulatif), puis la carte créée.
 
-type Ctx = { open: (cardId: string) => void; current: string | null; close: () => void; loadingId: string | null; setLoadingId: (id: string | null) => void };
+type Ctx = {
+  open: (cardId: string) => void;
+  current: string | null;
+  close: () => void;
+  creating: boolean;
+  setCreating: (v: boolean) => void;
+  loadingId: string | null;
+  setLoadingId: (id: string | null) => void;
+};
 
 const TeamCardOpenerContext = createContext<Ctx | null>(null);
 
 export function TeamCardOpenerProvider({ children }: { children: React.ReactNode }) {
   const [current, setCurrent] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const value = useMemo<Ctx>(
-    () => ({ open: (id) => setCurrent(id), current, close: () => setCurrent(null), loadingId, setLoadingId }),
-    [current, loadingId]
+    () => ({ open: (id) => setCurrent(id), current, close: () => setCurrent(null), creating, setCreating, loadingId, setLoadingId }),
+    [current, creating, loadingId]
   );
   return <TeamCardOpenerContext.Provider value={value}>{children}</TeamCardOpenerContext.Provider>;
 }
@@ -31,7 +42,7 @@ export function TeamCardOpenerProvider({ children }: { children: React.ReactNode
 export function useOpenTeamCard() {
   const ctx = useContext(TeamCardOpenerContext);
   if (!ctx) throw new Error("useOpenTeamCard doit être utilisé sous <TeamCardOpenerProvider>.");
-  return { open: ctx.open, loadingId: ctx.loadingId };
+  return { open: ctx.open, create: () => ctx.setCreating(true), loadingId: ctx.loadingId };
 }
 
 /** Fiche carte en popup — à monter sous l'EventOpenerProvider (la fiche ouvre l'événement lié). */
@@ -45,6 +56,7 @@ export function TeamCardOpenerHost() {
   const cardId = ctx?.current ?? null;
   const setLoadingId = ctx?.setLoadingId;
   const close = ctx?.close;
+  const creating = !!ctx?.creating;
 
   const load = useCallback(async () => {
     try {
@@ -55,6 +67,12 @@ export function TeamCardOpenerHost() {
       setError(e instanceof Error ? e.message : "Carte indisponible.");
     }
   }, [cacheKey]);
+
+  useEffect(() => {
+    if (!creating) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- l'état n'est posé qu'à la réponse du serveur
+    void load();
+  }, [creating, load]);
 
   useEffect(() => {
     if (!cardId) return;
@@ -87,6 +105,21 @@ export function TeamCardOpenerHost() {
     <>
       {card && ws && close && (
         <TeamCardModal card={card} ws={ws} zClass="z-[90]" onClose={close} onLocalPatch={patchLocal} onRefresh={() => void load()} onError={toast} />
+      )}
+      {creating && ws && ctx && (
+        <NewCardDialog
+          ws={ws}
+          myBoards={ws.boards.filter((b) => b.ownerId === ws.meId)}
+          initial={{}}
+          zClass="z-[90]"
+          onClose={() => ctx.setCreating(false)}
+          onCreated={async (id) => {
+            ctx.setCreating(false);
+            await load();
+            ctx.open(id);
+          }}
+          onError={toast}
+        />
       )}
       {error && <div className="fixed bottom-6 right-6 z-[95] max-w-sm rounded-btn bg-ink px-4 py-3 text-sm text-white shadow-card">{error}</div>}
     </>

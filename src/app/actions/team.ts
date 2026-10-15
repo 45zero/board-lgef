@@ -263,6 +263,20 @@ export const moveTeamCard = async (cardId: string, listId: string, position: num
     check(await supabase.from("team_cards").update({ list_id: listId, position }).eq("id", cardId));
   });
 
+/** « Archiver » : la carte va en bas de la colonne Terminé de son tableau (archivée s'il n'y en a pas). */
+export const finishTeamCard = async (cardId: string) =>
+  toResult(async () => {
+    const { supabase } = await session();
+    const card = check(await supabase.from("team_cards").select("board_id").eq("id", cardId).single());
+    const done = (await supabase.from("team_lists").select("id").eq("board_id", card.board_id).eq("is_done", true).order("position").limit(1).maybeSingle()).data;
+    if (!done) {
+      check(await supabase.from("team_cards").update({ archived_at: new Date().toISOString() }).eq("id", cardId));
+      return;
+    }
+    const last = (await supabase.from("team_cards").select("position").eq("list_id", done.id).order("position", { ascending: false }).limit(1).maybeSingle()).data;
+    check(await supabase.from("team_cards").update({ list_id: done.id, position: (last?.position ?? 0) + 1000 }).eq("id", cardId));
+  });
+
 /** Copie une carte (titre, description, couleur, étiquettes, échéance, checklist) dans la même colonne. */
 export const copyTeamCard = async (cardId: string) =>
   toResult(async () => {
