@@ -180,7 +180,7 @@ export function AccueilScreen({
               Mes actions
               {actions.length > 0 && (
                 <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red px-1 align-[2px] text-[9px] font-extrabold text-white">
-                  {actions.reduce((n, a) => n + a.count, 0)}
+                  {actions.length}
                 </span>
               )}
             </SectionTitle>
@@ -327,25 +327,50 @@ export function AccueilScreen({
 }
 
 /** Carte d'action du carrousel mobile : image (premier média) ou pictogramme, « Titre (n) ». */
+/**
+ * Photo d'illustration de chaque action (public/actions/<id>.jpg, 360 px) — photos StockSnap,
+ * domaine public (CC0), récupérées via Openverse : sticky-notes-NCEC9BTO9Z, coffee-cafelatte-F9A95133A1,
+ * calculator-numbers-VVXW9WBTB8 / JY874BSKKC, camera-lens-W7RWLHPKX4, soccer-field-5FKA3VHPRW,
+ * soccer-net-1IIEPDOFFI, team-meeting-VQXYE2ZEHC, mobile-smartphone-DLITZEAVJJ,
+ * iphone-smartphone-ODN23L0AC9, mailboxes-letters-38F072B2D5, soccer-ball-LHHL7FKKVD.
+ */
+const ACTION_PHOTOS = new Set([
+  "frais-declarer",
+  "frais-valider",
+  "frais-refuses",
+  "captation-repondre",
+  "captation-attribuer",
+  "couverture-refusee",
+  "presence",
+  "publier",
+  "commentaires",
+  "inscriptions",
+  "cartes",
+]);
+const actionPhoto = (id: string) => `/actions/${ACTION_PHOTOS.has(id) ? id : "default"}.jpg`;
+
+/** Carte d'action du carrousel mobile, au format des vignettes Airbnb : photo carrée, titre et détail dessous. */
 function ActionCard({ action: a, onClick }: { action: DashboardAction; onClick: () => void }) {
   const tone = TONES[a.tone];
   return (
-    <button onClick={onClick} className="group w-24 shrink-0 snap-start text-left">
-      <div className={`relative aspect-[4/3] overflow-hidden rounded-card shadow-card ${a.thumbUrl ? "bg-navy" : tone.tile}`}>
-        {a.thumbUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- miniature signée du premier média
-          <img src={a.thumbUrl} alt="" className="h-full w-full object-cover" onError={(e) => (e.currentTarget.style.display = "none")} />
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <ActionIcon id={a.id} size={22} strokeWidth={1.7} />
-          </div>
-        )}
-        <span className={`absolute right-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-extrabold shadow-card ${tone.count}`}>
+    <button onClick={onClick} className="group w-28 shrink-0 snap-start text-left">
+      <div className="relative aspect-square overflow-hidden rounded-2xl bg-subtle shadow-card">
+        {/* eslint-disable-next-line @next/next/no-img-element -- miniature signée du premier média, sinon photo statique */}
+        <img
+          src={a.thumbUrl ?? actionPhoto(a.id)}
+          alt=""
+          loading="lazy"
+          className="h-full w-full object-cover transition group-active:scale-[0.98]"
+          onError={(e) => {
+            if (!e.currentTarget.src.endsWith(actionPhoto(a.id))) e.currentTarget.src = actionPhoto(a.id);
+          }}
+        />
+        <span className={`absolute right-1.5 top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-extrabold shadow-card ${tone.count}`}>
           {a.count}
         </span>
       </div>
-      <div className="mt-1 line-clamp-2 text-[10.5px] font-bold leading-tight text-ink">{a.title}</div>
-      <div className="line-clamp-1 text-[9px] text-ink-4">{a.detail}</div>
+      <div className="mt-1.5 line-clamp-2 text-[12px] font-bold leading-tight text-ink">{a.title}</div>
+      <div className="mt-0.5 line-clamp-2 text-[11px] leading-tight text-ink-3">{a.detail}</div>
     </button>
   );
 }
