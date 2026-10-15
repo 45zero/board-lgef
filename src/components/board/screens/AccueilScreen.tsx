@@ -176,8 +176,15 @@ export function AccueilScreen({
 
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
           <section className="order-1 min-w-0">
-            <SectionTitle>Mes actions</SectionTitle>
-            {/* Mobile : carrousel de cartes (comme les médias), le nombre entre parenthèses. */}
+            <SectionTitle>
+              Mes actions
+              {actions.length > 0 && (
+                <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red px-1 align-[2px] text-[9px] font-extrabold text-white">
+                  {actions.reduce((n, a) => n + a.count, 0)}
+                </span>
+              )}
+            </SectionTitle>
+            {/* Mobile : carrousel de petites cartes (comme les médias), le nombre en pastille. */}
             {data !== null && actions.length > 0 && (
               <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2 lg:hidden">
                 {actions.map((a) => (
@@ -323,24 +330,22 @@ export function AccueilScreen({
 function ActionCard({ action: a, onClick }: { action: DashboardAction; onClick: () => void }) {
   const tone = TONES[a.tone];
   return (
-    <button onClick={onClick} className="group w-36 shrink-0 snap-start text-left">
+    <button onClick={onClick} className="group w-24 shrink-0 snap-start text-left">
       <div className={`relative aspect-[4/3] overflow-hidden rounded-card shadow-card ${a.thumbUrl ? "bg-navy" : tone.tile}`}>
         {a.thumbUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- miniature signée du premier média
           <img src={a.thumbUrl} alt="" className="h-full w-full object-cover" onError={(e) => (e.currentTarget.style.display = "none")} />
         ) : (
           <div className="flex h-full items-center justify-center">
-            <ActionIcon id={a.id} size={34} strokeWidth={1.6} />
+            <ActionIcon id={a.id} size={22} strokeWidth={1.7} />
           </div>
         )}
-        <span className={`absolute right-1.5 top-1.5 flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-[11px] font-extrabold shadow-card ${tone.count}`}>
+        <span className={`absolute right-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-extrabold shadow-card ${tone.count}`}>
           {a.count}
         </span>
       </div>
-      <div className="mt-1.5 line-clamp-2 text-[12px] font-bold leading-tight text-ink">
-        {a.title} ({a.count})
-      </div>
-      <div className="line-clamp-1 text-[10px] text-ink-4">{a.detail}</div>
+      <div className="mt-1 line-clamp-2 text-[10.5px] font-bold leading-tight text-ink">{a.title}</div>
+      <div className="line-clamp-1 text-[9px] text-ink-4">{a.detail}</div>
     </button>
   );
 }

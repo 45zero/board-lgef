@@ -45,6 +45,8 @@ export function MobileSettingsSheet({
   canPublish,
   navOrder,
   onNavOrderChange,
+  startTab,
+  onStartTabChange,
 }: {
   value: CenterAction;
   onChange: (a: CenterAction) => void;
@@ -53,6 +55,8 @@ export function MobileSettingsSheet({
   canPublish: boolean;
   navOrder: MobileTab[];
   onNavOrderChange: (order: MobileTab[]) => void;
+  startTab: MobileTab;
+  onStartTabChange: (tab: MobileTab) => void;
 }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const visible = useVisibleModules();
@@ -116,6 +120,25 @@ export function MobileSettingsSheet({
                 <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${active ? "border-red" : "border-line-strong"}`}>
                   {active && <span className="h-2.5 w-2.5 rounded-full bg-red" />}
                 </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="mb-2 mt-4 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-4">Page à l&rsquo;ouverture</div>
+        <div className="flex flex-wrap gap-1.5">
+          {navItems.map((slot) => {
+            const Icon = slot.icon;
+            const active = (navItems.some((n) => n.id === startTab) ? startTab : "calendrier") === slot.id;
+            return (
+              <button
+                key={slot.id}
+                onClick={() => onStartTabChange(slot.id)}
+                aria-pressed={active}
+                className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold ${
+                  active ? "border-red bg-sel-bg text-ink" : "border-line text-ink-3"
+                }`}
+              >
+                <Icon size={14} /> {slot.label}
               </button>
             );
           })}

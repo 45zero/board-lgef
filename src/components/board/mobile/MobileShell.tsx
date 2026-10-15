@@ -3,7 +3,7 @@
 import { useCanPublish } from "@/hooks/board/useCanPublish";
 import { useCallback, useEffect, useState } from "react";
 import { MobileHeader } from "@/components/board/mobile/MobileHeader";
-import { MobileBottomNav, useNavOrder, type MobileTab } from "@/components/board/mobile/MobileBottomNav";
+import { MobileBottomNav, useNavOrder, useStartTab, type MobileTab } from "@/components/board/mobile/MobileBottomNav";
 import { MobileCalendrierScreen } from "@/components/board/mobile/screens/MobileCalendrierScreen";
 import { MobileMailsScreen } from "@/components/board/mobile/screens/MobileMailsScreen";
 import { FraisScreen } from "@/components/board/screens/FraisScreen";
@@ -35,7 +35,9 @@ const LINKED_TABS: Record<string, MobileTab> = { accueil: "accueil", mails: "mai
 export function MobileShell() {
   // Lien direct depuis un e-mail (/?app=weekend, /?app=frais…).
   const [linkedApp] = useState(readAppParam);
-  const [tab, setTab] = useState<MobileTab>(() => (linkedApp && LINKED_TABS[linkedApp]) || "calendrier");
+  // Page d'ouverture choisie dans Paramètres, sauf lien direct.
+  const [startTab, setStartTab] = useStartTab();
+  const [tab, setTab] = useState<MobileTab>(() => (linkedApp && LINKED_TABS[linkedApp]) || startTab);
   const [mailMenuOpen, setMailMenuOpen] = useState(false);
   // Menu des modules (logo de l'en-tête, hors Mails qui y garde ses dossiers) : Week-end, Transferts…
   const [modulesOpen, setModulesOpen] = useState(false);
@@ -191,6 +193,8 @@ export function MobileShell() {
           canPublish={canPublish}
           navOrder={navOrder}
           onNavOrderChange={setNavOrder}
+          startTab={startTab}
+          onStartTabChange={setStartTab}
           value={center}
           onChange={(a) => {
             setCenter(a);

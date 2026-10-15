@@ -23,6 +23,29 @@ export const NAV_SLOTS: NavSlotDef[] = [
   { id: "transfer", module: "transfer", label: "Transferts", icon: Send },
 ];
 
+const START_KEY = "lgef-board:mobile-start-tab";
+
+/** Page ouverte au lancement de l'appli, choisie dans Paramètres (Calendrier par défaut), mémorisée sur l'appareil. */
+export function useStartTab(): [MobileTab, (tab: MobileTab) => void] {
+  const [tab, setTab] = useState<MobileTab>(() => {
+    try {
+      const v = localStorage.getItem(START_KEY) as MobileTab | null;
+      return v && NAV_SLOTS.some((s) => s.id === v) ? v : "calendrier";
+    } catch {
+      return "calendrier";
+    }
+  });
+  const set = (next: MobileTab) => {
+    setTab(next);
+    try {
+      localStorage.setItem(START_KEY, next);
+    } catch {
+      // stockage indisponible : le choix vaut pour la session
+    }
+  };
+  return [tab, set];
+}
+
 /** Modules dans la barre du bas (les autres restent dans le menu de l'en-tête). */
 export const NAV_BAR_SIZE = 4;
 const NAV_KEY = "lgef-board:mobile-nav-order";
