@@ -1029,11 +1029,43 @@ function useMe() {
 export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onClose: () => void; onDone: () => void }) {
   const { me } = useMe();
   const { runTask } = useBackgroundTasks();
-  const [caption, setCaption] = useState(pub.caption ?? "");
+  // Brouillon du texte gardé sur l'appareil : rien n'est perdu si la fenêtre se ferme ou se recharge.
+  const draftKey = `lgef-board:pub-draft:${pub.id}`;
+  const [caption, setCaptionState] = useState(() => {
+    try {
+      return localStorage.getItem(draftKey) ?? pub.caption ?? "";
+    } catch {
+      return pub.caption ?? "";
+    }
+  });
+  const setCaption = (v: string) => {
+    setCaptionState(v);
+    try {
+      if (v === (pub.caption ?? "")) localStorage.removeItem(draftKey);
+      else localStorage.setItem(draftKey, v);
+    } catch {
+      // stockage indisponible : le texte reste dans la fenêtre
+    }
+  };
+  const clearDraft = () => {
+    try {
+      localStorage.removeItem(draftKey);
+    } catch {
+      // rien à effacer
+    }
+  };
   const [files, setFiles] = useState<EventFile[]>(pub.files);
   const [albumChanged, setAlbumChanged] = useState(false);
-  // Fermer après avoir modifié l'album recharge la liste (vignette, nombre de médias).
-  const close = albumChanged ? onDone : onClose;
+  // Fermer après avoir modifié l'album recharge la liste (vignette, nombre de médias). Texte modifié :
+  // confirmation, puis le brouillon est abandonné.
+  const close = () => {
+    if (caption !== (pub.caption ?? "") && !confirm("Fermer sans publier ? Le texte saisi sera perdu.")) return;
+    clearDraft();
+    (albumChanged ? onDone : onClose)();
+  };
+  // Fond cliqué : seulement si le clic y a aussi commencé (une sélection de texte qui se termine
+  // hors de la fenêtre ne la ferme pas).
+  const backdropDown = useRef(false);
 
   /** Chaque modification de l'album est enregistrée tout de suite (pas seulement à la publication). */
   // Les enregistrements passent l'un après l'autre : deux déplacements rapides ne s'écrasent pas dans le désordre.
@@ -1129,6 +1161,7 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
     if (count === 0 && !caption.trim()) return alert("Écrivez le texte de la publication.");
     if (!confirm("Publier maintenant sur les réseaux sélectionnés ? Action publique et non réversible.")) return;
     const snapshot = { targets, caption, files };
+    clearDraft();
     onClose();
 
     void runTask(
@@ -1207,6 +1240,7 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
     try {
       await persistFiles();
       await scheduleMediaPublication(pub.id, { caption, targets, scheduledAt: new Date(scheduledAt).toISOString() });
+      clearDraft();
       onDone();
     } catch (e) {
       alert(e instanceof Error ? e.message : "Échec de la programmation.");
@@ -1235,7 +1269,14 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
   );
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={close}>
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+      onMouseDown={(e) => (backdropDown.current = e.target === e.currentTarget)}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && backdropDown.current) close();
+        backdropDown.current = false;
+      }}
+    >
       <div
         className="max-h-[85vh] w-full max-w-lg space-y-4 overflow-y-auto rounded-modal border border-line bg-card p-5 shadow-modal"
         onClick={(e) => e.stopPropagation()}
@@ -2059,7 +2100,8 @@ export function PublicationScreen() {
             tabRef.current = "to_publish";
             const list = await refetch();
             const created = list.find((p) => p.id === id);
-            if (created) setComposerFor(created);
+            // Un compositeur déjà ouvert (saisie en cours) n'est jamais remplacé.
+            if (created) setComposerFor((open) => open ?? created);
           }}
         />
       )}
