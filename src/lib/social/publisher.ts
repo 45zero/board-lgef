@@ -632,7 +632,12 @@ function friendlyNetworkError(key: NetworkKey, message: string): string {
  * Supprime la publication sur les réseaux demandés (irréversible) et retire les entrées
  * correspondantes de publish_info. Les réseaux non supprimés (échec) restent affichés.
  */
-export async function deletePublicationPosts(client: Client, publicationId: string, keys: NetworkKey[]): Promise<SocialPublishResult[]> {
+export async function deletePublicationPosts(
+  client: Client,
+  publicationId: string,
+  keys: NetworkKey[],
+  options: { keepStatus?: boolean } = {}
+): Promise<SocialPublishResult[]> {
   const pub = await loadPublication(client, publicationId);
   const info = pub.publish_info ?? {};
 
@@ -672,10 +677,43 @@ export async function deletePublicationPosts(client: Client, publicationId: stri
   const deleted = results.filter((r) => r.ok).map((r) => r.key);
   if (deleted.length > 0) {
     const next = await savePublishInfo(client, pub, (current) => deleted.reduce((acc, key) => withNetworkEntry(acc, key, undefined), current));
-    // Plus en ligne nulle part : la publication quitte « Publiés » et revient dans « À publier ».
-    if (!NETWORK_KEYS.some((k) => getNetworkEntry(next, k)?.published)) {
+    // Plus en ligne nulle part : la publication quitte « Publiés » et revient dans « À publier »
+    // (sauf remplacement du média : elle est republiée juste après).
+    if (!options.keepStatus && !NETWORK_KEYS.some((k) => getNetworkEntry(next, k)?.published)) {
       await client.from("media_publications").update({ status: "to_publish", published_at: null }).eq("id", pub.id);
     }
   }
   return results;
+}
+
+/* ---------- Remplacement du média ---------- */
+
+/**
+ * Aucun réseau ne permet de changer la vidéo (ou les photos) d'une publication en ligne : on la
+ * supprime partout où elle est publiée, puis la publication prend les nouveaux médias (Drive du
+ * board, comme une publication autonome). Le navigateur la republie ensuite sur les réseaux
+ * effectivement supprimés (`deleted`) — un réseau dont la suppression échoue garde l'ancienne.
+ */
+export async function replacePublicationMedia(
+  client: Client,
+  publicationId: string,
+  media: StandaloneMedia[]
+): Promise<{ results: SocialPublishResult[]; deleted: NetworkKey[] }> {
+  if (media.length === 0) throw new Error("Aucun nouveau média.");
+  const pub = await loadPublication(client, publicationId);
+  const keys = NETWORK_KEYS.filter((k) => getNetworkEntry(pub.publish_info, k)?.published);
+  const results = await deletePublicationPosts(client, publicationId, keys, { keepStatus: true });
+  const { error } = await client
+    .from("media_publications")
+    .update({
+      media: media as unknown as Json,
+      // Les fichiers d'événement d'origine restent dans l'événement, mais ne font plus partie de la publication.
+      file_ids: [],
+      event_file_id: null,
+      kind: kindFromContentTypes(media.map((m) => m.content_type)),
+      media_purged_at: null,
+    })
+    .eq("id", publicationId);
+  if (error) throw new Error(error.message);
+  return { results, deleted: results.filter((r) => r.ok).map((r) => r.key) };
 }

@@ -33,6 +33,7 @@ import {
   AlertTriangle,
   BellRing,
   Pencil,
+  Replace,
 } from "lucide-react";
 import {
   listMediaPublications,
@@ -40,6 +41,7 @@ import {
   scheduleMediaPublication,
   cancelScheduledPublication,
   markMediaPublished,
+  markMediaToPublish,
   createPublication,
   setPublicationFiles,
   claimFilesForPublication,
@@ -65,6 +67,7 @@ import {
   finishInstagram,
   replySocialComment,
   editSocialCaption,
+  replaceSocialMedia,
   refreshSocialStats,
   getSocialComments,
   deleteSocialComment,
@@ -102,7 +105,7 @@ import { useBackgroundTasks } from "@/contexts/BackgroundTasksContext";
 import { pdfToJpegFiles } from "@/lib/board/pdfToImages";
 import { createClient } from "@/lib/supabase/client";
 import { ParticipantsField, personName } from "@/components/board/calendar/EventTabs";
-import { useOversizedVideo } from "@/hooks/board/useOversizedVideo";
+import { useOversizedVideo, readVideoSize, INSTAGRAM_MAX_VIDEO_PX } from "@/hooks/board/useOversizedVideo";
 import { AlbumEditor } from "@/components/board/publication/AlbumEditor";
 import { YoutubeIcon, FacebookIcon, TiktokIcon, InstagramIcon } from "@/components/board/publication/BrandIcons";
 
@@ -639,6 +642,63 @@ function networkRules(contentTypes: string[]) {
 }
 
 /**
+ * Publie une publication déjà en ligne sur d'autres réseaux (« Publier sur un autre réseau ») ou la
+ * republie après remplacement de son média, avec le même texte. Attend un Reel Instagram encore en
+ * traitement comme le compositeur (5 min max, ensuite le cron prend le relais).
+ */
+async function publishOnNetworks(
+  pub: MediaPublication,
+  keys: NetworkKey[],
+  text: string,
+  me: By,
+  setProgress: (fraction: number | undefined, label?: string) => void,
+  youtubeTitle = publicationTitle(pub)
+): Promise<{ anyOk: boolean; failures: string[] }> {
+  const failures: string[] = [];
+  let anyOk = false;
+  if (keys.includes("youtube")) {
+    setProgress(undefined, "Envoi de la vidéo à YouTube…");
+    try {
+      await publishPublicationToYoutube(pub, { title: youtubeTitle, description: text }, me);
+      anyOk = true;
+    } catch (e) {
+      failures.push(`YouTube : ${e instanceof Error ? e.message : "échec"}`);
+    }
+  }
+
+  const social = keys.filter((k): k is SocialTargetKey => k !== "youtube").map((key) => ({ key, caption: text }));
+  let igPending = false;
+  if (social.length > 0) {
+    setProgress(undefined, "Publication sur Facebook / Instagram…");
+    try {
+      const results = await publishSocial(pub.id, social, me, { igUserTags: pub.targets.igTags, fbMentions: pub.targets.fbMentions });
+      anyOk ||= results.some((r) => r.ok);
+      igPending = results.some((r) => r.key === "instagram" && r.pending);
+      const socialFailures = describeFailures(results);
+      if (socialFailures) failures.push(socialFailures);
+      const warnings = describeWarnings(results);
+      if (warnings) failures.push(`Attention — ${warnings}`);
+    } catch (e) {
+      failures.push(e instanceof Error ? e.message : "Échec de la publication Facebook/Instagram.");
+    }
+  }
+  if (!anyOk) return { anyOk, failures };
+
+  const igDeadline = Date.now() + 5 * 60_000;
+  while (igPending && Date.now() < igDeadline) {
+    setProgress(undefined, "Instagram traite la vidéo…");
+    const [res] = await finishInstagram([pub.id]).catch(() => []);
+    if (!res || res.state === "published") igPending = false;
+    else if (res.state === "failed") {
+      igPending = false;
+      failures.push(`Instagram : ${res.error ?? "échec"}`);
+    } else await new Promise((r) => setTimeout(r, 5000));
+  }
+  if (igPending) failures.push("Instagram : la vidéo est encore en traitement — elle sera mise en ligne automatiquement (quelques minutes).");
+  return { anyOk, failures };
+}
+
+/**
  * Publie après coup une publication déjà en ligne sur un réseau de plus (ex. vidéo sortie sur
  * YouTube et Facebook, poussée ensuite sur Instagram). Les réseaux déjà publiés sont conservés.
  */
@@ -688,49 +748,8 @@ function PublishElsewhere({ pub, onChanged }: { pub: MediaPublication; onChanged
     void runTask(
       `Publication — ${publicationTitle(pub)}`,
       async ({ setProgress }) => {
-        const failures: string[] = [];
-        let anyOk = false;
-        if (keys.includes("youtube")) {
-          setProgress(undefined, "Envoi de la vidéo à YouTube…");
-          try {
-            await publishPublicationToYoutube(pub, { title: publicationTitle(pub), description: text }, me);
-            anyOk = true;
-          } catch (e) {
-            failures.push(`YouTube : ${e instanceof Error ? e.message : "échec"}`);
-          }
-        }
-
-        const social = keys.filter((k): k is SocialTargetKey => k !== "youtube").map((key) => ({ key, caption: text }));
-        let igPending = false;
-        if (social.length > 0) {
-          setProgress(undefined, "Publication sur Facebook / Instagram…");
-          try {
-            const results = await publishSocial(pub.id, social, me, { igUserTags: pub.targets.igTags, fbMentions: pub.targets.fbMentions });
-            anyOk ||= results.some((r) => r.ok);
-            igPending = results.some((r) => r.key === "instagram" && r.pending);
-            const socialFailures = describeFailures(results);
-            if (socialFailures) failures.push(socialFailures);
-            const warnings = describeWarnings(results);
-            if (warnings) failures.push(`Attention — ${warnings}`);
-          } catch (e) {
-            failures.push(e instanceof Error ? e.message : "Échec de la publication Facebook/Instagram.");
-          }
-        }
+        const { anyOk, failures } = await publishOnNetworks(pub, keys, text, me, setProgress);
         if (!anyOk) throw new Error(failures.join("\n") || "Échec de la publication.");
-
-        // Même attente que le compositeur pour un Reel encore en traitement chez Instagram.
-        const igDeadline = Date.now() + 5 * 60_000;
-        while (igPending && Date.now() < igDeadline) {
-          setProgress(undefined, "Instagram traite la vidéo…");
-          const [res] = await finishInstagram([pub.id]).catch(() => []);
-          if (!res || res.state === "published") igPending = false;
-          else if (res.state === "failed") {
-            igPending = false;
-            failures.push(`Instagram : ${res.error ?? "échec"}`);
-          } else await new Promise((r) => setTimeout(r, 5000));
-        }
-        if (igPending) failures.push("Instagram : la vidéo est encore en traitement — elle sera mise en ligne automatiquement (quelques minutes).");
-
         onChanged();
         return failures;
       },
@@ -785,6 +804,96 @@ function PublishElsewhere({ pub, onChanged }: { pub: MediaPublication; onChanged
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Remplace la vidéo (ou les photos) d'une publication en ligne. Aucun réseau ne permet de changer le
+ * média d'un post publié : l'ancien est supprimé sur chaque réseau, puis le nouveau est publié avec
+ * le même texte — vues, réactions et commentaires repartent de zéro, le lien change.
+ */
+function ReplaceMedia({ pub, onChanged }: { pub: MediaPublication; onChanged: () => void }) {
+  const { me } = useMe();
+  const { runTask } = useBackgroundTasks();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const keys = publishedEntries(pub).map((e) => e.key);
+  const isVideo = publicationKind(pub) === "video";
+
+  if (keys.length === 0) return null;
+
+  const start = async (files: File[]) => {
+    if (files.length === 0) return;
+    if (pub.publish_info?.instagram?.pending) return alert("Instagram traite encore la publication : attendez sa mise en ligne avant de remplacer le média.");
+    const rules = networkRules(files.map((f) => f.type));
+    if (keys.includes("youtube") && !rules.canYoutube) return alert("La publication est sur YouTube, qui ne prend que des vidéos : choisissez au moins une vidéo.");
+    if (keys.includes("instagram")) {
+      if (!rules.canInstagram) return alert("Instagram n'accepte pas ce format (HEIC…) : exportez le média en JPEG ou en vidéo MP4.");
+      for (const f of files.slice(0, 10).filter((f) => f.type.startsWith("video"))) {
+        const url = URL.createObjectURL(f);
+        const size = await readVideoSize(url);
+        URL.revokeObjectURL(url);
+        if (size && Math.max(size.width, size.height) > INSTAGRAM_MAX_VIDEO_PX) {
+          return alert(`Instagram : vidéo trop grande (${size.width}×${size.height}, « ${f.name} ») — Instagram accepte 1920 px max. Exportez-la en 1080p.`);
+        }
+      }
+    }
+    const where = keys.map(chipLabel).join(", ");
+    if (
+      !confirm(
+        `Remplacer le média sur ${where} ?\n\nLes réseaux ne permettent pas de changer une vidéo publiée : l'ancienne publication sera supprimée, puis la nouvelle publiée avec le même texte. Vues, réactions et commentaires seront perdus et le lien changera.`
+      )
+    )
+      return;
+
+    const text = pub.caption ?? "";
+    const youtubeTitle = pub.publish_info?.youtube?.title ?? publicationTitle(pub);
+    void runTask(
+      `Remplacement du média — ${publicationTitle(pub)}`,
+      async ({ setProgress }) => {
+        const media = await uploadStandaloneMedia(files, (sent, total, current) =>
+          setProgress(total ? sent / total : undefined, `${current} — ${Math.round((sent / Math.max(total, 1)) * 100)} %`)
+        );
+        setProgress(undefined, "Suppression de l'ancienne publication…");
+        const { error, results, deleted } = await replaceSocialMedia(pub.id, media);
+        if (error) throw new Error(error);
+        const failures: string[] = [];
+        const notDeleted = describeFailures(results);
+        if (notDeleted) failures.push(`Ancienne publication conservée — ${notDeleted}`);
+        if (deleted.length === 0) throw new Error(failures.join("\n") || "Suppression impossible.");
+
+        const published = await publishOnNetworks({ ...pub, media, files: [] }, deleted, text, me, setProgress, youtubeTitle);
+        failures.push(...published.failures);
+        // Rien de republié et plus rien en ligne : la publication revient dans « À publier ».
+        if (!published.anyOk && deleted.length === keys.length) await markMediaToPublish(pub.id);
+        onChanged();
+        if (!published.anyOk) throw new Error(`Ancienne publication supprimée, mais la nouvelle n'a pas pu être publiée.\n${failures.join("\n")}`);
+        return failures;
+      },
+      { success: (failures) => (failures.length ? `Média remplacé partiellement.\n${failures.join("\n")}` : "Média remplacé sur tous les réseaux.") }
+    );
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => inputRef.current?.click()}
+        className="flex items-center gap-1 text-[11px] font-semibold text-link hover:underline"
+      >
+        <Replace size={11} /> {isVideo ? "Remplacer la vidéo" : "Remplacer le média"}
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*,video/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          e.target.value = "";
+          void start(files);
+        }}
+      />
+    </>
   );
 }
 
@@ -845,7 +954,8 @@ function PublishedStatsRow({ pub, onChanged }: { pub: MediaPublication; onChange
         )}
       </div>
       <CaptionEditor pub={pub} onChanged={onChanged} />
-      <div className="mt-1.5">
+      <div className="mt-1.5 flex flex-wrap items-start gap-x-4 gap-y-1">
+        <ReplaceMedia pub={pub} onChanged={onChanged} />
         <PublishElsewhere pub={pub} onChanged={onChanged} />
       </div>
       {pub.publish_info?.lastError && (

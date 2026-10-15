@@ -285,6 +285,13 @@ export async function cancelScheduledPublication(id: string) {
   if (error) throw new Error(error.message);
 }
 
+/** Plus en ligne nulle part (republication après remplacement du média échouée) : retour dans « À publier ». */
+export async function markMediaToPublish(id: string) {
+  const supabase = createClient();
+  const { error } = await supabase.from("media_publications").update({ status: "to_publish", published_at: null }).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
 /** `targets` est conservé : il sert ensuite à retrouver les Pages à mentionner à la main (voir SocialDetail). */
 export async function markMediaPublished(id: string, caption?: string, targets?: PublicationTargets) {
   const supabase = createClient();

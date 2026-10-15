@@ -13,6 +13,7 @@ import {
   replyToPublicationComment,
   finishPendingInstagram,
   editPublicationCaption,
+  replacePublicationMedia,
 } from "@/lib/social/publisher";
 import { getSocialAccountById } from "@/lib/social/accounts";
 import { resolveFacebookPage } from "@/lib/social/graph";
@@ -25,6 +26,7 @@ import {
   type SocialComment,
   type SocialPublishResult,
   type SocialTargetKey,
+  type StandaloneMedia,
 } from "@/lib/social/targets";
 
 // Server actions du centre de publication — fines enveloppes authentifiées autour du cœur
@@ -288,4 +290,17 @@ export async function finishInstagram(publicationIds: string[]) {
 export async function editSocialCaption(publicationId: string, keys: NetworkKey[], caption: string): Promise<SocialPublishResult[]> {
   const supabase = await requirePublisher();
   return editPublicationCaption(supabase, publicationId, keys, caption);
+}
+
+/** Remplace la vidéo / les photos d'une publication en ligne : suppression sur les réseaux, puis nouveaux médias. */
+export async function replaceSocialMedia(
+  publicationId: string,
+  media: StandaloneMedia[]
+): Promise<{ error: string | null; results: SocialPublishResult[]; deleted: NetworkKey[] }> {
+  try {
+    const supabase = await requirePublisher();
+    return { error: null, ...(await replacePublicationMedia(supabase, publicationId, media)) };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Erreur inattendue.", results: [], deleted: [] };
+  }
 }

@@ -14,7 +14,7 @@ type VideoSize = { width: number; height: number };
 const sizeCache = new Map<string, Promise<VideoSize | null>>();
 
 /** Lit les dimensions d'une vidéo via ses seules métadonnées (le navigateur ne télécharge que l'en-tête). */
-function readVideoSize(url: string): Promise<VideoSize | null> {
+export function readVideoSize(url: string): Promise<VideoSize | null> {
   return new Promise((resolve) => {
     const video = document.createElement("video");
     const done = (size: VideoSize | null) => {
