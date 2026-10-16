@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { listNewPrimaryInbox, type NewInboxMail } from "@/lib/google/gmail";
 import { sendPush } from "@/lib/push/sendPush";
+import { usersWithWebPush } from "@/lib/push/webPush";
 
 export const maxDuration = 60;
 
@@ -15,7 +16,7 @@ const senderName = (from: string) => from.replace(/<[^>]*>/g, "").replace(/"/g, 
  * Push des nouveaux mails (onglet « Principal » de la boîte de réception) — appelé chaque minute par
  * pg_cron (job « mail-push », sql/2026-10-15_mail_push.sql) avec le secret CRON_SECRET. Canal Android
  * « mail », distinct des autres notifications ; un toucher ouvre Mails. Rien pour qui a coupé les push
- * (profiles.notify_push) ou n'a pas l'appli (aucun jeton). Dernier mail signalé par compte : mail_push_state.
+ * (profiles.notify_push) ou n'a ni l'appli (aucun jeton) ni ordinateur abonné. Dernier mail signalé par compte : mail_push_state.
  */
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -30,11 +31,12 @@ export async function GET(request: Request) {
   if (!accounts.length) return NextResponse.json({ pushed: 0 });
 
   const userIds = [...new Set(accounts.map((a) => a.user_id))];
-  const [{ data: profiles }, { data: tokens }] = await Promise.all([
+  const [{ data: profiles }, { data: tokens }, withComputer] = await Promise.all([
     service.from("profiles").select("id, notify_push").in("id", userIds),
     service.from("fcm_tokens").select("user_id").in("user_id", userIds),
+    usersWithWebPush(userIds),
   ]);
-  const withApp = new Set((tokens ?? []).map((t) => t.user_id));
+  const withApp = new Set([...(tokens ?? []).map((t) => t.user_id), ...withComputer]);
   const muted = new Set((profiles ?? []).filter((p) => p.notify_push === false).map((p) => p.id));
 
   // Canal « mail » ; icône de la messagerie du compte (le M de Gmail pour un compte Google).

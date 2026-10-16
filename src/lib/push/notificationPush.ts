@@ -1,6 +1,7 @@
 import "server-only";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import { sendPush, type PushIcon } from "@/lib/push/sendPush";
+import { usersWithWebPush } from "@/lib/push/webPush";
 
 /** Notifications du board envoyées aussi en push, avec leur icône et l'écran ouvert au toucher. */
 const PUSHED: Record<string, { icon: PushIcon; route: string }> = {
@@ -18,7 +19,7 @@ const WINDOW_MS = 30 * 60 * 1000;
 /**
  * Push des nouvelles notifications « média à publier » et Espace Team (appelé chaque minute par
  * /api/cron/notification-emails). Chacune part une fois (notifications.push_sent_at), seulement si
- * son destinataire a l'appli (fcm_tokens) et n'a pas coupé les push (profiles.notify_push).
+ * son destinataire a l'appli (fcm_tokens) ou un ordinateur abonné (web_push_subscriptions) et n'a pas coupé les push (profiles.notify_push).
  */
 export async function sendNotificationPushes(service: ReturnType<typeof createServiceClient>): Promise<number> {
   const { data: pending } = await service
@@ -40,11 +41,12 @@ export async function sendNotificationPushes(service: ReturnType<typeof createSe
   if (!claimed?.length) return 0;
 
   const userIds = [...new Set(claimed.map((n) => n.user_id).filter((id): id is string => !!id))];
-  const [{ data: tokens }, { data: profiles }] = await Promise.all([
+  const [{ data: tokens }, { data: profiles }, withComputer] = await Promise.all([
     service.from("fcm_tokens").select("user_id").in("user_id", userIds),
     service.from("profiles").select("id, notify_push").in("id", userIds),
+    usersWithWebPush(userIds),
   ]);
-  const withApp = new Set((tokens ?? []).map((t) => t.user_id));
+  const withApp = new Set([...(tokens ?? []).map((t) => t.user_id), ...withComputer]);
   const muted = new Set((profiles ?? []).filter((p) => p.notify_push === false).map((p) => p.id));
 
   let sent = 0;

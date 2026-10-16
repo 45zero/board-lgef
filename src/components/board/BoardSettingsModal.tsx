@@ -16,6 +16,7 @@ import {
   setCoverageReceivers,
 } from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
+import { webPushSupported, isWebPushEnabled, enableWebPush, disableWebPush } from "@/lib/web/webPush";
 import { useAuth } from "@/contexts/AuthContext";
 import { useVisibleModules } from "@/hooks/board/useVisibleModules";
 import { listAccessRequests } from "@/app/actions/account-requests";
@@ -23,6 +24,55 @@ import { unwrap } from "@/lib/board/actionResult";
 import { UsersAdminModal } from "@/components/board/users/UsersAdminModal";
 import { ModuleAccessModal } from "@/components/board/modules/ModuleAccessModal";
 import { MyProfileModal } from "@/components/board/profile/MyProfileModal";
+
+/**
+ * Notifications sur cet ordinateur (Web Push) : propre au navigateur, pas au compte. Sur Mac, marche
+ * dans Safari, dans le board ajouté au Dock et dans Chrome/Edge. Masquée dans l'appli mobile.
+ */
+function ComputerPushRow() {
+  // Fenêtre ouverte au clic, jamais rendue côté serveur : le navigateur est lisible dès le premier rendu.
+  const [supported] = useState(webPushSupported);
+  const [enabled, setEnabled] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (supported) isWebPushEnabled().then(setEnabled).catch(() => {});
+  }, [supported]);
+
+  if (!supported) return null;
+
+  const toggle = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      if (enabled) {
+        await disableWebPush();
+        setEnabled(false);
+      } else {
+        const result = await enableWebPush();
+        if (result === "ok") setEnabled(true);
+        else if (result === "denied")
+          setMessage("Notifications refusées : autorisez-les dans Réglages Système › Notifications, puis réessayez.");
+      }
+    } catch (e) {
+      console.error("[ComputerPushRow]", e);
+      setMessage("Activation impossible pour le moment.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <div className="text-sm font-semibold text-ink-2">Sur cet ordinateur</div>
+        <div className="text-xs text-ink-4">{message ?? "Notifications du Mac ou du PC, même board fermé"}</div>
+      </div>
+      <Toggle on={enabled} onClick={toggle} disabled={busy} />
+    </div>
+  );
+}
 
 /** Compte connecté : déconnexion puis retour à la page de connexion pour se connecter avec un autre compte. */
 /**
@@ -556,12 +606,11 @@ export function BoardSettingsModal({
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-ink-2">Notifications push</div>
-                <div className="text-xs text-ink-4">
-                  Bientôt disponible — préparé pour la future application mobile
-                </div>
+                <div className="text-xs text-ink-4">Sur l&rsquo;appli mobile et les ordinateurs activés ci-dessous</div>
               </div>
               <Toggle on={notif.notifyPush} onClick={() => notif.setNotifyPush(!notif.notifyPush)} />
             </div>
+            <ComputerPushRow />
           </div>
         </div>
 

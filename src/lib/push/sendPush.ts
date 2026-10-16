@@ -1,11 +1,12 @@
 import "server-only";
+import { sendWebPush } from "@/lib/push/webPush";
 
 /** Petites icônes de notification dessinées dans l'appli (android/app/src/main/res/drawable/ic_stat_*). */
 export type PushIcon = "ic_stat_gmail" | "ic_stat_publication" | "ic_stat_team";
 
 /**
  * Push vers les téléphones d'un utilisateur (jetons fcm_tokens) via la fonction Supabase send_push_v1
- * (dépôt calendrier-lgef). `channel` : canal Android (« mail » pour les mails, sinon par défaut) ;
+ * (dépôt calendrier-lgef), et vers ses ordinateurs abonnés (Web Push, src/lib/push/webPush.ts). `channel` : canal Android (« mail » pour les mails, sinon par défaut) ;
  * `icon` : petite icône et teinte de la notification ; `data.route` : écran ouvert au toucher.
  */
 export async function sendPush(params: {
@@ -19,6 +20,14 @@ export async function sendPush(params: {
   /** Notification affichée par l'appli Android (vignette en couleurs, texte sur plusieurs lignes). */
   native?: boolean;
 }): Promise<boolean> {
+  const [phone, computer] = await Promise.all([
+    sendPhonePush(params),
+    sendWebPush({ userId: params.userId, title: params.title, body: params.body, route: params.data?.route }),
+  ]);
+  return phone || computer;
+}
+
+async function sendPhonePush(params: Parameters<typeof sendPush>[0]): Promise<boolean> {
   const functionsUrl = (process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL || `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1`).replace(/\/+$/, "");
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!anonKey) return false;
