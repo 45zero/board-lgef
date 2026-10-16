@@ -106,14 +106,19 @@ export async function GET(request: Request) {
       : undefined,
     withDb
       ? safe(async () => {
-          const { count } = await supabase
+          // Mêmes cartes que « Mes actions » (myOpenCards) : hors listes terminées.
+          const { data: links } = await supabase
             .from("team_card_members")
-            .select("card_id, team_cards!inner(archived_at)", { count: "exact", head: true })
+            .select("card_id, team_cards!inner(archived_at, list_id)")
             .eq("user_id", userId)
             .is("seen_at", null)
             .neq("assigned_by", userId)
             .is("team_cards.archived_at", null);
-          return count ?? 0;
+          const listIds = [...new Set((links ?? []).map((l) => (l.team_cards as unknown as { list_id: string }).list_id))];
+          if (listIds.length === 0) return 0;
+          const { data: doneLists } = await supabase.from("team_lists").select("id").in("id", listIds).eq("is_done", true);
+          const done = new Set((doneLists ?? []).map((l) => l.id));
+          return (links ?? []).filter((l) => !done.has((l.team_cards as unknown as { list_id: string }).list_id)).length;
         }, 0)
       : undefined,
   ]);
