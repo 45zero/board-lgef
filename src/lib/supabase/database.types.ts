@@ -979,6 +979,42 @@ export type Database = {
         }
         Relationships: []
       }
+      event_comment_attachments: {
+        Row: {
+          id: string
+          comment_id: string
+          path: string
+          filename: string
+          content_type: string | null
+          size_bytes: number | null
+          kind: string
+          duration_ms: number | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          comment_id: string
+          path: string
+          filename: string
+          content_type?: string | null
+          size_bytes?: number | null
+          kind?: string
+          duration_ms?: number | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          comment_id?: string
+          path?: string
+          filename?: string
+          content_type?: string | null
+          size_bytes?: number | null
+          kind?: string
+          duration_ms?: number | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       event_comment_reads: {
         Row: {
           comment_id: string
@@ -1051,6 +1087,24 @@ export type Database = {
           mentions?: string[] | null
           created_at?: string
           parent_id?: string | null
+        }
+        Relationships: []
+      }
+      event_discussion_archives: {
+        Row: {
+          user_id: string
+          event_id: string
+          archived_at: string
+        }
+        Insert: {
+          user_id: string
+          event_id: string
+          archived_at?: string
+        }
+        Update: {
+          user_id?: string
+          event_id?: string
+          archived_at?: string
         }
         Relationships: []
       }

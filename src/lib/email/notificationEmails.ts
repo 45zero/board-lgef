@@ -24,8 +24,11 @@ export const CHOICES: Record<string, { accept: string; refuse: string; question:
   director_invitation: { accept: "Je serai présent", refuse: "Je ne pourrai pas", question: "Serez-vous présent pour représenter le comité directeur ?" },
 };
 
-/** Types jamais envoyés par cet e-mail : déjà envoyés par ailleurs (rappels, alertes de modération). */
-export const NOT_EMAILED = new Set(["event_reminder", "hateful_comment"]);
+/**
+ * Types jamais envoyés par cet e-mail : déjà envoyés par ailleurs (rappels, alertes de modération),
+ * ou messages de discussion (event_commented : push et bulle Discussions, pas un e-mail par message).
+ */
+export const NOT_EMAILED = new Set(["event_reminder", "hateful_comment", "event_commented"]);
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 

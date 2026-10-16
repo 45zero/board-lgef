@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  Send,
   UserPlus,
   Navigation,
   Video,
@@ -28,6 +27,7 @@ import { StaffEventsMap, useTravelToEvent } from "@/components/board/calendar/St
 import { formatTravel, type Travel } from "@/lib/board/geo";
 import { useEventTeam } from "@/hooks/board/useEventTeam";
 import { useEventComments } from "@/hooks/board/useEventComments";
+import { EventChat } from "@/components/board/discussions/EventChat";
 import { useEventFiles } from "@/hooks/board/useEventFiles";
 import { openEventFile, getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
 import { FileViewer } from "@/components/board/FileViewer";
@@ -254,179 +254,14 @@ export function RemindersField({
   );
 }
 
-type MentionPerson = { id: string; name: string };
-const fold = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/** Message de la discussion : les « @Prénom Nom » des personnes du board en surbrillance. */
-function CommentBody({ body, people }: { body: string; people: MentionPerson[] }) {
-  const names = people.map((p) => p.name).filter((n) => body.includes(`@${n}`));
-  if (names.length === 0) return <>{body}</>;
-  const re = new RegExp(`(${names.sort((a, b) => b.length - a.length).map((n) => escapeRegex(`@${n}`)).join("|")})`, "g");
-  return (
-    <>
-      {body.split(re).map((part, i) =>
-        i % 2 === 1 ? (
-          <span key={i} className="rounded bg-sel-bg px-0.5 font-semibold text-navy">
-            {part}
-          </span>
-        ) : (
-          part
-        )
-      )}
-    </>
-  );
-}
-
 /**
- * Discussion de l'événement. « @ » propose les personnes du board : celles mentionnées sont
- * notifiées (cloche, e-mail, push) et la notification ouvre cet onglet.
+ * Discussion de l'événement : conversation façon Messenger (réponses, réactions, photos et
+ * fichiers, vocaux, mentions @ notifiées) — la même que dans la bulle « Discussions ».
  */
 export function DiscussionTab({ hook }: { hook: ReturnType<typeof useEventComments> }) {
-  const { user } = useAuth();
-  const [value, setValue] = useState("");
-  const [people, setPeople] = useState<MentionPerson[]>([]);
-  // Personnes choisies dans la liste (nom inséré → id) ; seules celles encore dans le texte sont notifiées.
-  const [picked, setPicked] = useState<Map<string, string>>(new Map());
-  const [query, setQuery] = useState<string | null>(null);
-  const [highlight, setHighlight] = useState(0);
-  const [sending, setSending] = useState(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    createClient()
-      .from("profiles")
-      .select("id, first_name, last_name")
-      .order("first_name")
-      .limit(1000)
-      .then(({ data }) =>
-        setPeople(
-          (data ?? [])
-            .map((p) => ({ id: p.id, name: `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() }))
-            .filter((p) => p.name)
-        )
-      );
-  }, []);
-
-  const suggestions =
-    query === null ? [] : people.filter((p) => p.id !== user?.id && fold(p.name).includes(fold(query))).slice(0, 6);
-
-  const onChange = (text: string, caret: number) => {
-    setValue(text);
-    const m = /(?:^|\s)@([^\s@]*(?: [^\s@]*)?)$/.exec(text.slice(0, caret));
-    setQuery(m ? m[1] : null);
-    setHighlight(0);
-  };
-
-  const pick = (p: MentionPerson) => {
-    const el = inputRef.current;
-    const caret = el?.selectionStart ?? value.length;
-    const before = value.slice(0, caret).replace(/@([^\s@]*(?: [^\s@]*)?)$/, `@${p.name} `);
-    const next = before + value.slice(caret);
-    setValue(next);
-    setPicked((prev) => new Map(prev).set(p.name, p.id));
-    setQuery(null);
-    requestAnimationFrame(() => {
-      el?.focus();
-      el?.setSelectionRange(before.length, before.length);
-    });
-  };
-
-  const send = async () => {
-    const text = value.trim();
-    if (!text || sending) return;
-    const mentionIds = [...picked].filter(([name]) => text.includes(`@${name}`)).map(([, id]) => id);
-    setSending(true);
-    const ok = await hook.postComment(text, mentionIds);
-    setSending(false);
-    if (ok) {
-      setValue("");
-      setPicked(new Map());
-    }
-  };
-
-  const mentionedCount = [...picked.keys()].filter((name) => value.includes(`@${name}`)).length;
-
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 space-y-3 overflow-y-auto">
-        {hook.comments.length === 0 && <p className="text-sm text-ink-4">Aucun message pour l&rsquo;instant. Tapez @ pour notifier quelqu&rsquo;un.</p>}
-        {hook.comments.map((c) => (
-          <div key={c.id} className="rounded-btn bg-subtle px-3 py-2">
-            <div className="text-xs font-semibold text-ink-2">{personName(c.author)}</div>
-            <div className="whitespace-pre-line text-sm text-ink">
-              <CommentBody body={c.body} people={people} />
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="relative mt-3">
-        {suggestions.length > 0 && (
-          <div className="absolute bottom-full left-0 right-11 mb-1 overflow-hidden rounded-btn border border-line bg-card shadow-modal">
-            <div className="border-b border-line px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-ink-4">Notifier</div>
-            {suggestions.map((p, i) => (
-              <button
-                key={p.id}
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  pick(p);
-                }}
-                className={`block w-full px-3 py-2 text-left text-sm ${i === highlight ? "bg-sel-bg text-navy" : "text-ink-2 hover:bg-subtle"}`}
-              >
-                {p.name}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={inputRef}
-            rows={1}
-            value={value}
-            onChange={(e) => onChange(e.target.value, e.target.selectionStart)}
-            onBlur={() => setQuery(null)}
-            onKeyDown={(e) => {
-              if (suggestions.length > 0) {
-                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                  e.preventDefault();
-                  setHighlight((h) => (h + (e.key === "ArrowDown" ? 1 : suggestions.length - 1)) % suggestions.length);
-                  return;
-                }
-                if (e.key === "Enter" || e.key === "Tab") {
-                  e.preventDefault();
-                  pick(suggestions[Math.min(highlight, suggestions.length - 1)]);
-                  return;
-                }
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  setQuery(null);
-                  return;
-                }
-              }
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            placeholder="Écrire un message… (@ pour notifier quelqu'un)"
-            className="max-h-32 min-h-9 flex-1 resize-none rounded-btn border border-line px-3 py-2 text-sm outline-none focus:border-navy"
-          />
-          <button
-            onClick={() => void send()}
-            disabled={sending || !value.trim()}
-            title={mentionedCount ? `Envoyer et notifier ${mentionedCount} personne${mentionedCount > 1 ? "s" : ""}` : "Envoyer"}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-btn bg-navy text-white disabled:opacity-50"
-          >
-            <Send size={14} />
-          </button>
-        </div>
-        {mentionedCount > 0 && (
-          <p className="mt-1 text-[11px] text-ink-4">
-            {mentionedCount} personne{mentionedCount > 1 ? "s" : ""} {mentionedCount > 1 ? "seront notifiées" : "sera notifiée"}.
-          </p>
-        )}
-      </div>
+    <div className="-mx-1 flex h-[min(62dvh,600px)] flex-col overflow-hidden rounded-btn border border-line bg-card">
+      <EventChat eventId={hook.eventId} />
     </div>
   );
 }

@@ -144,6 +144,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
         .select(NOTIF_FIELDS)
         .eq("user_id", userId)
         .eq("is_deleted", false)
+        .neq("type", "event_commented")
         .order("created_at", { ascending: false })
         .limit(30),
       supabase.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("is_deleted", false).eq("read", false),
@@ -204,6 +205,11 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     channel.on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` }, (payload) => {
       const n = payload.new as BoardNotification & { is_deleted?: boolean };
       if (n.is_deleted) return;
+      // Message de discussion : bulle Discussions et push, pas la cloche.
+      if (n.type === "event_commented") {
+        emit("notifications");
+        return;
+      }
       setNotifications((prev) => [{ ...n, read: !!n.read }, ...prev.filter((p) => p.id !== n.id)].slice(0, 30));
       if (!n.read) setUnread((u) => u + 1);
       emit("notifications");

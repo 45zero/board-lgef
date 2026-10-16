@@ -50,5 +50,5 @@ export function useEventComments(eventId: string) {
     return true;
   };
 
-  return { comments, loading, postComment, refetch: fetchComments };
+  return { eventId, comments, loading, postComment, refetch: fetchComments };
 }

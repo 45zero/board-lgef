@@ -1,5 +1,6 @@
 "use client";
 
+import { DiscussionsBubble } from "@/components/board/discussions/DiscussionsBubble";
 import { useEffect, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import { TopBar } from "./TopBar";
@@ -115,6 +116,7 @@ export function BoardShell() {
     return (
       <>
         <MobileShell />
+        <DiscussionsBubble mobile />
         <BackgroundTasksPanel mobile />
         <InstallNotificationsPrompt mobile />
       </>
@@ -149,6 +151,7 @@ export function BoardShell() {
                 Module « {currentApp.label} » — à venir
               </div>
             )}
+            <DiscussionsBubble />
           </main>
 
           {/* Récapitulatif disponible sur tous les onglets ; ouvert ou refermé, l'état est commun. */}
