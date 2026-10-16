@@ -25,6 +25,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useBoardPreferences } from "@/hooks/board/useBoardPreferences";
 import { BOARD_APPS } from "@/lib/board/tokens";
 import { BackgroundTasksPanel } from "./BackgroundTasksPanel";
+import { InstallNotificationsPrompt } from "./InstallNotificationsPrompt";
 import { ModuleAccessModal } from "./modules/ModuleAccessModal";
 import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
 import { useUserRole } from "@/hooks/board/useUserRole";
@@ -115,6 +116,7 @@ export function BoardShell() {
       <>
         <MobileShell />
         <BackgroundTasksPanel mobile />
+        <InstallNotificationsPrompt mobile />
       </>
     );
 
@@ -181,6 +183,7 @@ export function BoardShell() {
       </div>
 
       <BackgroundTasksPanel />
+      <InstallNotificationsPrompt />
 
       {accessOpen && <ModuleAccessModal initialModuleId={app} onClose={() => setAccessOpen(false)} />}
 
