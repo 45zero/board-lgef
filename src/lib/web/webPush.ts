@@ -45,11 +45,24 @@ async function saveSubscription(sub: PushSubscription) {
 }
 
 /**
+ * Service worker installé à l'avance (dès l'affichage du réglage ou de la proposition) : Safari
+ * n'accepte pushManager.subscribe() que dans la foulée immédiate d'un clic, sans attente préalable.
+ */
+let readyRegistration: ServiceWorkerRegistration | null = null;
+export async function prepareWebPush() {
+  if (!webPushSupported()) return;
+  await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+  readyRegistration = await navigator.serviceWorker.ready;
+}
+
+/**
  * Ce navigateur reçoit-il déjà les notifications ? Si oui, l'abonnement est renvoyé au serveur
  * (enregistrement idempotent) : un abonnement du navigateur jamais arrivé en base est ainsi rattrapé.
  */
 export async function isWebPushEnabled() {
-  if (!webPushSupported() || Notification.permission !== "granted") return false;
+  if (!webPushSupported()) return false;
+  await prepareWebPush();
+  if (Notification.permission !== "granted") return false;
   const sub = await currentSubscription();
   if (!sub) return false;
   await saveSubscription(sub);
@@ -57,18 +70,21 @@ export async function isWebPushEnabled() {
 }
 
 /**
- * Demande l'autorisation (à appeler depuis un clic : Safari l'exige) et abonne ce navigateur.
+ * Abonne ce navigateur — à appeler directement depuis un clic. subscribe() est le premier appel
+ * (Safari l'exige) et affiche lui-même la demande d'autorisation du système, dans tous les navigateurs.
  * Renvoie « denied » si l'utilisateur a refusé (à réactiver dans les réglages du navigateur / du Mac).
  */
 export async function enableWebPush(): Promise<"ok" | "denied" | "unsupported"> {
   if (!webPushSupported()) return "unsupported";
-  const permission = await Notification.requestPermission();
-  if (permission !== "granted") return "denied";
-  const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-  await navigator.serviceWorker.ready;
-  const sub =
-    (await reg.pushManager.getSubscription()) ??
-    (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY!) }));
+  const reg = readyRegistration ?? (await prepareWebPush().then(() => readyRegistration));
+  if (!reg) return "unsupported";
+  let sub: PushSubscription;
+  try {
+    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY!) });
+  } catch (e) {
+    if (Notification.permission === "denied") return "denied";
+    throw e;
+  }
   await saveSubscription(sub);
   return "ok";
 }
