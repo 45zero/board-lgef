@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Camera, Check, Video } from "lucide-react";
-import { approveAccessRequest, rejectAccessRequest, type AccessRequest, type PaymentMode } from "@/app/actions/account-requests";
+import { approveAccessRequest, listManagerOptions, rejectAccessRequest, type AccessRequest, type PaymentMode } from "@/app/actions/account-requests";
 import { unwrap } from "@/lib/board/actionResult";
 
 const input = "w-full rounded-btn border border-line bg-card px-2.5 py-2 text-sm outline-none focus:border-navy";
@@ -24,14 +24,30 @@ const PAYMENT_LABELS: Record<PaymentMode, string> = {
   benevole: "Bénévole — ni frais ni facture",
 };
 
+// Comptes proposés comme N+1 : chargés une fois pour toutes les cartes affichées.
+type ManagerOption = { id: string; name: string };
+let managerOptions: Promise<ManagerOption[]> | null = null;
+const loadManagerOptions = () =>
+  (managerOptions ??= listManagerOptions()
+    .then(unwrap)
+    .catch(() => {
+      managerOptions = null;
+      return [];
+    }));
+
 /**
  * Demande d'accès en attente : accepter (avec, au besoin, Couverture match — photographe et/ou
- * vidéaste — et le mode de paiement) ou refuser. Les cases sont pré-cochées d'après « Vous êtes ».
+ * vidéaste — et le mode de paiement, et un N+1) ou refuser. Les cases sont pré-cochées d'après « Vous êtes ».
  */
 export function AccessRequestCard({ request, onDone }: { request: AccessRequest; onDone: (message: string) => void }) {
   const [photo, setPhoto] = useState(request.kind === "photographe");
   const [video, setVideo] = useState(request.kind === "videaste");
   const [payment, setPayment] = useState<PaymentMode>("reseau");
+  const [managerId, setManagerId] = useState("");
+  const [managers, setManagers] = useState<ManagerOption[]>([]);
+  useEffect(() => {
+    void loadManagerOptions().then(setManagers);
+  }, []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const name = `${request.firstName} ${request.lastName}`;
@@ -49,7 +65,7 @@ export function AccessRequestCard({ request, onDone }: { request: AccessRequest;
   };
   const approve = () =>
     act(async () => {
-      const res = unwrap(await approveAccessRequest(request.id, coverage ? { photo, video, payment } : null));
+      const res = unwrap(await approveAccessRequest(request.id, coverage ? { photo, video, payment } : null, managerId || null));
       const who = coverage ? `${name} ajouté à Couverture match` : `Accès accordé à ${name}`;
       return res.emailed ? `${who} — e-mail envoyé pour choisir son mot de passe.` : `${who} — l'e-mail n'a pas pu partir, prévenez-le.`;
     });
@@ -66,6 +82,18 @@ export function AccessRequestCard({ request, onDone }: { request: AccessRequest;
         {request.organization && <> · {request.organization}</>}
       </div>
       {request.reason && <p className="whitespace-pre-line rounded-btn bg-subtle px-2.5 py-2 text-xs text-ink-2">{request.reason}</p>}
+
+      <label className="block space-y-1">
+        <span className="text-[11px] font-bold uppercase tracking-wide text-ink-4">N+1 (responsable)</span>
+        <select value={managerId} onChange={(e) => setManagerId(e.target.value)} className={`${input} !py-1.5 text-xs`}>
+          <option value="">Aucun</option>
+          {managers.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <div className="space-y-2 rounded-btn border border-line p-2.5">
         <div className="text-[11px] font-bold uppercase tracking-wide text-ink-4">Couverture match</div>

@@ -210,6 +210,13 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
       push({ id: "commentaires", app: "audiovisuel", tone: "orange", count: flagged ?? 0, title: "Commentaires à vérifier", detail: "Signalés par la modération automatique" });
     }, undefined),
 
+    // Demandes d'accès au board (formulaire /demande-acces) : à accepter ou refuser (administrateurs).
+    safe(async () => {
+      if (!isAdmin) return;
+      const { count } = await service.from("account_requests").select("id", { count: "exact", head: true }).eq("status", "pending");
+      push({ id: "demandes-acces", app: "weekend", tone: "red", count: count ?? 0, title: "Demandes d'accès", detail: "Comptes demandés depuis le formulaire public" });
+    }, undefined),
+
     // Inscriptions : invitations pas encore envoyées sur mes campagnes (toutes pour un admin).
     safe(async () => {
       let q = service.from("event_registration_campaigns").select("id, events!inner(start_date)").gte("events.start_date", from.toISOString());

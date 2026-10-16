@@ -8,8 +8,8 @@ import { isTransactionalEmailConfigured, sendTransactionalBatch } from "@/lib/em
 
 // Demandes d'accès au board (table account_requests, partagée avec calendrier-lgef — même logique
 // que son Edge Function approve-account-request). Formulaire public /demande-acces ; validation par
-// un administrateur (Paramètres → Utilisateurs, ou Week-end → Couverture match), qui crée le compte,
-// l'ajoute au besoin au réseau Couverture match (photographe / vidéaste) et
+// un administrateur (Accueil → Mes actions, Paramètres → Utilisateurs ou Week-end → Couverture match),
+// qui crée le compte, lui donne au besoin un N+1, l'ajoute au réseau Couverture match (photographe / vidéaste) et
 // envoie par e-mail un lien pour choisir son mot de passe (/mot-de-passe).
 
 export type AccessKind = "salarie" | "arbitre" | "photographe" | "videaste" | "partenaire" | "media" | "autre";
@@ -71,7 +71,7 @@ export async function submitAccessRequest(input: z.input<typeof requestSchema>):
         user_id: a.id,
         type: "account_request" as const,
         title: "Demande d'accès",
-        message: `${r.firstName} ${r.lastName} (${KIND_LABELS[r.kind]}) demande un accès au board — Paramètres → Utilisateurs.`,
+        message: `${r.firstName} ${r.lastName} (${KIND_LABELS[r.kind]}) demande un accès au board — Accueil → Mes actions.`,
         data: { app: "weekend" },
       }))
     );
@@ -145,7 +145,8 @@ async function sendMail(to: string, subject: string, paragraphs: string[], link?
  */
 async function approveAccessRequestImpl(
   requestId: string,
-  network: { photo: boolean; video: boolean; payment: PaymentMode } | null
+  network: { photo: boolean; video: boolean; payment: PaymentMode } | null,
+  managerId: string | null
 ): Promise<{ emailed: boolean; existingAccount: boolean }> {
   if (network && !network.photo && !network.video) network = null;
   const reviewerId = await requireAdmin();
@@ -170,6 +171,11 @@ async function approveAccessRequestImpl(
     ? await service.from("profiles").update({ first_name: req.first_name, last_name: req.last_name }).eq("id", userId)
     : await service.from("profiles").insert({ id: userId, role: "user", first_name: req.first_name, last_name: req.last_name, email: req.email });
   if (profileError) throw new Error(`Compte créé mais profil non enregistré : ${profileError.message}`);
+
+  if (managerId && managerId !== userId) {
+    const { error } = await service.from("profiles").update({ expense_validator_id: managerId }).eq("id", userId);
+    if (error) throw new Error(`Compte créé mais N+1 non enregistré : ${error.message}`);
+  }
 
   if (network) {
     const slugs = [...(network.photo ? ["tech-photo"] : []), ...(network.video ? ["tech-video"] : []), PAYMENT_SLUG[network.payment]];
@@ -204,6 +210,16 @@ async function approveAccessRequestImpl(
   return { emailed, existingAccount: type === "recovery" };
 }
 
+/** Comptes du board pouvant être choisis comme N+1 à l'acceptation d'une demande. */
+async function listManagerOptionsImpl(): Promise<{ id: string; name: string }[]> {
+  await requireAdmin();
+  const { data, error } = await createServiceClient().from("profiles").select("id, first_name, last_name").order("last_name").order("first_name");
+  if (error) throw new Error(error.message);
+  return (data ?? [])
+    .map((p) => ({ id: p.id, name: `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() }))
+    .filter((p) => p.name);
+}
+
 async function rejectAccessRequestImpl(requestId: string) {
   const reviewerId = await requireAdmin();
   const service = createServiceClient();
@@ -228,8 +244,13 @@ export async function listAccessRequests() {
 }
 
 export async function approveAccessRequest(requestId: string,
-  network: { photo: boolean; video: boolean; payment: PaymentMode } | null) {
-  return toResult(() => approveAccessRequestImpl(requestId, network));
+  network: { photo: boolean; video: boolean; payment: PaymentMode } | null,
+  managerId: string | null = null) {
+  return toResult(() => approveAccessRequestImpl(requestId, network, managerId));
+}
+
+export async function listManagerOptions() {
+  return toResult(() => listManagerOptionsImpl());
 }
 
 export async function rejectAccessRequest(requestId: string) {

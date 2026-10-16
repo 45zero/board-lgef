@@ -24,6 +24,9 @@ import { EventArrow, useOpenEvent } from "@/components/board/calendar/EventOpene
 import { useEventCoverage } from "@/hooks/board/useEventCoverage";
 import { useAvailableTechnicians, type TechnicianOption } from "@/hooks/board/useAvailableTechnicians";
 import { useDirectorAttendance } from "@/hooks/board/useDirectorAttendance";
+import { listAccessRequests, type AccessRequest } from "@/app/actions/account-requests";
+import { AccessRequestCard } from "@/components/board/users/AccessRequestCard";
+import { unwrap } from "@/lib/board/actionResult";
 
 const fmt = (iso: string | null) =>
   iso
@@ -38,6 +41,7 @@ const APP_LABELS: Record<string, string> = {
   audiovisuel: "le centre de publication",
   inscription: "Inscription",
   trello: "l'Espace Team",
+  weekend: "Week-end",
 };
 
 /** Date et lieu d'un événement, avec un léger bouton « Carte » qui ouvre la carte dans une fenêtre. */
@@ -164,6 +168,38 @@ function ValidateRow({ sub, onDone, onDetails }: { sub: SubmissionToReview; onDo
       )}
       {error && <p className="mt-1 text-xs text-bad">{error}</p>}
     </div>
+  );
+}
+
+/** Demandes d'accès en attente : accepter (au besoin dans Couverture match) ou refuser. */
+function AccessRequestList({ onChanged }: { onChanged: () => void }) {
+  const [requests, setRequests] = useState<AccessRequest[] | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    listAccessRequests()
+      .then((res) => setRequests(unwrap(res)))
+      .catch(() => setRequests([]));
+  }, []);
+  if (!requests) return <p className="p-4 text-sm text-ink-4">Chargement…</p>;
+  return (
+    <>
+      {notice && <div className="m-3 rounded-btn bg-sel-bg px-3 py-2 text-xs font-semibold text-ink">{notice}</div>}
+      {requests.length === 0 ? (
+        <p className="p-4 text-sm text-ink-3">Tout est traité. 👍</p>
+      ) : (
+        requests.map((r) => (
+          <AccessRequestCard
+            key={r.id}
+            request={r}
+            onDone={(message) => {
+              setNotice(message);
+              setRequests((prev) => prev?.filter((x) => x.id !== r.id) ?? null);
+              onChanged();
+            }}
+          />
+        ))
+      )}
+    </>
   );
 }
 
@@ -464,6 +500,9 @@ export function ActionPopup({
   switch (action.id) {
     case "frais-valider":
       body = <ValidateList onChanged={onChanged} />;
+      break;
+    case "demandes-acces":
+      body = <AccessRequestList onChanged={onChanged} />;
       break;
     case "frais-declarer":
       body = <DeclareList statuses={["a_declarer"]} onChanged={onChanged} />;
