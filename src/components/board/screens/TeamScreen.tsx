@@ -87,7 +87,8 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
     const assignedTo = (uid: string) => ws.cards.filter((c) => c.members.some((m) => m.userId === uid));
     const active = (cards: TeamCard[]) => cards.filter((c) => !isCardDone(c, listsById));
     const mine = assignedTo(ws.meId);
-    const unseen = mine.filter((c) => !c.archivedAt && c.members.some((m) => m.userId === ws.meId && !m.seenAt && m.assignedBy !== ws.meId));
+    // Nouvelles cartes : hors terminées et archivées (comme « Mes actions » et la pastille de l'icône).
+    const unseen = active(mine).filter((c) => c.members.some((m) => m.userId === ws.meId && !m.seenAt && m.assignedBy !== ws.meId));
     // Équipe : mes équipiers (je suis leur N+1), puis toute personne dont je vois au moins une carte.
     const reports = ws.people.filter((p) => p.managerId === ws.meId && p.id !== ws.meId);
     const withCards = ws.people.filter((p) => p.id !== ws.meId && p.managerId !== ws.meId && assignedTo(p.id).length > 0);
