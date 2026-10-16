@@ -17,6 +17,7 @@ import {
 } from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
 import { webPushSupported, isWebPushEnabled, enableWebPush, disableWebPush } from "@/lib/web/webPush";
+import { sendTestWebPush } from "@/app/actions/web-push";
 import { useAuth } from "@/contexts/AuthContext";
 import { useVisibleModules } from "@/hooks/board/useVisibleModules";
 import { listAccessRequests } from "@/app/actions/account-requests";
@@ -37,10 +38,16 @@ function ComputerPushRow() {
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (supported) isWebPushEnabled().then(setEnabled).catch(() => {});
+    if (supported) isWebPushEnabled().then(setEnabled).catch((e) => console.error("[ComputerPushRow]", e));
   }, [supported]);
 
   if (!supported) return null;
+
+  const test = async () => {
+    setMessage(null);
+    const ok = await sendTestWebPush().catch(() => false);
+    setMessage(ok ? "Notification de test envoyée." : "Échec de l'envoi : désactivez puis réactivez.");
+  };
 
   const toggle = async () => {
     setBusy(true);
@@ -51,13 +58,16 @@ function ComputerPushRow() {
         setEnabled(false);
       } else {
         const result = await enableWebPush();
-        if (result === "ok") setEnabled(true);
+        if (result === "ok") {
+          setEnabled(true);
+          await test();
+        }
         else if (result === "denied")
           setMessage("Notifications refusées : autorisez-les dans Réglages Système › Notifications, puis réessayez.");
       }
     } catch (e) {
       console.error("[ComputerPushRow]", e);
-      setMessage("Activation impossible pour le moment.");
+      setMessage(`Activation impossible : ${e instanceof Error ? e.message : "erreur inconnue"}`);
     } finally {
       setBusy(false);
     }
@@ -67,7 +77,14 @@ function ComputerPushRow() {
     <div className="flex items-center justify-between gap-3">
       <div className="min-w-0">
         <div className="text-sm font-semibold text-ink-2">Sur cet ordinateur</div>
-        <div className="text-xs text-ink-4">{message ?? "Notifications du Mac ou du PC, même board fermé"}</div>
+        <div className="text-xs text-ink-4">
+          {message ?? "Notifications du Mac ou du PC, même board fermé"}
+          {enabled && !busy && (
+            <button type="button" onClick={test} className="ml-1.5 font-semibold text-link hover:underline">
+              Tester
+            </button>
+          )}
+        </div>
       </div>
       <Toggle on={enabled} onClick={toggle} disabled={busy} />
     </div>

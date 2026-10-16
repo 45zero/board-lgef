@@ -30,10 +30,21 @@ async function currentSubscription() {
   return reg ? reg.pushManager.getSubscription() : null;
 }
 
-/** Ce navigateur reçoit-il déjà les notifications ? */
+async function saveSubscription(sub: PushSubscription) {
+  const json = sub.toJSON();
+  await subscribeWebPush({ endpoint: sub.endpoint, p256dh: json.keys?.p256dh ?? "", auth: json.keys?.auth ?? "" });
+}
+
+/**
+ * Ce navigateur reçoit-il déjà les notifications ? Si oui, l'abonnement est renvoyé au serveur
+ * (enregistrement idempotent) : un abonnement du navigateur jamais arrivé en base est ainsi rattrapé.
+ */
 export async function isWebPushEnabled() {
   if (!webPushSupported() || Notification.permission !== "granted") return false;
-  return !!(await currentSubscription());
+  const sub = await currentSubscription();
+  if (!sub) return false;
+  await saveSubscription(sub);
+  return true;
 }
 
 /**
@@ -49,8 +60,7 @@ export async function enableWebPush(): Promise<"ok" | "denied" | "unsupported"> 
   const sub =
     (await reg.pushManager.getSubscription()) ??
     (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY!) }));
-  const json = sub.toJSON();
-  await subscribeWebPush({ endpoint: sub.endpoint, p256dh: json.keys?.p256dh ?? "", auth: json.keys?.auth ?? "" });
+  await saveSubscription(sub);
   return "ok";
 }
 

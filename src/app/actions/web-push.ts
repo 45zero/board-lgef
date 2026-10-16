@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
-import { saveWebPushSubscription, deleteWebPushSubscription } from "@/lib/push/webPush";
+import { saveWebPushSubscription, deleteWebPushSubscription, sendWebPush } from "@/lib/push/webPush";
 
 async function requireUserId() {
   const supabase = await createClient();
@@ -24,4 +24,10 @@ export async function subscribeWebPush(sub: { endpoint: string; p256dh: string; 
 export async function unsubscribeWebPush(endpoint: string) {
   const userId = await requireUserId();
   await deleteWebPushSubscription(userId, endpoint);
+}
+
+/** Notification d'essai vers les ordinateurs abonnés de l'utilisateur (lien « Tester » des Paramètres). */
+export async function sendTestWebPush() {
+  const userId = await requireUserId();
+  return sendWebPush({ userId, title: "Board LGEF", body: "Les notifications fonctionnent sur cet ordinateur.", route: "/" });
 }
