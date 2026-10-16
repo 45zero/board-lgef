@@ -324,12 +324,15 @@ export function StaffEventsMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [travel, travelLoading, selectedId]);
 
+  // Listes à droite : vue Carte du planning, ou n'importe quelle carte une fois agrandie.
+  const showSide = sidebar || expanded;
+
   // Panneau latéral : tous les techniciens (ceux sans trajet calculable à la fin) ; encart flottant : les 8 plus proches.
   const nearest = useMemo(() => {
     const shown = staff.filter((p) => !hiddenKinds.has(p.kind));
     const withRoute = shown.filter((p) => travel[p.id]).sort((a, b) => travel[a.id].minutes - travel[b.id].minutes);
-    return sidebar ? [...withRoute, ...shown.filter((p) => !travel[p.id]).sort((a, b) => a.name.localeCompare(b.name))] : withRoute.slice(0, 8);
-  }, [staff, travel, hiddenKinds, sidebar]);
+    return showSide ? [...withRoute, ...shown.filter((p) => !travel[p.id]).sort((a, b) => a.name.localeCompare(b.name))] : withRoute.slice(0, 8);
+  }, [staff, travel, hiddenKinds, showSide]);
 
   const focusStaff = (p: StaffPin) => {
     const marker = staffMarkersRef.current.get(p.id);
@@ -367,7 +370,31 @@ export function StaffEventsMap({
         </div>
       )}
       {!travelLoading && nearest.length === 0 && <div className="px-3 py-1.5 text-[11px] text-ink-4">Aucun technicien à afficher.</div>}
-      {nearest.map((p) => (
+      {nearest.map(staffRow)}
+    </>
+  );
+
+  // Sans événement sélectionné : les personnes par type (salariés, réseau, prestataires, bénévoles).
+  const staffByKind = STAFF_KINDS.filter((k) => !hiddenKinds.has(k))
+    .map((k) => ({ kind: k, people: staff.filter((p) => p.kind === k).sort((a, b) => a.name.localeCompare(b.name)) }))
+    .filter((g) => g.people.length > 0);
+  const staffGroups =
+    staffByKind.length === 0 ? (
+      <div className="px-3 py-1.5 text-[11px] text-ink-4">Aucun technicien à afficher.</div>
+    ) : (
+      staffByKind.map((g) => (
+        <div key={g.kind}>
+          <div className="flex items-center gap-1.5 px-3 pb-0.5 pt-2 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-4">
+            <span className="h-2 w-2 rounded-[2px]" style={{ background: STAFF_STYLES[g.kind].color }} />
+            {STAFF_STYLES[g.kind].label} · {g.people.length}
+          </div>
+          {g.people.map(staffRow)}
+        </div>
+      ))
+    );
+
+  function staffRow(p: StaffPin) {
+    return (
         <button key={p.id} onClick={() => focusStaff(p)} className="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-hover">
           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] text-[8px] font-bold text-white" style={{ background: STAFF_STYLES[p.kind].color }}>
             {initials(p.name)}
@@ -378,24 +405,14 @@ export function StaffEventsMap({
               <Car size={10} /> {formatTravel(travel[p.id])}
             </span>
           ) : (
-            !travelLoading && <span className="shrink-0 text-[10px] text-ink-4">—</span>
+            selectedEvent && !travelLoading && <span className="shrink-0 text-[10px] text-ink-4">—</span>
           )}
         </button>
-      ))}
-    </>
-  );
+    );
+  }
 
   const mapPane = (
-    <div
-      ref={paneRef}
-      className={
-        expanded
-          ? "fixed inset-x-0 z-[200] overflow-hidden bg-subtle"
-          : `relative overflow-hidden rounded-panel border border-line bg-subtle ${sidebar ? "min-h-[360px] flex-1" : className}`
-      }
-      // Agrandie sur téléphone : sous l'encoche et au-dessus de la barre d'accueil.
-      style={expanded ? { top: "env(safe-area-inset-top)", bottom: "env(safe-area-inset-bottom)" } : undefined}
-    >
+    <div className={`relative min-h-0 flex-1 overflow-hidden rounded-panel border border-line bg-subtle ${showSide ? "min-h-[280px]" : ""}`}>
       <div ref={mapDivRef} className="absolute inset-0" />
       <button
         onClick={toggleExpanded}
@@ -455,87 +472,95 @@ export function StaffEventsMap({
       </div>
 
       {/* Encart flottant (petites cartes) : techniciens les plus proches de l'événement sélectionné */}
-      {(!sidebar || expanded) && selectedEvent && staff.length > 0 && (
+      {!showSide && selectedEvent && staff.length > 0 && (
         <div className="absolute right-2 top-2 z-[1] w-60 max-w-[calc(100%-1rem)] rounded-btn border border-line bg-card/95 shadow-card">
           <div className="border-b border-line px-3 py-2">
             <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-4">Au plus près de</div>
             <div className="truncate text-xs font-bold text-ink">{selectedEvent.title}</div>
           </div>
-          <div className={`${expanded ? "max-h-[60vh]" : "max-h-56"} overflow-y-auto py-1`}>{staffRows}</div>
+          <div className="max-h-56 overflow-y-auto py-1">{staffRows}</div>
         </div>
       )}
     </div>
   );
 
-  if (!sidebar) return mapPane;
-
-  // Grand écran : carte à gauche ; à droite les événements de la période puis les techniciens au plus près.
+  // Carte à gauche ; à droite les événements puis les techniciens (au plus près, ou par type).
+  // Même arbre agrandi ou non : la carte Google reste montée dans son conteneur.
   return (
-    <div className={`flex min-h-0 flex-col gap-3 lg:flex-row ${className}`}>
+    <div
+      ref={paneRef}
+      className={
+        expanded
+          ? "fixed inset-x-0 z-[200] flex flex-col gap-3 bg-subtle p-3 lg:flex-row"
+          : `flex min-h-0 flex-col gap-3 ${sidebar ? "lg:flex-row" : ""} ${className}`
+      }
+      // Agrandie sur téléphone : sous l'encoche et au-dessus de la barre d'accueil.
+      style={expanded ? { top: "env(safe-area-inset-top)", bottom: "env(safe-area-inset-bottom)" } : undefined}
+    >
       {mapPane}
-      <aside className="flex min-h-0 w-full shrink-0 flex-col gap-3 lg:w-80">
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-panel border border-line bg-card">
-          <div className="flex items-center justify-between border-b border-line px-3 py-2">
-            <div className="text-xs font-bold text-ink">Événements</div>
-            <div className="font-mono text-[10px] text-ink-4">{events.length}</div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto py-1">
-            {events.length === 0 && <div className="px-3 py-2 text-[11px] text-ink-4">Aucun événement sur cette période.</div>}
-            {eventRows.map(({ e, header }) => {
-              const color = ORG_COLORS[e.org];
-              const onMap = !!positions[e.id];
-              const selected = e.id === selectedId;
-              return (
-                <div key={e.id}>
-                  {header && <div className="px-3 pb-0.5 pt-2 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-4">{header}</div>}
-                  <button
-                    onClick={() => focusEvent(e.id)}
-                    className={`flex w-full items-start gap-2 border-l-2 px-3 py-1.5 text-left ${selected ? "bg-sel-bg" : "hover:bg-hover"}`}
-                    style={{ borderLeftColor: selected ? color.base : "transparent" }}
-                  >
-                    <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color.base, opacity: onMap ? 1 : 0.35 }} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12px] font-semibold text-ink">{e.title}</span>
-                      <span className="block truncate text-[10.5px] text-ink-4">
-                        {e.start && format(parseISO(e.start), "HH:mm")}
-                        {e.location ? ` · ${e.location}` : ""}
-                        {!onMap && !loadingPositions && " · pas sur la carte"}
-                      </span>
-                    </span>
-                    {onOpenEvent && selected && (
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(ev) => {
-                          ev.stopPropagation();
-                          onOpenEvent(e.id);
-                        }}
-                        className="shrink-0 self-center rounded-full border border-line px-1.5 py-px text-[10px] font-semibold text-link hover:border-link"
-                      >
-                        Ouvrir
-                      </span>
-                    )}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {staff.length > 0 && (
+      {showSide && (
+        <aside className={`flex min-h-0 w-full shrink-0 flex-col gap-3 lg:w-80 ${expanded ? "max-h-[50%] lg:max-h-none" : ""}`}>
           <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-panel border border-line bg-card">
-            <div className="border-b border-line px-3 py-2">
-              <div className="text-xs font-bold text-ink">Au plus près</div>
-              <div className="truncate text-[10.5px] text-ink-4">
-                {selectedEvent ? `de ${selectedEvent.title} · aller simple en voiture` : "Sélectionnez un événement pour classer les techniciens"}
-              </div>
+            <div className="flex items-center justify-between border-b border-line px-3 py-2">
+              <div className="text-xs font-bold text-ink">Événements</div>
+              <div className="font-mono text-[10px] text-ink-4">{events.length}</div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto py-1">
-              {selectedEvent ? staffRows : <div className="px-3 py-2 text-[11px] text-ink-4">Cliquez un événement dans la liste ou sur la carte.</div>}
+              {events.length === 0 && <div className="px-3 py-2 text-[11px] text-ink-4">Aucun événement sur cette période.</div>}
+              {eventRows.map(({ e, header }) => {
+                const color = ORG_COLORS[e.org];
+                const onMap = !!positions[e.id];
+                const selected = e.id === selectedId;
+                return (
+                  <div key={e.id}>
+                    {header && <div className="px-3 pb-0.5 pt-2 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-4">{header}</div>}
+                    <button
+                      onClick={() => focusEvent(e.id)}
+                      className={`flex w-full items-start gap-2 border-l-2 px-3 py-1.5 text-left ${selected ? "bg-sel-bg" : "hover:bg-hover"}`}
+                      style={{ borderLeftColor: selected ? color.base : "transparent" }}
+                    >
+                      <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color.base, opacity: onMap ? 1 : 0.35 }} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[12px] font-semibold text-ink">{e.title}</span>
+                        <span className="block truncate text-[10.5px] text-ink-4">
+                          {e.start && format(parseISO(e.start), "HH:mm")}
+                          {e.location ? ` · ${e.location}` : ""}
+                          {!onMap && !loadingPositions && " · pas sur la carte"}
+                        </span>
+                      </span>
+                      {onOpenEvent && selected && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            onOpenEvent(e.id);
+                          }}
+                          className="shrink-0 self-center rounded-full border border-line px-1.5 py-px text-[10px] font-semibold text-link hover:border-link"
+                        >
+                          Ouvrir
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </section>
-        )}
-      </aside>
+
+          {staff.length > 0 && (
+            <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-panel border border-line bg-card">
+              <div className="border-b border-line px-3 py-2">
+                <div className="text-xs font-bold text-ink">{selectedEvent ? "Au plus près" : "Techniciens"}</div>
+                <div className="truncate text-[10.5px] text-ink-4">
+                  {selectedEvent ? `de ${selectedEvent.title} · aller simple en voiture` : "Sélectionnez un événement pour classer par temps de trajet"}
+                </div>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto py-1">{selectedEvent ? staffRows : staffGroups}</div>
+            </section>
+          )}
+        </aside>
+      )}
     </div>
   );
 }
