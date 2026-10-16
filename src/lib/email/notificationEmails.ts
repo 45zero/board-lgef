@@ -27,7 +27,7 @@ export const CHOICES: Record<string, { accept: string; refuse: string; question:
 /** Types jamais envoyés par cet e-mail : déjà envoyés par ailleurs (rappels, alertes de modération). */
 export const NOT_EMAILED = new Set(["event_reminder", "hateful_comment"]);
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 export const siteUrl = () => (process.env.NEXT_PUBLIC_SITE_URL ?? "https://board-lgef.vercel.app").replace(/\/+$/, "");
 
@@ -71,7 +71,7 @@ function openLink(n: EmailNotification): { label: string; url: string } {
   return { label: "Ouvrir le board", url: site };
 }
 
-const button = (label: string, url: string, tone: "red" | "green" | "navy" | "ghost") => {
+export const button = (label: string, url: string, tone: "red" | "green" | "navy" | "ghost") => {
   const styles = {
     red: "background:#E1141B;color:#fff",
     green: "background:#1F7A4D;color:#fff",
@@ -80,6 +80,32 @@ const button = (label: string, url: string, tone: "red" | "green" | "navy" | "gh
   }[tone];
   return `<a href="${esc(url)}" style="${styles};display:inline-block;padding:11px 18px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;margin:0 8px 8px 0">${esc(label)}</a>`;
 };
+
+/**
+ * Mise en page commune des e-mails du board : en-tête LGEF (logo), « Bonjour … », titre, contenu,
+ * boutons et pied de page. `body`, `buttons` et `footer` sont du HTML déjà échappé.
+ */
+export function emailLayout({ firstName, title, body, buttons, footer }: { firstName: string | null; title: string; body: string; buttons: string; footer: string }) {
+  const site = siteUrl();
+  return `<div style="background:#EEF1F6;padding:24px 12px;font-family:Arial,Helvetica,sans-serif">
+<div style="max-width:600px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;color:#0E2A55">
+  <div style="background:#12305F;padding:18px 24px">
+    <table style="border-collapse:collapse"><tr>
+      <td style="padding-right:12px"><img src="${esc(site)}/lgef-logo.png" alt="LGEF" width="40" style="display:block;width:40px;height:auto" /></td>
+      <td style="color:#fff"><div style="font-size:15px;font-weight:800">Ligue Grand Est de Football</div><div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;opacity:.75">Board LGEF</div></td>
+    </tr></table>
+  </div>
+  <div style="padding:24px">
+    <div style="font-size:14px;color:#64748b">Bonjour${firstName ? ` ${esc(firstName)}` : ""},</div>
+    <h1 style="font-size:20px;line-height:1.3;margin:8px 0 6px">${esc(title)}</h1>
+    ${body}
+    <div style="margin-top:8px">${buttons}</div>
+  </div>
+  <div style="padding:14px 24px;background:#F8FAFC;font-size:12px;color:#64748b;line-height:1.5">
+    ${footer}
+  </div>
+</div></div>`;
+}
 
 export function renderNotificationEmail(
   n: EmailNotification,
@@ -109,27 +135,16 @@ export function renderNotificationEmail(
 ${button(choice.accept, `${site}/action/${actionToken}?c=accept`, "green")}${button(choice.refuse, `${site}/action/${actionToken}?c=refuse`, "red")}${button(open.label, open.url, "ghost")}`
     : button(open.label, open.url, "navy");
 
-  const html = `<div style="background:#EEF1F6;padding:24px 12px;font-family:Arial,Helvetica,sans-serif">
-<div style="max-width:600px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;color:#0E2A55">
-  <div style="background:#12305F;padding:18px 24px">
-    <table style="border-collapse:collapse"><tr>
-      <td style="padding-right:12px"><img src="${esc(site)}/lgef-logo.png" alt="LGEF" width="40" style="display:block;width:40px;height:auto" /></td>
-      <td style="color:#fff"><div style="font-size:15px;font-weight:800">Ligue Grand Est de Football</div><div style="font-size:11px;letter-spacing:.12em;text-transform:uppercase;opacity:.75">Board LGEF</div></td>
-    </tr></table>
-  </div>
-  <div style="padding:24px">
-    <div style="font-size:14px;color:#64748b">Bonjour${recipient.firstName ? ` ${esc(recipient.firstName)}` : ""},</div>
-    <h1 style="font-size:20px;line-height:1.3;margin:8px 0 6px">${esc(title)}</h1>
-    ${message ? `<p style="font-size:15px;line-height:1.5;margin:0;color:#1e293b">${esc(message)}</p>` : ""}
+  const html = emailLayout({
+    firstName: recipient.firstName,
+    title,
+    body: `${message ? `<p style="font-size:15px;line-height:1.5;margin:0;color:#1e293b">${esc(message)}</p>` : ""}
     ${n.actor_name && !title.includes(n.actor_name) && !message.includes(n.actor_name) ? `<p style="font-size:13px;color:#64748b;margin:6px 0 0">De la part de ${esc(n.actor_name)}</p>` : ""}
-    ${eventCard}
-    <div style="margin-top:8px">${buttons}</div>
-  </div>
-  <div style="padding:14px 24px;background:#F8FAFC;font-size:12px;color:#64748b;line-height:1.5">
-    Vous recevez cet e-mail car les notifications par e-mail sont activées dans vos paramètres du board
-    (Paramètres → Notifications). <a href="${esc(site)}" style="color:#12305F">Ouvrir le board</a>
-  </div>
-</div></div>`;
+    ${eventCard}`,
+    buttons,
+    footer: `Vous recevez cet e-mail car les notifications par e-mail sont activées dans vos paramètres du board
+    (Paramètres → Notifications). <a href="${esc(site)}" style="color:#12305F">Ouvrir le board</a>`,
+  });
 
   const text = [
     `Bonjour${recipient.firstName ? ` ${recipient.firstName}` : ""},`,

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { isTransactionalEmailConfigured, sendTransactionalBatch } from "@/lib/email/transactional";
+import { button, emailLayout, esc } from "@/lib/email/notificationEmails";
 
 // Demandes d'accès au board (table account_requests, partagée avec calendrier-lgef — même logique
 // que son Edge Function approve-account-request). Formulaire public /demande-acces ; validation par
@@ -120,19 +121,28 @@ async function listAccessRequestsImpl(): Promise<AccessRequest[]> {
   }));
 }
 
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-
-async function sendMail(to: string, subject: string, paragraphs: string[], link?: { href: string; label: string }) {
+/** E-mail au demandeur, à la mise en page des autres e-mails du board (en-tête LGEF, bouton). */
+async function sendMail(
+  to: string,
+  firstName: string | null,
+  subject: string,
+  paragraphs: string[],
+  link?: { href: string; label: string }
+) {
   if (!isTransactionalEmailConfigured()) {
     console.warn("[account-requests] envoi d'e-mails non configuré (Brevo / Resend) — e-mail non envoyé à", to);
     return false;
   }
-  const html = [
-    ...paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`),
-    link ? `<p><a href="${link.href}" style="display:inline-block;background:#12305F;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:bold">${escapeHtml(link.label)}</a></p>` : "",
-    "<p>La Ligue Grand Est de Football</p>",
-  ].join("");
-  const text = [...paragraphs, link ? `${link.label} : ${link.href}` : "", "La Ligue Grand Est de Football"].filter(Boolean).join("\n\n");
+  const html = emailLayout({
+    firstName,
+    title: subject,
+    body: paragraphs.map((p) => `<p style="font-size:15px;line-height:1.5;margin:0 0 10px;color:#1e293b">${esc(p)}</p>`).join(""),
+    buttons: link ? button(link.label, link.href, "navy") : "",
+    footer: `Vous recevez cet e-mail suite à votre demande d'accès au board de la Ligue Grand Est de Football.`,
+  });
+  const text = [`Bonjour${firstName ? ` ${firstName}` : ""},`, subject, ...paragraphs, link ? `${link.label} : ${link.href}` : "", "— Board LGEF"]
+    .filter(Boolean)
+    .join("\n\n");
   const { sent } = await sendTransactionalBatch([{ to: [to], subject, html, text }], async () => {});
   return sent > 0;
 }
@@ -195,9 +205,9 @@ async function approveAccessRequestImpl(
   const href = `${site}/mot-de-passe?token_hash=${encodeURIComponent(link.properties.hashed_token)}&type=${type}`;
   const emailed = await sendMail(
     req.email,
+    req.first_name,
     "Votre accès au board LGEF",
     [
-      `Bonjour ${req.first_name},`,
       network?.photo
         ? "Votre demande d'accès est acceptée : vous faites maintenant partie du réseau Couverture match de la Ligue Grand Est. Les matchs à photographier vous seront proposés dans le module Week-end ; le premier qui clique « Je prends » obtient le match."
         : network
@@ -231,8 +241,7 @@ async function rejectAccessRequestImpl(requestId: string) {
     .select("email, first_name")
     .single();
   if (!req) throw new Error("Demande introuvable ou déjà traitée.");
-  await sendMail(req.email, "Votre demande d'accès au board LGEF", [
-    `Bonjour ${req.first_name},`,
+  await sendMail(req.email, req.first_name, "Votre demande d'accès au board LGEF", [
     "Votre demande d'accès au board de la Ligue Grand Est n'a pas été retenue. Pour toute question, répondez à la personne de la Ligue qui vous a orienté vers ce formulaire.",
   ]);
 }
