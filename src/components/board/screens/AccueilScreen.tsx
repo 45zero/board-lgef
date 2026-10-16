@@ -3,23 +3,15 @@
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useEffect, useRef, useState } from "react";
 import {
-  Bell,
   Eye,
-  CalendarCheck,
   CalendarDays,
-  Camera,
   CheckCircle2,
   ChevronLeft,
-  CircleX,
   ChevronRight,
   Clock,
   ImageIcon,
   MapPin,
-  MessageSquareWarning,
   Play,
-  Receipt,
-  Send,
-  SquareKanban,
 } from "lucide-react";
 import { getDashboard, type Dashboard, type DashboardAction, type ProgrammeItem } from "@/app/actions/dashboard";
 import type { RecentPost } from "@/lib/board/recentPosts";
@@ -37,25 +29,11 @@ type Period = "day" | "week";
 
 const TODAY = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-const TONES: Record<DashboardAction["tone"], { count: string; border: string; tile: string }> = {
-  red: { count: "bg-red text-white", border: "border-l-red", tile: "bg-bad-bg text-red" },
-  orange: { count: "bg-warn text-white", border: "border-l-warn", tile: "bg-warn-bg text-warn" },
-  navy: { count: "bg-navy text-white", border: "border-l-navy", tile: "bg-sel-bg text-navy" },
+const TONES: Record<DashboardAction["tone"], { count: string; border: string }> = {
+  red: { count: "bg-red text-white", border: "border-l-red" },
+  orange: { count: "bg-warn text-white", border: "border-l-warn" },
+  navy: { count: "bg-navy text-white", border: "border-l-navy" },
 };
-
-/** Pictogramme d'une action, d'après son identifiant (frais-…, captation-…, publier…). */
-function ActionIcon({ id, size, strokeWidth }: { id: string; size: number; strokeWidth?: number }) {
-  const props = { size, strokeWidth };
-  if (id.startsWith("frais")) return <Receipt {...props} />;
-  if (id.startsWith("captation")) return <Camera {...props} />;
-  if (id === "couverture-refusee") return <CircleX {...props} />;
-  if (id === "presence") return <CalendarCheck {...props} />;
-  if (id === "publier") return <ImageIcon {...props} />;
-  if (id === "commentaires") return <MessageSquareWarning {...props} />;
-  if (id === "inscriptions") return <Send {...props} />;
-  if (id === "cartes") return <SquareKanban {...props} />;
-  return <Bell {...props} />;
-}
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 const dayLabel = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
@@ -209,18 +187,14 @@ export function AccueilScreen({
                       onClick={() => setOpenAction(a)}
                       className={`flex w-full flex-col gap-2 rounded-card border border-l-4 border-line bg-card p-3 text-left shadow-card transition hover:-translate-y-px hover:border-line-strong sm:flex-row sm:items-center sm:gap-3 sm:p-3.5 ${tone.border}`}
                     >
-                      <span className="flex items-center gap-2">
-                        <span className={`flex h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-xs font-extrabold sm:h-9 sm:min-w-9 sm:text-sm ${tone.count}`}>
+                      {/* Même photo que la vignette mobile, le nombre en pastille dans le coin. */}
+                      <span className="relative block h-14 w-14 shrink-0">
+                        <span className="block h-full w-full overflow-hidden rounded-xl bg-subtle">
+                          <ActionPhoto action={a} />
+                        </span>
+                        <span className={`absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-extrabold shadow-card ring-2 ring-card ${tone.count}`}>
                           {a.count}
                         </span>
-                        {a.thumbUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element -- miniature signée du premier média
-                          <img src={a.thumbUrl} alt="" className="h-7 w-7 rounded-btn object-cover sm:h-10 sm:w-10" />
-                        ) : (
-                          <span className={`flex h-7 w-7 items-center justify-center rounded-btn sm:h-10 sm:w-10 ${tone.tile}`}>
-                            <ActionIcon id={a.id} size={16} />
-                          </span>
-                        )}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="line-clamp-2 block text-[13px] font-bold leading-tight text-ink sm:text-sm">{a.title}</span>
@@ -349,22 +323,29 @@ const ACTION_PHOTOS = new Set([
 ]);
 const actionPhoto = (id: string) => `/actions/${ACTION_PHOTOS.has(id) ? id : "default"}.jpg`;
 
+/** Miniature du premier média, sinon photo statique de l'action (repli sur la photo si la miniature échoue). */
+function ActionPhoto({ action: a, className = "" }: { action: DashboardAction; className?: string }) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- miniature signée du premier média, sinon photo statique
+    <img
+      src={a.thumbUrl ?? actionPhoto(a.id)}
+      alt=""
+      loading="lazy"
+      className={`h-full w-full object-cover ${className}`}
+      onError={(e) => {
+        if (!e.currentTarget.src.endsWith(actionPhoto(a.id))) e.currentTarget.src = actionPhoto(a.id);
+      }}
+    />
+  );
+}
+
 /** Carte d'action du carrousel mobile, au format des vignettes Airbnb : photo carrée, titre et détail dessous. */
 function ActionCard({ action: a, onClick }: { action: DashboardAction; onClick: () => void }) {
   const tone = TONES[a.tone];
   return (
     <button onClick={onClick} className="group w-28 shrink-0 snap-start text-left">
       <div className="relative aspect-square overflow-hidden rounded-2xl bg-subtle shadow-card">
-        {/* eslint-disable-next-line @next/next/no-img-element -- miniature signée du premier média, sinon photo statique */}
-        <img
-          src={a.thumbUrl ?? actionPhoto(a.id)}
-          alt=""
-          loading="lazy"
-          className="h-full w-full object-cover transition group-active:scale-[0.98]"
-          onError={(e) => {
-            if (!e.currentTarget.src.endsWith(actionPhoto(a.id))) e.currentTarget.src = actionPhoto(a.id);
-          }}
-        />
+        <ActionPhoto action={a} className="transition group-active:scale-[0.98]" />
         <span className={`absolute right-1.5 top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-extrabold shadow-card ${tone.count}`}>
           {a.count}
         </span>
