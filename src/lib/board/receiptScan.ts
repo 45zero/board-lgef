@@ -89,7 +89,13 @@ export async function eventRanker(service: ReturnType<typeof createServiceClient
     const from = new Date(new Date(`${dates[0]}T00:00:00Z`).getTime() - 3 * DAY).toISOString();
     const to = new Date(new Date(`${dates[dates.length - 1]}T00:00:00Z`).getTime() + 3 * DAY).toISOString();
     const [{ data }, roles] = await Promise.all([
-      service.from("events").select("id, title, start_date, end_date, location").lte("start_date", to).gte("end_date", from).limit(300),
+      service
+        .from("events")
+        .select("id, title, start_date, end_date, location")
+        .or(`event_type.is.null,event_type.neq.kanban,created_by.eq.${userId}`) // pas les évènements Perso des autres
+        .lte("start_date", to)
+        .gte("end_date", from)
+        .limit(300),
       getSolicitations(service, userId, { includePendingDirector: true, includeProposedCoverage: true }),
     ]);
     events = data ?? [];

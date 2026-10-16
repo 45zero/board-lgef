@@ -142,7 +142,13 @@ export async function searchEventsForExpense(query: string, date: string | null)
   const userId = await currentUserId();
   const service = createServiceClient();
   const q = query.trim().replace(/[%,()]/g, " ");
-  let req = service.from("events").select("id, title, start_date, end_date, location").order("start_date", { ascending: false }).limit(15);
+  let req = service
+    .from("events")
+    .select("id, title, start_date, end_date, location")
+    // Client service : les évènements Perso des autres sont exclus ici (la RLS ne s'applique pas).
+    .or(`event_type.is.null,event_type.neq.kanban,created_by.eq.${userId}`)
+    .order("start_date", { ascending: false })
+    .limit(15);
   if (q) {
     req = req.or(`title.ilike.%${q}%,location.ilike.%${q}%`).gte("start_date", new Date(Date.now() - 548 * DAY).toISOString());
   } else if (date) {
