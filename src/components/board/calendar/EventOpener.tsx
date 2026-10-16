@@ -11,7 +11,7 @@ import { MobileEventModal } from "@/components/board/mobile/MobileEventModal";
 const EVENT_SELECT =
   "id, title, event_type, start_date, end_date, location, online_meeting, registration_enabled, organizer_message, requires_coverage, created_by, created_at, updated_by, updated_at, status";
 
-type OpenEvent = (eventId: string) => Promise<void>;
+type OpenEvent = (eventId: string, opts?: { tab?: "discussion" }) => Promise<void>;
 
 const EventOpenerContext = createContext<{ open: OpenEvent; loadingId: string | null } | null>(null);
 
@@ -23,10 +23,11 @@ const EventOpenerContext = createContext<{ open: OpenEvent; loadingId: string | 
 export function EventOpenerProvider({ children }: { children: React.ReactNode }) {
   const isMobile = useIsMobile();
   const [event, setEvent] = useState<CalendarEvent | null>(null);
+  const [tab, setTab] = useState<"discussion" | undefined>();
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const open = useCallback<OpenEvent>(async (eventId) => {
+  const open = useCallback<OpenEvent>(async (eventId, opts) => {
     setLoadingId(eventId);
     setError(null);
     const { data, error: err } = await createClient().from("events").select(EVENT_SELECT).eq("id", eventId).maybeSingle();
@@ -36,17 +37,20 @@ export function EventOpenerProvider({ children }: { children: React.ReactNode })
       window.setTimeout(() => setError(null), 4000);
       return;
     }
+    setTab(opts?.tab);
     setEvent(mapEventRow(data as unknown as EventRow));
   }, []);
 
-  // Lien profond ?openEvent=<id> : ouvre la fiche puis nettoie l'URL.
+  // Lien profond ?openEvent=<id>[&tab=discussion] : ouvre la fiche puis nettoie l'URL.
   useEffect(() => {
     const url = new URL(window.location.href);
     const id = url.searchParams.get("openEvent");
     if (!id) return;
+    const tab = url.searchParams.get("tab") === "discussion" ? "discussion" : undefined;
     url.searchParams.delete("openEvent");
+    url.searchParams.delete("tab");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
-    queueMicrotask(() => void open(id));
+    queueMicrotask(() => void open(id, { tab }));
   }, [open]);
 
   return (
@@ -55,9 +59,9 @@ export function EventOpenerProvider({ children }: { children: React.ReactNode })
       {event && (
         <div data-event-opener-modal className="relative z-[80]" onClick={(e) => e.stopPropagation()}>
           {isMobile ? (
-            <MobileEventModal event={event} onClose={() => setEvent(null)} onSaved={() => setEvent(null)} />
+            <MobileEventModal key={event.id} event={event} initialTab={tab} onClose={() => setEvent(null)} onSaved={() => setEvent(null)} />
           ) : (
-            <EventModal event={event} onClose={() => setEvent(null)} onSaved={() => setEvent(null)} />
+            <EventModal key={event.id} event={event} initialTab={tab} onClose={() => setEvent(null)} onSaved={() => setEvent(null)} />
           )}
         </div>
       )}

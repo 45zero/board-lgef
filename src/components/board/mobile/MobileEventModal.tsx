@@ -47,6 +47,7 @@ export function MobileEventModal({
   draft,
   onClose,
   onSaved,
+  initialTab,
 }: {
   event: CalendarEvent | null;
   defaultStart?: Date;
@@ -54,8 +55,10 @@ export function MobileEventModal({
   draft?: EventDraft | null;
   onClose: () => void;
   onSaved: () => void;
+  /** Onglet ouvert d'emblée (ex. « discussion » depuis une notification de mention). */
+  initialTab?: "discussion";
 }) {
-  const [tab, setTab] = useState<Tab>("details");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "details");
   const [orgPickerOpen, setOrgPickerOpen] = useState(false);
   const locationInputRef = useRef<HTMLInputElement>(null);
   const mapsLoaded = useGoogleMapsScript();

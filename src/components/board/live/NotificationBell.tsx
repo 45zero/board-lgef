@@ -43,7 +43,7 @@ export function NotificationBell({ variant = "desktop" }: { variant?: "desktop" 
       openTeamCard(n.data.team_card_id);
     } else if (n.event_id) {
       setOpen(false);
-      void openEvent(n.event_id);
+      void openEvent(n.event_id, n.type === "event_mentioned" || n.type === "event_commented" ? { tab: "discussion" } : undefined);
     } else if (n.data?.app && /^[a-z]+$/.test(n.data.app)) {
       // Module à ouvrir (ex. centre de publication) : même lien que dans l'e-mail.
       setOpen(false);

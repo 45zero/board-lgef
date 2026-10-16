@@ -66,6 +66,10 @@ function openLink(n: EmailNotification): { label: string; url: string } {
       return { label: "Ouvrir l'Espace Team", url: `${site}/?app=trello` };
     case "coverage_request":
       if (n.eventId) return { label: "Attribuer la couverture", url: `${site}/?openEvent=${n.eventId}` };
+      break;
+    case "event_mentioned":
+    case "event_commented":
+      if (n.eventId) return { label: "Répondre dans la discussion", url: `${site}/?openEvent=${n.eventId}&tab=discussion` };
   }
   if (n.eventId) return { label: "Voir l'événement", url: `${site}/?openEvent=${n.eventId}` };
   return { label: "Ouvrir le board", url: site };

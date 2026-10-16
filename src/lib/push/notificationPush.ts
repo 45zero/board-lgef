@@ -11,6 +11,7 @@ const PUSHED: Record<string, { icon: PushIcon; route: string }> = {
   card_commented: { icon: "ic_stat_team", route: "/?app=trello" },
   card_due_soon: { icon: "ic_stat_team", route: "/?app=trello" },
   board_shared: { icon: "ic_stat_team", route: "/?app=trello" },
+  event_mentioned: { icon: "ic_stat_lgef", route: "/" },
 };
 
 /** Pas d'envoi d'historique : seules les notifications récentes partent en push. */
@@ -37,7 +38,7 @@ export async function sendNotificationPushes(service: ReturnType<typeof createSe
     .update({ push_sent_at: new Date().toISOString() })
     .in("id", pending.map((p) => p.id))
     .is("push_sent_at", null)
-    .select("id, user_id, type, title, message");
+    .select("id, user_id, type, title, message, event_id");
   if (!claimed?.length) return 0;
 
   const userIds = [...new Set(claimed.map((n) => n.user_id).filter((id): id is string => !!id))];
@@ -59,7 +60,8 @@ export async function sendNotificationPushes(service: ReturnType<typeof createSe
       body: n.message || "",
       type: n.type,
       icon: conf.icon,
-      data: { route: conf.route, notification_id: n.id },
+      // Mention dans une discussion : ouvre la fiche de l'événement sur l'onglet Discussion.
+      data: { route: n.type === "event_mentioned" && n.event_id ? `/?openEvent=${n.event_id}&tab=discussion` : conf.route, notification_id: n.id },
     });
     await service.from("notifications").update({ push_last_status: ok ? "sent" : "failed" }).eq("id", n.id);
     if (ok) sent++;

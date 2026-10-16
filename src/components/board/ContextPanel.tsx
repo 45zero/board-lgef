@@ -200,7 +200,7 @@ export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidget
               {activity.map((n) => (
                 <div key={n.id} className="group relative">
                 <button
-                  onClick={() => (n.data?.team_card_id ? openCard(n.data.team_card_id) : n.event_id ? void openEvent(n.event_id) : undefined)}
+                  onClick={() => (n.data?.team_card_id ? openCard(n.data.team_card_id) : n.event_id ? void openEvent(n.event_id, n.type === "event_mentioned" || n.type === "event_commented" ? { tab: "discussion" } : undefined) : undefined)}
                   className="flex w-full gap-2 pr-5 text-left"
                 >
                   <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${n.read ? "bg-line-strong" : "bg-red"}`} />

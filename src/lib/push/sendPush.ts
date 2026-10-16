@@ -2,7 +2,7 @@ import "server-only";
 import { sendWebPush } from "@/lib/push/webPush";
 
 /** Petites icônes de notification dessinées dans l'appli (android/app/src/main/res/drawable/ic_stat_*). */
-export type PushIcon = "ic_stat_gmail" | "ic_stat_publication" | "ic_stat_team";
+export type PushIcon = "ic_stat_gmail" | "ic_stat_publication" | "ic_stat_team" | "ic_stat_lgef";
 
 /**
  * Push vers les téléphones d'un utilisateur (jetons fcm_tokens) via la fonction Supabase send_push_v1
