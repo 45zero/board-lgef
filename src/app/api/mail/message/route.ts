@@ -22,7 +22,7 @@ export async function GET(request: Request) {
 
   try {
     const account = await getOwnedGoogleAccount(accountId, userId);
-    const message = await getMessage(account, messageId);
+    const message = await getMessage(account, messageId, { inlineImages: true });
     return NextResponse.json(message, { headers: { "Cache-Control": "private, max-age=600" } });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Erreur" }, { status: 500 });

@@ -116,11 +116,70 @@ function findAttachments(part: gmail_v1.Schema$MessagePart): AttachmentMeta[] {
   return found;
 }
 
-export async function getMessage(account: ConnectedAccount, messageId: string) {
+/** Images intégrées (signatures, logos) au-delà de cette taille : laissées en pièce jointe. */
+const MAX_INLINE_IMAGE = 2 * 1024 * 1024;
+const MAX_INLINE_TOTAL = 8 * 1024 * 1024;
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Images intégrées par cid: (signatures Outlook / Apple Mail / Gmail…) : remplacées dans le HTML par
+ * leur contenu (data:), comme dans Gmail, et retirées de la liste des pièces jointes. Les data: URI
+ * s'affichent dans tous les navigateurs, y compris dans l'iframe sandboxée d'EmailBody.
+ */
+async function embedInlineImages(
+  gmail: gmail_v1.Gmail,
+  messageId: string,
+  payload: gmail_v1.Schema$MessagePart,
+  html: string
+): Promise<{ html: string; inlineAttachmentIds: Set<string> }> {
+  const inlineAttachmentIds = new Set<string>();
+  if (!html || !/cid:/i.test(html)) return { html, inlineAttachmentIds };
+
+  const parts: gmail_v1.Schema$MessagePart[] = [];
+  const walk = (p: gmail_v1.Schema$MessagePart) => {
+    parts.push(p);
+    (p.parts ?? []).forEach(walk);
+  };
+  walk(payload);
+
+  let total = 0;
+  for (const p of parts) {
+    const headers = p.headers ?? undefined;
+    const cid = (headerValue(headers, "Content-ID") || headerValue(headers, "X-Attachment-Id")).replace(/^<|>$/g, "").trim();
+    if (!cid || !(p.mimeType ?? "").startsWith("image/")) continue;
+    const pattern = new RegExp(`cid:${escapeRegExp(cid)}(?=["'\\s)>]|$)`, "gi");
+    if (!pattern.test(html)) continue;
+    const size = p.body?.size ?? 0;
+    if (size > MAX_INLINE_IMAGE || total + size > MAX_INLINE_TOTAL) continue;
+    let data = p.body?.data ?? "";
+    if (!data && p.body?.attachmentId) {
+      const res = await gmail.users.messages.attachments.get({ userId: "me", messageId, id: p.body.attachmentId }).catch(() => null);
+      data = res?.data.data ?? "";
+    }
+    if (!data) continue;
+    total += size;
+    const base64 = Buffer.from(data, "base64url").toString("base64");
+    pattern.lastIndex = 0;
+    html = html.replace(pattern, `data:${p.mimeType};base64,${base64}`);
+    if (p.body?.attachmentId) inlineAttachmentIds.add(p.body.attachmentId);
+  }
+  return { html, inlineAttachmentIds };
+}
+
+/** `inlineImages` : pour l'affichage d'un mail (voir embedInlineImages). */
+export async function getMessage(account: ConnectedAccount, messageId: string, opts: { inlineImages?: boolean } = {}) {
   const gmail = await gmailClient(account);
   const { data } = await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" });
-  const { text, html } = findBody(data.payload ?? {});
-  const attachments = findAttachments(data.payload ?? {});
+  const body = findBody(data.payload ?? {});
+  const text = body.text;
+  let html = body.html;
+  let attachments = findAttachments(data.payload ?? {});
+  if (opts.inlineImages) {
+    const embedded = await embedInlineImages(gmail, messageId, data.payload ?? {}, html);
+    html = embedded.html;
+    attachments = attachments.filter((a) => !embedded.inlineAttachmentIds.has(a.attachmentId));
+  }
 
   return {
     id: data.id!,

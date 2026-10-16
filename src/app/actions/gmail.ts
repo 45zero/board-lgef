@@ -44,7 +44,7 @@ export async function listMyMessages(
 export async function getMyMessage(accountId: string, messageId: string) {
   const userId = await requireUserId();
   const account = await getOwnedGoogleAccount(accountId, userId);
-  return getMessage(account, messageId);
+  return getMessage(account, messageId, { inlineImages: true });
 }
 
 export async function sendMyMessage(
