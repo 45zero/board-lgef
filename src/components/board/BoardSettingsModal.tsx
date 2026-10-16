@@ -16,7 +16,7 @@ import {
   setCoverageReceivers,
 } from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
-import { webPushSupported, isWebPushEnabled, enableWebPush, disableWebPush } from "@/lib/web/webPush";
+import { isNativeApp, webPushIssue, isWebPushEnabled, enableWebPush, disableWebPush } from "@/lib/web/webPush";
 import { sendTestWebPush } from "@/app/actions/web-push";
 import { useAuth } from "@/contexts/AuthContext";
 import { useVisibleModules } from "@/hooks/board/useVisibleModules";
@@ -32,7 +32,9 @@ import { MyProfileModal } from "@/components/board/profile/MyProfileModal";
  */
 function ComputerPushRow() {
   // Fenêtre ouverte au clic, jamais rendue côté serveur : le navigateur est lisible dès le premier rendu.
-  const [supported] = useState(webPushSupported);
+  const [native] = useState(isNativeApp);
+  const [issue] = useState(webPushIssue);
+  const supported = !native && issue === null;
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -41,7 +43,14 @@ function ComputerPushRow() {
     if (supported) isWebPushEnabled().then(setEnabled).catch((e) => console.error("[ComputerPushRow]", e));
   }, [supported]);
 
-  if (!supported) return null;
+  if (native) return null;
+  if (!supported)
+    return (
+      <div className="min-w-0">
+        <div className="text-sm font-semibold text-ink-2">Sur cet ordinateur</div>
+        <div className="text-xs text-ink-4">Indisponible : {issue}</div>
+      </div>
+    );
 
   const test = async () => {
     setMessage(null);

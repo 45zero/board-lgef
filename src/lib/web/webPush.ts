@@ -8,15 +8,24 @@ import { subscribeWebPush, unsubscribeWebPush } from "@/app/actions/web-push";
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
+/** Dans l'appli mobile : push natifs, pas de réglage « ordinateur ». */
+export function isNativeApp() {
+  return Capacitor.isNativePlatform();
+}
+
+/** Ce qui empêche les notifications dans ce navigateur (null si rien), affiché dans les Paramètres. */
+export function webPushIssue(): string | null {
+  if (typeof window === "undefined") return "Navigateur indisponible";
+  if (!VAPID_PUBLIC_KEY) return "Clé de notification absente de cette version du board";
+  if (!window.isSecureContext) return "Page non sécurisée (https requis)";
+  if (!("serviceWorker" in navigator)) return "Service worker indisponible (navigation privée ou Mode Isolement ?)";
+  if (!("PushManager" in window) || !("Notification" in window))
+    return "Ce navigateur ne gère pas les notifications web : mettez à jour Safari ou utilisez Chrome";
+  return null;
+}
+
 export function webPushSupported() {
-  return (
-    typeof window !== "undefined" &&
-    !Capacitor.isNativePlatform() &&
-    !!VAPID_PUBLIC_KEY &&
-    "serviceWorker" in navigator &&
-    "PushManager" in window &&
-    "Notification" in window
-  );
+  return typeof window !== "undefined" && !isNativeApp() && webPushIssue() === null;
 }
 
 function urlBase64ToUint8Array(base64: string) {
