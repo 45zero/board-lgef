@@ -13,7 +13,17 @@ const PUSHED: Record<string, { icon: PushIcon; route: string }> = {
   board_shared: { icon: "ic_stat_team", route: "/?app=trello" },
   event_mentioned: { icon: "ic_stat_lgef", route: "/" },
   event_commented: { icon: "ic_stat_lgef", route: "/" },
+  direct_message: { icon: "ic_stat_lgef", route: "/" },
 };
+
+/** Écran ouvert au toucher : la discussion concernée (bulle), ou la fiche sur l'onglet Discussion pour une mention. */
+function routeOf(n: { type: string; event_id: string | null; data: unknown }, fallback: string) {
+  const conversationId = (n.data as { conversation_id?: unknown } | null)?.conversation_id;
+  if (n.type === "direct_message" && typeof conversationId === "string") return `/?openChat=direct:${conversationId}`;
+  if (n.type === "event_commented" && n.event_id) return `/?openChat=event:${n.event_id}`;
+  if (n.type === "event_mentioned" && n.event_id) return `/?openEvent=${n.event_id}&tab=discussion`;
+  return fallback;
+}
 
 /** Pas d'envoi d'historique : seules les notifications récentes partent en push. */
 const WINDOW_MS = 30 * 60 * 1000;
@@ -39,7 +49,7 @@ export async function sendNotificationPushes(service: ReturnType<typeof createSe
     .update({ push_sent_at: new Date().toISOString() })
     .in("id", pending.map((p) => p.id))
     .is("push_sent_at", null)
-    .select("id, user_id, type, title, message, event_id");
+    .select("id, user_id, type, title, message, event_id, data");
   if (!claimed?.length) return 0;
 
   const userIds = [...new Set(claimed.map((n) => n.user_id).filter((id): id is string => !!id))];
@@ -61,8 +71,7 @@ export async function sendNotificationPushes(service: ReturnType<typeof createSe
       body: n.message || "",
       type: n.type,
       icon: conf.icon,
-      // Message ou mention dans une discussion : ouvre la fiche de l'événement sur l'onglet Discussion.
-      data: { route: n.type.startsWith("event_") && n.event_id ? `/?openEvent=${n.event_id}&tab=discussion` : conf.route, notification_id: n.id },
+      data: { route: routeOf(n, conf.route), notification_id: n.id },
     });
     await service.from("notifications").update({ push_last_status: ok ? "sent" : "failed" }).eq("id", n.id);
     if (ok) sent++;

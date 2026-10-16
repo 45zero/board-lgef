@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
-import { postEventComment } from "@/app/actions/event-comments";
 
 export interface EventComment {
   id: string;
@@ -17,12 +15,11 @@ export interface EventComment {
 
 /**
  * Version simplifiée de calendrier-lgef/src/components/discussion/EventDiscussion.tsx
- * + ReplyBox.tsx : liste + envoi de messages via la RPC existante
- * `get_visible_event_comments` (gère déjà la visibilité côté base). Mentions @
- * notifiées par l'action postEventComment ; les réactions ne sont pas portées.
+ * : liste des messages via la RPC existante
+ * `get_visible_event_comments` (gère déjà la visibilité côté base). L'envoi, les
+ * mentions, ❤️ et pièces jointes passent par la conversation (EventChat, actions chat.ts).
  */
 export function useEventComments(eventId: string) {
-  const { user } = useAuth();
   const [comments, setComments] = useState<EventComment[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -40,15 +37,5 @@ export function useEventComments(eventId: string) {
     fetchComments();
   }, [fetchComments]);
 
-  /** Envoie un message ; les personnes de `mentionIds` (mentionnées avec @) sont notifiées. */
-  const postComment = async (body: string, mentionIds: string[] = []) => {
-    const trimmed = body.trim();
-    if (!trimmed || !user?.id) return false;
-    const res = await postEventComment(eventId, trimmed, mentionIds);
-    if (!res.ok) return false;
-    await fetchComments();
-    return true;
-  };
-
-  return { eventId, comments, loading, postComment, refetch: fetchComments };
+  return { eventId, comments, loading, refetch: fetchComments };
 }

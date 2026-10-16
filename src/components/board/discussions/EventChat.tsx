@@ -1,21 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { CornerUpLeft, FileText, Loader2, Mic, Paperclip, Pause, Play, Send, SmilePlus, Trash2, X } from "lucide-react";
+import { CornerUpLeft, FileText, Heart, Loader2, Mic, Paperclip, Pause, Play, Send, Trash2, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { createDiscussionUpload, getDiscussion, markDiscussionRead, postEventComment, toggleReaction } from "@/app/actions/event-comments";
+import { createChatUpload, getChat, markChatRead, postChat, toggleLike } from "@/app/actions/chat";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { Avatar } from "@/components/board/team/TeamUi";
-import {
-  DISCUSSIONS_CHANGED,
-  REACTIONS,
-  isAttachmentFallback,
-  reactionLabel,
-  type ChatAttachment,
-  type ChatAttachmentInput,
-  type ChatMessage,
-  type ChatPerson,
-} from "@/lib/board/discussions";
+import { DISCUSSIONS_CHANGED, isAttachmentFallback, type ChatAttachment, type ChatAttachmentInput, type ChatMessage, type ChatPerson, type ChatSource } from "@/lib/board/discussions";
 
 const BUCKET = "event-files";
 const MAX_VOICE_MS = 5 * 60_000;
@@ -47,9 +38,19 @@ const initialsOf = (name: string) =>
     .map((w) => w[0]!.toUpperCase())
     .join("") || "?";
 
+/** Message clair selon la raison pour laquelle le micro n'a pas pu être ouvert. */
+function micError(e: unknown) {
+  const name = e instanceof DOMException ? e.name : "";
+  if (name === "NotAllowedError" || name === "SecurityError")
+    return "Micro bloqué : autorisez le micro pour ce site (icône à gauche de l'adresse), et sur Mac dans Réglages Système → Confidentialité et sécurité → Micro pour votre navigateur.";
+  if (name === "NotFoundError" || name === "OverconstrainedError") return "Aucun micro détecté sur cet appareil.";
+  if (name === "NotReadableError" || name === "AbortError") return "Le micro est déjà utilisé par une autre application (visio, enregistreur…). Fermez-la et réessayez.";
+  return `Micro indisponible${name ? ` (${name})` : ""}.`;
+}
+
 /** Envoi direct vers le stockage (URL signée), puis description de la pièce jointe pour le message. */
-async function uploadAttachment(eventId: string, file: Blob, filename: string, durationMs?: number): Promise<ChatAttachmentInput> {
-  const res = await createDiscussionUpload(eventId, filename, file.size);
+async function uploadAttachment(source: ChatSource, file: Blob, filename: string, durationMs?: number): Promise<ChatAttachmentInput> {
+  const res = await createChatUpload(source, filename, file.size);
   if (!res.ok) throw new Error(res.error);
   const contentType = file.type || null;
   const { error } = await createClient().storage.from(BUCKET).uploadToSignedUrl(res.data.path, res.data.token, file, { contentType: contentType ?? undefined });
@@ -119,13 +120,7 @@ function Attachments({ items, mine }: { items: ChatAttachment[]; mine: boolean }
         a.kind === "audio" ? (
           <VoicePlayer key={a.id} att={a} mine={mine} />
         ) : (
-          <a
-            key={a.id}
-            href={a.url ?? undefined}
-            target="_blank"
-            rel="noreferrer"
-            className={`flex max-w-[240px] items-center gap-2 rounded-2xl px-3 py-2 ${mine ? "bg-navy text-white" : "bg-subtle text-ink"}`}
-          >
+          <a key={a.id} href={a.url ?? undefined} target="_blank" rel="noreferrer" className={`flex max-w-[240px] items-center gap-2 rounded-2xl px-3 py-2 ${mine ? "bg-navy text-white" : "bg-subtle text-ink"}`}>
             <FileText size={18} className="shrink-0" />
             <span className="min-w-0">
               <span className="block truncate text-xs font-semibold">{a.filename}</span>
@@ -159,6 +154,39 @@ function MessageBody({ body, people }: { body: string; people: ChatPerson[] }) {
   );
 }
 
+/** ❤️ d'un message : qui aime au survol (ou au toucher sur mobile), et bouton pour aimer / ne plus aimer. */
+function Likes({ likes, mine, onToggle }: { likes: ChatMessage["likes"]; mine: boolean; onToggle: () => void }) {
+  const [open, setOpen] = useState(false);
+  if (!likes.names.length) return null;
+  return (
+    <div className={`group/likes relative z-[1] -mt-1.5 ${mine ? "mr-2" : "ml-2"}`} onMouseLeave={() => setOpen(false)}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label={`Aimé par ${likes.names.join(", ")}`}
+        className={`flex items-center gap-0.5 rounded-full border px-1.5 py-px text-[11px] shadow-sm ${likes.mine ? "border-red/30 bg-[#fde8e9]" : "border-line bg-card"}`}
+      >
+        <span>❤️</span>
+        {likes.names.length > 1 && <span className="font-semibold text-ink-3">{likes.names.length}</span>}
+      </button>
+      {/* pb : le survol ne se coupe pas en passant du cœur à la liste. */}
+      <div className={`absolute bottom-full z-20 pb-1 ${mine ? "right-0" : "left-0"} ${open ? "block" : "hidden group-hover/likes:block"}`}>
+        <div className="w-max min-w-[140px] max-w-[220px] rounded-btn border border-line bg-card p-2 text-xs shadow-modal">
+          <div className="mb-1 font-bold text-ink-2">❤️ Aimé par</div>
+          {likes.names.map((n, i) => (
+            <div key={i} className="truncate text-ink-3">
+              {n}
+            </div>
+          ))}
+          <button type="button" onClick={onToggle} className="mt-1.5 w-full rounded-btn bg-subtle px-2 py-1 font-semibold text-ink-2 hover:bg-hover">
+            {likes.mine ? "Je n'aime plus" : "J'aime aussi"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MessageRow({
   m,
   mine,
@@ -167,7 +195,7 @@ function MessageRow({
   people,
   active,
   onActivate,
-  onReact,
+  onLike,
   onReply,
   onJump,
 }: {
@@ -178,11 +206,10 @@ function MessageRow({
   people: ChatPerson[];
   active: boolean;
   onActivate: () => void;
-  onReact: (type: string) => void;
+  onLike: () => void;
   onReply: () => void;
   onJump: (id: string) => void;
 }) {
-  const [picker, setPicker] = useState(false);
   const showBody = !(m.attachments.length && isAttachmentFallback(m.body));
   const corners = mine
     ? `rounded-l-2xl ${first ? "rounded-tr-2xl" : "rounded-tr-md"} ${last ? "rounded-br-2xl" : "rounded-br-md"}`
@@ -204,7 +231,7 @@ function MessageRow({
           </button>
         )}
         <div className={`flex max-w-full items-center gap-1 ${mine ? "flex-row-reverse" : ""}`}>
-          <div onClick={onActivate} onDoubleClick={() => onReact("like")} title={timeLabel(m.createdAt)} className="relative flex min-w-0 flex-col gap-1">
+          <div onClick={onActivate} onDoubleClick={onLike} title={timeLabel(m.createdAt)} className="relative flex min-w-0 flex-col gap-1">
             {m.attachments.length > 0 && <Attachments items={m.attachments} mine={mine} />}
             {showBody && (
               <div className={`whitespace-pre-line break-words px-3 py-2 text-sm leading-snug ${corners} ${mine ? "bg-navy text-white" : "bg-subtle text-ink"}`}>
@@ -212,51 +239,24 @@ function MessageRow({
               </div>
             )}
           </div>
-          {/* Réagir / répondre : au survol (ordinateur) ou au toucher du message (mobile). */}
+          {/* Aimer / répondre : au survol (ordinateur) ou au toucher du message (mobile). */}
           <div className={`flex shrink-0 items-center transition-opacity ${active ? "opacity-100" : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"} ${mine ? "flex-row-reverse" : ""}`}>
-            <div className="relative">
-              <button type="button" onClick={() => setPicker((p) => !p)} title="Réagir" aria-label="Réagir" className="rounded-full p-1.5 text-ink-4 hover:bg-hover hover:text-ink-2">
-                <SmilePlus size={16} />
-              </button>
-              {picker && (
-                <div className={`absolute bottom-full z-10 mb-1 flex gap-0.5 rounded-full border border-line bg-card px-1.5 py-1 shadow-modal ${mine ? "right-0" : "left-0"}`}>
-                  {REACTIONS.map((r) => (
-                    <button
-                      key={r.key}
-                      type="button"
-                      onClick={() => {
-                        setPicker(false);
-                        onReact(r.key);
-                      }}
-                      className="rounded-full px-1 text-xl transition-transform hover:scale-125"
-                    >
-                      {r.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={onLike}
+              title={m.likes.mine ? "Je n'aime plus" : "J'aime"}
+              aria-label={m.likes.mine ? "Je n'aime plus" : "J'aime"}
+              aria-pressed={m.likes.mine}
+              className={`rounded-full p-1.5 hover:bg-hover ${m.likes.mine ? "text-red" : "text-ink-4 hover:text-red"}`}
+            >
+              <Heart size={16} fill={m.likes.mine ? "currentColor" : "none"} />
+            </button>
             <button type="button" onClick={onReply} title="Répondre" aria-label="Répondre" className="rounded-full p-1.5 text-ink-4 hover:bg-hover hover:text-ink-2">
               <CornerUpLeft size={16} />
             </button>
           </div>
         </div>
-        {m.reactions.length > 0 && (
-          <div className={`relative z-[1] -mt-1.5 flex gap-1 ${mine ? "mr-2" : "ml-2"}`}>
-            {m.reactions.map((r) => (
-              <button
-                key={r.type}
-                type="button"
-                onClick={() => onReact(r.type)}
-                title={r.names.join(", ")}
-                className={`flex items-center gap-0.5 rounded-full border px-1.5 py-px text-[11px] shadow-sm ${r.mine ? "border-navy/30 bg-sel-bg" : "border-line bg-card"}`}
-              >
-                <span>{reactionLabel(r.type)}</span>
-                {r.count > 1 && <span className="font-semibold text-ink-3">{r.count}</span>}
-              </button>
-            ))}
-          </div>
-        )}
+        <Likes likes={m.likes} mine={mine} onToggle={onLike} />
       </div>
     </div>
   );
@@ -265,11 +265,12 @@ function MessageRow({
 /* ---------- Conversation ---------- */
 
 /**
- * Conversation d'un événement, façon Messenger : bulles, réponses, réactions (double-clic = ❤️),
- * photos et fichiers joints, messages vocaux, mentions @ notifiées. Même composant dans l'onglet
- * Discussion de la fiche et dans la bulle « Discussions » (ordinateur, mobile, appli).
+ * Conversation façon Messenger — d'un événement ou directe entre utilisateurs : bulles, réponses,
+ * ❤️ (double-clic, qui aime au survol), photos et fichiers joints, messages vocaux, mentions @
+ * notifiées. Même composant dans l'onglet Discussion de la fiche et dans la bulle « Discussions »
+ * (ordinateur, mobile, appli).
  */
-export function EventChat({ eventId, autoFocus = false }: { eventId: string; autoFocus?: boolean }) {
+export function EventChat({ source, autoFocus = false }: { source: ChatSource; autoFocus?: boolean }) {
   const [me, setMe] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -278,9 +279,14 @@ export function EventChat({ eventId, autoFocus = false }: { eventId: string; aut
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
+  // Un chargement parti avant un ❤️ ne doit pas l'effacer : seuls les chargements récents comptent.
+  const changeSeq = useRef(0);
+  const { kind, id } = source;
 
   const load = useCallback(async () => {
-    const res = await getDiscussion(eventId);
+    const seq = changeSeq.current;
+    const res = await getChat({ kind, id });
+    if (seq !== changeSeq.current) return;
     if (!res.ok) {
       setError(res.error);
       setMessages((prev) => prev ?? []);
@@ -289,7 +295,7 @@ export function EventChat({ eventId, autoFocus = false }: { eventId: string; aut
     setError(null);
     setMe(res.data.me);
     setMessages(res.data.messages);
-  }, [eventId]);
+  }, [kind, id]);
 
   // Ouverture, puis toutes les 15 s et à chaque notification reçue (nouveau message).
   useEffect(() => {
@@ -324,8 +330,8 @@ export function EventChat({ eventId, autoFocus = false }: { eventId: string; aut
   const lastOther = messages?.filter((m) => m.author.id !== me).at(-1)?.id;
   useEffect(() => {
     if (!lastOther) return;
-    void markDiscussionRead(eventId).then(() => window.dispatchEvent(new Event(DISCUSSIONS_CHANGED)));
-  }, [eventId, lastOther]);
+    void markChatRead({ kind, id }).then(() => window.dispatchEvent(new Event(DISCUSSIONS_CHANGED)));
+  }, [kind, id, lastOther]);
 
   // Défilement : en bas à l'ouverture et à chaque nouveau message si on y était déjà.
   const count = messages?.length ?? 0;
@@ -334,25 +340,23 @@ export function EventChat({ eventId, autoFocus = false }: { eventId: string; aut
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [count]);
 
-  const react = async (id: string, type: string) => {
-    // Affichage immédiat, puis rechargement.
+  const like = async (messageId: string) => {
+    changeSeq.current++;
+    // Affichage immédiat ; en cas d'échec, message et retour à l'état enregistré.
     setMessages(
       (prev) =>
-        prev?.map((m) => {
-          if (m.id !== id) return m;
-          const existing = m.reactions.find((r) => r.type === type);
-          const reactions = existing
-            ? m.reactions.map((r) => (r.type === type ? { ...r, mine: !r.mine, count: r.count + (r.mine ? -1 : 1) } : r)).filter((r) => r.count > 0)
-            : [...m.reactions, { type, count: 1, mine: true, names: ["Vous"] }];
-          return { ...m, reactions };
-        }) ?? null
+        prev?.map((m) =>
+          m.id !== messageId ? m : { ...m, likes: m.likes.mine ? { mine: false, names: m.likes.names.filter((n) => n !== "Vous") } : { mine: true, names: ["Vous", ...m.likes.names] } }
+        ) ?? null
     );
-    await toggleReaction(id, type);
+    const res = await toggleLike({ kind, id }, messageId);
+    changeSeq.current++;
+    if (!res.ok) setError(res.error);
     void load();
   };
 
-  const jump = (id: string) => {
-    const el = document.getElementById(`msg-${id}`);
+  const jump = (messageId: string) => {
+    const el = document.getElementById(`msg-${messageId}`);
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
     el?.classList.add("animate-pulse");
     window.setTimeout(() => el?.classList.remove("animate-pulse"), 1200);
@@ -373,7 +377,7 @@ export function EventChat({ eventId, autoFocus = false }: { eventId: string; aut
         ) : messages.length === 0 ? (
           <div className="py-10 text-center">
             <p className="text-sm font-semibold text-ink-2">Aucun message pour l&apos;instant.</p>
-            <p className="mt-1 text-xs text-ink-4">Écrivez le premier — tapez @ pour notifier quelqu&apos;un.</p>
+            <p className="mt-1 text-xs text-ink-4">Écrivez le premier{kind === "event" ? " — tapez @ pour notifier quelqu'un" : ""}.</p>
           </div>
         ) : (
           messages.map((m, i) => {
@@ -395,7 +399,7 @@ export function EventChat({ eventId, autoFocus = false }: { eventId: string; aut
                   people={people}
                   active={active === m.id}
                   onActivate={() => setActive((a) => (a === m.id ? null : m.id))}
-                  onReact={(type) => void react(m.id, type)}
+                  onLike={() => void like(m.id)}
                   onReply={() => {
                     setReplyTo(m);
                     setActive(null);
@@ -409,7 +413,7 @@ export function EventChat({ eventId, autoFocus = false }: { eventId: string; aut
         {error && <p className="mt-3 text-center text-xs text-bad">{error}</p>}
       </div>
       <Composer
-        eventId={eventId}
+        source={source}
         me={me}
         people={people}
         replyTo={replyTo}
@@ -431,7 +435,7 @@ export function EventChat({ eventId, autoFocus = false }: { eventId: string; aut
 type Pending = { key: string; file: File; preview: string | null };
 
 function Composer({
-  eventId,
+  source,
   me,
   people,
   replyTo,
@@ -439,7 +443,7 @@ function Composer({
   onSent,
   autoFocus,
 }: {
-  eventId: string;
+  source: ChatSource;
   me: string | null;
   people: ChatPerson[];
   replyTo: ChatMessage | null;
@@ -544,11 +548,11 @@ function Composer({
       const attachments: ChatAttachmentInput[] = [];
       if (voice) {
         const ext = voice.blob.type.includes("mp4") ? "m4a" : voice.blob.type.includes("ogg") ? "ogg" : "webm";
-        attachments.push(await uploadAttachment(eventId, voice.blob, `message-vocal.${ext}`, voice.durationMs));
+        attachments.push(await uploadAttachment(source, voice.blob, `message-vocal.${ext}`, voice.durationMs));
       }
-      for (const f of toUpload) attachments.push(await uploadAttachment(eventId, f.file, f.file.name));
-      const mentionIds = [...picked].filter(([name]) => text.includes(`@${name}`)).map(([, id]) => id);
-      const res = await postEventComment(eventId, text, mentionIds, { parentId: replyTo?.id ?? null, attachments });
+      for (const f of toUpload) attachments.push(await uploadAttachment(source, f.file, f.file.name));
+      const mentionIds = [...picked].filter(([name]) => text.includes(`@${name}`)).map(([, pid]) => pid);
+      const res = await postChat(source, text, mentionIds, { parentId: replyTo?.id ?? null, attachments });
       if (!res.ok) throw new Error(res.error);
       if (!voice && !override?.text) {
         toUpload.forEach((f) => f.preview && URL.revokeObjectURL(f.preview));
@@ -568,7 +572,7 @@ function Composer({
   const startVoice = async () => {
     setError(null);
     if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      setError("L'enregistrement vocal n'est pas disponible sur cet appareil.");
+      setError(window.isSecureContext ? "L'enregistrement vocal n'est pas pris en charge par ce navigateur." : "Le micro n'est disponible qu'en https.");
       return;
     }
     try {
@@ -591,8 +595,8 @@ function Composer({
       recorder.current = rec;
       rec.start(250);
       setRecordingSince(startedAt);
-    } catch {
-      setError("Micro refusé : autorisez l'accès au micro pour envoyer un vocal.");
+    } catch (e) {
+      setError(micError(e));
     }
   };
   const stopVoice = (keep: boolean) => {

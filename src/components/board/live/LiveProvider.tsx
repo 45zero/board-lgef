@@ -144,7 +144,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
         .select(NOTIF_FIELDS)
         .eq("user_id", userId)
         .eq("is_deleted", false)
-        .neq("type", "event_commented")
+        .not("type", "in", "(event_commented,direct_message)")
         .order("created_at", { ascending: false })
         .limit(30),
       supabase.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("is_deleted", false).eq("read", false),
@@ -206,7 +206,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
       const n = payload.new as BoardNotification & { is_deleted?: boolean };
       if (n.is_deleted) return;
       // Message de discussion : bulle Discussions et push, pas la cloche.
-      if (n.type === "event_commented") {
+      if (n.type === "event_commented" || n.type === "direct_message") {
         emit("notifications");
         return;
       }

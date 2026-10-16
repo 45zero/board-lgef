@@ -166,6 +166,138 @@ export type Database = {
         }
         Relationships: []
       }
+      chat_conversation_members: {
+        Row: {
+          conversation_id: string
+          user_id: string
+          joined_at: string
+          last_read_at: string | null
+          archived_at: string | null
+        }
+        Insert: {
+          conversation_id: string
+          user_id: string
+          joined_at?: string
+          last_read_at?: string | null
+          archived_at?: string | null
+        }
+        Update: {
+          conversation_id?: string
+          user_id?: string
+          joined_at?: string
+          last_read_at?: string | null
+          archived_at?: string | null
+        }
+        Relationships: []
+      }
+      chat_conversations: {
+        Row: {
+          id: string
+          created_by: string
+          created_at: string
+          last_message_at: string | null
+        }
+        Insert: {
+          id?: string
+          created_by: string
+          created_at?: string
+          last_message_at?: string | null
+        }
+        Update: {
+          id?: string
+          created_by?: string
+          created_at?: string
+          last_message_at?: string | null
+        }
+        Relationships: []
+      }
+      chat_message_attachments: {
+        Row: {
+          id: string
+          message_id: string
+          path: string
+          filename: string
+          content_type: string | null
+          size_bytes: number | null
+          kind: string
+          duration_ms: number | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          message_id: string
+          path: string
+          filename: string
+          content_type?: string | null
+          size_bytes?: number | null
+          kind?: string
+          duration_ms?: number | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          message_id?: string
+          path?: string
+          filename?: string
+          content_type?: string | null
+          size_bytes?: number | null
+          kind?: string
+          duration_ms?: number | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      chat_message_reactions: {
+        Row: {
+          message_id: string
+          user_id: string
+          type: string
+          created_at: string
+        }
+        Insert: {
+          message_id: string
+          user_id: string
+          type?: string
+          created_at?: string
+        }
+        Update: {
+          message_id?: string
+          user_id?: string
+          type?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      chat_messages: {
+        Row: {
+          id: string
+          conversation_id: string
+          author_id: string
+          body: string
+          parent_id: string | null
+          mentions: string[] | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          conversation_id: string
+          author_id: string
+          body: string
+          parent_id?: string | null
+          mentions?: string[] | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          conversation_id?: string
+          author_id?: string
+          body?: string
+          parent_id?: string | null
+          mentions?: string[] | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       module_access: {
         Row: {
           module_id: string
@@ -5285,7 +5417,7 @@ export type Database = {
       invoice_status: "submitted" | "processing" | "approved" | "rejected" | "paid"
       label_color: "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "pink" | "gray"
       note_member_role: "createur" | "destinataire" | "collaborateur"
-      notification_type: "card_assigned" | "card_commented" | "card_mentioned" | "card_due_soon" | "board_shared" | "director_assignment" | "expense_submitted" | "account_request" | "coverage_request" | "coverage_request_created" | "coverage_approved" | "coverage_denied" | "coverage_assignment" | "coverage_rejected" | "event_deleted" | "event_mentioned" | "event_commented" | "account_request_approved" | "account_request_denied" | "assignment_created" | "assignment_updated" | "expense_approved" | "expense_rejected" | "coverage_accepted" | "coverage_accepted_admin" | "director_request" | "director_approved" | "director_denied" | "director_reassigned" | "director_invitation" | "director_accepted" | "director_declined" | "event_team_added" | "event_reminder" | "hateful_comment" | "expense_to_validate" | "registration_response" | "publication_to_publish" | "support_ticket" | "support_resolved"
+      notification_type: "card_assigned" | "card_commented" | "card_mentioned" | "card_due_soon" | "board_shared" | "director_assignment" | "expense_submitted" | "account_request" | "coverage_request" | "coverage_request_created" | "coverage_approved" | "coverage_denied" | "coverage_assignment" | "coverage_rejected" | "event_deleted" | "event_mentioned" | "event_commented" | "account_request_approved" | "account_request_denied" | "assignment_created" | "assignment_updated" | "expense_approved" | "expense_rejected" | "coverage_accepted" | "coverage_accepted_admin" | "director_request" | "director_approved" | "director_denied" | "director_reassigned" | "director_invitation" | "director_accepted" | "director_declined" | "event_team_added" | "event_reminder" | "hateful_comment" | "expense_to_validate" | "registration_response" | "publication_to_publish" | "support_ticket" | "support_resolved" | "direct_message"
       response_status: "accepted" | "rejected"
       sector_type: "arbitrage" | "technique" | "formation" | "communication" | "competitions"
       user_role: "user" | "technician" | "super_user" | "admin" | "organizer" | "comite_directeur_bad" | "comite_directeur"

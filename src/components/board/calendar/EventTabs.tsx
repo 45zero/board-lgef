@@ -261,7 +261,7 @@ export function RemindersField({
 export function DiscussionTab({ hook }: { hook: ReturnType<typeof useEventComments> }) {
   return (
     <div className="-mx-1 flex h-[min(62dvh,600px)] flex-col overflow-hidden rounded-btn border border-line bg-card">
-      <EventChat eventId={hook.eventId} />
+      <EventChat source={{ kind: "event", id: hook.eventId }} />
     </div>
   );
 }
