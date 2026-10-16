@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Archive, Bell, CalendarDays, ChevronRight, MapPin, Plus, SquareKanban, X } from "lucide-react";
 import { finishTeamCard } from "@/app/actions/team";
+import { OPEN_DISCUSSION, discussionOfNotification } from "@/lib/board/discussions";
 import type { ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import type { Recap } from "@/app/api/dashboard/recap/route";
 import { useLive, useLiveRefresh } from "@/components/board/live/LiveProvider";
@@ -200,7 +201,13 @@ export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidget
               {activity.map((n) => (
                 <div key={n.id} className="group relative">
                 <button
-                  onClick={() => (n.data?.team_card_id ? openCard(n.data.team_card_id) : n.event_id ? void openEvent(n.event_id, n.type === "event_mentioned" || n.type === "event_commented" ? { tab: "discussion" } : undefined) : undefined)}
+                  onClick={() => {
+                    // Mention ou message : la conversation s'ouvre dans la bulle Discussions.
+                    const chat = discussionOfNotification(n);
+                    if (chat) window.dispatchEvent(new CustomEvent(OPEN_DISCUSSION, { detail: chat }));
+                    else if (n.data?.team_card_id) openCard(n.data.team_card_id);
+                    else if (n.event_id) void openEvent(n.event_id);
+                  }}
                   className="flex w-full gap-2 pr-5 text-left"
                 >
                   <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${n.read ? "bg-line-strong" : "bg-red"}`} />

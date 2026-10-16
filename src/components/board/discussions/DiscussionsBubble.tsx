@@ -94,7 +94,10 @@ function ThreadRow({ t, onOpen, onArchive, mobile }: { t: DiscussionThread; onOp
   );
 }
 
-type View = { kind: "list"; archived: boolean } | { kind: "new" } | { kind: "chat"; source: ChatSource; title: string; subtitle: string; people: ChatPerson[] };
+type View =
+  | { kind: "list"; archived: boolean }
+  | { kind: "new" }
+  | { kind: "chat"; source: ChatSource; title: string; subtitle: string; people: ChatPerson[]; replyToId?: string | null };
 
 /** Contenu de la bulle : liste et recherche, nouvelle discussion, conversation. */
 function DiscussionsPanel({
@@ -107,13 +110,15 @@ function DiscussionsPanel({
 }: {
   threads: DiscussionThread[];
   loading: boolean;
-  initial: ChatSource | null;
+  initial: { source: ChatSource; replyToId: string | null } | null;
   onChanged: () => void;
   onClose: () => void;
   mobile: boolean;
 }) {
   const { open: openEvent } = useOpenEvent();
-  const [view, setView] = useState<View>(() => (initial ? { kind: "chat", source: initial, title: "", subtitle: "", people: [] } : { kind: "list", archived: false }));
+  const [view, setView] = useState<View>(() =>
+    initial ? { kind: "chat", source: initial.source, title: "", subtitle: "", people: [], replyToId: initial.replyToId } : { kind: "list", archived: false }
+  );
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ChatSearchResults | null>(null);
   const [selected, setSelected] = useState<ChatPerson[]>([]);
@@ -226,7 +231,7 @@ function DiscussionsPanel({
           </button>
         </div>
         <div className="min-h-0 flex-1">
-          <EventChat key={sourceKey(view.source)} source={view.source} autoFocus={!mobile} />
+          <EventChat key={sourceKey(view.source)} source={view.source} autoFocus={!mobile} replyToId={view.replyToId ?? null} />
         </div>
       </div>
     );
@@ -414,13 +419,14 @@ function readSavedPos(): { side: Side; y: number } | null {
  * personnes et d'événements, conversation dans la bulle, archivage (la discussion revient à la
  * notification suivante). Ordinateur : en bas à droite ; mobile et appli : bulle déplaçable au
  * doigt, rangée contre un bord (position mémorisée), conversation en plein écran.
- * Ouverte directement sur une discussion par le lien `?openChat=<event|direct>:<id>` (push).
+ * Ouverte directement sur une discussion par le lien `?openChat=<event|direct>:<id>[&reply=<message>]`
+ * (push, e-mail).
  */
 export function DiscussionsBubble({ mobile = false }: { mobile?: boolean }) {
   const [threads, setThreads] = useState<DiscussionThread[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
-  const [initial, setInitial] = useState<ChatSource | null>(null);
+  const [initial, setInitial] = useState<{ source: ChatSource; replyToId: string | null } | null>(null);
   const [panelKey, setPanelKey] = useState(0);
 
   const load = useCallback(async () => {
@@ -429,8 +435,8 @@ export function DiscussionsBubble({ mobile = false }: { mobile?: boolean }) {
     setLoading(false);
   }, []);
 
-  const openOn = useCallback((source: ChatSource | null) => {
-    setInitial(source);
+  const openOn = useCallback((source: ChatSource | null, replyToId: string | null = null) => {
+    setInitial(source ? { source, replyToId } : null);
     setPanelKey((k) => k + 1);
     setOpen(true);
   }, []);
@@ -440,14 +446,16 @@ export function DiscussionsBubble({ mobile = false }: { mobile?: boolean }) {
     const onOpen = (e: Event) => openOn((e as CustomEvent<ChatSource>).detail ?? null);
     const first = window.setTimeout(() => {
       onChanged();
-      // Lien profond (push d'un message) : ouvre la conversation, puis nettoie l'adresse.
+      // Lien profond (push, e-mail « Répondre ») : ouvre la conversation, puis nettoie l'adresse.
       const url = new URL(window.location.href);
       const source = parseSourceKey(url.searchParams.get("openChat"));
+      const replyToId = url.searchParams.get("reply");
       if (url.searchParams.has("openChat")) {
         url.searchParams.delete("openChat");
+        url.searchParams.delete("reply");
         window.history.replaceState(null, "", url.pathname + url.search + url.hash);
       }
-      if (source) openOn(source);
+      if (source) openOn(source, replyToId);
     }, 0);
     window.addEventListener(DISCUSSIONS_CHANGED, onChanged);
     window.addEventListener(OPEN_DISCUSSION, onOpen);

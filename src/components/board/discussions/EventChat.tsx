@@ -270,7 +270,7 @@ function MessageRow({
  * notifiées. Même composant dans l'onglet Discussion de la fiche et dans la bulle « Discussions »
  * (ordinateur, mobile, appli).
  */
-export function EventChat({ source, autoFocus = false }: { source: ChatSource; autoFocus?: boolean }) {
+export function EventChat({ source, autoFocus = false, replyToId = null }: { source: ChatSource; autoFocus?: boolean; replyToId?: string | null }) {
   const [me, setMe] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -332,6 +332,15 @@ export function EventChat({ source, autoFocus = false }: { source: ChatSource; a
     if (!lastOther) return;
     void markChatRead({ kind, id }).then(() => window.dispatchEvent(new Event(DISCUSSIONS_CHANGED)));
   }, [kind, id, lastOther]);
+
+  // Lien « Répondre » d'un e-mail : la réponse à ce message est préparée une fois les messages chargés.
+  const pendingReply = useRef(replyToId);
+  useEffect(() => {
+    if (!pendingReply.current || !messages) return;
+    const target = messages.find((m) => m.id === pendingReply.current);
+    pendingReply.current = null;
+    if (target) queueMicrotask(() => setReplyTo(target));
+  }, [messages]);
 
   // Défilement : en bas à l'ouverture et à chaque nouveau message si on y était déjà.
   const count = messages?.length ?? 0;

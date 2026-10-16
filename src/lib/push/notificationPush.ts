@@ -2,6 +2,7 @@ import "server-only";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import { sendPush, type PushIcon } from "@/lib/push/sendPush";
 import { usersWithWebPush } from "@/lib/push/webPush";
+import { discussionOfNotification, isBoardDiscussion } from "@/lib/board/discussions";
 
 /** Notifications du board envoyées aussi en push, avec leur icône et l'écran ouvert au toucher. */
 const PUSHED: Record<string, { icon: PushIcon; route: string }> = {
@@ -16,13 +17,10 @@ const PUSHED: Record<string, { icon: PushIcon; route: string }> = {
   direct_message: { icon: "ic_stat_lgef", route: "/" },
 };
 
-/** Écran ouvert au toucher : la discussion concernée (bulle), ou la fiche sur l'onglet Discussion pour une mention. */
+/** Écran ouvert au toucher : pour une discussion (message, mention, message direct), la conversation dans la bulle. */
 function routeOf(n: { type: string; event_id: string | null; data: unknown }, fallback: string) {
-  const conversationId = (n.data as { conversation_id?: unknown } | null)?.conversation_id;
-  if (n.type === "direct_message" && typeof conversationId === "string") return `/?openChat=direct:${conversationId}`;
-  if (n.type === "event_commented" && n.event_id) return `/?openChat=event:${n.event_id}`;
-  if (n.type === "event_mentioned" && n.event_id) return `/?openEvent=${n.event_id}&tab=discussion`;
-  return fallback;
+  const chat = discussionOfNotification(n);
+  return chat ? `/?openChat=${chat.kind}:${chat.id}` : fallback;
 }
 
 /** Pas d'envoi d'historique : seules les notifications récentes partent en push. */
@@ -64,7 +62,9 @@ export async function sendNotificationPushes(service: ReturnType<typeof createSe
   let sent = 0;
   for (const n of claimed) {
     const conf = PUSHED[n.type];
-    if (!n.user_id || !conf || !withApp.has(n.user_id) || muted.has(n.user_id)) continue;
+    // Discussion de l'ancienne appli calendrier : elle a déjà envoyé son push (sinon deux pour un message).
+    const legacy = (n.type === "event_commented" || n.type === "event_mentioned") && !isBoardDiscussion(n);
+    if (!n.user_id || !conf || legacy || !withApp.has(n.user_id) || muted.has(n.user_id)) continue;
     const ok = await sendPush({
       userId: n.user_id,
       title: n.title || "Board LGEF",

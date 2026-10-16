@@ -6,6 +6,7 @@ import { useLive, type BoardNotification } from "@/components/board/live/LivePro
 import { useOpenEvent } from "@/components/board/calendar/EventOpener";
 import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { openSupport } from "@/lib/board/supportContext";
+import { OPEN_DISCUSSION, discussionOfNotification } from "@/lib/board/discussions";
 
 const ago = (iso: string) => {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -35,7 +36,12 @@ export function NotificationBell({ variant = "desktop" }: { variant?: "desktop" 
 
   const click = (n: BoardNotification) => {
     void markRead(n.id);
-    if (n.data?.support_ticket_id) {
+    const chat = discussionOfNotification(n);
+    if (chat) {
+      // Mention ou message : la conversation s'ouvre dans la bulle Discussions.
+      setOpen(false);
+      window.dispatchEvent(new CustomEvent(OPEN_DISCUSSION, { detail: chat }));
+    } else if (n.data?.support_ticket_id) {
       setOpen(false);
       openSupport(n.data.support_ticket_id);
     } else if (n.data?.team_card_id) {
@@ -43,7 +49,7 @@ export function NotificationBell({ variant = "desktop" }: { variant?: "desktop" 
       openTeamCard(n.data.team_card_id);
     } else if (n.event_id) {
       setOpen(false);
-      void openEvent(n.event_id, n.type === "event_mentioned" || n.type === "event_commented" ? { tab: "discussion" } : undefined);
+      void openEvent(n.event_id);
     } else if (n.data?.app && /^[a-z]+$/.test(n.data.app)) {
       // Module à ouvrir (ex. centre de publication) : même lien que dans l'e-mail.
       setOpen(false);

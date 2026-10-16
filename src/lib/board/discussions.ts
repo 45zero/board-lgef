@@ -15,6 +15,25 @@ export function parseSourceKey(key: string | null): ChatSource | null {
   return m ? { kind: m[1] as ChatSource["kind"], id: m[2] } : null;
 }
 
+/**
+ * Notification d'une discussion envoyée par le board (marquée data.tab = "discussion", ou message
+ * direct). Les autres « event_commented » / « event_mentioned » viennent de l'ancienne appli
+ * calendrier-lgef, qui envoie déjà elle-même push et e-mail : le board ne les renvoie pas.
+ */
+export function isBoardDiscussion(n: { type: string; data: unknown }) {
+  if (n.type === "direct_message") return true;
+  return (n.type === "event_commented" || n.type === "event_mentioned") && (n.data as { tab?: unknown } | null)?.tab === "discussion";
+}
+
+/** Discussion à ouvrir dans la bulle pour une notification (message, mention, message direct). */
+export function discussionOfNotification(n: { type: string; event_id: string | null; data: unknown }): ChatSource | null {
+  const data = (n.data ?? {}) as { conversation_id?: unknown; event_id?: unknown };
+  if (n.type === "direct_message") return typeof data.conversation_id === "string" ? { kind: "direct", id: data.conversation_id } : null;
+  if (n.type !== "event_commented" && n.type !== "event_mentioned") return null;
+  const eventId = n.event_id ?? (typeof data.event_id === "string" ? data.event_id : null);
+  return eventId ? { kind: "event", id: eventId } : null;
+}
+
 /** Seule réaction acceptée par la base (event_comment_reactions, chat_message_reactions). */
 export const LIKE = "like";
 
