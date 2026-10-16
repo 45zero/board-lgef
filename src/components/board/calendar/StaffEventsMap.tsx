@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Car, Loader2 } from "lucide-react";
+import { Car, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { getEventPositions, getStaffLocations, getTravelToEvent } from "@/app/actions/map";
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
@@ -114,6 +114,9 @@ export function StaffEventsMap({
   const openStaffRef = useRef<string | null>(null);
 
   const [staff, setStaff] = useState<StaffPin[]>([]);
+  // Agrandissement maison : le plein écran de Google n'agrandit que la carte et perd la légende et l'encart.
+  const paneRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
   const [hiddenKinds, setHiddenKinds] = useState<Set<StaffKind>>(() => new Set());
 
   // Sélection : suit l'événement mis en avant par le parent, modifiable par un clic sur la carte.
@@ -185,7 +188,7 @@ export function StaffEventsMap({
       zoom: 7,
       mapTypeControl: false,
       streetViewControl: false,
-      fullscreenControl: true,
+      fullscreenControl: false,
       clickableIcons: false,
       gestureHandling: "greedy",
     });
@@ -193,6 +196,36 @@ export function StaffEventsMap({
     infoRef.current = new google.maps.InfoWindow();
     infoRef.current.addListener("closeclick", () => (openStaffRef.current = null));
   }, [loaded]);
+
+  // Plein écran du navigateur quand il est disponible (pas sur iPhone) ; sinon la carte couvre la fenêtre.
+  const toggleExpanded = () => {
+    const el = paneRef.current;
+    if (expanded) {
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+      setExpanded(false);
+      return;
+    }
+    setExpanded(true);
+    if (el?.requestFullscreen) void el.requestFullscreen().catch(() => {});
+  };
+  useEffect(() => {
+    if (!expanded) return;
+    const onFsChange = () => {
+      if (!document.fullscreenElement) setExpanded(false);
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") {
+        ev.stopPropagation();
+        setExpanded(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [expanded]);
 
   // Recadre sur l'événement mis en avant dès que sa position est connue.
   const focusPos = focusEventId ? positions[focusEventId] : undefined;
@@ -353,8 +386,25 @@ export function StaffEventsMap({
   );
 
   const mapPane = (
-    <div className={`relative overflow-hidden rounded-panel border border-line bg-subtle ${sidebar ? "min-h-[360px] flex-1" : className}`}>
+    <div
+      ref={paneRef}
+      className={
+        expanded
+          ? "fixed inset-x-0 z-[200] overflow-hidden bg-subtle"
+          : `relative overflow-hidden rounded-panel border border-line bg-subtle ${sidebar ? "min-h-[360px] flex-1" : className}`
+      }
+      // Agrandie sur téléphone : sous l'encoche et au-dessus de la barre d'accueil.
+      style={expanded ? { top: "env(safe-area-inset-top)", bottom: "env(safe-area-inset-bottom)" } : undefined}
+    >
       <div ref={mapDivRef} className="absolute inset-0" />
+      <button
+        onClick={toggleExpanded}
+        className="absolute left-2 top-2 z-[2] flex h-8 w-8 items-center justify-center rounded-btn border border-line bg-card/95 text-ink-2 shadow-card hover:text-ink"
+        title={expanded ? "Réduire la carte" : "Agrandir la carte"}
+        aria-label={expanded ? "Réduire la carte" : "Agrandir la carte"}
+      >
+        {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+      </button>
       {!loaded && (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-ink-4">
           <Loader2 size={16} className="mr-2 animate-spin" /> Chargement de la carte…
@@ -405,13 +455,13 @@ export function StaffEventsMap({
       </div>
 
       {/* Encart flottant (petites cartes) : techniciens les plus proches de l'événement sélectionné */}
-      {!sidebar && selectedEvent && staff.length > 0 && (
+      {(!sidebar || expanded) && selectedEvent && staff.length > 0 && (
         <div className="absolute right-2 top-2 z-[1] w-60 max-w-[calc(100%-1rem)] rounded-btn border border-line bg-card/95 shadow-card">
           <div className="border-b border-line px-3 py-2">
             <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-ink-4">Au plus près de</div>
             <div className="truncate text-xs font-bold text-ink">{selectedEvent.title}</div>
           </div>
-          <div className="max-h-56 overflow-y-auto py-1">{staffRows}</div>
+          <div className={`${expanded ? "max-h-[60vh]" : "max-h-56"} overflow-y-auto py-1`}>{staffRows}</div>
         </div>
       )}
     </div>
