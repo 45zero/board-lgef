@@ -5,7 +5,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { MapPopup } from "@/components/board/calendar/MapPopup";
 import { useEffect, useState } from "react";
-import { X, Check, ChevronRight, CalendarDays, MapPin, Map as MapIcon } from "lucide-react";
+import { X, Check, ChevronRight, CalendarDays, MapPin, Map as MapIcon, Loader2, Send } from "lucide-react";
+import { Composer } from "@/components/board/screens/PublicationScreen";
+import { getMediaPublication, type MediaPublication } from "@/lib/board/mediaPublications";
+import { createClient } from "@/lib/supabase/client";
+import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { StaffEventsMap, useTravelToEvent } from "@/components/board/calendar/StaffEventsMap";
 import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
 import { formatTravel } from "@/lib/board/geo";
@@ -168,6 +172,66 @@ function ValidateRow({ sub, onDone, onDetails }: { sub: SubmissionToReview; onDo
       )}
       {error && <p className="mt-1 text-xs text-bad">{error}</p>}
     </div>
+  );
+}
+
+/**
+ * Média à publier : « Publier » ouvre la même fenêtre que le centre de publication (texte, réseaux,
+ * programmation, habillage…) pour aller au bout de la publication sans quitter l'accueil.
+ */
+function PublishRow({ item, onDone }: { item: DashboardActionItem; onDone: () => void }) {
+  const [pub, setPub] = useState<MediaPublication | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // « Publier maintenant » continue en tâche de fond : la ligne part quand la publication est
+  // réellement publiée ou programmée (suivi en direct), pas à la fermeture de la fenêtre.
+  useLiveRefresh(["media_publications"], () => {
+    void createClient()
+      .from("media_publications")
+      .select("status")
+      .eq("id", item.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!data || data.status !== "to_publish") onDone();
+      });
+  });
+  const open = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const p = await getMediaPublication(item.id);
+      if (!p) throw new Error("Publication introuvable : elle a peut-être déjà été publiée.");
+      setPub(p);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ouverture impossible.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <>
+      <Row title={item.title} eventId={item.eventId} date={item.date}>
+        <button
+          onClick={() => void open()}
+          disabled={loading}
+          className="flex items-center gap-1 rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white disabled:opacity-60"
+        >
+          {loading ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Publier
+        </button>
+      </Row>
+      {error && <p className="border-b border-line px-4 pb-2 text-xs text-bad">{error}</p>}
+      {pub && (
+        <Composer
+          pub={pub}
+          onClose={() => setPub(null)}
+          onDone={() => {
+            // Programmée : retirée de la liste tout de suite.
+            setPub(null);
+            onDone();
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -524,7 +588,7 @@ export function ActionPopup({
       body = items.length ? items.map((i) => <CardRow key={i.id} item={i} onOpen={onClose} />) : null;
       break;
     case "publier":
-      body = items.length ? items.map((i) => <Row key={i.id} title={i.title} eventId={i.eventId} date={i.date} />) : null;
+      body = items.length ? items.map((i) => <PublishRow key={i.id} item={i} onDone={() => removeItem(i.id)} />) : null;
       break;
     default:
       body = <p className="p-4 text-sm text-ink-3">{action.detail}</p>;
