@@ -5,7 +5,6 @@ import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Car, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
-import { getEventPositions, getStaffLocations, getTravelToEvent } from "@/app/actions/map";
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
 import {
   formatTravel,
@@ -19,6 +18,16 @@ import {
 } from "@/lib/board/geo";
 
 export type MapEvent = { id: string; title: string; org: OrgKey; start?: string | null; location?: string | null };
+
+/** Carte servie par /api/map (en parallèle des Server Actions de la page, qui passent une par une). */
+async function mapApi<T>(body: { op: "positions"; ids: string[] } | { op: "staff" } | { op: "travel"; eventId: string; userIds?: string[] }): Promise<T> {
+  const res = await fetch("/api/map", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`Carte : ${res.status}`);
+  return res.json() as Promise<T>;
+}
+const getEventPositions = (ids: string[]) => mapApi<Record<string, LatLng>>({ op: "positions", ids });
+const getStaffLocations = () => mapApi<StaffPin[]>({ op: "staff" });
+const getTravelToEvent = (eventId: string, userIds?: string[]) => mapApi<Record<string, Travel>>({ op: "travel", eventId, userIds });
 
 // Positions déjà résolues, partagées entre les cartes de la session.
 const positionCache = new Map<string, LatLng | null>();
@@ -106,17 +115,25 @@ export function StaffEventsMap({
   const infoRef = useRef<google.maps.InfoWindow | null>(null);
   const eventMarkersRef = useRef<Map<string, google.maps.Marker>>(new Map());
   const selectedIdRef = useRef<string | null>(focusEventId);
-  const onOpenEventRef = useRef(onOpenEvent);
+  // Agrandissement maison : le plein écran de Google n'agrandit que la carte et perd la légende et l'encart.
+  const paneRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  // Ouvrir une fiche réduit d'abord la carte agrandie : sinon la fiche s'ouvre derrière elle (plein écran).
+  const openEvent = onOpenEvent
+    ? (id: string) => {
+        if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+        setExpanded(false);
+        onOpenEvent(id);
+      }
+    : undefined;
+  const onOpenEventRef = useRef(openEvent);
   useEffect(() => {
-    onOpenEventRef.current = onOpenEvent;
-  }, [onOpenEvent]);
+    onOpenEventRef.current = openEvent;
+  });
   const staffMarkersRef = useRef<Map<string, google.maps.Marker>>(new Map());
   const openStaffRef = useRef<string | null>(null);
 
   const [staff, setStaff] = useState<StaffPin[]>([]);
-  // Agrandissement maison : le plein écran de Google n'agrandit que la carte et perd la légende et l'encart.
-  const paneRef = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
   const [hiddenKinds, setHiddenKinds] = useState<Set<StaffKind>>(() => new Set());
 
   // Sélection : suit l'événement mis en avant par le parent, modifiable par un clic sur la carte.
@@ -528,13 +545,13 @@ export function StaffEventsMap({
                           {!onMap && !loadingPositions && " · pas sur la carte"}
                         </span>
                       </span>
-                      {onOpenEvent && selected && (
+                      {openEvent && selected && (
                         <span
                           role="button"
                           tabIndex={0}
                           onClick={(ev) => {
                             ev.stopPropagation();
-                            onOpenEvent(e.id);
+                            openEvent(e.id);
                           }}
                           className="shrink-0 self-center rounded-full border border-line px-1.5 py-px text-[10px] font-semibold text-link hover:border-link"
                         >
