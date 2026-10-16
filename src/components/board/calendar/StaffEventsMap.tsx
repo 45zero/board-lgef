@@ -118,18 +118,10 @@ export function StaffEventsMap({
   // Agrandissement maison : le plein écran de Google n'agrandit que la carte et perd la légende et l'encart.
   const paneRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
-  // Ouvrir une fiche réduit d'abord la carte agrandie : sinon la fiche s'ouvre derrière elle (plein écran).
-  const openEvent = onOpenEvent
-    ? (id: string) => {
-        if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
-        setExpanded(false);
-        onOpenEvent(id);
-      }
-    : undefined;
-  const onOpenEventRef = useRef(openEvent);
+  const onOpenEventRef = useRef(onOpenEvent);
   useEffect(() => {
-    onOpenEventRef.current = openEvent;
-  });
+    onOpenEventRef.current = onOpenEvent;
+  }, [onOpenEvent]);
   const staffMarkersRef = useRef<Map<string, google.maps.Marker>>(new Map());
   const openStaffRef = useRef<string | null>(null);
 
@@ -215,33 +207,19 @@ export function StaffEventsMap({
   }, [loaded]);
 
   // Plein écran du navigateur quand il est disponible (pas sur iPhone) ; sinon la carte couvre la fenêtre.
-  const toggleExpanded = () => {
-    const el = paneRef.current;
-    if (expanded) {
-      if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
-      setExpanded(false);
-      return;
-    }
-    setExpanded(true);
-    if (el?.requestFullscreen) void el.requestFullscreen().catch(() => {});
-  };
+  // Agrandie, la carte couvre la fenêtre sans passer en plein écran navigateur : en plein écran, la
+  // fiche d'un événement ouverte depuis la carte resterait cachée derrière elle.
+  const toggleExpanded = () => setExpanded((v) => !v);
   useEffect(() => {
     if (!expanded) return;
-    const onFsChange = () => {
-      if (!document.fullscreenElement) setExpanded(false);
-    };
     const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === "Escape") {
-        ev.stopPropagation();
-        setExpanded(false);
-      }
+      // Échap ferme d'abord la fiche ouverte par-dessus la carte.
+      if (ev.key !== "Escape" || document.querySelector("[data-event-opener-modal]")) return;
+      ev.stopPropagation();
+      setExpanded(false);
     };
-    document.addEventListener("fullscreenchange", onFsChange);
     window.addEventListener("keydown", onKey, true);
-    return () => {
-      document.removeEventListener("fullscreenchange", onFsChange);
-      window.removeEventListener("keydown", onKey, true);
-    };
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [expanded]);
 
   // Recadre sur l'événement mis en avant dès que sa position est connue.
@@ -508,7 +486,7 @@ export function StaffEventsMap({
       ref={paneRef}
       className={
         expanded
-          ? "fixed inset-x-0 z-[200] flex flex-col gap-3 bg-subtle p-3 lg:flex-row"
+          ? "fixed inset-x-0 z-[75] flex flex-col gap-3 bg-subtle p-3 lg:flex-row"
           : `flex min-h-0 flex-col gap-3 ${sidebar ? "lg:flex-row" : ""} ${className}`
       }
       // Agrandie sur téléphone : sous l'encoche et au-dessus de la barre d'accueil.
@@ -545,13 +523,13 @@ export function StaffEventsMap({
                           {!onMap && !loadingPositions && " · pas sur la carte"}
                         </span>
                       </span>
-                      {openEvent && selected && (
+                      {onOpenEvent && selected && (
                         <span
                           role="button"
                           tabIndex={0}
                           onClick={(ev) => {
                             ev.stopPropagation();
-                            openEvent(e.id);
+                            onOpenEvent(e.id);
                           }}
                           className="shrink-0 self-center rounded-full border border-line px-1.5 py-px text-[10px] font-semibold text-link hover:border-link"
                         >

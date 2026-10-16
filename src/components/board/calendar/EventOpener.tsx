@@ -53,7 +53,7 @@ export function EventOpenerProvider({ children }: { children: React.ReactNode })
     <EventOpenerContext.Provider value={{ open, loadingId }}>
       {children}
       {event && (
-        <div className="relative z-[80]" onClick={(e) => e.stopPropagation()}>
+        <div data-event-opener-modal className="relative z-[80]" onClick={(e) => e.stopPropagation()}>
           {isMobile ? (
             <MobileEventModal event={event} onClose={() => setEvent(null)} onSaved={() => setEvent(null)} />
           ) : (
