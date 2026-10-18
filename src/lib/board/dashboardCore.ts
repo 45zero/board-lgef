@@ -176,11 +176,15 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
           .eq("status", "pending")
           .gte("events.start_date", now.toISOString())
           .order("created_at")
-          .limit(30);
-        const assignItems = (toAssign ?? []).filter((c) => !refusedIds.has(c.id)).map((c) => {
-          const ev = c.events as unknown as { title: string; start_date: string; location: string | null; event_type: DbEventType | null };
-          return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date, location: ev.location, eventType: ev.event_type, detail: c.details ?? undefined };
-        });
+          .limit(100);
+        // Popup : du plus proche au plus lointain (date de l'événement).
+        const assignItems = (toAssign ?? [])
+          .filter((c) => !refusedIds.has(c.id))
+          .map((c) => {
+            const ev = c.events as unknown as { title: string; start_date: string; location: string | null; event_type: DbEventType | null };
+            return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date, location: ev.location, eventType: ev.event_type, detail: c.details ?? undefined };
+          })
+          .sort((a, b) => a.date.localeCompare(b.date));
         push({ id: "captation-attribuer", app: "calendrier", tone: "orange", count: Math.max(0, (toAssignCount ?? assignItems.length) - refusedIds.size), items: assignItems, title: "Demandes de captation à traiter", detail: "À valider et attribuer à un technicien" });
       }
     }, undefined),
