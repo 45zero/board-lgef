@@ -216,7 +216,7 @@ export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; 
                       `delete-${t.id}`,
                       async () => unwrap(await deleteTransfer(t.id)),
                       "Transfert supprimé.",
-                      `Supprimer « ${t.title || "ce transfert"} » ? Le lien est coupé${t.archived ? "" : " et les fichiers envoyés vont à la corbeille du Drive"}.`
+                      `Supprimer « ${t.title || "ce transfert"} » ? Le lien est coupé${t.archived ? "" : " et les fichiers envoyés sont supprimés définitivement du Drive"}.`
                     )
                   }
                 />
@@ -506,7 +506,7 @@ function TransferDrawer({
                   run(
                     "revoke",
                     async () => unwrap(await revokeTransfer(t.id)),
-                    t.archived ? "Couper le lien ? Les fichiers restent archivés dans le Drive." : "Couper le lien ? Les fichiers envoyés iront à la corbeille du Drive."
+                    t.archived ? "Couper le lien ? Les fichiers restent archivés dans le Drive." : "Couper le lien ? Les fichiers envoyés seront supprimés définitivement du Drive."
                   )
                 }
               />
@@ -517,7 +517,7 @@ function TransferDrawer({
               danger
               busy={busy === "delete"}
               onClick={async () => {
-                if (!window.confirm(`Supprimer définitivement ce transfert ? Il disparaît de la liste et des statistiques${t.archived ? "" : " ; les fichiers envoyés vont à la corbeille du Drive"}.`)) return;
+                if (!window.confirm(`Supprimer définitivement ce transfert ? Il disparaît de la liste et des statistiques${t.archived ? "" : " ; les fichiers envoyés sont supprimés définitivement du Drive"}.`)) return;
                 setBusy("delete");
                 try {
                   unwrap(await deleteTransfer(t.id));

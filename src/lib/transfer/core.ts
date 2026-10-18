@@ -405,7 +405,8 @@ export async function registerDownload(code: string, fileId: string, visit?: Vis
 /* ---------- Expiration / coupure ---------- */
 
 /**
- * Coupe le lien. Fichiers envoyés : corbeille du Drive, ou — transfert archivé — gardés mais plus
+ * Coupe le lien. Fichiers envoyés : supprimés définitivement du Drive (place libérée tout de suite ;
+ * l'expéditeur peut toujours renvoyer), ou — transfert archivé — gardés mais plus
  * accessibles par lien. Fichiers venus du Drive du board : jamais touchés (ils ont pu être partagés
  * ailleurs) ; seule la page LGEF Transfer cesse de les proposer.
  */
@@ -417,10 +418,15 @@ export async function closeTransfer(transferId: string, status: "expired" | "rev
   const storage = await getTransferStorage();
   if (!storage) return;
   const { data: files } = await s.from("transfer_files").select("drive_file_id, from_board_drive").eq("transfer_id", transferId);
-  // Partage public retiré d'abord : un fichier à la corbeille reste téléchargeable par son lien Google sinon.
   await mapLimit((files ?? []).filter((f) => f.drive_file_id && !f.from_board_drive), 5, async (f) => {
-    await storage.unpublish(f.drive_file_id!).catch((e) => console.error("[transfer.close] partage", e));
-    if (!t.archived) await storage.trash(f.drive_file_id!).catch((e) => console.error("[transfer.close] corbeille", e));
+    const id = f.drive_file_id!;
+    if (t.archived) return void (await storage.unpublish(id).catch((e) => console.error("[transfer.close] partage", e)));
+    // Suppression impossible (droits…) : au moins plus de partage public, et à la corbeille.
+    await storage.remove(id).catch(async (e) => {
+      console.error("[transfer.close] suppression", e);
+      await storage.unpublish(id).catch(() => undefined);
+      await storage.trash(id).catch(() => undefined);
+    });
   });
 }
 

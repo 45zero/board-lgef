@@ -224,6 +224,12 @@ export async function trashFile(account: ConnectedAccount, fileId: string) {
   await drive.files.update({ fileId, requestBody: { trashed: true } });
 }
 
+/** Suppression définitive (sans corbeille) : l'espace est libéré tout de suite. */
+export async function deleteFile(account: ConnectedAccount, fileId: string) {
+  const drive = await driveClient(account);
+  await drive.files.delete({ fileId });
+}
+
 /** Espace du compte Google (Drive + Gmail + Photos partagent le quota), en octets ; limit null : illimité. */
 export async function getStorageQuota(account: ConnectedAccount) {
   const drive = await driveClient(account);

@@ -215,7 +215,7 @@ export async function updateTransfer(
   });
 }
 
-/** Supprime le transfert : lien coupé, fichiers envoyés à la corbeille du Drive (sauf archivés), retiré de la liste. */
+/** Supprime le transfert : lien coupé, fichiers envoyés supprimés définitivement du Drive (sauf archivés), retiré de la liste. */
 export async function deleteTransfer(id: string): Promise<ActionResult<null>> {
   return toResult(async () => {
     await ownTransfer(id);

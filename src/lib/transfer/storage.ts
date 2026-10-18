@@ -1,7 +1,7 @@
 import "server-only";
 import { format } from "date-fns";
 import { getValidGoogleAccessToken } from "@/lib/google/accounts";
-import { createResumableUploadSession, ensurePublicViewAccess, findOrCreateFolder, getFile, getFileParents, searchFiles, trashFile } from "@/lib/google/drive";
+import { createResumableUploadSession, deleteFile, ensurePublicViewAccess, findOrCreateFolder, getFile, getFileParents, searchFiles, trashFile } from "@/lib/google/drive";
 import { getBoardDriveAccount } from "@/lib/board/teamDrive";
 import type { TransferPreview } from "@/lib/transfer/shared";
 
@@ -41,6 +41,8 @@ export interface TransferStorage {
   /** Contenu brut (pubs : servies par nos serveurs avec cache) ; `range` : en-tête Range transmis (vidéo sur Safari). */
   fetchMedia(fileId: string, range?: string | null): Promise<Response>;
   trash(fileId: string): Promise<void>;
+  /** Suppression définitive (fichiers d'un transfert supprimé ou expiré : place libérée tout de suite). */
+  remove(fileId: string): Promise<void>;
   /** Recherche dans le Drive du board (envoi depuis le board sans recharger) — fichiers téléchargeables seulement. */
   search(query: string): Promise<{ id: string; name: string; size: number; mimeType: string; modifiedTime: string }[]>;
 }
@@ -100,6 +102,9 @@ async function googleStorage(): Promise<TransferStorage | null> {
     },
     async trash(fileId) {
       await trashFile(account, fileId);
+    },
+    async remove(fileId) {
+      await deleteFile(account, fileId);
     },
     async search(query) {
       // Documents Google natifs exclus : pas de fichier brut à télécharger.
