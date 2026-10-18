@@ -972,24 +972,51 @@ function PublishedStatsRow({ pub, onChanged }: { pub: MediaPublication; onChange
   );
 }
 
+/** Vues / j'aime / commentaires / partages cumulés de tous les réseaux où ces publications sont en ligne. */
+function sumStats(items: MediaPublication[]) {
+  const t = { views: 0, likes: 0, comments: 0, shares: 0, posts: 0, lastFetch: null as string | null };
+  for (const pub of items) {
+    for (const e of publishedEntries(pub)) {
+      t.posts += 1;
+      const s = e.info.stats;
+      if (!s) continue;
+      t.views += s.views ?? 0;
+      t.likes += s.likes;
+      t.comments += s.comments;
+      t.shares += s.shares ?? 0;
+      if (!t.lastFetch || s.fetchedAt > t.lastFetch) t.lastFetch = s.fetchedAt;
+    }
+  }
+  return t;
+}
+
+/** Totaux d'une publication, tous réseaux confondus — en haut à droite de sa ligne (onglet « Publiés »). */
+function PublicationTotals({ pub }: { pub: MediaPublication }) {
+  const t = sumStats([pub]);
+  if (t.posts === 0 || !t.lastFetch) return null;
+  const items: [typeof Eye, number, string][] = [
+    [Eye, t.views, "Vues"],
+    [Heart, t.likes, "J'aime"],
+    [MessageCircle, t.comments, "Commentaires"],
+    [Repeat2, t.shares, "Partages"],
+  ];
+  return (
+    <span
+      title={`Total sur ${t.posts} réseau${t.posts > 1 ? "x" : ""}`}
+      className="ml-auto flex shrink-0 items-center gap-2 rounded-full bg-subtle px-2 py-0.5 text-[11px] font-bold text-ink-2"
+    >
+      {items.map(([Icon, n, label]) => (
+        <span key={label} className="flex items-center gap-0.5" aria-label={label}>
+          <Icon size={11} className="text-ink-4" /> {n.toLocaleString("fr-FR")}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /** Totaux de l'onglet « Publiés » (sur la sélection filtrée) + rafraîchissement manuel des stats. */
 function StatsToolbar({ items, refreshing, onRefresh }: { items: MediaPublication[]; refreshing: boolean; onRefresh: () => void }) {
-  const totals = useMemo(() => {
-    const t = { views: 0, likes: 0, comments: 0, shares: 0, posts: 0, lastFetch: null as string | null };
-    for (const pub of items) {
-      for (const e of publishedEntries(pub)) {
-        t.posts += 1;
-        const s = e.info.stats;
-        if (!s) continue;
-        t.views += s.views ?? 0;
-        t.likes += s.likes;
-        t.comments += s.comments;
-        t.shares += s.shares ?? 0;
-        if (!t.lastFetch || s.fetchedAt > t.lastFetch) t.lastFetch = s.fetchedAt;
-      }
-    }
-    return t;
-  }, [items]);
+  const totals = useMemo(() => sumStats(items), [items]);
 
   if (totals.posts === 0) return null;
 
@@ -2045,6 +2072,7 @@ function PublicationCard({
         <div className="flex items-center gap-1.5">
           <span className="truncate text-sm font-bold text-ink">{publicationTitle(pub)}</span>
           {isDrive && hasMedia && <span className="shrink-0 rounded-full bg-subtle px-1.5 py-0.5 text-[10px] font-semibold text-ink-3">Drive</span>}
+          {tab === "published" && <PublicationTotals pub={pub} />}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-4">
           {orgColor && (
