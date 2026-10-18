@@ -103,13 +103,18 @@ export function DeclarationBar({ target, total, lineCount, onDone }: { target: E
               Pas de frais
             </button>
           )}
-          <button
-            disabled={busy || lineCount === 0}
-            onClick={() => declare(false)}
-            className="rounded-btn bg-red px-3 py-1.5 text-xs font-bold text-white shadow-btn-red disabled:opacity-50"
-          >
-            {busy ? "Envoi…" : alreadySent ? `Mettre à jour la déclaration (${formatEuros(total)})` : `Déclarer ${formatEuros(total)}`}
-          </button>
+          {/* « Pas de frais » déclaré : plus rien à envoyer, sauf si des lignes sont ajoutées ensuite. */}
+          {info.status === "no_expense" && lineCount === 0 ? (
+            <span className="text-xs text-ink-3">Aucun frais déclaré pour cet événement.</span>
+          ) : (
+            <button
+              disabled={busy || lineCount === 0}
+              onClick={() => declare(false)}
+              className="rounded-btn bg-red px-3 py-1.5 text-xs font-bold text-white shadow-btn-red disabled:opacity-50"
+            >
+              {busy ? "Envoi…" : alreadySent ? `Mettre à jour la déclaration (${formatEuros(total)})` : `Déclarer ${formatEuros(total)}`}
+            </button>
+          )}
         </div>
       )}
     </div>
