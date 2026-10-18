@@ -1045,13 +1045,19 @@ function FilterChip({
   );
 }
 
+/** Les matchs du week-end sont filtrés avec les compétitions : mêmes championnats (R1, R2…) tirés du titre. */
+const filterCategory = (p: MediaPublication): DbEventType | null => {
+  const cat = publicationCategory(p);
+  return cat === "match_du_week_end" ? "competitions" : cat;
+};
+
 function FiltersBar({ items, filters, onChange }: { items: MediaPublication[]; filters: Filters; onChange: (f: Filters) => void }) {
   const counts = useMemo(() => {
     const byCategory = new Map<DbEventType | null, number>();
     const byTag = new Map<CompetitionTag, number>();
     const byKind = new Map<PublicationKind, number>();
     for (const p of items) {
-      const cat = publicationCategory(p);
+      const cat = filterCategory(p);
       byCategory.set(cat, (byCategory.get(cat) ?? 0) + 1);
       byKind.set(publicationKind(p), (byKind.get(publicationKind(p)) ?? 0) + 1);
       if (cat === "competitions") {
@@ -1119,7 +1125,7 @@ function FiltersBar({ items, filters, onChange }: { items: MediaPublication[]; f
 
 function applyFilters(items: MediaPublication[], f: Filters) {
   return items.filter((p) => {
-    const cat = publicationCategory(p);
+    const cat = filterCategory(p);
     if (f.category !== "all" && cat !== f.category) return false;
     if (f.category === "competitions" && f.competition !== "all" && competitionTag(publicationTitle(p)) !== f.competition) return false;
     if (f.kind !== "all" && publicationKind(p) !== f.kind) return false;
