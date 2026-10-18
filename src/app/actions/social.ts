@@ -183,7 +183,8 @@ export async function moderateComment(
       await supabase.from("comment_moderation").update({ action: "deleted", action_error: null }).eq("id", moderationId);
     } else if (decision === "hide") {
       await setNetworkCommentHidden(supabase, key, row.comment_id, true);
-      await supabase.from("comment_moderation").update({ action: "hidden", action_error: null }).eq("id", moderationId);
+      // Masqué par une personne : confirmé haineux (ne compte plus comme « à vérifier »).
+      await supabase.from("comment_moderation").update({ action: "hidden", action_error: null, verdict: "hateful" }).eq("id", moderationId);
     } else {
       if (row.action === "hidden") await setNetworkCommentHidden(supabase, key, row.comment_id, false);
       await supabase

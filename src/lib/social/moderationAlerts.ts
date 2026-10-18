@@ -29,7 +29,7 @@ function escapeHtml(s: string) {
 }
 
 function actionLabel(c: FlaggedComment) {
-  if (c.verdict === "review") return "À vérifier (laissé visible)";
+  if (c.verdict === "review" && c.action === "hidden") return "À vérifier — masqué en attendant votre décision";
   if (c.action === "hidden") return "Masqué automatiquement";
   if (c.action === "hide_failed") return "⚠️ Masquage impossible — à traiter à la main";
   return "Signalé";

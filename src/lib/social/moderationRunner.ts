@@ -118,22 +118,20 @@ export async function runCommentModeration(client: Client): Promise<ModerationRe
       if (row.verdict === "ok") continue;
       const f = batch.find((b) => b.key === row.network && b.comment.id === row.comment_id)!;
       let action: FlaggedComment["action"] = "none";
-      if (row.verdict === "hateful") {
-        report.hateful += 1;
-        try {
-          await setNetworkCommentHidden(client, f.key, f.comment.id, true);
-          action = "hidden";
-        } catch (e) {
-          action = "hide_failed";
-          await client
-            .from("comment_moderation")
-            .update({ action_error: e instanceof Error ? e.message : "échec" })
-            .eq("id", row.id);
-        }
-        await client.from("comment_moderation").update({ action }).eq("id", row.id);
-      } else {
-        report.review += 1;
+      if (row.verdict === "hateful") report.hateful += 1;
+      else report.review += 1;
+      // Haineux comme « à vérifier » : masqué tout de suite, en attendant la décision (« Non haineux » le rétablit).
+      try {
+        await setNetworkCommentHidden(client, f.key, f.comment.id, true);
+        action = "hidden";
+      } catch (e) {
+        action = "hide_failed";
+        await client
+          .from("comment_moderation")
+          .update({ action_error: e instanceof Error ? e.message : "échec" })
+          .eq("id", row.id);
       }
+      await client.from("comment_moderation").update({ action }).eq("id", row.id);
 
       flagged.push({
         moderationId: row.id,

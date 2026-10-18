@@ -206,7 +206,8 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
         .from("comment_moderation")
         .select("id", { count: "exact", head: true })
         .neq("verdict", "ok")
-        .in("action", ["none", "hide_failed"]);
+        // « À vérifier » masqué d'office : reste à trancher tant que personne n'a décidé.
+        .or("action.in.(none,hide_failed),and(verdict.eq.review,action.eq.hidden)");
       push({ id: "commentaires", app: "audiovisuel", tone: "orange", count: flagged ?? 0, title: "Commentaires à vérifier", detail: "Signalés par la modération automatique" });
     }, undefined),
 
