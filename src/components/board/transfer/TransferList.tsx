@@ -180,7 +180,12 @@ export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; 
                   <p>
                     {t.fileCount} fichier{t.fileCount > 1 ? "s" : ""} · {formatBytes(t.totalBytes)}
                   </p>
-                  <p className="text-ink-4">{shortDate(t.createdAt)}</p>
+                  <p className="text-ink-4">
+                    Envoyé le {shortDate(t.createdAt)} ·{" "}
+                    {!t.expiresAt
+                      ? "sans expiration"
+                      : `${new Date(t.expiresAt).getTime() < Date.now() ? "expiré" : "expire"} le ${shortDate(t.expiresAt)}`}
+                  </p>
                 </div>
                 <span className="flex w-24 shrink-0 items-center justify-end gap-3 text-xs font-bold text-ink">
                   <span className="flex items-center gap-1" title="Ouvertures du lien">
