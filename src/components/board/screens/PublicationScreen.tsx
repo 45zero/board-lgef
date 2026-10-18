@@ -75,6 +75,7 @@ import {
   deleteSocialComment,
   deleteSocialPosts,
   resolveFacebookMention,
+  searchFacebookPages,
   listFlaggedComments,
   moderateComment,
   notifyToPublish,
@@ -1208,6 +1209,31 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
   const [mentionRef, setMentionRef] = useState("");
   const [mentionState, setMentionState] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
 
+  // Suggestions de l'annuaire des Pages (« fc metz » → Pages trouvées) pendant la saisie d'un nom.
+  const [pageSuggestions, setPageSuggestions] = useState<FacebookMention[]>([]);
+  const [pageHighlight, setPageHighlight] = useState(0);
+  useEffect(() => {
+    const q = mentionRef.trim().replace(/^@/, "");
+    if (q.length < 2 || /facebook\.com|fb\.com|^\d+$/i.test(q)) {
+      const t = window.setTimeout(() => setPageSuggestions([]), 0);
+      return () => window.clearTimeout(t);
+    }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      void searchFacebookPages(q).then((pages) => !cancelled && setPageSuggestions(pages.filter((p) => !fbMentions.some((m) => m.id === p.id))));
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [mentionRef, fbMentions]);
+  const pickPage = (page: FacebookMention) => {
+    setFbMentions((prev) => (prev.some((m) => m.id === page.id) ? prev : [...prev, page]));
+    setMentionRef("");
+    setPageSuggestions([]);
+    setMentionState({ loading: false, error: null });
+  };
+
   const addMention = async () => {
     if (!mentionRef.trim()) return;
     setMentionState({ loading: true, error: null });
@@ -1450,19 +1476,49 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
             {canFacebook && (fb.lorraine || fb.champagne_ardenne || fb.alsace) && (
               <div className="space-y-1.5 border-t border-dashed border-line pt-2">
                 <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Mentionner des Pages Facebook</div>
-                <div className="flex gap-1.5">
+                <div className="relative flex gap-1.5">
                   <input
                     value={mentionRef}
-                    onChange={(e) => setMentionRef(e.target.value)}
+                    onChange={(e) => {
+                      setMentionRef(e.target.value);
+                      setPageHighlight(0);
+                    }}
                     onKeyDown={(e) => {
+                      if (pageSuggestions.length > 0 && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+                        e.preventDefault();
+                        setPageHighlight((h) => (h + (e.key === "ArrowDown" ? 1 : pageSuggestions.length - 1)) % pageSuggestions.length);
+                        return;
+                      }
+                      if (e.key === "Escape") setPageSuggestions([]);
                       if (e.key === "Enter") {
                         e.preventDefault();
-                        addMention();
+                        if (pageSuggestions.length > 0) pickPage(pageSuggestions[Math.min(pageHighlight, pageSuggestions.length - 1)]);
+                        else addMention();
                       }
                     }}
-                    placeholder="Nom de la Page, lien facebook.com/… ou identifiant"
+                    placeholder="Tapez un nom (fc metz…), un lien facebook.com/… ou un identifiant"
                     className="min-w-0 flex-1 rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
                   />
+                  {pageSuggestions.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-btn border border-line bg-card shadow-modal">
+                      <div className="border-b border-line px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-ink-4">Pages Facebook trouvées</div>
+                      {pageSuggestions.map((p, i) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            pickPage(p);
+                          }}
+                          className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs ${i === pageHighlight ? "bg-sel-bg text-navy" : "text-ink-2 hover:bg-subtle"}`}
+                        >
+                          <FacebookIcon size={13} />
+                          <span className="min-w-0 flex-1 truncate font-semibold">{p.name}</span>
+                          {p.detail && <span className="shrink-0 text-[10px] text-ink-4">{p.detail}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <button
                     onClick={addMention}
                     disabled={mentionState.loading || !mentionRef.trim()}
@@ -1490,8 +1546,9 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
                   </div>
                 )}
                 <p className="text-[10px] text-ink-4">
-                  En attendant l&rsquo;accord de Meta, les mentions s&rsquo;ajoutent à la main : après publication, bouton « Ajouter les
-                  mentions sur Facebook » dans l&rsquo;onglet Publiés.
+                  Les Pages choisies sont mentionnées à la fin du texte et prévenues par Facebook. Une Page absente des
+                  suggestions : collez son lien ou son identifiant (sur la Page : À propos → Transparence) — elle sera proposée
+                  ensuite. Un simple nom non trouvé reste à ajouter à la main sur Facebook.
                 </p>
               </div>
             )}

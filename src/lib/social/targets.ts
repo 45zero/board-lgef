@@ -126,7 +126,8 @@ export const NETWORK_KEYS: NetworkKey[] = ["youtube", ...SOCIAL_TARGETS.map((t) 
  * Meta « Page Mentions », accès avancé requis — sans lui Facebook retire la mention en silence).
  * Sans `id` (saisie par simple nom), elle est à ajouter à la main sur Facebook après publication.
  */
-export type FacebookMention = { id: string; name: string };
+/** `detail` : ville / Page vérifiée, affiché dans les suggestions pour distinguer les homonymes. */
+export type FacebookMention = { id: string; name: string; detail?: string };
 
 /** Message Facebook final : le texte suivi des mentions de Pages identifiées par leur id. */
 export function withFacebookMentions(message: string, mentions: FacebookMention[] | undefined): string {

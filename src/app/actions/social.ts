@@ -17,6 +17,7 @@ import {
 } from "@/lib/social/publisher";
 import { getSocialAccountById } from "@/lib/social/accounts";
 import { resolveFacebookPage } from "@/lib/social/graph";
+import { rememberMentionedPages, searchMetaPages, searchPagesDirectory } from "@/lib/social/pagesDirectory";
 import {
   FACEBOOK_REGIONS,
   publishedNetworks,
@@ -98,6 +99,8 @@ export async function publishSocial(
 ): Promise<SocialPublishResult[]> {
   const supabase = await requirePublisher();
   if (targets.length === 0) return [];
+  // Pages mentionnées : retenues dans l'annuaire (proposées en tête la prochaine fois).
+  if (options.fbMentions?.length) await rememberMentionedPages(createServiceClient(), options.fbMentions).catch(() => {});
   return publishPublicationToSocial(supabase, publicationId, targets, by, options);
 }
 
@@ -107,9 +110,27 @@ export async function resolveFacebookMention(ref: string): Promise<{ error: stri
     await requireUser();
     const account = FACEBOOK_REGIONS.map((r) => getSocialAccountById(r.accountId)).find(Boolean);
     if (!account) throw new Error("Compte Facebook non configuré.");
-    return { error: null, page: await resolveFacebookPage(ref, account.accessToken) };
+    const page = await resolveFacebookPage(ref, account.accessToken);
+    // Ajoutée une fois par son identifiant : elle reste dans l'annuaire.
+    await rememberMentionedPages(createServiceClient(), [page], "manual").catch(() => {});
+    return { error: null, page };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Page introuvable.", page: null };
+  }
+}
+
+/**
+ * Pages Facebook correspondant au texte tapé (« fc metz ») — suggestions de mention : d'abord celles de
+ * l'annuaire (déjà mentionnées / qui identifient la LGEF), puis la recherche Meta par nom.
+ */
+export async function searchFacebookPages(query: string): Promise<FacebookMention[]> {
+  try {
+    await requireUser();
+    const [known, meta] = await Promise.all([searchPagesDirectory(createServiceClient(), query), searchMetaPages(query)]);
+    const ids = new Set(known.map((p) => p.id));
+    return [...known, ...meta.filter((p) => !ids.has(p.id))].slice(0, 8);
+  } catch {
+    return [];
   }
 }
 

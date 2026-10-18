@@ -298,6 +298,42 @@ export type Database = {
         }
         Relationships: []
       }
+      facebook_pages_directory: {
+        Row: {
+          id: string
+          name: string
+          search: string
+          source: string
+          tag_count: number
+          mention_count: number
+          last_seen_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          name: string
+          search: string
+          source?: string
+          tag_count?: number
+          mention_count?: number
+          last_seen_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          search?: string
+          source?: string
+          tag_count?: number
+          mention_count?: number
+          last_seen_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       module_access: {
         Row: {
           module_id: string
