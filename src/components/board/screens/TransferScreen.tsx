@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { Send, Plus, Layers, Megaphone, ExternalLink, BarChart3 } from "lucide-react";
 import { unwrap } from "@/lib/board/actionResult";
 import { formatBytes, type TransferPlanLimits } from "@/lib/transfer/shared";
-import { getTransferContext, getTransferStats, type TransferStats as TransferSummary } from "@/app/actions/transfers";
+import { getTransferHome, getTransferStats, type TransferFilters, type TransferRow, type TransferTiles } from "@/app/actions/transfers";
+import { readOpenTransferParam } from "@/lib/board/deepLink";
 import { TransferUploader } from "@/components/transfer/TransferUploader";
 import { TransferList } from "@/components/board/transfer/TransferList";
 import { TransferPlansAdmin } from "@/components/board/transfer/TransferPlansAdmin";
@@ -21,20 +22,26 @@ const PUBLIC_URL = (process.env.NEXT_PUBLIC_TRANSFER_URL || "").replace(/\/+$/, 
 
 export function TransferScreen() {
   const [tab, setTab] = useState<Tab>("list");
-  const [ctx, setCtx] = useState<{ isAdmin: boolean; plan: TransferPlanLimits } | null>(null);
-  const [stats, setStats] = useState<TransferSummary | null>(null);
+  const [ctx, setCtx] = useState<{ isAdmin: boolean; plan: TransferPlanLimits; initial: { scope: TransferFilters["scope"]; rows: TransferRow[] } } | null>(null);
+  const [stats, setStats] = useState<TransferTiles | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Un seul appel à l'ouverture (contexte, chiffres, première liste) : les actions serveur passent l'une après l'autre.
   useEffect(() => {
-    getTransferContext()
+    getTransferHome({ received: !!readOpenTransferParam() })
       .then((r) => {
-        const c = unwrap(r);
-        setCtx(c);
-        if (c.isAdmin) void getTransferStats().then((s) => s.ok && setStats(s.data));
+        const h = unwrap(r);
+        setCtx({ isAdmin: h.isAdmin, plan: h.plan, initial: { scope: h.scope, rows: h.rows } });
+        setStats(h.tiles);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "LGEF Transfer est indisponible."));
-  }, [refreshKey]);
+  }, []);
+
+  // Après un envoi : chiffres à jour (la liste se recharge d'elle-même).
+  useEffect(() => {
+    if (refreshKey && ctx?.isAdmin) void getTransferStats().then((s) => s.ok && setStats(s.data));
+  }, [refreshKey, ctx?.isAdmin]);
 
   const tabs: { id: Tab; label: string; icon: typeof Send; show: boolean }[] = [
     { id: "list", label: "Transferts", icon: Send, show: true },
@@ -75,7 +82,7 @@ export function TransferScreen() {
               <Tile label="Téléchargements (30 j)" value={String(stats.downloads30)} />
             </div>
           )}
-          {ctx && <TransferList isAdmin={ctx.isAdmin} plan={ctx.plan} refreshKey={refreshKey} />}
+          {ctx && <TransferList isAdmin={ctx.isAdmin} plan={ctx.plan} refreshKey={refreshKey} initial={ctx.initial} />}
         </>
       )}
 

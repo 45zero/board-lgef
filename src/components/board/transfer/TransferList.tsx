@@ -56,16 +56,28 @@ type Person = { id: string; name: string; email: string };
 type ForwardDraft = { members: Person[]; query: string; to: string; note: string };
 const EMPTY_FORWARD: ForwardDraft = { members: [], query: "", to: "", note: "" };
 
-export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; plan: TransferPlanLimits | null; refreshKey: number }) {
+export function TransferList({
+  isAdmin,
+  plan,
+  refreshKey,
+  initial,
+}: {
+  isAdmin: boolean;
+  plan: TransferPlanLimits | null;
+  refreshKey: number;
+  /** Première liste déjà chargée par l'écran (getTransferHome) : affichée sans nouvel appel. */
+  initial?: { scope: TransferFilters["scope"]; rows: TransferRow[] };
+}) {
   // Lien d'une notification « transfert partagé » (/?app=transfer&openTransfer=<id>) : fiche ouverte dans « Partagés avec moi ».
   const [linked] = useState(readOpenTransferParam);
-  const [scope, setScope] = useState<TransferFilters["scope"]>(linked ? "received" : isAdmin ? "all" : "mine");
+  const [scope, setScope] = useState<TransferFilters["scope"]>(initial?.scope ?? (linked ? "received" : isAdmin ? "all" : "mine"));
   const [period, setPeriod] = useState("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [status, setStatus] = useState<TransferFilters["status"]>("");
   const [q, setQ] = useState("");
-  const [rows, setRows] = useState<TransferRow[] | null>(null);
+  const [rows, setRows] = useState<TransferRow[] | null>(initial?.rows ?? null);
+  const skipFirstLoad = useRef(!!initial);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(linked);
   useEffect(() => clearOpenTransferParam(), []);
@@ -85,6 +97,10 @@ export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; 
   }, [scope, status, range]);
 
   useEffect(() => {
+    if (skipFirstLoad.current) {
+      skipFirstLoad.current = false;
+      return;
+    }
     load();
   }, [load, refreshKey]);
 

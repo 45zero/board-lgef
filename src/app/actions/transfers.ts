@@ -35,6 +35,37 @@ export async function getTransferContext(): Promise<ActionResult<{ isAdmin: bool
   });
 }
 
+export type TransferTiles = { active: number; activeBytes: number; last30: number; downloads30: number };
+
+/** Chiffres du haut de l'onglet (admins) : transferts actifs, volume en ligne, envois et téléchargements des 30 derniers jours. */
+async function transferTiles(): Promise<TransferTiles> {
+  const s = createServiceClient();
+  const since30 = new Date(Date.now() - 30 * 86400_000).toISOString();
+  const [{ data: active }, { count: last30 }, { count: downloads30 }] = await Promise.all([
+    s.from("transfers").select("total_bytes, expires_at").eq("status", "ready"),
+    s.from("transfers").select("id", { count: "exact", head: true }).gte("created_at", since30).neq("status", "uploading"),
+    s.from("transfer_downloads").select("id", { count: "exact", head: true }).gte("at", since30),
+  ]);
+  const live = (active ?? []).filter((t) => !t.expires_at || new Date(t.expires_at).getTime() > Date.now());
+  return { active: live.length, activeBytes: live.reduce((n, t) => n + t.total_bytes, 0), last30: last30 ?? 0, downloads30: downloads30 ?? 0 };
+}
+
+/**
+ * Ouverture de l'onglet en un seul appel (les actions serveur d'une page passent l'une après
+ * l'autre) : contexte, chiffres (admins) et première liste (tout le board pour un admin, ses
+ * envois sinon ; « Partagés avec moi » si `received`), chargés en parallèle.
+ */
+export async function getTransferHome(opts: { received?: boolean } = {}): Promise<
+  ActionResult<{ isAdmin: boolean; email: string; plan: TransferPlanLimits; tiles: TransferTiles | null; scope: TransferFilters["scope"]; rows: TransferRow[] }>
+> {
+  return toResult(async () => {
+    const member = await requireMember();
+    const scope: TransferFilters["scope"] = opts.received ? "received" : member.isAdmin ? "all" : "mine";
+    const [{ plan }, tiles, rows] = await Promise.all([resolvePlan(member.email), member.isAdmin ? transferTiles() : Promise.resolve(null), loadTransferRows(member, { scope })]);
+    return { isAdmin: member.isAdmin, email: member.email, plan, tiles, scope, rows };
+  });
+}
+
 /* ---------- Drive du board (envoi sans recharger) ---------- */
 
 export type DriveFileForTransfer = { id: string; name: string; size: number; mimeType: string; modifiedTime: string };
@@ -92,7 +123,7 @@ const effectiveStatus = (t: { status: TransferStatus; expires_at: string | null 
 async function receivedTransferRows(member: { id: string; email: string }) {
   const s = createServiceClient();
   const [{ data: direct, error }, { data: forwards }] = await Promise.all([
-    s.from("transfers").select("*").contains("recipients", [member.email]).neq("status", "uploading").order("created_at", { ascending: false }).limit(500),
+    s.from("transfers").select(LIST_COLUMNS).contains("recipients", [member.email]).neq("status", "uploading").order("created_at", { ascending: false }).limit(500),
     s.from("transfer_forwards").select("transfer_id, forwarded_by, created_at").contains("recipients", [member.email]).order("created_at", { ascending: false }).limit(500),
   ]);
   if (error) throw new Error(error.message);
@@ -102,7 +133,7 @@ async function receivedTransferRows(member: { id: string; email: string }) {
   const missing = [...lastForward.keys()].filter((id) => !known.has(id));
   const byIds = [...new Set(missing.map((id) => lastForward.get(id)).filter((x): x is string => !!x))];
   const [{ data: forwarded }, { data: people }] = await Promise.all([
-    missing.length ? s.from("transfers").select("*").in("id", missing).neq("status", "uploading") : Promise.resolve({ data: [] }),
+    missing.length ? s.from("transfers").select(LIST_COLUMNS).in("id", missing).neq("status", "uploading") : Promise.resolve({ data: [] }),
     byIds.length ? s.from("profiles").select("id, first_name, last_name, email").in("id", byIds) : Promise.resolve({ data: [] }),
   ]);
   const nameOf = new Map((people ?? []).map((p) => [p.id, [p.first_name, p.last_name].filter(Boolean).join(" ") || p.email || "—"]));
@@ -115,14 +146,21 @@ async function receivedTransferRows(member: { id: string; email: string }) {
 }
 
 export async function listTransfers(filters: TransferFilters): Promise<ActionResult<TransferRow[]>> {
-  return toResult(async () => {
-    const member = await requireMember();
+  return toResult(async () => loadTransferRows(await requireMember(), filters));
+}
+
+// Colonnes de la liste (pas le message, jusqu'à 5 000 caractères par transfert).
+const LIST_COLUMNS =
+  "id, code, status, source, sender_email, sender_name, sender_user_id, title, recipients, file_count, total_bytes, download_count, view_count, last_download_at, archived, created_at, expires_at";
+
+async function loadTransferRows(member: { id: string; email: string; isAdmin: boolean }, filters: TransferFilters): Promise<TransferRow[]> {
+  {
     let data: Awaited<ReturnType<typeof receivedTransferRows>>;
     if (filters.scope === "received") {
       data = await receivedTransferRows(member);
     } else {
       const supabase = await createClient();
-      let q = supabase.from("transfers").select("*").order("created_at", { ascending: false }).limit(500);
+      let q = supabase.from("transfers").select(LIST_COLUMNS).order("created_at", { ascending: false }).limit(500);
       if (filters.scope === "mine" || !member.isAdmin) q = q.eq("sender_user_id", member.id);
       if (filters.from) q = q.gte("created_at", new Date(`${filters.from}T00:00:00`).toISOString());
       if (filters.to) q = q.lt("created_at", new Date(new Date(`${filters.to}T00:00:00`).getTime() + 86400_000).toISOString());
@@ -164,7 +202,7 @@ export async function listTransfers(filters: TransferFilters): Promise<ActionRes
       .filter((t) => !needle || [t.title, t.senderEmail, t.senderName, t.code, ...t.recipients].some((s) => s.toLowerCase().includes(needle)));
     await addForwardsAndCards(member, rows);
     return rows;
-  });
+  }
 }
 
 const chunks = <T,>(list: T[], size: number) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, (i + 1) * size));
