@@ -314,13 +314,16 @@ export const attachTeamFilesFromEmail = async (cardId: string, accountId: string
   });
 
 /**
- * Copie les fichiers d'un transfert LGEF Transfer dans la carte (copie dans le Drive du board, sans
- * limite de taille : rien ne transite par nos serveurs). Il faut pouvoir modifier la carte et voir le
- * transfert (expéditeur, admin, destinataire ou personne à qui on l'a fait suivre). Renvoie les
- * fichiers non copiés.
+ * Copie les fichiers d'un transfert LGEF Transfer dans le dossier de la carte (copie dans le Drive du
+ * board, sans limite de taille : rien ne transite par nos serveurs). Toujours le dossier de la carte,
+ * jamais le centre de publication ni les fichiers de l'événement : un transfert de 30 vidéos ne doit
+ * pas créer 30 « À publier ». Copies en parallèle (la durée d'une action est limitée) ; un fichier déjà
+ * copié (étiquette transferFileId, ou même nom venant d'un transfert) n'est pas recopié — relancer
+ * complète une copie interrompue. Il faut pouvoir modifier la carte et voir le transfert.
+ * Renvoie tous les fichiers du transfert présents dans la carte, le nombre de nouvelles copies et les échecs.
  */
 export const attachTeamFilesFromTransfer = async (cardId: string, transferId: string) =>
-  toResult(async (): Promise<{ copied: { id: string; name: string; mimeType: string; size: number }[]; failed: string[] }> => {
+  toResult(async (): Promise<{ files: { id: string; name: string; mimeType: string; size: number }[]; copied: number; failed: string[] }> => {
     const { supabase, userId } = await session();
     const card = await visibleCard(supabase, cardId);
     await requireEditable(supabase, cardId, userId);
@@ -328,26 +331,43 @@ export const attachTeamFilesFromTransfer = async (cardId: string, transferId: st
     if (!member) throw new Error("Non authentifié");
     await transferAccessFor(member, transferId);
     const account = await requireDrive();
-    const { data: files } = await createServiceClient()
-      .from("transfer_files")
-      .select("name, mime_type, size_bytes, drive_file_id, uploaded")
-      .eq("transfer_id", transferId)
-      .order("position");
-    const copied: { id: string; name: string; mimeType: string; size: number }[] = [];
+    const [{ data: files }, folder, tags] = await Promise.all([
+      createServiceClient().from("transfer_files").select("id, name, mime_type, size_bytes, drive_file_id, uploaded").eq("transfer_id", transferId).order("position"),
+      ensureCardFolder(account, card),
+      uploaderTags(supabase, cardId, userId, { source: "transfer", toCenter: false }),
+    ]);
+    const present = (await listFolderTagged(account, folder.id)).filter((f) => !f.isFolder && f.appProperties.source === "transfer");
+    const byTransferFile = new Map(present.filter((f) => f.appProperties.transferFileId).map((f) => [f.appProperties.transferFileId, f]));
+    const byName = new Map(present.map((f) => [f.name, f]));
+    const description = describe(card, tags.name);
+
+    const result: { id: string; name: string; mimeType: string; size: number }[] = [];
     const failed: string[] = [];
-    for (const f of files ?? []) {
-      try {
-        if (!f.drive_file_id || !f.uploaded) throw new Error("fichier non arrivé");
-        const { parentId, tags, media } = await cardDestination(account, supabase, card, userId, f.mime_type, "transfer");
-        const copy = await copyTaggedFile(account, f.drive_file_id, { name: f.name, parentId, description: describe(card, tags.name), appProperties: tags.appProperties });
-        await registerCardFile(supabase, card, userId, media, { id: copy.id, name: f.name, mimeType: f.mime_type, size: f.size_bytes, webViewLink: copy.webViewLink });
-        copied.push({ id: copy.id, name: f.name, mimeType: f.mime_type, size: f.size_bytes });
-      } catch (e) {
-        console.error("[team] fichier de transfert", f.name, e);
-        failed.push(f.name);
+    let copied = 0;
+    const queue = [...(files ?? [])];
+    const worker = async () => {
+      for (let f = queue.shift(); f; f = queue.shift()) {
+        const done = byTransferFile.get(f.id) ?? byName.get(f.name);
+        if (done) {
+          result.push({ id: done.id, name: f.name, mimeType: f.mime_type, size: f.size_bytes });
+          continue;
+        }
+        try {
+          if (!f.drive_file_id || !f.uploaded) throw new Error("fichier non arrivé");
+          const copy = await copyTaggedFile(account, f.drive_file_id, { name: f.name, parentId: folder.id, description, appProperties: { ...tags.appProperties, transferFileId: f.id } });
+          result.push({ id: copy.id, name: f.name, mimeType: f.mime_type, size: f.size_bytes });
+          copied++;
+        } catch (e) {
+          console.error("[team] fichier de transfert", f.name, e);
+          failed.push(f.name);
+        }
       }
-    }
-    return { copied, failed };
+    };
+    await Promise.all(Array.from({ length: 6 }, worker));
+    // Ordre du transfert.
+    const order = new Map((files ?? []).map((f, i) => [f.name, i]));
+    result.sort((a, b) => (order.get(a.name) ?? 0) - (order.get(b.name) ?? 0));
+    return { files: result, copied, failed };
   });
 
 /** Retire une pièce jointe du dossier de la carte (corbeille du Drive, récupérable 30 jours). */

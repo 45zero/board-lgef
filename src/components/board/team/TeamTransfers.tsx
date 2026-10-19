@@ -114,7 +114,7 @@ export function TeamTransfers({
                       {[
                         `de ${r.sender}`,
                         `${r.fileCount} fichier${r.fileCount > 1 ? "s" : ""} · ${formatBytes(r.totalBytes)}`,
-                        r.files.length ? "copiés dans la carte" : "",
+                        r.files.length ? (r.files.length < r.fileCount ? `${r.files.length}/${r.fileCount} copiés dans la carte` : "copiés dans la carte") : "",
                         !r.live ? "lien supprimé" : r.live.active ? (r.live.expiresAt ? `lien jusqu'au ${shortDate(r.live.expiresAt)}` : "lien sans expiration") : "lien expiré",
                         `joint par ${people.find((p) => p.id === r.linkedBy)?.name ?? "—"}`,
                       ]
@@ -154,6 +154,15 @@ export function TeamTransfers({
                         ))}
                       </ul>
                       {r.files.length > 1 && <DownloadAll cardId={cardId} files={r.files} />}
+                      {r.files.length < r.fileCount && r.live?.active && canEdit && (
+                        <button
+                          disabled={busy}
+                          onClick={() => void copyNow(r)}
+                          className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-btn bg-chip-bg px-3 py-2 text-[12px] font-bold text-ink-2 hover:bg-hover disabled:opacity-50"
+                        >
+                          <Copy size={12} /> Compléter la copie ({r.fileCount - r.files.length} fichier{r.fileCount - r.files.length > 1 ? "s" : ""} manquant{r.fileCount - r.files.length > 1 ? "s" : ""})
+                        </button>
+                      )}
                     </>
                   ) : r.live?.active ? (
                     <div className="flex flex-wrap items-center gap-2 py-1">

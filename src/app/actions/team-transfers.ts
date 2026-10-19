@@ -78,7 +78,7 @@ export const linkTransferToTeamCard = async (cardId: string, transferId: string,
     });
     if (error?.code === "23505") return { alreadyLinked: true, copied: 0, failed: [] };
     if (error) throw new Error(error.code === "42501" ? "Vous ne pouvez pas modifier cette carte." : error.message);
-    const { copied: files, failed } = opts.copyFiles ? unwrap(await attachTeamFilesFromTransfer(cardId, transferId)) : { copied: [], failed: [] };
+    const { files, failed } = opts.copyFiles ? unwrap(await attachTeamFilesFromTransfer(cardId, transferId)) : { files: [], failed: [] };
     const copied = files.length;
     if (copied) await createServiceClient().from("team_card_transfers").update({ files_copied: copied, files }).eq("card_id", cardId).eq("transfer_id", transferId);
     const what = t.title ? `« ${t.title} »` : `${t.file_count} fichier${t.file_count > 1 ? "s" : ""}`;
@@ -118,17 +118,16 @@ export const listTeamCardTransfers = async (cardId: string) =>
     });
   });
 
-/** Transfert joint sans copie : copie ses fichiers dans la carte maintenant (lien encore actif). */
+/** Copie (ou complète) les fichiers du transfert dans la carte : joint sans copie, ou copie interrompue. */
 export const copyTeamCardTransferFiles = async (id: string) =>
   toResult(async (): Promise<{ copied: number; failed: string[] }> => {
     const { supabase } = await session();
     const { data: row } = await supabase.from("team_card_transfers").select("card_id, transfer_id, files").eq("id", id).maybeSingle();
     if (!row) throw new Error("Transfert introuvable sur cette carte.");
     if (!row.transfer_id) throw new Error("Le transfert a été supprimé : ses fichiers ne peuvent plus être copiés.");
-    const { copied, failed } = unwrap(await attachTeamFilesFromTransfer(row.card_id, row.transfer_id));
-    const files = [...toFiles(row.files), ...copied];
-    if (copied.length) await createServiceClient().from("team_card_transfers").update({ files_copied: files.length, files }).eq("id", id);
-    return { copied: copied.length, failed };
+    const { files, copied, failed } = unwrap(await attachTeamFilesFromTransfer(row.card_id, row.transfer_id));
+    await createServiceClient().from("team_card_transfers").update({ files_copied: files.length, files }).eq("id", id);
+    return { copied, failed };
   });
 
 /** Délie le transfert de la carte (les fichiers copiés restent dans la carte). */
