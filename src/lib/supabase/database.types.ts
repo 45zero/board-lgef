@@ -562,6 +562,7 @@ export type Database = {
           drive_connected_account_id: string | null
           habillage: Json
           publisher_ids: string[]
+          registration_reply_to: string | null
           moderation_recipient_ids: string[]
           expense_manager_ids: string[]
           updated_by: string | null
@@ -572,6 +573,7 @@ export type Database = {
           drive_connected_account_id?: string | null
           habillage?: Json
           publisher_ids?: string[]
+          registration_reply_to?: string | null
           moderation_recipient_ids?: string[]
           expense_manager_ids?: string[]
           updated_by?: string | null
@@ -582,6 +584,7 @@ export type Database = {
           drive_connected_account_id?: string | null
           habillage?: Json
           publisher_ids?: string[]
+          registration_reply_to?: string | null
           moderation_recipient_ids?: string[]
           expense_manager_ids?: string[]
           updated_by?: string | null

@@ -54,6 +54,10 @@ import {
   removeRecipients,
   sendCampaign,
   sendCampaignWhatsApp,
+  getRegistrationReplyTo,
+  setRegistrationReplyTo,
+  previewResponseConfirmation,
+  sendResponseConfirmation,
   previewCampaignHtml,
   getCampaignEmbedHtml,
   listContactLists,
@@ -420,6 +424,13 @@ function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationE
   const [statusFilter, setStatusFilter] = useState<"all" | "yes" | "no" | "waiting" | "unsent">("all");
   const [listQuery, setListQuery] = useState("");
   const [qrOpen, setQrOpen] = useState(false);
+  const [replyTo, setReplyTo] = useState<{ replyTo: string | null; fallback: string | null; available: boolean } | null>(null);
+  const [replyToDraft, setReplyToDraft] = useState("");
+  const [replyToMsg, setReplyToMsg] = useState<string | null>(null);
+  const [relancing, setRelancing] = useState(false);
+  // Envoi groupé d'une invitation à une sélection qui contient des clubs ayant déjà répondu : on demande avant.
+  const [respondedGuard, setRespondedGuard] = useState<{ channel: "mail" | "wa"; ids: string[] } | null>(null);
+  const [confirmIds, setConfirmIds] = useState<string[] | null>(null);
 
   const refetch = async (c: Campaign) => {
     setRecipients(await listCampaignRecipients(c.id));
@@ -447,6 +458,9 @@ function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationE
       setPreviewHtml(await previewCampaignHtml(c.id));
       setEmbedHtml(await getCampaignEmbedHtml(c.id));
       setContactLists(await listContactLists());
+      const rt = await getRegistrationReplyTo();
+      setReplyTo(rt);
+      setReplyToDraft(rt.replyTo ?? "");
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ev.id]);
@@ -627,6 +641,48 @@ function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationE
     } finally {
       setSendingWa(false);
     }
+  };
+
+  const saveReplyTo = async () => {
+    if (!replyTo || replyToDraft.trim() === (replyTo.replyTo ?? "")) return;
+    const { error } = await setRegistrationReplyTo(replyToDraft);
+    if (error) {
+      setReplyToMsg(error);
+      return;
+    }
+    const value = replyToDraft.trim().toLowerCase() || null;
+    setReplyTo({ ...replyTo, replyTo: value });
+    setReplyToDraft(value ?? "");
+    setReplyToMsg("Enregistré.");
+  };
+
+  // Relance : seulement les clubs qui ont reçu le mail et n'ont pas encore répondu.
+  const waitingIds = recipients.filter((r) => r.email && r.sent_at && !r.response).map((r) => r.id);
+  const relance = async () => {
+    if (!confirm(`Relancer par email les ${waitingIds.length} destinataire(s) qui n'ont pas encore répondu ?`)) return;
+    setRelancing(true);
+    setSendResult(null);
+    try {
+      await saveSubject();
+      const { sent, error } = await sendCampaign(campaign.id, waitingIds);
+      setSendResult(error ?? `${sent} relance(s) envoyée(s).`);
+      await refetch(campaign);
+    } catch (e) {
+      setSendResult(e instanceof Error ? e.message : "Échec de la relance.");
+    } finally {
+      setRelancing(false);
+    }
+  };
+
+  const respondedIds = recipients.filter((r) => r.response && r.email).map((r) => r.id);
+  const selectedResponded = recipients.filter((r) => selected.has(r.id) && r.response).length;
+  const selectedRespondedWithEmail = recipients.filter((r) => selected.has(r.id) && r.response && r.email).map((r) => r.id);
+
+  /** Invitation à la sélection : si des clubs y ont déjà répondu, on propose de les exclure. */
+  const sendSelection = (channel: "mail" | "wa") => {
+    const ids = [...selected];
+    if (selectedResponded > 0) setRespondedGuard({ channel, ids });
+    else void sendTo(channel, ids, "bulk");
   };
 
   const publicUrl = `${siteOrigin()}/inscription/${ev.id}/public/${campaign.public_token}`;
@@ -814,6 +870,14 @@ function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationE
             >
               <Send size={14} /> {sending ? "Envoi…" : `Envoyer aux clubs (${recipients.filter((r) => r.email && !r.sent_at).length})`}
             </button>
+            <button
+              onClick={relance}
+              disabled={relancing || waitingIds.length === 0}
+              title="Renvoie l'invitation uniquement aux destinataires qui l'ont reçue et n'ont pas encore répondu"
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-btn border border-line px-4 py-2 text-sm font-bold text-navy hover:bg-hover disabled:opacity-50"
+            >
+              <Send size={14} /> {relancing ? "Relance…" : `Relancer les sans réponse (${waitingIds.length})`}
+            </button>
             {sendResult && <p className="mt-2 text-xs font-semibold text-ink-2">{sendResult}</p>}
             <button
               onClick={sendWhatsApp}
@@ -823,6 +887,39 @@ function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationE
               <MessageCircle size={14} /> {sendingWa ? "Envoi WhatsApp…" : `Inviter par WhatsApp (${waPending})`}
             </button>
             {waResult && <p className="mt-2 text-xs font-semibold text-ink-2">{waResult}</p>}
+            <button
+              onClick={() => setConfirmIds(respondedIds)}
+              disabled={respondedIds.length === 0}
+              title="Mail court qui rappelle à chaque club sa réponse enregistrée (ex. après une relance reçue par erreur)"
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-btn border border-line px-4 py-2 text-sm font-bold text-ink-2 hover:bg-hover disabled:opacity-50"
+            >
+              <Check size={14} /> Confirmer leur réponse aux clubs ({respondedIds.length})
+            </button>
+
+            <label className="mt-3 block">
+              <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Réponses des clubs reçues sur</span>
+              <input
+                type="email"
+                value={replyToDraft}
+                onChange={(e) => {
+                  setReplyToDraft(e.target.value);
+                  setReplyToMsg(null);
+                }}
+                onBlur={saveReplyTo}
+                onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                disabled={!replyTo?.available}
+                placeholder={replyTo?.fallback ?? "communication@lgef.fff.fr"}
+                className="mt-1 w-full rounded-btn border border-line px-3 py-2 text-xs outline-none disabled:opacity-60"
+              />
+            </label>
+            <p className="mt-1 text-[10px] text-ink-4">
+              {replyTo && !replyTo.available
+                ? "Réglage disponible après la mise à jour de la base de données."
+                : replyToMsg ??
+                  (replyTo?.replyTo
+                    ? "Quand un club clique « Répondre », son mail arrive à cette adresse."
+                    : `Vide : les réponses arrivent chez la personne qui envoie${replyTo?.fallback ? ` (${replyTo.fallback})` : ""}.`)}
+            </p>
           </div>
         </div>
 
@@ -964,19 +1061,29 @@ function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationE
               {selected.size > 0 && (
                 <>
                   <button
-                    onClick={() => sendTo("mail", [...selected], "bulk")}
+                    onClick={() => sendSelection("mail")}
                     disabled={busy !== null}
                     className="flex items-center gap-1 rounded-btn border border-line px-2 py-1 font-semibold text-ink-2 hover:bg-hover disabled:opacity-50"
                   >
                     <Mail size={11} /> Mail
                   </button>
                   <button
-                    onClick={() => sendTo("wa", [...selected], "bulk")}
+                    onClick={() => sendSelection("wa")}
                     disabled={busy !== null}
                     className="flex items-center gap-1 rounded-btn border border-line px-2 py-1 font-semibold text-good hover:bg-hover disabled:opacity-50"
                   >
                     <MessageCircle size={11} /> WhatsApp
                   </button>
+                  {selectedRespondedWithEmail.length > 0 && (
+                    <button
+                      onClick={() => setConfirmIds(selectedRespondedWithEmail)}
+                      disabled={busy !== null}
+                      title="Mail court qui rappelle à chaque club sa réponse enregistrée"
+                      className="flex items-center gap-1 rounded-btn border border-line px-2 py-1 font-semibold text-ink-2 hover:bg-hover disabled:opacity-50"
+                    >
+                      <Check size={11} /> Confirmer leur réponse ({selectedRespondedWithEmail.length})
+                    </button>
+                  )}
                   <button
                     onClick={() => deleteRecipients([...selected])}
                     disabled={busy !== null}
@@ -1074,6 +1181,34 @@ function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationE
         </div>
       </div>
 
+      {respondedGuard && (
+        <RespondedGuardModal
+          total={respondedGuard.ids.length}
+          responded={selectedResponded}
+          channel={respondedGuard.channel}
+          onCancel={() => setRespondedGuard(null)}
+          onSend={(onlyWaiting) => {
+            const { channel, ids } = respondedGuard;
+            const respondedSet = new Set(recipients.filter((r) => r.response).map((r) => r.id));
+            setRespondedGuard(null);
+            void sendTo(channel, onlyWaiting ? ids.filter((id) => !respondedSet.has(id)) : ids, "bulk");
+          }}
+        />
+      )}
+
+      {confirmIds && (
+        <ResponseConfirmationModal
+          campaignId={campaign.id}
+          eventTitle={ev.title}
+          recipients={recipients.filter((r) => confirmIds.includes(r.id))}
+          onClose={() => setConfirmIds(null)}
+          onSent={(msg) => {
+            setConfirmIds(null);
+            setListMsg(msg);
+          }}
+        />
+      )}
+
       {/* Aperçu — rendu réel du mail, identique à ce qui part */}
       {previewOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setPreviewOpen(false)}>
@@ -1094,6 +1229,165 @@ function CampaignEditor({ ev, onBack, onManageDirectories }: { ev: RegistrationE
         </div>
       )}
 
+    </div>
+  );
+}
+
+/** Avant d'envoyer l'invitation à une sélection qui contient des clubs ayant déjà répondu. */
+function RespondedGuardModal({
+  total,
+  responded,
+  channel,
+  onCancel,
+  onSend,
+}: {
+  total: number;
+  responded: number;
+  channel: "mail" | "wa";
+  onCancel: () => void;
+  onSend: (onlyWaiting: boolean) => void;
+}) {
+  const waiting = total - responded;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
+      <div className="w-full max-w-md rounded-modal border border-line bg-card p-5 shadow-modal" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-extrabold text-ink">
+          {responded} destinataire{responded > 1 ? "s ont" : " a"} déjà répondu
+        </h3>
+        <p className="mt-2 text-xs leading-relaxed text-ink-3">
+          Leur renvoyer l&rsquo;invitation{channel === "wa" ? " par WhatsApp" : ""} risque de les faire douter que leur réponse a été prise en compte.
+        </p>
+        <div className="mt-4 flex flex-col gap-2">
+          <button
+            onClick={() => onSend(true)}
+            disabled={waiting === 0}
+            className="rounded-btn bg-navy px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+          >
+            {waiting === 0 ? "Personne sans réponse dans la sélection" : `Envoyer seulement aux ${waiting} sans réponse`}
+          </button>
+          <button onClick={() => onSend(false)} className="rounded-btn border border-line px-4 py-2 text-xs font-semibold text-ink-2 hover:bg-hover">
+            Envoyer aux {total} quand même
+          </button>
+          <button onClick={onCancel} className="px-4 py-1.5 text-xs font-semibold text-ink-4 hover:text-ink">
+            Annuler
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Mail « votre réponse est bien enregistrée » aux clubs qui ont répondu : objet et message modifiables,
+ * aperçu réel (réponse du premier club concerné), puis envoi.
+ */
+function ResponseConfirmationModal({
+  campaignId,
+  eventTitle,
+  recipients,
+  onClose,
+  onSent,
+}: {
+  campaignId: string;
+  eventTitle: string;
+  recipients: Recipient[];
+  onClose: () => void;
+  onSent: (msg: string) => void;
+}) {
+  const [subject, setSubject] = useState(`Votre réponse est bien enregistrée — ${eventTitle}`);
+  const [message, setMessage] = useState(
+    `Vous avez reçu une relance concernant l'invitation à « ${eventTitle} ». Elle était destinée aux clubs qui n'avaient pas encore répondu : merci de ne pas en tenir compte.`
+  );
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const targets = recipients.filter((r) => r.response && r.email);
+  const yes = targets.filter((r) => r.response === "yes").length;
+  const ids = targets.map((r) => r.id);
+  const idsKey = ids.join(",");
+
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      const preview = await previewResponseConfirmation(campaignId, ids.slice(0, 1), subject, message);
+      setPreviewHtml(preview?.html ?? "");
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignId, idsKey, subject, message]);
+
+  const send = async () => {
+    if (!confirm(`Envoyer ce mail à ${targets.length} destinataire(s) ?`)) return;
+    setSending(true);
+    setError(null);
+    try {
+      const { sent, error } = await sendResponseConfirmation(campaignId, ids, subject, message);
+      if (error) setError(error);
+      else onSent(`${sent} confirmation(s) envoyée(s).`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Échec de l'envoi.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="flex h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-modal border border-line bg-card shadow-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+          <span className="text-sm font-extrabold text-ink">Confirmer leur réponse aux clubs</span>
+          <button onClick={onClose} className="text-ink-4 hover:text-ink">
+            <X size={14} />
+          </button>
+        </div>
+        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+          <div className="flex flex-col gap-3 overflow-y-auto border-b border-line p-4 md:border-b-0 md:border-r">
+            <p className="text-xs leading-relaxed text-ink-3">
+              Chaque club reçoit sa propre réponse enregistrée, sans boutons oui / non : seulement un lien discret pour la modifier si besoin.
+            </p>
+            <div className="rounded-btn bg-subtle px-3 py-2 text-xs text-ink-2">
+              <span className="font-bold text-ink">{targets.length} destinataire(s)</span> : {yes} participe{yes > 1 ? "nt" : ""}, {targets.length - yes} ne participe
+              {targets.length - yes > 1 ? "nt" : ""} pas.
+            </div>
+            <label className="block">
+              <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Objet</span>
+              <input
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className="mt-1 w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Message</span>
+              <textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                rows={6}
+                className="mt-1 w-full resize-y rounded-btn border border-line px-3 py-2 text-sm leading-relaxed outline-none"
+              />
+              <span className="mt-1 block text-[10px] text-ink-4">
+                La salutation, la réponse du club et le lien « Modifier ma réponse » sont ajoutés automatiquement.
+              </span>
+            </label>
+            {error && <p className="text-xs font-semibold text-red">{error}</p>}
+            <button
+              onClick={send}
+              disabled={sending || targets.length === 0 || !message.trim()}
+              className="mt-auto flex items-center justify-center gap-2 rounded-btn bg-navy px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+            >
+              <Send size={14} /> {sending ? "Envoi…" : `Envoyer à ${targets.length} destinataire(s)`}
+            </button>
+          </div>
+          <div className="flex min-h-[300px] flex-col">
+            <div className="flex items-center gap-1.5 px-4 py-2 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+              <Eye size={12} /> Aperçu{targets[0] ? ` — ${personName(targets[0]) || targets[0].club || ""}` : ""}
+            </div>
+            <iframe srcDoc={previewHtml} title="Aperçu du mail de confirmation" className="w-full flex-1 bg-subtle" sandbox="allow-popups" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

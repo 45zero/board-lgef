@@ -7,13 +7,16 @@ import { sendMessage } from "@/lib/google/gmail";
 import { findOrCreateFolder, createResumableUploadSession, ensurePublicViewAccess } from "@/lib/google/drive";
 import {
   buildRegistrationEmailHtml,
+  buildResponseConfirmationEmailHtml,
+  recordedResponseLabel,
   renderCampaignCardHtml,
   formatEventDateLabel,
   greetingFor,
   type EmailBlock,
 } from "@/lib/board/registrationEmail";
+import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { personName, greetingName, normalizeFrPhone, type ClubContact } from "@/lib/board/clubContacts";
-import { isTransactionalEmailConfigured, sendTransactionalBatch } from "@/lib/email/transactional";
+import { isTransactionalEmailConfigured, sendTransactionalBatch, type EmailMessage } from "@/lib/email/transactional";
 import { isWhatsAppConfigured, sendWhatsAppEventInvite } from "@/lib/whatsapp";
 import type { Database, Json } from "@/lib/supabase/database.types";
 
@@ -650,6 +653,86 @@ export async function getCampaignEmbedHtml(campaignId: string) {
   });
 }
 
+/* ---------- Adresse de réponse des mails aux clubs ---------- */
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Adresse choisie dans le board (board_settings.registration_reply_to), null si vide ou colonne absente. */
+async function readReplyToSetting(): Promise<{ value: string | null; available: boolean }> {
+  const { data, error } = await createServiceClient()
+    .from("board_settings")
+    .select("registration_reply_to")
+    .eq("id", true)
+    .maybeSingle();
+  if (error) return { value: null, available: false };
+  const value = data?.registration_reply_to?.trim();
+  return { value: value || null, available: true };
+}
+
+/** Où arrivent les « Répondre » des clubs : l'adresse réglée, sinon celle de la personne qui envoie. */
+export async function getRegistrationReplyTo() {
+  const { supabase } = await requireStaff();
+  const [{ value, available }, { data: { user } }] = await Promise.all([readReplyToSetting(), supabase.auth.getUser()]);
+  return { replyTo: value, fallback: user?.email ?? null, available };
+}
+
+export async function setRegistrationReplyTo(email: string): Promise<{ error: string | null }> {
+  const { userId } = await requireStaff();
+  const value = email.trim().toLowerCase();
+  if (value && !EMAIL_RE.test(value)) return { error: "Adresse email invalide." };
+  const { error } = await createServiceClient()
+    .from("board_settings")
+    .update({ registration_reply_to: value || null, updated_by: userId, updated_at: new Date().toISOString() })
+    .eq("id", true);
+  if (error) return { error: "Réglage pas encore disponible (colonne registration_reply_to à créer)." };
+  return { error: null };
+}
+
+/**
+ * Envoi des mails aux clubs : Brevo / Resend (domaine lgef.fr) par lots, sinon le Gmail du Drive du board.
+ * Les « Répondre » arrivent à l'adresse réglée dans Inscriptions, sinon chez la personne qui envoie.
+ */
+async function deliverEmails(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  messages: EmailMessage[],
+  onSent: (indexes: number[]) => Promise<void>
+): Promise<{ sent: number; error: string | null }> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const replyTo = (await readReplyToSetting()).value ?? user?.email ?? null;
+
+  if (isTransactionalEmailConfigured()) {
+    const result = await sendTransactionalBatch(
+      messages.map((m) => ({ ...m, replyTo })),
+      onSent
+    );
+    if (result.sent === 0 && result.errors.length > 0) return { sent: 0, error: `Échec de l'envoi : ${result.errors[0]}` };
+    return { sent: result.sent, error: null };
+  }
+
+  const boardAccountId = await getBoardDriveAccountId();
+  let account = boardAccountId ? await getGoogleAccountById(boardAccountId) : null;
+  if (!account) {
+    const accounts = await listConnectedAccounts(userId);
+    account = accounts.find((a) => a.provider === "google") ?? null;
+  }
+  if (!account) return { sent: 0, error: "Aucun compte Google connecté pour envoyer les emails (Paramètres du board → Drive du board)." };
+
+  let sent = 0;
+  for (const [i, m] of messages.entries()) {
+    try {
+      await sendMessage(account, { to: m.to.join(", "), subject: m.subject, body: m.text, html: m.html, replyTo: replyTo ?? undefined });
+      await onSent([i]);
+      sent += 1;
+    } catch (e) {
+      console.error("[deliverEmails] échec envoi à", m.to, e);
+    }
+  }
+  return { sent, error: null };
+}
+
 /**
  * Envoi par email. Sans `recipientIds` : tous ceux qui n'ont pas encore reçu le mail.
  * Avec `recipientIds` (renvoi individuel ou sélection) : ces destinataires-là, même déjà envoyés.
@@ -721,40 +804,78 @@ export async function sendCampaign(campaignId: string, recipientIds?: string[]) 
       .in("id", ids);
   };
 
-  let sent = 0;
-  if (isTransactionalEmailConfigured()) {
-    // Brevo ou Resend (domaine lgef.fr) : envoi par lots, pas de quota Gmail — les réponses « Répondre » arrivent chez l'expéditeur du board.
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    const result = await sendTransactionalBatch(
-      messages.map((m) => ({ ...m, replyTo: user?.email ?? null })),
-      (indexes) => markSent(indexes.map((i) => withEmail[i].id))
-    );
-    sent = result.sent;
-    if (sent === 0 && result.errors.length > 0) return { sent, error: `Échec de l'envoi : ${result.errors[0]}` };
-  } else {
-    const boardAccountId = await getBoardDriveAccountId();
-    let account = boardAccountId ? await getGoogleAccountById(boardAccountId) : null;
-    if (!account) {
-      const accounts = await listConnectedAccounts(userId);
-      account = accounts.find((a) => a.provider === "google") ?? null;
-    }
-    if (!account) return { sent, error: "Aucun compte Google connecté pour envoyer les emails (Paramètres du board → Drive du board)." };
-
-    for (const [i, m] of messages.entries()) {
-      try {
-        await sendMessage(account, { to: m.to.join(", "), subject: m.subject, body: m.text, html: m.html });
-        await markSent([withEmail[i].id]);
-        sent += 1;
-      } catch (e) {
-        console.error("[sendCampaign] échec envoi à", m.to, e);
-      }
-    }
-  }
+  const { sent, error } = await deliverEmails(supabase, userId, messages, (indexes) => markSent(indexes.map((i) => withEmail[i].id)));
+  if (error) return { sent, error };
 
   await supabase.from("event_registration_campaigns").update({ status: "sent" }).eq("id", campaignId);
   return { sent, error: null };
+}
+
+type ConfirmationRecipient = Database["public"]["Tables"]["event_registration_recipients"]["Row"];
+
+/** Contenu du mail « votre réponse est bien enregistrée » pour un destinataire qui a répondu. */
+async function confirmationMessages(campaignId: string, recipients: ConfirmationRecipient[], subject: string, message: string) {
+  const { supabase } = await requireStaff();
+  const { data: campaign } = await supabase
+    .from("event_registration_campaigns")
+    .select("event_id, events(title, start_date, location)")
+    .eq("id", campaignId)
+    .single();
+  if (!campaign) throw new Error("Campagne introuvable.");
+  const event = campaign.events as unknown as { title: string; start_date: string; location: string | null } | null;
+  const eventTitle = event?.title ?? "Événement";
+  const eventDateLabel = formatEventDateLabel(event?.start_date);
+
+  return recipients.map((r) => {
+    const response = r.response === "yes" ? "yes" : "no";
+    const greeting = greetingFor(greetingName(r));
+    const responseUrl = `${siteUrl()}/inscription/${campaign.event_id}/${r.token}`;
+    const html = buildResponseConfirmationEmailHtml({
+      eventTitle,
+      eventDateLabel,
+      eventLocation: event?.location ?? null,
+      logoUrl: `${siteUrl()}/lgef-logo.png`,
+      greeting,
+      message,
+      response,
+      attendees: r.attendees,
+      responseUrl,
+    });
+    return {
+      to: [r.email!, r.email_secondary].filter((e): e is string => !!e && e !== ""),
+      subject: subject.trim() || `Votre réponse est bien enregistrée — ${eventTitle}`,
+      html,
+      text: `${greeting}\n\n${message}\n\n${recordedResponseLabel(response, r.attendees)}\n\nVous n'avez rien à faire. Votre situation a changé ? Modifier ma réponse : ${responseUrl}`,
+    };
+  });
+}
+
+/** Aperçu du mail de confirmation, avec la réponse du premier destinataire choisi qui a répondu. */
+export async function previewResponseConfirmation(campaignId: string, recipientIds: string[], subject: string, message: string) {
+  const { supabase } = await requireStaff();
+  const rows = await fetchRowsByIds(recipientIds.slice(0, 200), (chunk) =>
+    supabase.from("event_registration_recipients").select("*").eq("campaign_id", campaignId).in("id", chunk)
+  );
+  const sample = rows.find((r) => r.response && r.email);
+  if (!sample) return null;
+  const [m] = await confirmationMessages(campaignId, [sample], subject, message);
+  return { html: m.html, subject: m.subject };
+}
+
+/**
+ * « Votre réponse est bien enregistrée » aux destinataires choisis qui ont déjà répondu (oui ou non),
+ * ex. pour rassurer ceux qui ont reçu une relance par erreur. Les autres sont ignorés ; sent_at n'est pas touché.
+ */
+export async function sendResponseConfirmation(campaignId: string, recipientIds: string[], subject: string, message: string) {
+  const { supabase, userId } = await requireStaff();
+  if (!message.trim()) return { sent: 0, error: "Le message est vide." };
+  const rows = await fetchRowsByIds(recipientIds, (chunk) =>
+    supabase.from("event_registration_recipients").select("*").eq("campaign_id", campaignId).in("id", chunk)
+  );
+  const responded = rows.filter((r) => (r.response === "yes" || r.response === "no") && !!r.email);
+  if (responded.length === 0) return { sent: 0, error: "Aucun destinataire choisi n'a répondu avec une adresse email." };
+  const messages = await confirmationMessages(campaignId, responded, subject, message.trim());
+  return deliverEmails(supabase, userId, messages, async () => {});
 }
 
 /** Invitations WhatsApp (API Meta, modèle approuvé) à tous les destinataires avec un mobile, pas encore invités par WhatsApp. */

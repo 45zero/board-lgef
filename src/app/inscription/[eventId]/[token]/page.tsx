@@ -37,6 +37,8 @@ export default async function RsvpPage({
         cardHtml={cardHtml}
         initialChoice={initialChoice}
         alreadyResponded={recipient.response as "yes" | "no" | null}
+        alreadyAttendees={recipient.attendees}
+        allowChange
         clubLimit={clubLimit}
         onSubmit={respond}
       />

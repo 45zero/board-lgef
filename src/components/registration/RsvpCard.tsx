@@ -12,6 +12,8 @@ export function RsvpCard({
   cardHtml,
   initialChoice,
   alreadyResponded,
+  alreadyAttendees,
+  allowChange = false,
   extraFields,
   clubLimit,
   onSubmit,
@@ -23,6 +25,10 @@ export function RsvpCard({
   cardHtml?: string;
   initialChoice?: "yes" | "no" | null;
   alreadyResponded?: "yes" | "no" | null;
+  /** Nombre de personnes déjà enregistré (réponse « Je participe »). */
+  alreadyAttendees?: number | null;
+  /** Lien personnel : la réponse peut être modifiée (pas sur le lien public, où chaque envoi crée une inscription). */
+  allowChange?: boolean;
   extraFields?: React.ReactNode;
   /** Plafond de personnes par club de la campagne (ex. AG : 2) et places restantes pour ce club — absent = pas de limite. */
   clubLimit?: { cap: number; remaining: number } | null;
@@ -33,7 +39,7 @@ export function RsvpCard({
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<"yes" | "no" | null>(alreadyResponded ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [attendees, setAttendees] = useState("1");
+  const [attendees, setAttendees] = useState(String(alreadyAttendees ?? 1));
   const maxAttendees = clubLimit ? clubLimit.remaining : 99;
   const clubFull = !!clubLimit && clubLimit.remaining === 0;
   const capLabel = clubLimit ? `${clubLimit.cap} personne${clubLimit.cap > 1 ? "s" : ""} maximum par club` : "";
@@ -106,6 +112,17 @@ export function RsvpCard({
                 ? `Merci, votre participation est enregistrée${Number(attendees) > 1 ? ` (${attendees} personnes)` : ""} !`
                 : "Merci, votre réponse a été enregistrée."}
             </p>
+            {allowChange && (
+              <button
+                onClick={() => {
+                  setChoice(done);
+                  setDone(null);
+                }}
+                className="mt-2 text-xs font-semibold text-link hover:underline"
+              >
+                Modifier ma réponse
+              </button>
+            )}
           </div>
         ) : (
           <>

@@ -203,6 +203,71 @@ export function renderCampaignCardHtml(c: RegistrationEmailContent, opts?: { inc
 
 /** Email HTML "design" (table-based, compatible clients mail) — blocs rendus dans l'ordre choisi, chacun avec son propre alignement. */
 export function buildRegistrationEmailHtml(c: RegistrationEmailContent): string {
+  return emailDocument(renderCampaignCardHtml(c));
+}
+
+export interface ResponseConfirmationContent {
+  eventTitle: string;
+  eventDateLabel: string;
+  eventLocation: string | null;
+  logoUrl: string;
+  greeting: string;
+  /** Texte libre écrit dans le board (ex. « ne tenez pas compte de la relance »), un paragraphe par ligne. */
+  message: string;
+  response: "yes" | "no";
+  attendees: number | null;
+  /** Page personnelle du club : voir sa réponse, la modifier si besoin. */
+  responseUrl: string;
+}
+
+/** Phrase de la réponse enregistrée — même texte dans le mail HTML et la version texte. */
+export function recordedResponseLabel(response: "yes" | "no", attendees: number | null) {
+  if (response === "no") return "Votre réponse est bien enregistrée : vous ne participerez pas.";
+  const n = attendees ?? 1;
+  return `Votre réponse est bien enregistrée : vous participez (${n} personne${n > 1 ? "s" : ""}).`;
+}
+
+/**
+ * Mail « votre réponse est bien enregistrée » aux clubs qui ont déjà répondu (ex. après une relance
+ * envoyée à tort) : leur réponse en évidence, aucun bouton oui / non, un simple lien pour la modifier.
+ */
+export function buildResponseConfirmationEmailHtml(c: ResponseConfirmationContent): string {
+  const yes = c.response === "yes";
+  const paragraphs = c.message
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => `<p style="margin:0 0 12px;color:#27334c;font-size:15px;line-height:1.5;">${escapeHtml(line)}</p>`)
+    .join("");
+  const card = `<table role="presentation" class="lgef-card" width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;width:100%;max-width:560px;">
+            <tr>
+              <td class="lgef-pad" style="background:#0b1d3c;padding:20px 28px;">
+                <img src="${escapeAttr(c.logoUrl)}" alt="LGEF" width="33" height="40" style="width:33px;height:40px;display:block;border:0;margin:0 0 14px;" />
+                <p style="margin:0;color:#ffffff;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;opacity:0.7;">Votre réponse</p>
+                <h1 style="margin:6px 0 0;color:#ffffff;font-size:22px;">${escapeHtml(c.eventTitle)}</h1>
+              </td>
+            </tr>
+            <tr>
+              <td class="lgef-pad" style="padding:24px 28px;">
+                <p style="margin:0 0 16px;color:#27334c;font-size:15px;line-height:1.5;">${escapeHtml(c.greeting)}</p>
+                ${paragraphs}
+                <div style="margin:8px 0 16px;padding:14px 16px;border-radius:12px;border:2px solid ${yes ? "#146447" : "#d5dce8"};background:${yes ? "#e8f4ee" : "#f7f9fd"};">
+                  <p style="margin:0;color:${yes ? "#146447" : "#27334c"};font-size:15px;font-weight:bold;line-height:1.4;">${yes ? "✓" : "✕"} ${escapeHtml(recordedResponseLabel(c.response, c.attendees))}</p>
+                  ${c.eventDateLabel ? `<p style="margin:6px 0 0;color:#79859a;font-size:13px;">📅 ${escapeHtml(c.eventDateLabel)}${c.eventLocation ? ` — ${escapeHtml(c.eventLocation)}` : ""}</p>` : ""}
+                </div>
+                <p style="margin:0 0 6px;color:#27334c;font-size:15px;line-height:1.5;">Vous n&rsquo;avez rien à faire.</p>
+                <p style="margin:0;color:#79859a;font-size:13px;line-height:1.5;">Votre situation a changé ? <a href="${escapeAttr(c.responseUrl)}" style="color:#12305f;font-weight:bold;">Modifier ma réponse</a></p>
+              </td>
+            </tr>
+            <tr>
+              <td class="lgef-pad" style="padding:16px 28px;background:#f7f9fd;">
+                <p style="margin:0;color:#79859a;font-size:11px;">Board LGEF — Ligue du Grand Est de Football</p>
+              </td>
+            </tr>
+          </table>`;
+  return emailDocument(card);
+}
+
+function emailDocument(card: string): string {
   return `<!doctype html>
 <html lang="fr">
   <head>
@@ -225,7 +290,7 @@ export function buildRegistrationEmailHtml(c: RegistrationEmailContent): string 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5fb;">
       <tr>
         <td align="center" class="lgef-outer" style="padding:24px 12px;">
-          ${renderCampaignCardHtml(c)}
+          ${card}
         </td>
       </tr>
     </table>

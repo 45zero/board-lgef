@@ -279,12 +279,14 @@ function buildRawMessage(params: {
   body: string;
   html?: string;
   from: string;
+  replyTo?: string;
   inReplyTo?: string;
   references?: string;
 }) {
   const headerLines = [
     `From: ${params.from}`,
     `To: ${params.to}`,
+    ...(params.replyTo ? [`Reply-To: ${params.replyTo}`] : []),
     ...(params.cc ? [`Cc: ${params.cc}`] : []),
     ...(params.bcc ? [`Bcc: ${params.bcc}`] : []),
     `Subject: =?UTF-8?B?${Buffer.from(params.subject, "utf8").toString("base64")}?=`,
@@ -325,7 +327,7 @@ function buildRawMessage(params: {
 
 export async function sendMessage(
   account: ConnectedAccount,
-  params: { to: string; cc?: string; bcc?: string; subject: string; body: string; html?: string }
+  params: { to: string; cc?: string; bcc?: string; subject: string; body: string; html?: string; replyTo?: string }
 ) {
   const gmail = await gmailClient(account);
   const raw = buildRawMessage({ ...params, from: account.email });
