@@ -9,7 +9,15 @@ function cleanAttendees(n: number | null | undefined) {
   return Number.isInteger(n) && n! >= 1 && n! <= 99 ? n! : 1;
 }
 
-type ClubRef = { club: string | null; club_number: string | null };
+type ClubRef = { club: string | null; club_number: string | null; source?: string | null };
+
+/**
+ * Invitation nominative hors club (ex. membres du Comité directeur, tous rangés sous « COMITE DIRECTEUR LGEF »
+ * sans numéro d'affiliation) : pas de plafond par club, et elle ne prend pas de place aux autres.
+ */
+function isPersonalInvite(r: ClubRef) {
+  return r.source === "invited" && !r.club_number;
+}
 
 function normalizeClub(name: string | null | undefined) {
   return (name ?? "")
@@ -30,7 +38,7 @@ function sameClub(a: ClubRef, b: ClubRef) {
 /**
  * Places encore disponibles pour un club quand la campagne a un plafond par club
  * (`max_attendees_per_club`, ex. AG : 2) — somme des « oui » des autres destinataires du même club.
- * `null` = campagne sans plafond.
+ * `null` = campagne sans plafond, ou invitation nominative hors club.
  */
 async function remainingForClub(campaignId: string, club: ClubRef, excludeRecipientId?: string) {
   const supabase = createServiceClient();
@@ -40,16 +48,16 @@ async function remainingForClub(campaignId: string, club: ClubRef, excludeRecipi
     .eq("id", campaignId)
     .maybeSingle();
   const cap = campaign?.max_attendees_per_club ?? null;
-  if (!cap) return null;
+  if (!cap || isPersonalInvite(club)) return null;
   if (!club.club && !club.club_number) return { cap, remaining: cap };
 
   const { data: yes } = await supabase
     .from("event_registration_recipients")
-    .select("id, club, club_number, attendees")
+    .select("id, club, club_number, source, attendees")
     .eq("campaign_id", campaignId)
     .eq("response", "yes");
   const used = (yes ?? [])
-    .filter((r) => r.id !== excludeRecipientId && sameClub(r, club))
+    .filter((r) => r.id !== excludeRecipientId && !isPersonalInvite(r) && sameClub(r, club))
     .reduce((sum, r) => sum + (r.attendees ?? 1), 0);
   return { cap, remaining: Math.max(0, cap - used) };
 }
@@ -235,7 +243,7 @@ export async function submitRegistrationResponse(
   const supabase = createServiceClient();
   const { data: recipient } = await supabase
     .from("event_registration_recipients")
-    .select("id, campaign_id, name, first_name, last_name, club, club_number")
+    .select("id, campaign_id, name, first_name, last_name, club, club_number, source")
     .eq("token", token)
     .maybeSingle();
   if (!recipient) return { error: "Lien invalide ou expiré." };
