@@ -56,6 +56,8 @@ function openLink(n: EmailNotification): { label: string; url: string } {
     case "support_ticket":
     case "support_resolved":
       return { label: "Ouvrir le centre d'aide", url: `${site}/?support=${typeof n.data?.support_ticket_id === "string" ? n.data.support_ticket_id : ""}` };
+    case "transfer_shared":
+      return { label: "Voir le transfert", url: `${site}/?app=transfer${typeof n.data?.transfer_id === "string" ? `&openTransfer=${n.data.transfer_id}` : ""}` };
     case "registration_response":
       return { label: "Voir les inscriptions", url: `${site}/?app=inscription` };
     case "card_assigned":

@@ -4,12 +4,14 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { toResult, type ActionResult } from "@/lib/board/actionResult";
 import { getTransferMember } from "@/lib/transfer/session";
+import { transferAccessFor } from "@/lib/transfer/access";
 import { getTransferStorage } from "@/lib/transfer/storage";
-import { closeTransfer, requireTransferStorage, resendTransferEmails, resolvePlan, transferLink } from "@/lib/transfer/core";
+import { closeTransfer, forwardTransfer as shareTransfer, requireTransferStorage, resendTransferEmails, resolvePlan, transferLink } from "@/lib/transfer/core";
 import { isEmail, type TransferPlanLimits, type TransferPreview } from "@/lib/transfer/shared";
 
-// Onglet « LGEF Transfer » du board : ses transferts (tous pour les admins), gestion des formules,
-// des attributions et des pubs. Lecture sous RLS ; écritures en service role après contrôle.
+// Onglet « LGEF Transfer » du board : ses transferts (tous pour les admins), ceux reçus à son adresse
+// (ou qu'on lui a fait suivre), gestion des formules, des attributions et des pubs. Lecture de ses
+// transferts sous RLS ; transferts reçus et écritures en service role après contrôle.
 
 async function requireMember() {
   const member = await getTransferMember();
@@ -68,28 +70,72 @@ export type TransferRow = {
   createdAt: string;
   expiresAt: string | null;
   mine: boolean;
+  /** Expéditeur ou admin : modifier, prolonger, couper, supprimer. Sinon destinataire : voir, faire suivre, joindre à une carte. */
+  canManage: boolean;
+  /** « Partagés avec moi » : membre qui me l'a fait suivre (null : reçu directement à mon adresse). */
+  sharedBy: string | null;
+  /** Personnes à qui il a été fait suivre (noms des membres, sinon adresses) — toutes pour l'expéditeur, les siennes sinon. */
+  forwardedTo: string[];
+  /** Cartes de l'Espace Team (visibles par moi) où il est joint. */
+  cards: { id: string; title: string }[];
 };
 
-export type TransferFilters = { scope: "mine" | "all"; from?: string; to?: string; status?: TransferStatus | "downloaded" | "never" | ""; q?: string };
+export type TransferFilters = { scope: "mine" | "all" | "received"; from?: string; to?: string; status?: TransferStatus | "downloaded" | "never" | ""; q?: string };
 
 const effectiveStatus = (t: { status: TransferStatus; expires_at: string | null }): TransferStatus =>
   t.status === "ready" && t.expires_at && new Date(t.expires_at).getTime() < Date.now() ? "expired" : t.status;
 
+/**
+ * « Partagés avec moi » : mon adresse parmi les destinataires, ou transfert qu'on m'a fait suivre
+ * (hors les miens). sharedBy : qui me l'a fait suivre en dernier, si je ne l'ai pas reçu directement.
+ */
+async function receivedTransferRows(member: { id: string; email: string }) {
+  const s = createServiceClient();
+  const [{ data: direct, error }, { data: forwards }] = await Promise.all([
+    s.from("transfers").select("*").contains("recipients", [member.email]).neq("status", "uploading").order("created_at", { ascending: false }).limit(500),
+    s.from("transfer_forwards").select("transfer_id, forwarded_by, created_at").contains("recipients", [member.email]).order("created_at", { ascending: false }).limit(500),
+  ]);
+  if (error) throw new Error(error.message);
+  const known = new Set((direct ?? []).map((t) => t.id));
+  const lastForward = new Map<string, string | null>();
+  for (const f of forwards ?? []) if (!lastForward.has(f.transfer_id)) lastForward.set(f.transfer_id, f.forwarded_by);
+  const missing = [...lastForward.keys()].filter((id) => !known.has(id));
+  const byIds = [...new Set(missing.map((id) => lastForward.get(id)).filter((x): x is string => !!x))];
+  const [{ data: forwarded }, { data: people }] = await Promise.all([
+    missing.length ? s.from("transfers").select("*").in("id", missing).neq("status", "uploading") : Promise.resolve({ data: [] }),
+    byIds.length ? s.from("profiles").select("id, first_name, last_name, email").in("id", byIds) : Promise.resolve({ data: [] }),
+  ]);
+  const nameOf = new Map((people ?? []).map((p) => [p.id, [p.first_name, p.last_name].filter(Boolean).join(" ") || p.email || "—"]));
+  return [
+    ...(direct ?? []).map((t) => ({ ...t, shared_by: null as string | null })),
+    ...(forwarded ?? []).map((t) => ({ ...t, shared_by: nameOf.get(lastForward.get(t.id) ?? "") ?? "—" })),
+  ]
+    .filter((t) => t.sender_user_id !== member.id)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
 export async function listTransfers(filters: TransferFilters): Promise<ActionResult<TransferRow[]>> {
   return toResult(async () => {
     const member = await requireMember();
-    const supabase = await createClient();
-    let q = supabase.from("transfers").select("*").order("created_at", { ascending: false }).limit(500);
-    if (filters.scope === "mine" || !member.isAdmin) q = q.eq("sender_user_id", member.id);
-    if (filters.from) q = q.gte("created_at", new Date(`${filters.from}T00:00:00`).toISOString());
-    if (filters.to) q = q.lt("created_at", new Date(new Date(`${filters.to}T00:00:00`).getTime() + 86400_000).toISOString());
-    if (filters.status === "downloaded") q = q.gt("download_count", 0);
-    if (filters.status === "never") q = q.eq("download_count", 0).eq("status", "ready");
-    if (filters.status === "uploading" || filters.status === "revoked") q = q.eq("status", filters.status);
-    const { data, error } = await q;
-    if (error) throw new Error(error.message);
+    let data: Awaited<ReturnType<typeof receivedTransferRows>>;
+    if (filters.scope === "received") {
+      data = await receivedTransferRows(member);
+    } else {
+      const supabase = await createClient();
+      let q = supabase.from("transfers").select("*").order("created_at", { ascending: false }).limit(500);
+      if (filters.scope === "mine" || !member.isAdmin) q = q.eq("sender_user_id", member.id);
+      if (filters.from) q = q.gte("created_at", new Date(`${filters.from}T00:00:00`).toISOString());
+      if (filters.to) q = q.lt("created_at", new Date(new Date(`${filters.to}T00:00:00`).getTime() + 86400_000).toISOString());
+      const res = await q;
+      if (res.error) throw new Error(res.error.message);
+      data = (res.data ?? []).map((t) => ({ ...t, shared_by: null }));
+    }
+    const fromIso = filters.from ? new Date(`${filters.from}T00:00:00`).toISOString() : null;
+    const toIso = filters.to ? new Date(new Date(`${filters.to}T00:00:00`).getTime() + 86400_000).toISOString() : null;
     const needle = (filters.q ?? "").trim().toLowerCase();
-    return (data ?? [])
+    const rows = data
+      .filter((t) => (!fromIso || t.created_at >= fromIso) && (!toIso || t.created_at < toIso))
+      .filter((t) => (filters.status === "downloaded" ? t.download_count > 0 : filters.status === "never" ? t.download_count === 0 : true))
       .map((t) => ({
         id: t.id,
         code: t.code,
@@ -109,35 +155,94 @@ export async function listTransfers(filters: TransferFilters): Promise<ActionRes
         createdAt: t.created_at,
         expiresAt: t.expires_at,
         mine: t.sender_user_id === member.id,
+        canManage: t.sender_user_id === member.id || member.isAdmin,
+        sharedBy: t.shared_by,
+        forwardedTo: [] as string[],
+        cards: [] as { id: string; title: string }[],
       }))
-      .filter((t) => (filters.status === "ready" || filters.status === "expired" || filters.status === "never" ? t.status === (filters.status === "never" ? "ready" : filters.status) : true))
+      .filter((t) => (filters.status && filters.status !== "downloaded" ? t.status === (filters.status === "never" ? "ready" : filters.status) : true))
       .filter((t) => !needle || [t.title, t.senderEmail, t.senderName, t.code, ...t.recipients].some((s) => s.toLowerCase().includes(needle)));
+    await addForwardsAndCards(member, rows);
+    return rows;
   });
+}
+
+const chunks = <T,>(list: T[], size: number) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, (i + 1) * size));
+
+/**
+ * Complète les lignes : à qui chaque transfert a été fait suivre (tout pour l'expéditeur ou un admin,
+ * sinon seulement les suivis faits par moi ou vers moi) et les cartes visibles où il est joint.
+ * Sans la migration du 19/10 (tables absentes), les lignes restent telles quelles.
+ */
+async function addForwardsAndCards(member: { id: string; email: string }, rows: TransferRow[]) {
+  if (!rows.length) return;
+  const s = createServiceClient();
+  const supabase = await createClient();
+  const ids = rows.map((r) => r.id);
+  const parts = chunks(ids, 100);
+  const [forwards, links, { data: people }] = await Promise.all([
+    Promise.all(parts.map((p) => s.from("transfer_forwards").select("transfer_id, forwarded_by, recipients").in("transfer_id", p))).then((rs) => rs.flatMap((r) => r.data ?? [])),
+    Promise.all(parts.map((p) => supabase.from("team_card_transfers").select("transfer_id, card_id").in("transfer_id", p))).then((rs) => rs.flatMap((r) => r.data ?? [])),
+    s.from("profiles").select("first_name, last_name, email").not("email", "is", null),
+  ]);
+  const nameOf = new Map((people ?? []).map((p) => [p.email!.toLowerCase(), [p.first_name, p.last_name].filter(Boolean).join(" ") || p.email!]));
+  const cardIds = [...new Set(links.map((l) => l.card_id))];
+  const cards = (await Promise.all(chunks(cardIds, 100).map((p) => supabase.from("team_cards").select("id, title").in("id", p)))).flatMap((r) => r.data ?? []);
+  const cardTitle = new Map(cards.map((c) => [c.id, c.title]));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  for (const f of forwards) {
+    const row = byId.get(f.transfer_id);
+    if (!row || !(row.canManage || f.forwarded_by === member.id || f.recipients.includes(member.email))) continue;
+    for (const e of f.recipients) {
+      const label = nameOf.get(e) ?? e;
+      if (!row.forwardedTo.includes(label)) row.forwardedTo.push(label);
+    }
+  }
+  for (const l of links) {
+    const row = byId.get(l.transfer_id ?? "");
+    const title = cardTitle.get(l.card_id);
+    if (row && title !== undefined && !row.cards.some((c) => c.id === l.card_id)) row.cards.push({ id: l.card_id, title });
+  }
 }
 
 export type TransferDetail = {
   files: { id: string; name: string; mimeType: string; size: number; downloadCount: number; fromBoardDrive: boolean; preview: TransferPreview }[];
+  /** Historique : expéditeur et admins seulement. */
   downloads: { at: string; fileName: string | null }[];
   message: string;
   driveFolderUrl: string | null;
+  forwards: { at: string; by: string; recipients: string[]; note: string }[];
+  /** Cartes de l'Espace Team (visibles par moi) où le transfert est joint. */
+  cards: { id: string; title: string }[];
 };
 
 export async function getTransferDetail(id: string): Promise<ActionResult<TransferDetail>> {
   return toResult(async () => {
-    await requireMember();
+    const member = await requireMember();
+    const { t, access } = await transferAccessFor(member, id);
+    const s = createServiceClient();
     const supabase = await createClient();
-    const { data: t } = await supabase.from("transfers").select("id, message, drive_folder_id, status, expires_at").eq("id", id).maybeSingle();
-    if (!t) throw new Error("Transfert introuvable.");
-    const [{ data: files }, { data: downloads }, storage] = await Promise.all([
-      supabase.from("transfer_files").select("*").eq("transfer_id", id).order("position"),
-      supabase.from("transfer_downloads").select("at, file_id").eq("transfer_id", id).order("at", { ascending: false }).limit(200),
+    const [{ data: files }, { data: downloads }, { data: forwards }, { data: links }, storage] = await Promise.all([
+      s.from("transfer_files").select("*").eq("transfer_id", id).order("position"),
+      access === "manage" ? s.from("transfer_downloads").select("at, file_id").eq("transfer_id", id).order("at", { ascending: false }).limit(200) : Promise.resolve({ data: [] }),
+      s.from("transfer_forwards").select("created_at, forwarded_by, recipients, note").eq("transfer_id", id).order("created_at", { ascending: false }).limit(100),
+      supabase.from("team_card_transfers").select("card_id").eq("transfer_id", id),
       getTransferStorage(),
     ]);
+    // Destinataire : seulement les suivis qu'il a faits ou reçus (pas ceux des autres).
+    const visibleForwards = (forwards ?? []).filter((f) => access === "manage" || f.forwarded_by === member.id || f.recipients.includes(member.email));
+    const byIds = [...new Set(visibleForwards.map((f) => f.forwarded_by).filter((x): x is string => !!x))];
+    const cardIds = [...new Set((links ?? []).map((l) => l.card_id))];
+    const [{ data: people }, { data: cards }] = await Promise.all([
+      byIds.length ? s.from("profiles").select("id, first_name, last_name, email").in("id", byIds) : Promise.resolve({ data: [] }),
+      cardIds.length ? supabase.from("team_cards").select("id, title").in("id", cardIds) : Promise.resolve({ data: [] }),
+    ]);
+    const nameOf = new Map((people ?? []).map((p) => [p.id, [p.first_name, p.last_name].filter(Boolean).join(" ") || p.email || "—"]));
     const names = new Map((files ?? []).map((f) => [f.id, f.name]));
     const live = effectiveStatus(t) === "ready";
     return {
       message: t.message,
-      driveFolderUrl: t.drive_folder_id && storage?.provider === "google" ? `https://drive.google.com/drive/folders/${t.drive_folder_id}` : null,
+      driveFolderUrl: access === "manage" && t.drive_folder_id && storage?.provider === "google" ? `https://drive.google.com/drive/folders/${t.drive_folder_id}` : null,
       files: (files ?? []).map((f) => ({
         id: f.id,
         name: f.name,
@@ -148,13 +253,53 @@ export async function getTransferDetail(id: string): Promise<ActionResult<Transf
         preview: live && storage && f.drive_file_id ? storage.preview(f.drive_file_id, f.mime_type) : { kind: "none" as const },
       })),
       downloads: (downloads ?? []).map((d) => ({ at: d.at, fileName: d.file_id ? names.get(d.file_id) ?? null : null })),
+      forwards: visibleForwards.map((f) => ({ at: f.created_at, by: (f.forwarded_by && nameOf.get(f.forwarded_by)) || "—", recipients: f.recipients, note: f.note })),
+      cards: (cards ?? []).map((c) => ({ id: c.id, title: c.title })),
     };
+  });
+}
+
+/** Membres du board à qui faire suivre un transfert (sauf moi). */
+export async function listTransferPeople(): Promise<ActionResult<{ id: string; name: string; email: string }[]>> {
+  return toResult(async () => {
+    const member = await requireMember();
+    const { data, error } = await createServiceClient().from("profiles").select("id, first_name, last_name, email").not("email", "is", null).order("first_name");
+    if (error) throw new Error(error.message);
+    return (data ?? [])
+      .filter((p) => p.id !== member.id && p.email)
+      .map((p) => ({ id: p.id, name: [p.first_name, p.last_name].filter(Boolean).join(" ") || p.email!, email: p.email!.toLowerCase() }));
+  });
+}
+
+/**
+ * Fait suivre le transfert (expéditeur, admin ou destinataire) : à des membres du board (onglet
+ * « Partagés avec moi » + notification) et/ou à des adresses (e-mail avec le lien), avec un mot.
+ * Une adresse qui est celle d'un membre est traitée comme ce membre.
+ */
+export async function forwardTransfer(id: string, input: { memberIds: string[]; emails: string[]; note: string }): Promise<ActionResult<{ members: number; emails: number }>> {
+  return toResult(async () => {
+    const member = await requireMember();
+    await transferAccessFor(member, id);
+    const typed = [...new Set(input.emails.map((r) => r.trim().toLowerCase()).filter(Boolean))];
+    if (typed.some((r) => !isEmail(r))) throw new Error("Une adresse est invalide.");
+    const { data: people, error } = await createServiceClient().from("profiles").select("id, email").not("email", "is", null);
+    if (error) throw new Error(error.message);
+    const byEmail = new Map((people ?? []).map((p) => [p.email!.toLowerCase(), p.id]));
+    const byId = new Map((people ?? []).map((p) => [p.id, p.email!.toLowerCase()]));
+    const memberIds = new Set([...input.memberIds.filter((x) => byId.has(x)), ...typed.flatMap((e) => (byEmail.has(e) ? [byEmail.get(e)!] : []))]);
+    memberIds.delete(member.id);
+    const members = [...memberIds].map((mid) => ({ id: mid, email: byId.get(mid)! }));
+    const emails = typed.filter((e) => !byEmail.has(e));
+    if (!members.length && !emails.length) throw new Error("Choisissez au moins une personne ou une adresse.");
+    if (members.length + emails.length > 30) throw new Error("30 destinataires au maximum par envoi.");
+    await shareTransfer(id, { id: member.id, name: member.name, email: member.email }, { emails, members }, input.note.trim().slice(0, 2000));
+    return { members: members.length, emails: emails.length };
   });
 }
 
 /* ---------- Actions sur un transfert ---------- */
 
-/** Transfert visible par l'utilisateur (RLS : le sien, ou admin). */
+/** Transfert géré par l'utilisateur (RLS : le sien, ou admin) — un destinataire ne peut pas le modifier. */
 async function ownTransfer(id: string) {
   const member = await requireMember();
   const supabase = await createClient();

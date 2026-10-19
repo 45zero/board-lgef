@@ -44,7 +44,7 @@ export type BoardNotification = {
   created_at: string;
   event_id: string | null;
   actor_name: string | null;
-  data: { team_card_id?: string; support_ticket_id?: string; app?: string } | null;
+  data: { team_card_id?: string; support_ticket_id?: string; app?: string; transfer_id?: string } | null;
 };
 
 type Listener = { tables: Set<LiveTable> | null; fn: () => void };

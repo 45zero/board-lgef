@@ -4258,6 +4258,54 @@ export type Database = {
         }
         Relationships: []
       }
+      team_card_transfers: {
+        Row: {
+          id: string
+          card_id: string
+          transfer_id: string | null
+          linked_by: string | null
+          linked_at: string
+          code: string
+          title: string
+          sender_email: string
+          sender_name: string
+          file_count: number
+          total_bytes: number
+          files_copied: number
+          files: Json
+        }
+        Insert: {
+          id?: string
+          card_id: string
+          transfer_id?: string | null
+          linked_by?: string | null
+          linked_at?: string
+          code: string
+          title?: string
+          sender_email?: string
+          sender_name?: string
+          file_count?: number
+          total_bytes?: number
+          files_copied?: number
+          files?: Json
+        }
+        Update: {
+          id?: string
+          card_id?: string
+          transfer_id?: string | null
+          linked_by?: string | null
+          linked_at?: string
+          code?: string
+          title?: string
+          sender_email?: string
+          sender_name?: string
+          file_count?: number
+          total_bytes?: number
+          files_copied?: number
+          files?: Json
+        }
+        Relationships: []
+      }
       team_card_members: {
         Row: {
           card_id: string
@@ -4974,6 +5022,33 @@ export type Database = {
           file_id?: string | null
           visitor?: string
           at?: string
+        }
+        Relationships: []
+      }
+      transfer_forwards: {
+        Row: {
+          id: string
+          transfer_id: string
+          forwarded_by: string | null
+          recipients: string[]
+          note: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          transfer_id: string
+          forwarded_by?: string | null
+          recipients: string[]
+          note?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          transfer_id?: string
+          forwarded_by?: string | null
+          recipients?: string[]
+          note?: string
+          created_at?: string
         }
         Relationships: []
       }

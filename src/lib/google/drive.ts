@@ -372,6 +372,21 @@ export async function uploadTaggedFile(
   return toTagged(data);
 }
 
+/** Copie d'un fichier du même Drive (côté Google, rien ne transite par nos serveurs), étiquetée. */
+export async function copyTaggedFile(
+  account: ConnectedAccount,
+  fileId: string,
+  params: { name: string; parentId: string; description?: string; appProperties?: Record<string, string> }
+) {
+  const drive = await driveClient(account);
+  const { data } = await drive.files.copy({
+    fileId,
+    requestBody: { name: params.name, parents: [params.parentId], description: params.description, appProperties: params.appProperties },
+    fields: TAGGED_FIELDS,
+  });
+  return toTagged(data);
+}
+
 /** Partage un fichier en lecture avec une adresse e-mail : Google envoie l'invitation (message facultatif). */
 export async function shareFileWithEmail(account: ConnectedAccount, fileId: string, email: string, message?: string) {
   const drive = await driveClient(account);

@@ -19,13 +19,13 @@ export function NewCardDialog({
 }: {
   ws: TeamWorkspace;
   myBoards: TeamBoard[];
-  initial: { personId?: string; boardId?: string; listId?: string };
+  initial: { personId?: string; boardId?: string; listId?: string; title?: string };
   onClose: () => void;
   onCreated: (cardId: string) => Promise<void>;
   onError: (m: string) => void;
   zClass?: string;
 }) {
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(initial.title ?? "");
   const [boardId, setBoardId] = useState(initial.boardId ?? myBoards[0]?.id ?? "");
   const board = myBoards.find((b) => b.id === boardId);
   const [listId, setListId] = useState(initial.listId ?? "");

@@ -207,6 +207,7 @@ export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidget
                     if (chat) window.dispatchEvent(new CustomEvent(OPEN_DISCUSSION, { detail: chat }));
                     else if (n.data?.team_card_id) openCard(n.data.team_card_id);
                     else if (n.event_id) void openEvent(n.event_id);
+                    else if (n.data?.transfer_id && /^[0-9a-f-]{36}$/.test(n.data.transfer_id)) window.location.assign(`/?app=transfer&openTransfer=${n.data.transfer_id}`);
                   }}
                   className="flex w-full gap-2 pr-5 text-left"
                 >

@@ -4,7 +4,7 @@ import { format } from "date-fns";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { getTransferStorage, type TransferPreview } from "@/lib/transfer/storage";
 import { GB, isEmail, type TransferAdView, type TransferPlanLimits, type UploadTarget } from "@/lib/transfer/shared";
-import { sendCodeEmail, sendDownloadNoticeEmail, sendTransferEmails } from "@/lib/transfer/emails";
+import { sendCodeEmail, sendDownloadNoticeEmail, sendForwardEmails, sendTransferEmails } from "@/lib/transfer/emails";
 
 // LGEF Transfer — logique serveur (sans session : la page publique passe par ici en service role).
 // Voir sql/2026-10-13_lgef_transfer.sql pour le modèle.
@@ -295,7 +295,6 @@ export async function completeTransfer(transferId: string, uploaded: { fileRowId
   return { code: t.code, link: transferLink(t.code) };
 }
 
-/** Renvoie l'e-mail aux destinataires (depuis le board). */
 /** Renvoie l'e-mail aux destinataires (depuis le board) ; `onlyTo` : seulement à ces adresses (destinataires ajoutés). */
 export async function resendTransferEmails(transferId: string, onlyTo?: string[]) {
   const s = svc();
@@ -305,6 +304,45 @@ export async function resendTransferEmails(transferId: string, onlyTo?: string[]
   if (!recipients.length) throw new Error("Aucun destinataire à qui envoyer l'e-mail.");
   const { data: files } = await s.from("transfer_files").select("*").eq("transfer_id", transferId).order("position");
   await sendTransferEmails({ ...t, recipients }, files ?? [], transferLink(t.code), { recipientsOnly: true });
+}
+
+/**
+ * « Faire suivre » depuis le board (appelant déjà contrôlé ; les destinataires d'origine ne changent
+ * pas). Adresses extérieures : e-mail LGEF Transfer avec le lien. Membres du board : le transfert
+ * apparaît dans leur onglet « Partagés avec moi » et ils reçoivent une notification du board (envoyée
+ * aussi par e-mail selon leurs préférences, avec un lien qui ouvre le transfert). Noté dans transfer_forwards.
+ */
+export async function forwardTransfer(
+  transferId: string,
+  by: { id: string; name: string; email: string },
+  to: { emails: string[]; members: { id: string; email: string }[] },
+  note: string
+) {
+  const s = svc();
+  const { data: t } = await s.from("transfers").select("*").eq("id", transferId).single();
+  if (!t || t.status !== "ready" || (t.expires_at && new Date(t.expires_at).getTime() < Date.now())) throw new Error("Ce transfert n'est plus actif : il ne peut pas être suivi.");
+  if (to.emails.length) {
+    const { data: files } = await s.from("transfer_files").select("name, size_bytes").eq("transfer_id", transferId).order("position");
+    await sendForwardEmails(t, files ?? [], transferLink(t.code), { by, to: to.emails, note });
+  }
+  const recipients = [...new Set([...to.emails, ...to.members.map((m) => m.email)])];
+  const { error } = await s.from("transfer_forwards").insert({ transfer_id: transferId, forwarded_by: by.id, recipients, note });
+  if (error) throw new Error(`Partage non enregistré : ${error.message}`);
+  const who = by.name || by.email;
+  const what = t.title ? `« ${t.title} »` : `${t.file_count} fichier${t.file_count > 1 ? "s" : ""}`;
+  const origin = t.sender_email !== by.email ? ` (envoyé par ${t.sender_name || t.sender_email})` : "";
+  await Promise.all(
+    to.members.map((m) =>
+      s.rpc("create_notification", {
+        p_user_id: m.id,
+        p_type: "transfer_shared",
+        p_title: "Transfert partagé avec vous",
+        p_message: `${who} vous fait suivre ${what}${origin}.${note ? ` « ${note.slice(0, 160)} »` : ""}`,
+        p_actor_name: who,
+        p_data: { app: "transfer", transfer_id: transferId },
+      })
+    )
+  );
 }
 
 /* ---------- Page de téléchargement ---------- */

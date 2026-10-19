@@ -51,9 +51,10 @@ export function NotificationBell({ variant = "desktop" }: { variant?: "desktop" 
       setOpen(false);
       void openEvent(n.event_id);
     } else if (n.data?.app && /^[a-z]+$/.test(n.data.app)) {
-      // Module à ouvrir (ex. centre de publication) : même lien que dans l'e-mail.
+      // Module à ouvrir (ex. centre de publication) : même lien que dans l'e-mail ; transfert partagé : ouvert d'emblée.
       setOpen(false);
-      window.location.assign(`/?app=${n.data.app}`);
+      const transfer = n.data.transfer_id && /^[0-9a-f-]{36}$/.test(n.data.transfer_id) ? `&openTransfer=${n.data.transfer_id}` : "";
+      window.location.assign(`/?app=${n.data.app}${transfer}`);
     }
   };
 

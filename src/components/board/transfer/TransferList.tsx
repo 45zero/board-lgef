@@ -1,12 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, Copy, Check, ExternalLink, Eye, Download, Loader2, X, Mail, Ban, Archive, CalendarClock, FolderOpen, Send, Users, Pencil, Trash2, Save } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Search, Copy, Check, ExternalLink, Eye, Download, Loader2, X, Mail, Ban, Archive, CalendarClock, FolderOpen, Send, Users, Pencil, Trash2, Save, Forward, Kanban } from "lucide-react";
 import { unwrap } from "@/lib/board/actionResult";
 import { durationChoices, durationLabel, fileKind, formatBytes, type TransferPlanLimits } from "@/lib/transfer/shared";
 import { KindIcon, RemotePreviewModal } from "@/components/transfer/FilePreview";
+import { LinkTransferToCardPopover } from "@/components/board/team/TeamTransfers";
+import { TeamCardGlyph, useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
+import { clearOpenTransferParam, readOpenTransferParam } from "@/lib/board/deepLink";
 import {
   deleteTransfer,
+  forwardTransfer,
+  listTransferPeople,
   updateTransfer,
   extendTransfer,
   getTransferDetail,
@@ -20,8 +25,10 @@ import {
   type TransferStatus,
 } from "@/app/actions/transfers";
 
-// Onglet « Transferts » : tous ses transferts (tous ceux du board pour les admins), filtres par
-// période, statut et recherche ; fiche détaillée avec aperçu, historique des téléchargements, actions.
+// Onglet « Transferts » : ses transferts envoyés (tous ceux du board pour les admins) et reçus (à son
+// adresse, ou qu'on lui a fait suivre), filtres par période, statut et recherche ; fiche détaillée
+// avec aperçu, historique des téléchargements, actions. Un transfert reçu se consulte, se fait
+// suivre et se joint à une carte ; seul l'expéditeur (ou un admin) le modifie.
 
 const STATUS_META: Record<TransferStatus, { label: string; tone: string }> = {
   ready: { label: "Actif", tone: "bg-good-bg text-good" },
@@ -44,8 +51,15 @@ export const PERIODS: { id: string; label: string; range: () => { from?: string;
 const dateTime = (s: string) => new Date(s).toLocaleString("fr-FR", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const shortDate = (s: string) => new Date(s).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
 
+type DrawerMode = "edit" | "forward" | "card" | null;
+type Person = { id: string; name: string; email: string };
+type ForwardDraft = { members: Person[]; query: string; to: string; note: string };
+const EMPTY_FORWARD: ForwardDraft = { members: [], query: "", to: "", note: "" };
+
 export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; plan: TransferPlanLimits | null; refreshKey: number }) {
-  const [scope, setScope] = useState<"mine" | "all">(isAdmin ? "all" : "mine");
+  // Lien d'une notification « transfert partagé » (/?app=transfer&openTransfer=<id>) : fiche ouverte dans « Partagés avec moi ».
+  const [linked] = useState(readOpenTransferParam);
+  const [scope, setScope] = useState<TransferFilters["scope"]>(linked ? "received" : isAdmin ? "all" : "mine");
   const [period, setPeriod] = useState("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -53,8 +67,9 @@ export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; 
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<TransferRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [openEditing, setOpenEditing] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(linked);
+  useEffect(() => clearOpenTransferParam(), []);
+  const [openMode, setOpenMode] = useState<DrawerMode>(null);
   const [rowBusy, setRowBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -74,12 +89,12 @@ export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; 
   }, [load, refreshKey]);
 
   const needle = q.trim().toLowerCase();
-  const shown = (rows ?? []).filter((t) => !needle || [t.title, t.senderEmail, t.senderName, t.code, ...t.recipients].some((s) => s.toLowerCase().includes(needle)));
+  const shown = (rows ?? []).filter((t) => !needle || [t.title, t.senderEmail, t.senderName, t.code, ...t.recipients, ...t.forwardedTo].some((s) => s.toLowerCase().includes(needle)));
   const totals = shown.reduce((acc, t) => ({ bytes: acc.bytes + t.totalBytes, downloads: acc.downloads + t.downloadCount }), { bytes: 0, downloads: 0 });
   const open = rows?.find((t) => t.id === openId) ?? null;
 
-  const openTransfer = (id: string, editing = false) => {
-    setOpenEditing(editing);
+  const openTransfer = (id: string, mode: DrawerMode = null) => {
+    setOpenMode(mode);
     setOpenId(id);
   };
 
@@ -103,23 +118,22 @@ export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        {isAdmin && (
-          <div className="flex rounded-btn bg-card p-0.5">
-            {(
-              [
-                ["all", "Tout le board"],
-                ["mine", "Les miens"],
-              ] as const
-            ).map(([id, label]) => (
-              <button key={id} onClick={() => setScope(id)} className={`rounded-btn px-3 py-1.5 text-xs font-bold ${scope === id ? "bg-navy text-white" : "text-ink-3 hover:bg-hover"}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="flex rounded-btn bg-card p-0.5">
+          {(
+            [
+              ...(isAdmin ? ([["all", "Tout le board"]] as const) : []),
+              ["mine", "Envoyés"],
+              ["received", "Partagés avec moi"],
+            ] as const
+          ).map(([id, label]) => (
+            <button key={id} onClick={() => setScope(id)} className={`rounded-btn px-3 py-1.5 text-xs font-bold ${scope === id ? "bg-navy text-white" : "text-ink-3 hover:bg-hover"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="flex min-w-[200px] flex-1 items-center gap-2 rounded-btn border border-line bg-card px-2.5 py-1.5">
           <Search size={13} className="text-ink-4" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Titre, expéditeur, destinataire…" className="w-full bg-transparent text-sm outline-none" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Titre, expéditeur, destinataire, suivi à…" className="w-full bg-transparent text-sm outline-none" />
         </div>
         <select value={period} onChange={(e) => setPeriod(e.target.value)} className="rounded-btn border border-line bg-card px-2 py-1.5 text-sm outline-none" aria-label="Période">
           {PERIODS.map((p) => (
@@ -158,7 +172,7 @@ export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; 
         {rows !== null && shown.length === 0 && (
           <div className="px-4 py-12 text-center text-sm text-ink-4">
             <Send size={28} className="mx-auto mb-2 opacity-50" />
-            Aucun transfert pour ces filtres.
+            {scope === "received" ? "Aucun transfert partagé avec vous pour ces filtres." : "Aucun transfert pour ces filtres."}
           </div>
         )}
         <ul className="divide-y divide-line">
@@ -170,11 +184,39 @@ export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; 
                     <p className="truncate text-sm font-bold text-ink">{t.title || `${t.fileCount} fichier${t.fileCount > 1 ? "s" : ""}`}</p>
                     <span className={`shrink-0 rounded-chip px-2 py-0.5 text-[10px] font-bold ${STATUS_META[t.status].tone}`}>{STATUS_META[t.status].label}</span>
                     {t.archived && <Archive size={12} className="shrink-0 text-ink-4" aria-label="Archivé" />}
+                    {/* Joint à une carte : logo Espace Team en rouge, ouvre la carte. */}
+                    {t.cards.length > 0 && (
+                      <span className="shrink-0 text-red">
+                        <TeamCardGlyph cards={t.cards} size={14} />
+                      </span>
+                    )}
                   </div>
                   <p className="mt-0.5 truncate text-xs text-ink-3">
-                    {scope === "all" && <b className="font-semibold text-ink-2">{t.senderName || t.senderEmail} → </b>}
-                    {t.recipients.length ? t.recipients.join(", ") : "Lien partagé"}
+                    {scope === "received" ? (
+                      <>
+                        {t.sharedBy ? (
+                          <>
+                            Partagé par <b className="font-semibold text-ink-2">{t.sharedBy}</b> · envoyé par {t.senderName || t.senderEmail}
+                          </>
+                        ) : (
+                          <>
+                            Reçu de <b className="font-semibold text-ink-2">{t.senderName || t.senderEmail}</b>
+                          </>
+                        )}
+                        {t.recipients.length > 0 && <> → {t.recipients.join(", ")}</>}
+                      </>
+                    ) : (
+                      <>
+                        {scope === "all" && <b className="font-semibold text-ink-2">{t.senderName || t.senderEmail} → </b>}
+                        {t.recipients.length ? t.recipients.join(", ") : "Lien partagé"}
+                      </>
+                    )}
                   </p>
+                  {t.forwardedTo.length > 0 && (
+                    <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-ink-4" title={t.forwardedTo.join(", ")}>
+                      <Forward size={11} className="shrink-0" /> <span className="truncate">Suivi à {t.forwardedTo.join(", ")}</span>
+                    </p>
+                  )}
                 </div>
                 <div className="hidden shrink-0 text-right text-xs text-ink-3 sm:block">
                   <p>
@@ -197,7 +239,9 @@ export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; 
                 </span>
               </button>
               <div className="flex shrink-0 items-center gap-0.5 pr-3">
-                {t.status === "ready" && t.recipients.length > 0 && (
+                {t.status === "ready" && <RowButton icon={Forward} label="Faire suivre (membres du board ou e-mail)" onClick={() => openTransfer(t.id, "forward")} />}
+                {t.status === "ready" && <RowButton icon={Kanban} label="Joindre à une carte" onClick={() => openTransfer(t.id, "card")} />}
+                {t.canManage && t.status === "ready" && t.recipients.length > 0 && (
                   <RowButton
                     icon={Mail}
                     label="Renvoyer l'e-mail aux destinataires"
@@ -205,21 +249,23 @@ export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; 
                     onClick={() => rowAction(`resend-${t.id}`, async () => unwrap(await resendTransfer(t.id)), `E-mail renvoyé à ${t.recipients.length} destinataire${t.recipients.length > 1 ? "s" : ""}.`)}
                   />
                 )}
-                <RowButton icon={Pencil} label="Modifier" onClick={() => openTransfer(t.id, true)} />
-                <RowButton
-                  icon={Trash2}
-                  label="Supprimer"
-                  danger
-                  busy={rowBusy === `delete-${t.id}`}
-                  onClick={() =>
-                    rowAction(
-                      `delete-${t.id}`,
-                      async () => unwrap(await deleteTransfer(t.id)),
-                      "Transfert supprimé.",
-                      `Supprimer « ${t.title || "ce transfert"} » ? Le lien est coupé${t.archived ? "" : " et les fichiers envoyés sont supprimés définitivement du Drive"}.`
-                    )
-                  }
-                />
+                {t.canManage && <RowButton icon={Pencil} label="Modifier" onClick={() => openTransfer(t.id, "edit")} />}
+                {t.canManage && (
+                  <RowButton
+                    icon={Trash2}
+                    label="Supprimer"
+                    danger
+                    busy={rowBusy === `delete-${t.id}`}
+                    onClick={() =>
+                      rowAction(
+                        `delete-${t.id}`,
+                        async () => unwrap(await deleteTransfer(t.id)),
+                        "Transfert supprimé.",
+                        `Supprimer « ${t.title || "ce transfert"} » ? Le lien est coupé${t.archived ? "" : " et les fichiers envoyés sont supprimés définitivement du Drive"}.`
+                      )
+                    }
+                  />
+                )}
               </div>
             </li>
           ))}
@@ -233,7 +279,7 @@ export function TransferList({ isAdmin, plan, refreshKey }: { isAdmin: boolean; 
           t={open}
           isAdmin={isAdmin}
           plan={plan}
-          startEditing={openEditing}
+          startMode={openMode}
           onClose={() => setOpenId(null)}
           onChanged={load}
           onDeleted={() => {
@@ -253,7 +299,7 @@ function TransferDrawer({
   t,
   isAdmin,
   plan,
-  startEditing,
+  startMode,
   onClose,
   onChanged,
   onDeleted,
@@ -261,7 +307,7 @@ function TransferDrawer({
   t: TransferRow;
   isAdmin: boolean;
   plan: TransferPlanLimits | null;
-  startEditing: boolean;
+  startMode: DrawerMode;
   onClose: () => void;
   onChanged: () => void;
   onDeleted: () => void;
@@ -274,6 +320,45 @@ function TransferDrawer({
   const [extendDays, setExtendDays] = useState<string>("7");
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [forward, setForward] = useState<ForwardDraft | null>(startMode === "forward" ? EMPTY_FORWARD : null);
+  const [people, setPeople] = useState<Person[] | null>(null);
+  const [linking, setLinking] = useState(startMode === "card");
+  const [linkedCard, setLinkedCard] = useState<{ id: string; title: string } | null>(null);
+  const { open: openCard } = useOpenTeamCard();
+  const body = useRef<HTMLDivElement>(null);
+
+  const reloadDetail = () => getTransferDetail(t.id).then((r) => r.ok && setDetail(r.data));
+
+  const sendForward = async () => {
+    if (!forward) return;
+    setBusy("forward");
+    setError(null);
+    setNotice(null);
+    try {
+      const res = unwrap(await forwardTransfer(t.id, { memberIds: forward.members.map((m) => m.id), emails: forward.to.split(/[\s,;]+/).filter(Boolean), note: forward.note }));
+      setForward(null);
+      setNotice(
+        [
+          res.members ? `Partagé avec ${res.members} membre${res.members > 1 ? "s" : ""} du board (notifié${res.members > 1 ? "s" : ""})` : "",
+          res.emails ? `lien envoyé à ${res.emails} adresse${res.emails > 1 ? "s" : ""}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ")
+          .replace(/^./, (c) => c.toUpperCase()) + "."
+      );
+      void reloadDetail();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Envoi impossible.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Annuaire chargé à la première ouverture de « Faire suivre ».
+  useEffect(() => {
+    if (!forward || people) return;
+    void listTransferPeople().then((r) => setPeople(r.ok ? r.data : []));
+  }, [forward, people]);
 
   const startEdit = (d: TransferDetail) => setDraft({ title: t.title, message: d.message, recipients: t.recipients.join(", "), notifyAdded: true });
 
@@ -283,7 +368,7 @@ function TransferDrawer({
         const d = unwrap(r);
         setDetail(d);
         // Ouvert depuis le bouton « Modifier » de la liste : formulaire prêt (message connu).
-        if (startEditing) setDraft({ title: t.title, message: d.message, recipients: t.recipients.join(", "), notifyAdded: true });
+        if (startMode === "edit" && t.canManage) setDraft({ title: t.title, message: d.message, recipients: t.recipients.join(", "), notifyAdded: true });
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Chargement impossible."));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- chargé une fois par transfert (la clé du tiroir change sinon)
@@ -348,7 +433,7 @@ function TransferDrawer({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+        <div ref={body} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
           {notice && <p className="rounded-btn bg-good-bg px-3 py-2 text-xs text-good">{notice}</p>}
           {draft && (
             <section className="space-y-2 rounded-card border border-line-strong p-3">
@@ -388,6 +473,101 @@ function TransferDrawer({
                   {busy === "edit" ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Enregistrer
                 </button>
                 <button onClick={() => setDraft(null)} className="rounded-btn px-3 py-1.5 text-xs font-semibold text-ink-3 hover:bg-hover">
+                  Annuler
+                </button>
+              </div>
+            </section>
+          )}
+          {/* Sélecteur de carte : en haut du contenu, déroulé vers le bas (le pied de fiche est en bas d'écran). */}
+          <div className="relative h-0">
+            <LinkTransferToCardPopover
+              open={linking}
+              onClose={() => setLinking(false)}
+              transfer={{ id: t.id, title: t.title }}
+              onDone={(message, card) => {
+                setNotice(message);
+                setLinkedCard(card);
+                if (card) void reloadDetail();
+              }}
+            />
+          </div>
+          {linkedCard && (
+            <button onClick={() => openCard(linkedCard.id)} className="flex w-full items-center gap-1.5 rounded-btn bg-sel-bg px-3 py-2 text-left text-xs font-bold text-link hover:opacity-90">
+              <Kanban size={13} /> Ouvrir la carte « {linkedCard.title} »
+            </button>
+          )}
+          {forward && (
+            <section className="space-y-2 rounded-card border border-line-strong p-3">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-ink-4">Faire suivre</h3>
+              <div className="rounded-btn border border-line bg-card px-2 py-1.5 focus-within:border-line-strong">
+                <div className="flex flex-wrap items-center gap-1">
+                  {forward.members.map((m) => (
+                    <span key={m.id} className="flex items-center gap-1 rounded-chip bg-sel-bg px-2 py-0.5 text-xs font-semibold text-link">
+                      {m.name}
+                      <button onClick={() => setForward({ ...forward, members: forward.members.filter((x) => x.id !== m.id) })} aria-label={`Retirer ${m.name}`}>
+                        <X size={11} />
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    autoFocus
+                    value={forward.query}
+                    onChange={(e) => setForward({ ...forward, query: e.target.value })}
+                    placeholder={forward.members.length ? "Ajouter un membre…" : "Membres du board (ex. Ianis)…"}
+                    aria-label="Membres du board"
+                    className="min-w-[140px] flex-1 bg-transparent py-0.5 text-sm outline-none"
+                  />
+                </div>
+                {forward.query.trim() && (
+                  <ul className="mt-1 max-h-40 overflow-y-auto border-t border-line pt-1">
+                    {people === null && <li className="px-1 py-1 text-xs text-ink-4">Chargement…</li>}
+                    {(people ?? [])
+                      .filter((p) => !forward.members.some((m) => m.id === p.id) && `${p.name} ${p.email}`.toLowerCase().includes(forward.query.trim().toLowerCase()))
+                      .slice(0, 6)
+                      .map((p) => (
+                        <li key={p.id}>
+                          <button
+                            onClick={() => setForward({ ...forward, members: [...forward.members, p], query: "" })}
+                            className="flex w-full items-center justify-between gap-2 rounded-btn px-1.5 py-1 text-left text-sm hover:bg-hover"
+                          >
+                            <span className="truncate text-ink-2">{p.name}</span>
+                            <span className="truncate text-[11px] text-ink-4">{p.email}</span>
+                          </button>
+                        </li>
+                      ))}
+                  </ul>
+                )}
+              </div>
+              <textarea
+                value={forward.to}
+                onChange={(e) => setForward({ ...forward, to: e.target.value })}
+                rows={2}
+                placeholder="Et/ou des adresses e-mail extérieures (séparées par une virgule)"
+                aria-label="Adresses"
+                className="w-full resize-none rounded-btn border border-line bg-card px-3 py-2 text-sm outline-none focus:border-line-strong"
+              />
+              <textarea
+                value={forward.note}
+                onChange={(e) => setForward({ ...forward, note: e.target.value })}
+                maxLength={2000}
+                rows={3}
+                placeholder="Un mot (facultatif) — ex. « Ianis, peux-tu reprendre ces visuels ? »"
+                aria-label="Message"
+                className="w-full resize-none rounded-btn border border-line bg-card px-3 py-2 text-sm outline-none focus:border-line-strong"
+              />
+              <p className="text-[11px] text-ink-4">
+                Les membres le retrouvent dans « Partagés avec moi » et reçoivent une notification ; les adresses extérieures reçoivent le lien par e-mail
+                {t.mine ? "" : ` (envoyé par ${t.senderName || t.senderEmail})`}. Valable {t.expiresAt ? `jusqu'au ${shortDate(t.expiresAt)}` : "sans limite"}.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void sendForward()}
+                  disabled={busy === "forward" || (!forward.members.length && !forward.to.trim())}
+                  className="flex items-center gap-1.5 rounded-btn bg-red px-3 py-1.5 text-xs font-bold text-white disabled:opacity-60"
+                >
+                  {busy === "forward" ? <Loader2 size={13} className="animate-spin" /> : <Forward size={13} />} Faire suivre
+                </button>
+                <button onClick={() => setForward(null)} className="rounded-btn px-3 py-1.5 text-xs font-semibold text-ink-3 hover:bg-hover">
                   Annuler
                 </button>
               </div>
@@ -459,11 +639,58 @@ function TransferDrawer({
             </section>
           )}
 
+          {detail && detail.cards.length > 0 && (
+            <section>
+              <h3 className="mb-1.5 text-xs font-bold uppercase tracking-wide text-ink-4">Joint aux cartes</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {detail.cards.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => openCard(c.id)}
+                    className="flex max-w-full items-center gap-1.5 rounded-btn border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-2 hover:border-link hover:bg-sel-bg hover:text-link"
+                  >
+                    <Kanban size={12} /> <span className="truncate">{c.title}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {detail && detail.forwards.length > 0 && (
+            <section>
+              <h3 className="mb-1.5 text-xs font-bold uppercase tracking-wide text-ink-4">Fait suivre</h3>
+              <ul className="space-y-1.5 text-xs text-ink-3">
+                {detail.forwards.map((f, i) => (
+                  <li key={i}>
+                    <span className="text-ink-2">
+                      {f.by} → {f.recipients.join(", ")}
+                    </span>
+                    <span className="text-ink-4"> · {dateTime(f.at)}</span>
+                    {f.note && <p className="mt-0.5 whitespace-pre-line text-ink-4">« {f.note} »</p>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           {error && <p className="rounded-btn bg-bad-bg px-3 py-2 text-xs text-bad">{error}</p>}
         </div>
 
         <div className="space-y-2 border-t border-line p-4">
           {active && (
+            <div className="flex flex-wrap gap-2">
+              {!forward && <Action icon={Forward} label="Faire suivre" onClick={() => setForward(EMPTY_FORWARD)} />}
+              <Action
+                icon={Kanban}
+                label="Joindre à une carte"
+                onClick={() => {
+                  body.current?.scrollTo({ top: 0, behavior: "smooth" });
+                  setLinking(true);
+                }}
+              />
+            </div>
+          )}
+          {t.canManage && active && (
             <div className="flex flex-wrap items-center gap-2">
               <select value={extendDays} onChange={(e) => setExtendDays(e.target.value)} className="rounded-btn border border-line bg-card px-2 py-1.5 text-xs outline-none" aria-label="Nouvelle durée">
                 {choices.map((d) => (
@@ -481,6 +708,7 @@ function TransferDrawer({
               {t.recipients.length > 0 && <Action icon={Mail} label="Renvoyer l'e-mail" busy={busy === "resend"} onClick={() => run("resend", async () => unwrap(await resendTransfer(t.id)))} />}
             </div>
           )}
+          {t.canManage && (
           <div className="flex flex-wrap gap-2">
             {!draft && <Action icon={Pencil} label="Modifier" busy={!detail} onClick={() => detail && startEdit(detail)} />}
             {(active || t.status === "uploading") && (
@@ -529,6 +757,7 @@ function TransferDrawer({
               }}
             />
           </div>
+          )}
         </div>
       </aside>
 

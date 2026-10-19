@@ -41,6 +41,7 @@ import { unwrap } from "@/lib/board/actionResult";
 import { TEAM_COLORS, TEAM_COLOR_IDS, isCardDone, type TeamCard, type TeamColor, type TeamComment, type TeamWorkspace } from "@/lib/board/team";
 import { Avatar, DueChip, EventChip, LeaveBeforeEventContext, Popover } from "./TeamUi";
 import { TeamAttachments } from "./TeamAttachments";
+import { TeamTransfers } from "./TeamTransfers";
 import { TeamEmails } from "./TeamEmails";
 
 const ago = (iso: string) => {
@@ -424,6 +425,18 @@ export function TeamCardModal({
             <TeamAttachments cardId={card.id} canEdit={canEdit} pickSignal={pickSignal} reloadSignal={attachmentsReload} people={ws.people} hasEvent={!!card.event} onError={onError} />
 
             <TeamEmails cardId={card.id} canEdit={canEdit} me={me} people={ws.people} onAttachmentsAdded={reloadAttachments} onError={onError} />
+
+            <TeamTransfers
+              cardId={card.id}
+              canEdit={canEdit}
+              me={me}
+              people={ws.people}
+              onLinked={() => {
+                reloadAttachments();
+                void loadComments();
+              }}
+              onError={onError}
+            />
 
             {/* Discussion */}
             <section>

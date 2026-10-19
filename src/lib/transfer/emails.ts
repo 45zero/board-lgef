@@ -100,6 +100,39 @@ ${button(link, "Revoir le transfert")}
   await send(messages);
 }
 
+/** « Faire suivre » : un membre du board envoie le lien d'un transfert (le sien ou reçu) à d'autres adresses. */
+export async function sendForwardEmails(
+  t: TransferForMail,
+  files: { name: string; size_bytes: number }[],
+  link: string,
+  forward: { by: { name: string; email: string }; to: string[]; note: string }
+) {
+  const who = forward.by.name || forward.by.email;
+  const origin = t.sender_name || t.sender_email;
+  const fromOther = t.sender_email !== forward.by.email;
+  const count = `${files.length} fichier${files.length > 1 ? "s" : ""} (${formatBytes(t.total_bytes)})`;
+  const expiry = t.expires_at ? `Disponible jusqu'au ${longDate(t.expires_at)}.` : "Disponible sans limite de durée.";
+  const what = t.title ? `« ${t.title} »` : count;
+  await send(
+    forward.to.map((to) => ({
+      to: [to],
+      replyTo: forward.by.email,
+      subject: `${who} vous fait suivre ${what} via LGEF Transfer`,
+      text: `${who} vous fait suivre ${count}${fromOther ? `, envoyés par ${origin}` : ""}.\n${forward.note ? `\n${forward.note}\n` : ""}${t.message ? `\nMessage d'origine :\n${t.message}\n` : ""}\nVoir et télécharger : ${link}\n${expiry}`,
+      html: layout(
+        `<p style="font-size:17px;font-weight:bold;margin:0 0 6px">${esc(who)} vous fait suivre ${esc(count)}</p>
+${t.title ? `<p style="font-size:14px;margin:0 0 4px;color:#56607a">${esc(t.title)}</p>` : ""}
+${fromOther ? `<p style="font-size:13px;margin:0 0 12px;color:#7a8499">Envoyé à l'origine par ${esc(origin)}</p>` : ""}
+${forward.note ? `<p style="font-size:14px;white-space:pre-line;background:#f5f7fb;border-radius:10px;padding:12px 14px">${esc(forward.note)}</p>` : ""}
+${t.message ? `<p style="font-size:12px;color:#7a8499;margin:12px 0 4px">Message d'origine</p><p style="font-size:13px;white-space:pre-line;color:#56607a;margin:0 0 12px">${esc(t.message)}</p>` : ""}
+${filesBlock(files)}
+${button(link, "Voir et télécharger")}
+<p style="font-size:12px;color:#7a8499">${expiry}</p>`
+      ),
+    }))
+  );
+}
+
 export async function sendDownloadNoticeEmail(t: { sender_email: string; title: string }, fileName: string, link: string) {
   await send([
     {

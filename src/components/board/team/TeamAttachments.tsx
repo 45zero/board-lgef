@@ -134,7 +134,7 @@ export function TeamAttachments({
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-bold text-ink">{f.name}</p>
                   <p className="truncate text-[11px] text-ink-4">
-                    {[kind(f.mimeType, f.name), size(f.size), `ajouté par ${f.uploadedBy}`, f.fromGed ? "depuis mon Drive" : ""].filter(Boolean).join(" · ")}
+                    {[kind(f.mimeType, f.name), size(f.size), `ajouté par ${f.uploadedBy}`, f.fromGed ? "depuis mon Drive" : f.fromTransfer ? "depuis LGEF Transfer" : ""].filter(Boolean).join(" · ")}
                   </p>
                   {(f.place === "event" || f.toCenter) && (
                     <p className="mt-0.5 flex flex-wrap gap-1">
@@ -312,7 +312,8 @@ function GedPicker({ open, onClose, onPick }: { open: boolean; onClose: () => vo
 }
 
 /** Aperçu en popup : images, PDF, vidéos, sons et textes s'affichent ; les autres formats se téléchargent. */
-function PreviewModal({ cardId, file, onClose }: { cardId: string; file: TeamAttachment; onClose: () => void }) {
+/** Aperçu plein écran d'un fichier de la carte (aussi utilisé pour les fichiers copiés d'un transfert). */
+export function PreviewModal({ cardId, file, onClose }: { cardId: string; file: Pick<TeamAttachment, "id" | "name" | "mimeType">; onClose: () => void }) {
   const src = `/api/team/cards/${cardId}/attachments/${file.id}?inline=1`;
   const m = file.mimeType;
   useEffect(() => {
