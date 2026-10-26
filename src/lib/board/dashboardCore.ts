@@ -4,7 +4,9 @@ import { publicationThumbs } from "@/lib/board/publicationThumbs";
 import { myOpenCards } from "@/lib/board/myCards";
 import { isPublisher } from "@/lib/board/publishers";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
-import { computeMyExpenses, countPendingForValidator } from "@/lib/board/expensesCore";
+import { computeMyExpenses, countPendingForValidator, isPrestataire } from "@/lib/board/expensesCore";
+import { invoicesToValidate, isCompta, myMissingInvoices, unpaidPayables } from "@/lib/board/gedCore";
+import { euros } from "@/lib/board/staff";
 import type { DbEventType } from "@/lib/board/calendar";
 import { getSolicitations, technicianFilter } from "@/lib/board/solicitation";
 
@@ -106,14 +108,50 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
       push({ id: "cartes", app: "trello", tone: late ? "red" : "orange", count: cards.length, items, title: "Cartes à traiter", detail: detail || "Cartes de l'Espace Team qui vous sont assignées" });
     }, undefined),
 
-    // Frais à déclarer (moi) et à valider (mon équipe, en tant que N+1).
+    // Frais et factures (GED) : à déclarer / déposer (moi), à valider (N+1, compta), à payer (compta).
     safe(async () => {
-      const [mine, pending] = await Promise.all([computeMyExpenses(service, userId), countPendingForValidator(service, userId)]);
+      const [mine, pending, prestataire, compta] = await Promise.all([
+        computeMyExpenses(service, userId),
+        countPendingForValidator(service, userId),
+        isPrestataire(service, userId),
+        isCompta(service, userId),
+      ]);
       const toDeclare = mine.filter((m) => m.status === "a_declarer" && !m.upcoming).length;
       const rejected = mine.filter((m) => m.status === "rejected").length;
       push({ id: "frais-valider", app: "frais", tone: "red", count: pending, title: "Notes de frais à valider", detail: "Votre équipe attend votre validation" });
       push({ id: "frais-refuses", app: "frais", tone: "red", count: rejected, title: "Frais refusés à corriger", detail: "Corriger et redéclarer, ou indiquer « pas de frais »" });
-      push({ id: "frais-declarer", app: "frais", tone: "orange", count: toDeclare, title: "Frais à déclarer", detail: "Événements où vous étiez sollicité" });
+      push({
+        id: "frais-declarer",
+        app: "frais",
+        tone: "orange",
+        count: toDeclare,
+        title: "Frais à déclarer",
+        detail: prestataire ? "Frais saisis, pas encore envoyés" : "Événements où vous étiez sollicité",
+      });
+
+      const [missing, toValidate, due] = await Promise.all([
+        prestataire ? myMissingInvoices(service, userId) : null,
+        invoicesToValidate(service, userId, isAdmin || compta),
+        isAdmin || compta ? unpaidPayables(service) : null,
+      ]);
+      if (missing) {
+        const asItem = (e: (typeof missing.todo)[number]) => ({ id: e.eventId, eventId: e.eventId, title: e.title, date: e.start, detail: e.invoice?.comment ? `Motif : ${e.invoice.comment}` : e.roles.join(", ") });
+        push({ id: "factures-refusees", app: "frais", tone: "red", count: missing.refused.length, items: missing.refused.map(asItem), title: "Factures refusées", detail: "À corriger et déposer à nouveau" });
+        push({ id: "factures-deposer", app: "frais", tone: "orange", count: missing.todo.length, items: missing.todo.map(asItem), title: "Factures à déposer", detail: "Interventions passées sans facture" });
+      }
+      push({
+        id: "factures-valider",
+        app: "frais",
+        tone: "red",
+        count: toValidate.length,
+        items: toValidate.map((i) => ({ id: i.id, eventId: i.eventId, title: `${i.personName} · ${i.title}`, date: i.date, detail: i.amount !== null ? euros(i.amount) : undefined })),
+        title: "Factures à valider",
+        detail: "Factures de prestataires en attente",
+      });
+      if (due) {
+        const parts = [due.invoices ? `${due.invoices} facture${due.invoices > 1 ? "s" : ""}` : null, due.expenses ? `${due.expenses} note${due.expenses > 1 ? "s" : ""} de frais` : null].filter(Boolean);
+        push({ id: "a-payer", app: "frais", tone: "orange", count: due.invoices + due.expenses, title: "À payer", detail: `${euros(due.total)} · ${parts.join(" et ")} validée${due.invoices + due.expenses > 1 ? "s" : ""}` });
+      }
     }, undefined),
 
     // Présence au comité directeur à confirmer.

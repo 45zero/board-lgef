@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { MapPopup } from "@/components/board/calendar/MapPopup";
 import { useEffect, useState } from "react";
-import { X, Check, ChevronRight, CalendarDays, MapPin, Map as MapIcon, Loader2, Send } from "lucide-react";
+import { X, Check, ChevronRight, CalendarDays, MapPin, Map as MapIcon, Loader2, Send, FileText } from "lucide-react";
 import { Composer } from "@/components/board/screens/PublicationScreen";
 import { getMediaPublication, type MediaPublication } from "@/lib/board/mediaPublications";
 import { createClient } from "@/lib/supabase/client";
@@ -31,6 +31,12 @@ import { useDirectorAttendance } from "@/hooks/board/useDirectorAttendance";
 import { listAccessRequests, type AccessRequest } from "@/app/actions/account-requests";
 import { AccessRequestCard } from "@/components/board/users/AccessRequestCard";
 import { unwrap } from "@/lib/board/actionResult";
+import { confirmMyInvoiceUpload, getInvoiceFiles, getMyInvoiceItems, prepareMyInvoiceUpload, reviewInvoice } from "@/app/actions/staff";
+import type { InvoiceRequestItem } from "@/app/actions/invoice-public";
+import { InvoiceItemCard, stateOf } from "@/components/invoice/InvoiceUploadCard";
+import { ACTION_FRAIS_TAB, requestFraisTab } from "@/lib/board/fraisTab";
+import { FRAIS_FLAVORS } from "@/lib/board/fraisFlavor";
+import { useFraisFlavor } from "@/hooks/board/useFraisFlavor";
 
 const fmt = (iso: string | null) =>
   iso
@@ -40,7 +46,6 @@ const fmt = (iso: string | null) =>
     : "";
 
 const APP_LABELS: Record<string, string> = {
-  frais: "Frais",
   calendrier: "le calendrier",
   audiovisuel: "le centre de publication",
   inscription: "Inscription",
@@ -159,13 +164,91 @@ function ValidateRow({ sub, onDone, onDetails }: { sub: SubmissionToReview; onDo
             autoFocus
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Motif du refus…"
+            onKeyDown={(e) => e.key === "Enter" && !busy && void decide("rejected")}
+            placeholder="Commentaire (facultatif)…"
             className="min-w-0 flex-1 rounded-btn border border-line px-2.5 py-1.5 text-sm outline-none"
           />
           <button onClick={() => setRefusing(false)} className={btnGhost}>
             Annuler
           </button>
-          <button disabled={busy || !reason.trim()} onClick={() => decide("rejected")} className={btnKo}>
+          <button disabled={busy} onClick={() => decide("rejected")} className={btnKo}>
+            Confirmer le refus
+          </button>
+        </div>
+      )}
+      {error && <p className="mt-1 text-xs text-bad">{error}</p>}
+    </div>
+  );
+}
+
+/** Facture de prestataire : voir le fichier, valider ou refuser (commentaire facultatif) sans quitter l'accueil. */
+function InvoiceValidateRow({ item, onDone }: { item: DashboardActionItem; onDone: () => void }) {
+  const [busy, setBusy] = useState<"view" | "approved" | "rejected" | null>(null);
+  const [refusing, setRefusing] = useState(false);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const view = async () => {
+    // Fenêtre ouverte tout de suite (sinon bloquée par le navigateur), remplie à la réponse.
+    const win = window.open("", "_blank");
+    setBusy("view");
+    const res = await getInvoiceFiles(item.id);
+    setBusy(null);
+    if (!res.ok || !res.data.length) {
+      win?.close();
+      return setError(res.ok ? "Aucun fichier joint à cette facture." : res.error);
+    }
+    if (win) win.location.href = res.data[0].url;
+    for (const f of res.data.slice(1)) window.open(f.url, "_blank");
+  };
+  const decide = async (decision: "approved" | "rejected") => {
+    setBusy(decision);
+    setError(null);
+    const res = await reviewInvoice(item.id, decision, decision === "rejected" ? reason : undefined);
+    setBusy(null);
+    if (!res.ok) return setError(res.error);
+    onDone();
+  };
+  return (
+    <div className="border-b border-line px-4 py-3 last:border-b-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-sm font-bold text-ink">
+              {item.title}
+              {item.detail && ` · ${item.detail}`}
+            </span>
+            {item.eventId && <EventArrow eventId={item.eventId} className="h-6 w-6" />}
+          </div>
+          {item.date && <div className="truncate text-[11px] text-ink-4">{fmt(item.date)}</div>}
+        </div>
+        <button disabled={!!busy} onClick={() => void view()} className={btnGhost}>
+          {busy === "view" ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />} Voir
+        </button>
+        {!refusing && (
+          <>
+            <button disabled={!!busy} onClick={() => setRefusing(true)} className={btnKo}>
+              Refuser
+            </button>
+            <button disabled={!!busy} onClick={() => void decide("approved")} className={btnOk}>
+              {busy === "approved" ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Valider
+            </button>
+          </>
+        )}
+      </div>
+      {refusing && (
+        <div className="mt-2 flex gap-2">
+          <input
+            autoFocus
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !busy && void decide("rejected")}
+            placeholder="Commentaire pour le prestataire (facultatif)…"
+            className="min-w-0 flex-1 rounded-btn border border-line px-2.5 py-1.5 text-sm outline-none"
+          />
+          <button onClick={() => setRefusing(false)} className={btnGhost}>
+            Annuler
+          </button>
+          <button disabled={!!busy} onClick={() => void decide("rejected")} className={btnKo}>
             Confirmer le refus
           </button>
         </div>
@@ -297,6 +380,50 @@ function ValidateList({ onChanged }: { onChanged: () => void }) {
         />
       )}
     </>
+  );
+}
+
+/* ---------- Mes factures à déposer / refusées (prestataire) ---------- */
+
+/** Interventions passées sans facture (ou refusée) : dépôt direct, comme dans « Mes factures ». */
+function InvoiceDepositList({ refused, onChanged }: { refused: boolean; onChanged: () => void }) {
+  const [items, setItems] = useState<InvoiceRequestItem[] | null>(null);
+  const [sent, setSent] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    const year = new Date().getFullYear();
+    Promise.all([getMyInvoiceItems(year), getMyInvoiceItems(year - 1)])
+      .then((res) => {
+        const all = res.flatMap((r) => (r.ok ? r.data : []));
+        const since = Date.now() - 365 * 86_400_000;
+        setItems(
+          all
+            .filter((i) => new Date(i.eventStart).getTime() < Date.now() && new Date(i.eventStart).getTime() >= since)
+            .filter((i) => (refused ? stateOf(i) === "rejected" : stateOf(i) === "todo"))
+            .sort((a, b) => b.eventStart.localeCompare(a.eventStart))
+        );
+      })
+      .catch(() => setItems([]));
+  }, [refused]);
+  if (!items) return <p className="p-4 text-sm text-ink-4">Chargement…</p>;
+  if (items.length === 0) return <p className="p-4 text-sm text-ink-3">Toutes vos factures sont déposées. 👍</p>;
+  return (
+    <div className="space-y-2 p-3">
+      {items.map((i) => (
+        <InvoiceItemCard
+          key={i.eventId}
+          item={i}
+          state={sent.has(i.eventId) ? "sent" : stateOf(i)}
+          upload={{
+            prepare: (f) => prepareMyInvoiceUpload(i.eventId, f.name, f.type, f.size),
+            confirm: (path, amount, comment) => confirmMyInvoiceUpload(i.eventId, path, amount, comment),
+          }}
+          onSent={() => {
+            setSent((s) => new Set(s).add(i.eventId));
+            onChanged();
+          }}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -555,6 +682,7 @@ export function ActionPopup({
   onChanged: () => void;
 }) {
   const [items, setItems] = useState<DashboardActionItem[]>(action.items ?? []);
+  const fraisFlavor = useFraisFlavor();
   const removeItem = (id: string) => {
     setItems((prev) => prev.filter((i) => i.id !== id));
     onChanged();
@@ -573,6 +701,15 @@ export function ActionPopup({
       break;
     case "frais-refuses":
       body = <DeclareList statuses={["rejected"]} onChanged={onChanged} />;
+      break;
+    case "factures-deposer":
+      body = <InvoiceDepositList refused={false} onChanged={onChanged} />;
+      break;
+    case "factures-refusees":
+      body = <InvoiceDepositList refused onChanged={onChanged} />;
+      break;
+    case "factures-valider":
+      body = items.length ? items.map((i) => <InvoiceValidateRow key={i.id} item={i} onDone={() => removeItem(i.id)} />) : null;
       break;
     case "captation-repondre":
       body = items.length ? items.map((i) => <CoverageRow key={i.id} item={i} onDone={() => removeItem(i.id)} />) : null;
@@ -614,11 +751,13 @@ export function ActionPopup({
             <button
               onClick={() => {
                 onClose();
+                const tab = ACTION_FRAIS_TAB[action.id];
+                if (tab) requestFraisTab(tab);
                 onNavigate(action.app);
               }}
               className="flex items-center gap-1 text-xs font-semibold text-link hover:underline"
             >
-              Ouvrir {APP_LABELS[action.app] ?? action.app} <ChevronRight size={13} />
+              {action.id === "factures-valider" ? "Valider dans la GED" : action.id === "a-payer" ? "Ouvrir les paiements" : `Ouvrir ${action.app === "frais" ? FRAIS_FLAVORS[fraisFlavor].label : (APP_LABELS[action.app] ?? action.app)}`} <ChevronRight size={13} />
             </button>
           </div>
         )}

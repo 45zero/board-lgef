@@ -24,8 +24,8 @@ export function useAppBadges(): Record<string, AppBadge[]> {
     audiovisuel: [{ count: audiovisuel, tone: "red", title: `${audiovisuel} publication(s) à publier` }],
     trello: [{ count: trello, tone: "red", title: `${trello} nouvelle(s) carte(s) assignée(s)` }],
     frais: [
-      { count: data.frais?.toValidate ?? 0, tone: "red", title: `${data.frais?.toValidate ?? 0} note(s) de frais à valider` },
-      { count: data.frais?.toDeclare ?? 0, tone: "orange", title: `${data.frais?.toDeclare ?? 0} note(s) de frais à déclarer` },
+      { count: data.frais?.toValidate ?? 0, tone: "red", title: `${data.frais?.toValidate ?? 0} frais / facture(s) à valider` },
+      { count: data.frais?.toDeclare ?? 0, tone: "orange", title: `${data.frais?.toDeclare ?? 0} frais à déclarer / facture(s) à déposer` },
     ],
   };
   for (const key of Object.keys(badges)) badges[key] = badges[key].filter((b) => b.count > 0);

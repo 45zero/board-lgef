@@ -94,7 +94,7 @@ export function InvoiceLine({
     if (!res.ok) return onError(res.error);
     setRejecting(false);
     setMotive("");
-    setNotice(decision === "approved" ? (res.data.archived ? "Validée et archivée dans le Drive." : "Validée.") : "Refusée — le prestataire a reçu le motif et un lien pour en déposer une nouvelle.");
+    setNotice(decision === "approved" ? (res.data.archived ? "Validée et archivée dans le Drive." : "Validée.") : "Refusée — le prestataire est prévenu, avec un lien pour en déposer une nouvelle.");
     await onChanged();
   };
   return (
@@ -143,14 +143,14 @@ export function InvoiceLine({
           autoFocus
           value={motive}
           onChange={(ev) => setMotive(ev.target.value)}
-          onKeyDown={(ev) => ev.key === "Enter" && motive.trim() && void review("rejected")}
-          placeholder="Motif du refus (envoyé au prestataire)"
+          onKeyDown={(ev) => ev.key === "Enter" && void review("rejected")}
+          placeholder="Commentaire pour le prestataire (facultatif)"
           className="min-w-0 flex-1 rounded-btn border border-line px-2 py-1 text-[12px] outline-none focus:border-line-strong"
         />
         <button
           type="button"
           onClick={() => void review("rejected")}
-          disabled={!motive.trim() || !!reviewing}
+          disabled={!!reviewing}
           className="flex items-center gap-1 rounded-btn bg-bad px-2 py-1 text-[11px] font-bold text-white disabled:opacity-50"
         >
           {reviewing === "rejected" && <Loader2 size={11} className="animate-spin" />} Refuser

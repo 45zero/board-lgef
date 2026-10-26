@@ -4,6 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { getInboxUnreadCount } from "@/lib/google/gmail";
 import { getMyExpenses, getMyValidatorScope } from "@/app/actions/expenses";
+import { createServiceClient } from "@/lib/supabase/serviceClient";
+import { isPrestataire } from "@/lib/board/expensesCore";
+import { myMissingInvoices } from "@/lib/board/gedCore";
 
 export type AppBadges = {
   /** Mails non lus (boîtes de réception de tous les comptes connectés). */
@@ -14,7 +17,7 @@ export type AppBadges = {
   inscription: { sent: number; pending: number };
   /** Centre de publication : publications à publier. */
   audiovisuel: number;
-  /** Frais : mes événements à déclarer / déclarations de mon équipe à valider (N+1). */
+  /** Frais : mes frais à déclarer et factures à déposer (prestataire) / notes de frais et factures à valider (N+1, compta). */
   frais: { toDeclare: number; toValidate: number };
   /** Espace Team : cartes qui m'ont été assignées et que je n'ai pas encore ouvertes. */
   trello: number;
@@ -98,8 +101,17 @@ export async function GET(request: Request) {
     withDb
       ? safe(
           async () => {
-            const [mine, validator] = await Promise.all([getMyExpenses(), getMyValidatorScope()]);
-            return { toDeclare: mine.filter((m) => (m.status === "a_declarer" && !m.upcoming) || m.status === "rejected").length, toValidate: validator.pending + validator.pendingInvoices };
+            const service = createServiceClient();
+            const [mine, validator, missing] = await Promise.all([
+              getMyExpenses(),
+              getMyValidatorScope(),
+              isPrestataire(service, userId).then((p) => (p ? myMissingInvoices(service, userId) : null)),
+            ]);
+            const invoicesToDo = missing ? missing.todo.length + missing.refused.length : 0;
+            return {
+              toDeclare: mine.filter((m) => (m.status === "a_declarer" && !m.upcoming) || m.status === "rejected").length + invoicesToDo,
+              toValidate: validator.pending + validator.pendingInvoices,
+            };
           },
           { toDeclare: 0, toValidate: 0 }
         )

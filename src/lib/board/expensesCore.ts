@@ -22,6 +22,24 @@ export function toStatus(s: string | null | undefined): ExpenseStatus {
   return "a_declarer";
 }
 
+type SubmissionLike = { status: string | null; total_amount: number | string | null; expense_ids: string[] | null };
+
+/**
+ * Déclaration « en attente » sans aucune ligne ni montant : l'ancienne appli calendrier l'envoyait
+ * quand on validait une fiche vide. Elle vaut « pas de frais » : rien à valider ni à payer.
+ */
+export const isEmptyDeclaration = (s: SubmissionLike) =>
+  (s.status === "pending" || s.status === "revision_requested") && Number(s.total_amount ?? 0) === 0 && !(s.expense_ids ?? []).length;
+
+/** Statut affiché d'une déclaration, déclaration vide comprise (voir isEmptyDeclaration). */
+export const submissionStatus = (s: SubmissionLike | null | undefined): ExpenseStatus => (s && isEmptyDeclaration(s) ? "no_expense" : toStatus(s?.status));
+
+/** Prestataire (spécialité tech-prestataire) : il facture ses interventions au lieu de déclarer des frais. */
+export async function isPrestataire(service: Service, userId: string): Promise<boolean> {
+  const { data } = await service.from("profile_specialties").select("user_id, specialties!inner(slug)").eq("user_id", userId).eq("specialties.slug", "tech-prestataire");
+  return (data ?? []).length > 0;
+}
+
 /** Mois d'une ligne hors événement : sa date de dépense, à défaut sa date de saisie. */
 export const lineMonth = (l: { expense_date: string | null; created_at: string }) => (l.expense_date ?? l.created_at).slice(0, 7);
 
@@ -30,30 +48,33 @@ export async function countPendingForValidator(service: Service, userId: string)
   const { data: reports } = await service.from("profiles").select("id").eq("expense_validator_id", userId);
   const ids = (reports ?? []).map((r) => r.id);
   if (ids.length === 0) return 0;
-  const { count } = await service
+  const { data } = await service
     .from("expense_submissions")
-    .select("id", { count: "exact", head: true })
+    .select("status, total_amount, expense_ids")
     .in("status", ["pending", "revision_requested"])
     .in("user_id", ids);
-  return count ?? 0;
+  return (data ?? []).filter((s) => !isEmptyDeclaration(s)).length;
 }
 
 /**
  * Mes frais : les événements (12 derniers mois) où je suis sollicité — membre ou responsable
  * d'équipe, assigné, comité directeur à la présence confirmée, technicien ayant accepté la
  * captation — ou où j'ai saisi des frais / une déclaration, plus mes frais hors événement par mois.
+ * Un prestataire facture ses interventions (Mes factures) : seuls les événements où il a saisi des
+ * frais ou déclaré quelque chose sont listés, rien n'est « à déclarer » d'office.
  */
 export async function computeMyExpenses(service: Service, userId: string): Promise<MyExpenseItem[]> {
   const since = new Date(Date.now() - 365 * 86_400_000).toISOString();
 
   // Frais : seulement les sollicitations effectives (présence confirmée, captation acceptée).
-  const [roles, submissions, allLines] = await Promise.all([
+  const [roles, submissions, allLines, prestataire] = await Promise.all([
     getSolicitations(service, userId),
     service
       .from("expense_submissions")
-      .select("id, event_id, period_month, status, submitted_at, reviewed_at, reviewed_by, reviewer_comments, reviewer_comment")
+      .select("id, event_id, period_month, status, total_amount, expense_ids, submitted_at, reviewed_at, reviewed_by, reviewer_comments, reviewer_comment")
       .eq("user_id", userId),
     service.from("event_expenses").select("event_id, total_amount, expense_date, created_at, currency, exchange_rate").eq("user_id", userId).gte("created_at", since),
+    isPrestataire(service, userId),
   ]);
 
   const subs = submissions.data ?? [];
@@ -71,7 +92,8 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
   for (const l of allLines.data ?? []) add(l.event_id ? `event:${l.event_id}` : `month:${lineMonth(l)}`, euros(l));
 
   const withLines = [...totals.keys()].filter((k) => k.startsWith("event:")).map((k) => k.slice(6));
-  const eventIds = [...new Set([...roles.keys(), ...subByEvent.keys(), ...withLines])];
+  const declared = [...subByEvent.entries()].filter(([, s]) => !prestataire || !isEmptyDeclaration(s)).map(([id]) => id);
+  const eventIds = [...new Set([...(prestataire ? [] : roles.keys()), ...declared, ...withLines])];
   const { data: events } = eventIds.length
     ? await service
         .from("events")
@@ -88,8 +110,9 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
   const reviewerById = new Map((reviewers ?? []).map((r) => [r.id, r]));
 
   const now = new Date().toISOString();
-  const subFields = (sub: (typeof subs)[number] | undefined) => ({
-    status: toStatus(sub?.status),
+  // Déclaration vide puis frais saisis : de nouveau à déclarer.
+  const subFields = (sub: (typeof subs)[number] | undefined, lineCount: number) => ({
+    status: sub && isEmptyDeclaration(sub) && lineCount > 0 ? ("a_declarer" as const) : submissionStatus(sub),
     submissionId: sub?.id ?? null,
     submittedAt: sub?.submitted_at ?? null,
     reviewedAt: sub?.reviewed_at ?? null,
@@ -114,7 +137,7 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
         roles: [...(roles.get(e.id) ?? [])],
         total: t.total,
         lineCount: t.count,
-        ...subFields(subByEvent.get(e.id)),
+        ...subFields(subByEvent.get(e.id), t.count),
       };
     });
 
@@ -132,7 +155,7 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
       roles: [],
       total: t.total,
       lineCount: t.count,
-      ...subFields(subByMonth.get(m)),
+      ...subFields(subByMonth.get(m), t.count),
     };
   });
 

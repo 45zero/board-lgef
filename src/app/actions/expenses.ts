@@ -8,7 +8,8 @@ import { insertExpenseLines, isForeign, type NewExpenseLine } from "@/lib/board/
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { DbEventType } from "@/lib/board/calendar";
 import { type SolicitationRole } from "@/lib/board/solicitation";
-import { computeMyExpenses, lineMonth, personName, toStatus } from "@/lib/board/expensesCore";
+import { computeMyExpenses, countPendingForValidator, isEmptyDeclaration, lineMonth, personName, toStatus } from "@/lib/board/expensesCore";
+import { countAllPendingExpenses, invoicesToValidate, unpaidPayables } from "@/lib/board/gedCore";
 import { EXPENSE_CATEGORIES, CATEGORY_META, lineParts, monthLabel, type ExpenseTarget } from "@/lib/board/expenseCategories";
 
 // Gestion des frais du board. Données partagées avec l'appli calendrier :
@@ -139,7 +140,7 @@ async function linesOf(service: Service, userId: string, target: ExpenseTarget) 
 async function submissionOf(service: Service, userId: string, target: ExpenseTarget) {
   const q = service
     .from("expense_submissions")
-    .select("id, status, reviewed_by, reviewed_at, reviewer_comments, reviewer_comment")
+    .select("id, status, total_amount, expense_ids, reviewed_by, reviewed_at, reviewer_comments, reviewer_comment")
     .eq("user_id", userId);
   const { data } =
     "eventId" in target ? await q.eq("event_id", target.eventId).maybeSingle() : await q.is("event_id", null).eq("period_month", target.month).maybeSingle();
@@ -246,36 +247,47 @@ export async function declareExpenses(target: ExpenseTarget, noExpense = false):
 }
 
 /**
- * Suis-je N+1 d'au moins une personne (ou admin) ? — affiche l'onglet « À valider ». Avec les factures
- * de mes prestataires (spécialité tech-prestataire) : en attente, et s'il y en a à suivre.
+ * Ce que je vois et ce qui m'attend dans le module : suis-je N+1 (notes de frais de mon équipe), ai-je
+ * des prestataires (leurs factures), suis-je compta / administrateur (`seesAll` : tout le monde, et
+ * « Paiements »). Les compteurs sont ceux du tableau de bord (voir gedCore.ts).
  */
 export async function getMyValidatorScope(): Promise<{
   isValidator: boolean;
   isAdmin: boolean;
+  seesAll: boolean;
   canManageValidators: boolean;
   pending: number;
+  pendingAll: number;
   hasPrestataireReports: boolean;
   pendingInvoices: number;
+  pendingInvoicesAll: number;
+  unpaid: number;
 }> {
-  const { userId, isAdmin, canManageValidators, service } = await currentUser();
+  const { userId, isAdmin, seesAll, canManageValidators, service } = await currentUser();
   const { data: reports } = await service.from("profiles").select("id").eq("expense_validator_id", userId);
   const ids = (reports ?? []).map((r) => r.id);
-  let pending = 0;
-  let prestataires: string[] = [];
-  let pendingInvoices = 0;
-  if (ids.length > 0) {
-    const [{ count }, { data: links }] = await Promise.all([
-      service.from("expense_submissions").select("id", { count: "exact", head: true }).in("status", ["pending", "revision_requested"]).in("user_id", ids),
-      service.from("profile_specialties").select("user_id, specialties!inner(slug)").eq("specialties.slug", "tech-prestataire").in("user_id", ids),
-    ]);
-    pending = count ?? 0;
-    prestataires = (links ?? []).map((l) => l.user_id);
-    if (prestataires.length) {
-      const { count: inv } = await service.from("event_invoices").select("id", { count: "exact", head: true }).eq("status", "pending").in("user_id", prestataires);
-      pendingInvoices = inv ?? 0;
-    }
-  }
-  return { isValidator: ids.length > 0, isAdmin, canManageValidators, pending, hasPrestataireReports: prestataires.length > 0, pendingInvoices };
+  const [{ data: links }, pending, pendingAll, toValidate, due, { count: invoicesAll }] = await Promise.all([
+    ids.length
+      ? service.from("profile_specialties").select("user_id, specialties!inner(slug)").eq("specialties.slug", "tech-prestataire").in("user_id", ids)
+      : Promise.resolve({ data: [] as { user_id: string }[] }),
+    countPendingForValidator(service, userId),
+    seesAll ? countAllPendingExpenses(service) : Promise.resolve(0),
+    invoicesToValidate(service, userId, seesAll),
+    seesAll ? unpaidPayables(service) : Promise.resolve(null),
+    seesAll ? service.from("event_invoices").select("id", { count: "exact", head: true }).eq("status", "pending") : Promise.resolve({ count: 0 }),
+  ]);
+  return {
+    isValidator: ids.length > 0,
+    isAdmin,
+    seesAll,
+    canManageValidators,
+    pending,
+    pendingAll,
+    hasPrestataireReports: (links ?? []).length > 0,
+    pendingInvoices: toValidate.length,
+    pendingInvoicesAll: invoicesAll ?? 0,
+    unpaid: due ? due.invoices + due.expenses : 0,
+  };
 }
 
 /**
@@ -301,8 +313,9 @@ export async function getSubmissionsToReview(
     .order("submitted_at", { ascending: status === "pending", nullsFirst: false })
     .limit(200);
   if (userIds) q = q.in("user_id", userIds);
-  const { data: subs } = await q;
-  if (!subs?.length) return [];
+  // Déclarations vides (ancienne appli) : « pas de frais », rien à valider.
+  const subs = ((await q).data ?? []).filter((s) => !isEmptyDeclaration(s));
+  if (!subs.length) return [];
 
   const personIds = [...new Set(subs.map((s) => s.user_id))];
   const eventIds = [...new Set(subs.map((s) => s.event_id).filter((id): id is string => !!id))];
@@ -364,7 +377,6 @@ export async function reviewSubmission(
       const { data: owner } = await service.from("profiles").select("expense_validator_id").eq("id", sub.user_id).single();
       if (owner?.expense_validator_id !== userId) throw new Error("Vous n'êtes pas le responsable de cette personne.");
     }
-    if (decision === "rejected" && !comment.trim()) throw new Error("Indiquez le motif du refus.");
 
     const { error } = await service
       .from("expense_submissions")
@@ -385,7 +397,7 @@ export async function reviewSubmission(
       decision === "approved" ? "Frais validés" : "Frais refusés",
       decision === "approved"
         ? `Vos frais (${Number(sub.total_amount ?? 0).toFixed(2)} €) pour ${what} ont été validés.`
-        : `Vos frais pour ${what} ont été refusés : ${comment.trim()}`,
+        : `Vos frais pour ${what} ont été refusés${comment.trim() ? ` : ${comment.trim()}` : "."}`,
       { kind: "expense_reviewed", event_id: sub.event_id, period_month: sub.period_month, decision }
     );
     return { error: null };
@@ -431,8 +443,10 @@ export async function getMyExpenseStatus(target: ExpenseTarget): Promise<{
     const { data: r } = await service.from("profiles").select("first_name, last_name, email").eq("id", sub.reviewed_by).single();
     reviewerName = personName(r);
   }
+  // Déclaration vide (ancienne appli) : « pas de frais », ou de nouveau à déclarer si des frais ont été saisis depuis.
+  const status = sub && isEmptyDeclaration(sub) ? ((await linesOf(service, userId, target)).length ? "a_declarer" : "no_expense") : toStatus(sub?.status);
   return {
-    status: toStatus(sub?.status),
+    status,
     reviewerName,
     reviewerComment: sub?.reviewer_comments ?? sub?.reviewer_comment ?? null,
     reviewedAt: sub?.reviewed_at ?? null,

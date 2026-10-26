@@ -4,8 +4,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Receipt, ShieldCheck, X, ChevronRight, Download, Settings, Check, Camera, Paperclip, FileText, Wallet, Briefcase, Banknote } from "lucide-react";
+import { Receipt, ShieldCheck, X, ChevronRight, Download, Settings, Check, Camera, Paperclip, FileText, Briefcase, Banknote } from "lucide-react";
 import { useFraisFlavor } from "@/hooks/board/useFraisFlavor";
+import { takeFraisTab, type FraisTab } from "@/lib/board/fraisTab";
 import { FRAIS_FLAVORS } from "@/lib/board/fraisFlavor";
 import { MyInvoices, Payables, PrestataireInvoices } from "@/components/board/invoices/InvoiceTabs";
 import {
@@ -46,7 +47,7 @@ import {
   type Period,
 } from "@/components/board/expenses/PeriodNav";
 
-type Tab = "invoices" | "mine" | "validate" | "allFrais" | "prestataires" | "payables" | "settings";
+type Tab = FraisTab;
 
 type MineFilter = "a_declarer" | "upcoming" | "pending" | "approved" | "rejected" | "all";
 
@@ -293,7 +294,7 @@ function MyExpenses({ period, menu, reloadKey = 0 }: { period: Period; menu?: Mo
 
 /* ---------- À valider (N+1) ---------- */
 
-/** Fiche de validation : détail des lignes, justificatifs, puis Valider / Refuser (motif obligatoire). */
+/** Fiche de validation : détail des lignes, justificatifs, puis Valider / Refuser (commentaire facultatif). */
 export function ReviewModal({ sub, onClose, onDone }: { sub: SubmissionToReview; onClose: () => void; onDone: () => void }) {
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
@@ -378,7 +379,7 @@ export function ReviewModal({ sub, onClose, onDone }: { sub: SubmissionToReview;
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               rows={2}
-              placeholder="Commentaire (obligatoire en cas de refus)…"
+              placeholder="Commentaire (facultatif)…"
               className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
             />
           )}
@@ -408,7 +409,7 @@ export function ReviewModal({ sub, onClose, onDone }: { sub: SubmissionToReview;
   );
 }
 
-/** Refus depuis la liste : le motif est obligatoire (il est envoyé au déclarant). */
+/** Refus depuis la liste : commentaire facultatif, envoyé au déclarant. */
 function RejectModal({ sub, onClose, onDone }: { sub: SubmissionToReview; onClose: () => void; onDone: () => void }) {
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
@@ -439,7 +440,7 @@ function RejectModal({ sub, onClose, onDone }: { sub: SubmissionToReview; onClos
         </div>
         <div className="space-y-2 p-5">
           <label className="block text-xs font-semibold text-ink-3" htmlFor="reject-comment">
-            Motif du refus (obligatoire, envoyé à {sub.person.name.split(" ")[0]})
+            Commentaire (facultatif, envoyé à {sub.person.name.split(" ")[0]})
           </label>
           <textarea
             id="reject-comment"
@@ -456,7 +457,7 @@ function RejectModal({ sub, onClose, onDone }: { sub: SubmissionToReview; onClos
           <button onClick={onClose} className="rounded-btn border border-line px-4 py-2 text-sm font-semibold text-ink-2 hover:bg-hover">
             Annuler
           </button>
-          <button disabled={busy || !comment.trim()} onClick={reject} className="rounded-btn bg-bad px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+          <button disabled={busy} onClick={reject} className="rounded-btn bg-bad px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
             {busy ? "…" : "Refuser"}
           </button>
         </div>
@@ -626,21 +627,38 @@ function ToValidate({ onChanged, period, menu, scope = "mine" }: { onChanged: ()
 
 const headerBtn = "flex h-8 w-8 items-center justify-center rounded-full text-white/85 hover:bg-white/10";
 
+type TabDef = { id: Tab; label: string; icon: typeof Receipt; badge?: number; badgeTone?: "red" | "orange"; show: boolean; hint: string };
+
+/** Choix « Tout le monde » / « Mon équipe » (compta qui est aussi N+1). */
+function WhoSwitch({ value, onChange, teamLabel }: { value: "all" | "mine"; onChange: (v: "all" | "mine") => void; teamLabel: string }) {
+  return (
+    <div className="flex shrink-0 rounded-btn border border-line bg-card p-0.5 text-xs font-semibold">
+      {(["all", "mine"] as const).map((v) => (
+        <button key={v} onClick={() => onChange(v)} className={`rounded-[6px] px-2.5 py-1 ${value === v ? "bg-navy text-white" : "text-ink-3 hover:bg-hover"}`}>
+          {v === "all" ? "Tout le monde" : teamLabel}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /**
- * Module Frais, nommé selon le profil (fraisFlavor.ts) :
- * - Frais (salariés, réseau, bénévoles) : « Mes frais », « À valider » si je suis N+1, Paramètres ;
- * - Factures (prestataires) : « Mes factures » d'abord, puis les mêmes onglets ;
- * - GED (administrateurs et compta) : en plus, « Frais » et « Prestataires » de tout le monde, et
- *   « À payer » (factures et notes de frais validées, à marquer payées).
- * « À valider » regroupe les notes de frais et, si j'ai des prestataires, leurs factures.
- * Le N+1 de chacun se règle dans Administration → Utilisateurs.
+ * Module Frais, nommé selon le profil (fraisFlavor.ts), en trois temps :
+ * - Moi : « Mes factures » (prestataires : une facture par intervention) et « Mes frais » ;
+ * - À valider : « Notes de frais » (mon équipe en tant que N+1 ; tout le monde pour la GED) et
+ *   « Factures » des prestataires (les miens ; tous pour la GED) ;
+ * - Compta (GED : administrateurs et compta) : « Paiements », factures et notes de frais validées à
+ *   marquer payées.
+ * Chaque onglet dit en une phrase à quoi il sert ; les pastilles comptent ce qui attend, comme le
+ * tableau de bord. Le N+1 de chacun se règle dans Administration → Utilisateurs.
  * `mobile` (appli mobile) : en-tête propre — retour, période dans le menu du titre, Photo / Joindre
  * et Paramètres en haut —, mois en cours par défaut et événements à venir dans « À déclarer ».
  */
 export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}) {
   const flavor = useFraisFlavor();
-  const [tab, setTab] = useState<Tab>(flavor === "factures" ? "invoices" : "mine");
-  const [validateKind, setValidateKind] = useState<"frais" | "factures">("frais");
+  const homeTab = (f: typeof flavor): Tab => (f === "factures" ? "invoices" : f === "ged" ? "frais" : "mine");
+  const [tab, setTab] = useState<Tab>(() => takeFraisTab() ?? homeTab(flavor));
+  const [who, setWho] = useState<"all" | "mine">("all");
   const [scope, setScope] = useState<Awaited<ReturnType<typeof getMyValidatorScope>> | null>(null);
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [monthIdx, setMonthIdx] = useState<number | null>(() => (mobile ? new Date().getMonth() : null));
@@ -657,25 +675,100 @@ export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}
   useEffect(() => {
     void loadScope();
   }, [loadScope]);
-  // Profil connu après coup (tout premier chargement) : un prestataire arrive sur ses factures.
+  useLiveRefresh(["expense_submissions", "notifications"], () => void loadScope());
+  // Profil connu après coup (tout premier chargement) : chacun arrive sur son onglet principal.
   const [flavorSeen, setFlavorSeen] = useState(flavor);
   if (flavorSeen !== flavor) {
     setFlavorSeen(flavor);
-    setTab(flavor === "factures" ? "invoices" : "mine");
+    setTab(homeTab(flavor));
   }
 
-  const isGed = flavor === "ged";
-  const tabs: { id: Tab; label: string; icon: typeof Receipt; badge?: number; show: boolean }[] = [
-    { id: "invoices", label: "Mes factures", icon: FileText, show: flavor === "factures" },
-    { id: "mine", label: "Mes frais", icon: Receipt, show: true },
-    { id: "validate", label: "À valider", icon: ShieldCheck, badge: (scope?.pending ?? 0) + (scope?.pendingInvoices ?? 0), show: !!scope?.isValidator },
-    { id: "allFrais", label: "Frais", icon: Wallet, show: isGed },
-    { id: "prestataires", label: "Prestataires", icon: Briefcase, show: isGed },
-    { id: "payables", label: "À payer", icon: Banknote, show: isGed },
-    // Mobile : Paramètres est la roue crantée de l'en-tête.
-    { id: "settings", label: "Paramètres", icon: Settings, show: !mobile },
+  const isGed = flavor === "ged" || !!scope?.seesAll;
+  const prestataire = flavor === "factures";
+  const groups: { label: string; tabs: TabDef[] }[] = [
+    {
+      label: "Moi",
+      tabs: [
+        {
+          id: "invoices",
+          label: "Mes factures",
+          icon: FileText,
+          show: prestataire,
+          hint: "Déposez la facture de chaque intervention passée : elle part en validation chez votre responsable, puis en paiement.",
+        },
+        {
+          id: "mine",
+          label: "Mes frais",
+          icon: Receipt,
+          show: true,
+          hint: prestataire
+            ? "Frais exceptionnels non compris dans vos factures (péage, hôtel…) : saisissez-les avec le justificatif, puis déclarez-les."
+            : "Vos dépenses par événement (ou hors événement, au mois) : saisissez-les avec les justificatifs, puis déclarez-les à votre N+1.",
+        },
+      ],
+    },
+    {
+      label: "À valider",
+      tabs: [
+        {
+          id: "frais",
+          label: "Notes de frais",
+          icon: ShieldCheck,
+          badge: isGed ? scope?.pendingAll : scope?.pending,
+          show: isGed || !!scope?.isValidator,
+          hint: isGed
+            ? "Notes de frais déclarées : validez-les ou refusez-les. Validées, elles passent dans Paiements."
+            : "Notes de frais de votre équipe : validez-les ou refusez-les. Validées, la compta les rembourse.",
+        },
+        {
+          id: "factures",
+          label: "Factures",
+          icon: Briefcase,
+          badge: isGed ? scope?.pendingInvoicesAll : scope?.pendingInvoices,
+          show: isGed || !!scope?.hasPrestataireReports,
+          hint: "Factures des prestataires, intervention par intervention : à valider, manquantes (intervention passée sans facture), validées ou refusées.",
+        },
+      ],
+    },
+    {
+      label: "Compta",
+      tabs: [
+        {
+          id: "payables",
+          label: "Paiements",
+          icon: Banknote,
+          badge: scope?.unpaid,
+          badgeTone: "orange",
+          show: isGed,
+          hint: "Tout ce qui est validé : marquez les factures payées et les notes de frais remboursées.",
+        },
+      ],
+    },
   ];
-  const shownTabs = tabs.filter((t) => t.show);
+  // Mobile : Paramètres est la roue crantée de l'en-tête.
+  const settingsTab: TabDef = { id: "settings", label: "Paramètres", icon: Settings, show: !mobile, hint: "Réglages du module : import des justificatifs par e-mail…" };
+  const shownGroups = groups.map((g) => ({ ...g, tabs: g.tabs.filter((t) => t.show) })).filter((g) => g.tabs.length);
+  const allTabs = [...shownGroups.flatMap((g) => g.tabs), settingsTab];
+  const current = allTabs.find((t) => t.id === tab);
+  // Onglet plus disponible (profil, droits) : retour à l'onglet principal.
+  if (scope && !current && tab !== "settings") setTab(homeTab(flavor));
+  const showWho = (tab === "frais" && isGed && !!scope?.isValidator) || (tab === "factures" && isGed && !!scope?.hasPrestataireReports);
+  // GED : tout le monde, sauf si elle choisit son équipe / ses prestataires ; sinon les miens.
+  const listScope: "all" | "mine" = isGed && !(showWho && who === "mine") ? "all" : "mine";
+
+  const tabButton = (t: TabDef) => {
+    const Icon = t.icon;
+    return (
+      <button
+        key={t.id}
+        onClick={() => setTab(t.id)}
+        className={`flex shrink-0 items-center gap-2 rounded-btn px-3.5 py-2 text-sm font-semibold ${tab === t.id ? "bg-navy text-white" : "bg-card text-ink-2 hover:bg-hover"}`}
+      >
+        <Icon size={15} /> {t.label}
+        {!!t.badge && <span className={`rounded-full px-1.5 text-[10px] font-bold text-white ${t.badgeTone === "orange" ? "bg-warn" : "bg-red"}`}>{t.badge}</span>}
+      </button>
+    );
+  };
 
   const pickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = [...(e.target.files ?? [])];
@@ -687,23 +780,24 @@ export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}
 
   const body = (
     <div className="mx-auto max-w-6xl space-y-3 p-3 md:space-y-4 md:p-4">
-      {shownTabs.length > 1 && (
-        <div className="-mx-3 flex items-center gap-2 overflow-x-auto px-3 md:mx-0 md:flex-wrap md:px-0">
-          {shownTabs.map((t) => {
-            const Icon = t.icon;
-            return (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`flex shrink-0 items-center gap-2 rounded-btn px-3.5 py-2 text-sm font-semibold ${
-                  tab === t.id ? "bg-navy text-white" : "bg-card text-ink-2 hover:bg-hover"
-                }`}
-              >
-                <Icon size={15} /> {t.label}
-                {!!t.badge && <span className="rounded-full bg-red px-1.5 text-[10px] font-bold text-white">{t.badge}</span>}
-              </button>
-            );
-          })}
+      {allTabs.filter((t) => t.show).length > 1 && (
+        <div className="-mx-3 flex items-end gap-3 overflow-x-auto px-3 md:mx-0 md:flex-wrap md:px-0">
+          {shownGroups.map((g, gi) => (
+            <div key={g.label} className="flex shrink-0 items-end gap-3">
+              {gi > 0 && <span className="mb-1 h-7 w-px bg-line" aria-hidden />}
+              <div>
+                {shownGroups.length > 1 && <div className="mb-1 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-4">{g.label}</div>}
+                <div className="flex gap-1.5">{g.tabs.map(tabButton)}</div>
+              </div>
+            </div>
+          ))}
+          {settingsTab.show && <div className="ml-auto shrink-0">{tabButton(settingsTab)}</div>}
+        </div>
+      )}
+      {current && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="min-w-0 flex-1 text-xs text-ink-3 md:text-sm">{current.hint}</p>
+          {showWho && <WhoSwitch value={who} onChange={setWho} teamLabel={tab === "factures" ? "Mes prestataires" : "Mon équipe"} />}
         </div>
       )}
 
@@ -712,24 +806,8 @@ export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}
 
       {tab === "invoices" && <MyInvoices period={period} menu={menu} />}
       {tab === "mine" && <MyExpenses period={period} menu={menu} reloadKey={reloadKey} />}
-      {tab === "validate" && scope?.hasPrestataireReports && (
-        <div className="flex gap-1.5">
-          <FilterChip active={validateKind === "frais"} onClick={() => setValidateKind("frais")}>
-            Notes de frais{scope.pending ? ` (${scope.pending})` : ""}
-          </FilterChip>
-          <FilterChip active={validateKind === "factures"} onClick={() => setValidateKind("factures")}>
-            Factures prestataires{scope.pendingInvoices ? ` (${scope.pendingInvoices})` : ""}
-          </FilterChip>
-        </div>
-      )}
-      {tab === "validate" &&
-        (validateKind === "factures" && scope?.hasPrestataireReports ? (
-          <PrestataireInvoices scope="mine" period={period} menu={menu} onChanged={() => void loadScope()} />
-        ) : (
-          <ToValidate onChanged={() => void loadScope()} period={period} menu={menu} />
-        ))}
-      {tab === "allFrais" && <ToValidate scope="all" onChanged={() => void loadScope()} period={period} menu={menu} />}
-      {tab === "prestataires" && <PrestataireInvoices scope="all" period={period} menu={menu} onChanged={() => void loadScope()} />}
+      {tab === "frais" && <ToValidate key={listScope} scope={listScope} onChanged={() => void loadScope()} period={period} menu={menu} />}
+      {tab === "factures" && <PrestataireInvoices key={listScope} scope={listScope} period={period} menu={menu} onChanged={() => void loadScope()} />}
       {tab === "payables" && <Payables period={period} menu={menu} />}
       {tab === "settings" && <ExpenseMailSettings />}
     </div>
@@ -745,13 +823,13 @@ export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}
         kicker={tab === "settings" ? "Paramètres" : periodLabel}
         onBack={mobile.onBack}
         onLogoClick={() => {
-          if (tab === "settings") setTab(flavor === "factures" ? "invoices" : "mine");
+          if (tab === "settings") setTab(homeTab(flavor));
           setMenuOpen((o) => !o);
         }}
         menuOpen={menuOpen}
         onSettings={() => {
           setMenuOpen(false);
-          setTab((t) => (t === "settings" ? (flavor === "factures" ? "invoices" : "mine") : "settings"));
+          setTab((t) => (t === "settings" ? homeTab(flavor) : "settings"));
         }}
         app="frais"
         actions={

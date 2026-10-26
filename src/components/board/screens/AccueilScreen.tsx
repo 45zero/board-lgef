@@ -321,7 +321,12 @@ const ACTION_PHOTOS = new Set([
   "inscriptions",
   "cartes",
 ]);
-const actionPhoto = (id: string) => `/actions/${ACTION_PHOTOS.has(id) ? id : "default"}.jpg`;
+// Factures : mêmes photos que les frais correspondants.
+const PHOTO_ALIASES: Record<string, string> = { "factures-deposer": "frais-declarer", "factures-refusees": "frais-refuses", "factures-valider": "frais-valider", "a-payer": "frais-valider" };
+const actionPhoto = (id: string) => {
+  const photo = PHOTO_ALIASES[id] ?? id;
+  return `/actions/${ACTION_PHOTOS.has(photo) ? photo : "default"}.jpg`;
+};
 
 /** Miniature du premier média, sinon photo statique de l'action (repli sur la photo si la miniature échoue). */
 function ActionPhoto({ action: a, className = "" }: { action: DashboardAction; className?: string }) {

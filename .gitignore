@@ -43,3 +43,7 @@ next-env.d.ts
 
 # centre d'aide : photos des tickets téléchargées par scripts/support-tickets.mjs
 /.support-tickets/
+
+# Kit Sony (appareil photo) et fichiers temporaires de Claude : locaux, hors dépôt.
+/CrSDK_*/
+/.claude-tmp/
