@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { MapPopup } from "@/components/board/calendar/MapPopup";
 import { useEffect, useState } from "react";
-import { X, Check, ChevronRight, CalendarDays, MapPin, Map as MapIcon, Loader2, Send, FileText } from "lucide-react";
+import { X, Check, ChevronRight, CalendarDays, MapPin, Map as MapIcon, Loader2, Send, FileText, Search } from "lucide-react";
 import { Composer } from "@/components/board/screens/PublicationScreen";
 import { getMediaPublication, type MediaPublication } from "@/lib/board/mediaPublications";
 import { createClient } from "@/lib/supabase/client";
@@ -22,7 +22,8 @@ import {
   type MyExpenseItem,
   type SubmissionToReview,
 } from "@/app/actions/expenses";
-import { ExpenseSheetModal, ReviewModal } from "@/components/board/screens/FraisScreen";
+import { DeclareBar, ExpenseSheetModal, ReviewModal, declarableInBulk } from "@/components/board/screens/FraisScreen";
+import { normalize } from "@/components/board/expenses/PeriodNav";
 import { confirmNoExpense, formatEuros } from "@/components/board/expenses/ExpenseStatus";
 import { EventArrow, useOpenEvent } from "@/components/board/calendar/EventOpener";
 import { useEventCoverage } from "@/hooks/board/useEventCoverage";
@@ -93,7 +94,9 @@ function Row({
   date,
   location,
   children,
+  select,
 }: {
+  select?: { checked: boolean; onToggle: () => void };
   title: string;
   subtitle?: string;
   eventId?: string | null;
@@ -103,7 +106,8 @@ function Row({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3 last:border-b-0">
+    <div className={`flex flex-wrap items-center gap-2 border-b border-line px-4 py-3 last:border-b-0 ${select?.checked ? "bg-sel-bg" : ""}`}>
+      {select && <SelectBox checked={select.checked} onChange={select.onToggle} label={`Sélectionner ${title}`} />}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate text-sm font-bold text-ink">{title}</span>
@@ -120,6 +124,27 @@ function Row({
 const btnOk = "flex items-center gap-1 rounded-btn bg-good px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50";
 const btnKo = "rounded-btn border border-bad px-3 py-1.5 text-xs font-bold text-bad disabled:opacity-50";
 const btnGhost = "flex items-center gap-1 rounded-btn border border-line px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover disabled:opacity-50";
+
+/** Filtre par nom (ou titre) : « Tout sélectionner » ne coche alors que ce qui est affiché. */
+function NameFilter({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="mx-3 mt-3 flex items-center gap-2 rounded-btn border border-line bg-card px-3 py-1.5">
+      <Search size={13} className="shrink-0 text-ink-4" />
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Filtrer par nom (ex. Hugo)…"
+        className="w-full bg-transparent text-sm outline-none"
+      />
+      {value && (
+        <button onClick={() => onChange("")} aria-label="Effacer le filtre" className="text-ink-4 hover:text-ink">
+          <X size={13} />
+        </button>
+      )}
+    </div>
+  );
+}
+const matchesName = (q: string, text: string) => !q.trim() || normalize(text).includes(normalize(q.trim()));
 
 /* ---------- Frais à valider (N+1) ---------- */
 
@@ -442,7 +467,9 @@ function DecideBar({
 function ValidateList({ onChanged }: { onChanged: () => void }) {
   const [subs, setSubs] = useState<SubmissionToReview[] | null>(null);
   const [details, setDetails] = useState<SubmissionToReview | null>(null);
-  const sel = useSelection((subs ?? []).map((s) => s.submissionId));
+  const [query, setQuery] = useState("");
+  const shown = (subs ?? []).filter((s) => matchesName(query, `${s.person.name} ${s.event.title}`));
+  const sel = useSelection(shown.map((s) => s.submissionId));
   useEffect(() => {
     getSubmissionsToReview("pending", "mine")
       .then(setSubs)
@@ -456,10 +483,11 @@ function ValidateList({ onChanged }: { onChanged: () => void }) {
   };
   return (
     <>
+      <NameFilter value={query} onChange={setQuery} />
       <DecideBar
         sel={sel}
-        selectableCount={subs.length}
-        total={subs.filter((s) => sel.selected.has(s.submissionId)).reduce((n, s) => n + s.total, 0)}
+        selectableCount={shown.length}
+        total={shown.filter((s) => sel.selected.has(s.submissionId)).reduce((n, s) => n + s.total, 0)}
         commentFor="chaque déclarant"
         onDecide={async (ids, decision, comment) => {
           const done = new Set<string>();
@@ -473,7 +501,8 @@ function ValidateList({ onChanged }: { onChanged: () => void }) {
           return errors;
         }}
       />
-      {subs.map((s) => (
+      {shown.length === 0 && <p className="p-4 text-sm text-ink-3">Aucun résultat pour « {query} ».</p>}
+      {shown.map((s) => (
         <ValidateRow
           key={s.submissionId}
           sub={s}
@@ -499,13 +528,17 @@ function ValidateList({ onChanged }: { onChanged: () => void }) {
 
 /** Factures de prestataires à valider : une à une ou en lot (cases à cocher). */
 function InvoiceValidateList({ items, onDone }: { items: DashboardActionItem[]; onDone: (ids: string[]) => void }) {
-  const sel = useSelection(items.map((i) => i.id));
+  const [query, setQuery] = useState("");
+  // Titre « Prénom Nom · Événement ».
+  const shown = items.filter((i) => matchesName(query, i.title));
+  const sel = useSelection(shown.map((i) => i.id));
   return (
     <>
+      <NameFilter value={query} onChange={setQuery} />
       <DecideBar
         sel={sel}
-        selectableCount={items.length}
-        total={items.filter((i) => sel.selected.has(i.id)).reduce((n, i) => n + (i.amount ?? 0), 0)}
+        selectableCount={shown.length}
+        total={shown.filter((i) => sel.selected.has(i.id)).reduce((n, i) => n + (i.amount ?? 0), 0)}
         commentFor="chaque prestataire"
         onDecide={async (ids, decision, comment) => {
           const done: string[] = [];
@@ -519,7 +552,8 @@ function InvoiceValidateList({ items, onDone }: { items: DashboardActionItem[]; 
           return errors;
         }}
       />
-      {items.map((i) => (
+      {shown.length === 0 && <p className="p-4 text-sm text-ink-3">Aucun résultat pour « {query} ».</p>}
+      {shown.map((i) => (
         <InvoiceValidateRow key={i.id} item={i} selected={sel.selected.has(i.id)} onToggle={() => sel.toggle(i.id)} onDone={() => onDone([i.id])} />
       ))}
     </>
@@ -538,8 +572,10 @@ function PayList({ onChanged }: { onChanged: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const keyOf = (p: Payable) => `${p.kind}:${p.id}`;
-  const sel = useSelection((items ?? []).map(keyOf));
+  const shown = (items ?? []).filter((p) => matchesName(query, `${p.personName} ${p.title}`));
+  const sel = useSelection(shown.map(keyOf));
   useEffect(() => {
     getPayables(new Date().getFullYear())
       .then((res) => {
@@ -566,7 +602,7 @@ function PayList({ onChanged }: { onChanged: () => void }) {
     if (!res.ok) return setError(res.error);
     drop([keyOf(p)]);
   };
-  const picked = items.filter((p) => sel.selected.has(keyOf(p)));
+  const picked = shown.filter((p) => sel.selected.has(keyOf(p)));
   const markPicked = async () => {
     if (!picked.length || !paidOn) return;
     setBulkBusy(true);
@@ -588,20 +624,22 @@ function PayList({ onChanged }: { onChanged: () => void }) {
     <>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2.5">
         <span className="text-xs text-ink-3">
-          {items.length} élément{items.length > 1 ? "s" : ""} · <strong className="text-ink">{formatEuros(items.reduce((n, p) => n + p.amount, 0))}</strong>
+          {shown.length} élément{shown.length > 1 ? "s" : ""}
+          {query.trim() ? ` pour « ${query.trim()} »` : ""} · <strong className="text-ink">{formatEuros(shown.reduce((n, p) => n + p.amount, 0))}</strong>
         </span>
         <label className="flex items-center gap-2 text-xs font-semibold text-ink-3">
           Payé le
           <input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} className="rounded-btn border border-line bg-card px-2 py-1 text-sm outline-none" />
         </label>
       </div>
+      {items.length > 0 && <NameFilter value={query} onChange={setQuery} />}
       {items.length === 0 && !msg ? (
         <p className="p-4 text-sm text-ink-3">Tout ce qui est validé est payé. 👍</p>
       ) : (
         <BulkBar
           className="m-3"
           count={sel.selected.size}
-          selectableCount={items.length}
+          selectableCount={shown.length}
           total={formatEuros(picked.reduce((n, p) => n + p.amount, 0))}
           allSelected={sel.allSelected}
           onToggleAll={sel.selectAll}
@@ -612,7 +650,8 @@ function PayList({ onChanged }: { onChanged: () => void }) {
         />
       )}
       {error && <p className="px-4 pb-2 text-xs text-bad">{error}</p>}
-      {items.map((p) => (
+      {items.length > 0 && shown.length === 0 && <p className="p-4 text-sm text-ink-3">Aucun résultat pour « {query} ».</p>}
+      {shown.map((p) => (
         <div key={keyOf(p)} className={`flex flex-wrap items-center gap-2 border-b border-line px-4 py-3 last:border-b-0 ${sel.selected.has(keyOf(p)) ? "bg-sel-bg" : ""}`}>
           <SelectBox checked={sel.selected.has(keyOf(p))} onChange={() => sel.toggle(keyOf(p))} label={`Sélectionner ${p.personName} · ${p.title}`} />
           <div className="min-w-0 flex-1">
@@ -689,6 +728,7 @@ function DeclareList({ statuses, onChanged }: { statuses: MyExpenseItem["status"
   const [open, setOpen] = useState<MyExpenseItem | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
+  const sel = useSelection((items ?? []).filter(declarableInBulk).map((i) => i.key));
   useEffect(() => {
     getMyExpenses()
       .then((all) => setItems(all.filter((i) => statuses.includes(i.status) && !i.upcoming)))
@@ -703,9 +743,11 @@ function DeclareList({ statuses, onChanged }: { statuses: MyExpenseItem["status"
   };
   return (
     <>
+      <DeclareBar items={items} sel={sel} onDone={refresh} className="m-3" />
       {items.map((i) => (
         <Row
           key={i.key}
+          select={declarableInBulk(i) ? { checked: sel.selected.has(i.key), onToggle: () => sel.toggle(i.key) } : undefined}
           title={i.title}
           eventId={i.eventId}
           subtitle={`${i.eventId ? `${fmt(i.start)} · ${i.roles.join(", ")}` : "Hors événement"}${i.lineCount ? ` · ${formatEuros(i.total)}` : ""}${

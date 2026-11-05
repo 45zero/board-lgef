@@ -105,6 +105,65 @@ export function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpens
   );
 }
 
+/** Déclarables en lot : « à déclarer » et passés (les refusés se corrigent un par un). */
+export const declarableInBulk = (i: MyExpenseItem) => i.status === "a_declarer" && !i.upcoming;
+
+/**
+ * Déclarer ou « Pas de frais » d'un coup pour les lignes cochées. « Pas de frais » supprimerait les
+ * lignes saisies : il ne s'applique qu'aux événements sans frais ; « Déclarer » à ceux qui en ont.
+ */
+export function DeclareBar({
+  items,
+  sel,
+  onDone,
+  className,
+}: {
+  items: MyExpenseItem[];
+  sel: ReturnType<typeof useSelection>;
+  onDone: () => void;
+  className?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const selectable = items.filter(declarableInBulk);
+  const picked = selectable.filter((i) => sel.selected.has(i.key));
+  const noExpense = picked.filter((i) => i.eventId && i.lineCount === 0);
+  const toDeclare = picked.filter((i) => i.lineCount > 0);
+  const run = async (list: MyExpenseItem[], none: boolean) => {
+    if (!list.length) return;
+    setBusy(true);
+    setMsg(null);
+    const errors = await runBulk(list, async (i) => (await declareExpenses(i.eventId ? { eventId: i.eventId } : { month: i.month! }, none)).error);
+    setBusy(false);
+    sel.clear();
+    setMsg(bulkReport(list.length, errors, none ? "clôturé" : "déclaré"));
+    onDone();
+  };
+  return (
+    <BulkBar
+      className={className}
+      count={picked.length}
+      selectableCount={selectable.length}
+      total={formatEuros(picked.reduce((n, i) => n + i.total, 0))}
+      allSelected={sel.allSelected}
+      onToggleAll={sel.selectAll}
+      onClear={sel.clear}
+      busy={busy}
+      message={msg}
+      actions={[
+        ...(noExpense.length ? [{ label: `Pas de frais (${noExpense.length})`, tone: "neutral" as const, onClick: () => void run(noExpense, true) }] : []),
+        ...(toDeclare.length ? [{ label: `Déclarer (${toDeclare.length})`, tone: "good" as const, icon: <Check size={13} />, onClick: () => void run(toDeclare, false) }] : []),
+      ]}
+      // Sélection mixte : chaque bouton ne traite que sa part, on le dit.
+      extra={
+        noExpense.length > 0 && toDeclare.length > 0 && (
+          <p className="text-[11px] text-ink-3">« Pas de frais » : les événements sans frais saisis · « Déclarer » : ceux qui ont des frais.</p>
+        )
+      }
+    />
+  );
+}
+
 function MyExpenses({ period, menu, reloadKey = 0 }: { period: Period; menu?: MobileMenu; reloadKey?: number }) {
   const { user } = useAuth();
   // Dernière liste connue affichée tout de suite (navigateur), puis rafraîchie.
@@ -166,6 +225,7 @@ function MyExpenses({ period, menu, reloadKey = 0 }: { period: Period; menu?: Mo
   // Regroupement par mois.
   const groups = new Map<string, MyExpenseItem[]>();
   for (const i of visible) groups.set(monthKey(i.start), [...(groups.get(monthKey(i.start)) ?? []), i]);
+  const sel = useSelection(visible.filter(declarableInBulk).map((i) => i.key));
 
   if (!items) return <div className="p-6 text-sm text-ink-4">Chargement…</div>;
 
@@ -196,6 +256,7 @@ function MyExpenses({ period, menu, reloadKey = 0 }: { period: Period; menu?: Mo
           <Download size={14} /> Exporter
         </button>
       </FiltersRow>
+      <DeclareBar items={visible} sel={sel} onDone={() => void load()} />
 
       {visible.length === 0 ? (
         <div className="rounded-panel border border-dashed border-line p-8 text-center text-sm text-ink-4">
@@ -209,7 +270,16 @@ function MyExpenses({ period, menu, reloadKey = 0 }: { period: Period; menu?: Mo
         <div className="overflow-hidden rounded-panel border border-line bg-card">
           {[...groups.entries()].map(([key, group]) => (
             <div key={key}>
-              <GroupHeader label={monthLabel(key)} count={group.length} total={group.reduce((n, i) => n + i.total, 0)} />
+              <GroupHeader
+                label={monthLabel(key)}
+                count={group.length}
+                total={group.reduce((n, i) => n + i.total, 0)}
+                select={(() => {
+                  const keys = group.filter(declarableInBulk).map((i) => i.key);
+                  if (!keys.length) return undefined;
+                  return { checked: keys.every((k) => sel.selected.has(k)), partial: keys.some((k) => sel.selected.has(k)), onToggle: () => sel.toggleMany(keys) };
+                })()}
+              />
               {group.map((i) => (
                 <div
                   key={i.key}
@@ -222,9 +292,12 @@ function MyExpenses({ period, menu, reloadKey = 0 }: { period: Period; menu?: Mo
                       setOpen(i);
                     }
                   }}
-                  className="flex w-full cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover md:flex-nowrap"
+                  className={`flex w-full cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover md:flex-nowrap ${
+                    sel.selected.has(i.key) ? "bg-sel-bg" : ""
+                  }`}
                 >
-                  <div className="min-w-0 basis-full md:flex-1 md:basis-auto">
+                  {declarableInBulk(i) && <SelectBox checked={sel.selected.has(i.key)} onChange={() => sel.toggle(i.key)} label={`Sélectionner ${i.title}`} />}
+                  <div className={`min-w-0 md:flex-1 md:basis-auto ${declarableInBulk(i) ? "flex-1" : "basis-full"}`}>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="truncate text-sm font-bold text-ink">{i.title}</span>
                       <OrgChip eventType={i.eventType} />
