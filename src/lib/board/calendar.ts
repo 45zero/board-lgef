@@ -87,9 +87,16 @@ export interface CalendarEvent {
   photoCoverage?: boolean;
   /** L'utilisateur connecté est sollicité sur cet événement (voir src/lib/board/solicitation.ts). */
   solicited?: boolean;
+  /** Événement « Perso » créé par l'utilisateur connecté — compté dans « Mes événements ». */
+  myPersonal?: boolean;
   /** L'utilisateur connecté est désigné sur la couverture et doit encore accepter ou refuser. */
   awaitingMyAnswer?: boolean;
   status: "pending" | "approved" | "rejected" | "completed" | null;
+}
+
+/** Filtre « Mes événements » : ceux où je suis sollicité, plus mes événements Perso. */
+export function isMyEvent(e: Pick<CalendarEvent, "solicited" | "myPersonal">): boolean {
+  return !!e.solicited || !!e.myPersonal;
 }
 
 export type PublishedMedia = "video" | "photo" | "both";

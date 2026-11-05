@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, Search } from "lucide-react";
 import { formatEuros } from "@/components/board/expenses/ExpenseStatus";
+import { SelectBox } from "@/components/board/expenses/BulkSelect";
 
 // Navigation par période (année → mois, total et nombre de fiches de chacun) et éléments de liste
 // communs aux onglets du module Frais / Factures / GED.
@@ -261,10 +262,24 @@ export function MobileYearMonthBar({
   );
 }
 
-export function GroupHeader({ label, total, count }: { label: string; total: number; count: number }) {
+/** `select` : case pour cocher d'un coup toutes les lignes sélectionnables du groupe. */
+export function GroupHeader({
+  label,
+  total,
+  count,
+  select,
+}: {
+  label: string;
+  total: number;
+  count: number;
+  select?: { checked: boolean; partial: boolean; onToggle: () => void };
+}) {
   return (
     <div className="flex items-center justify-between bg-subtle px-4 py-1.5 text-[11px] font-bold text-ink-3">
-      <span>{label}</span>
+      <span className="flex items-center gap-2">
+        {select && <SelectBox checked={select.checked} partial={select.partial} onChange={select.onToggle} label={`Sélectionner ${label}`} />}
+        {label}
+      </span>
       <span>
         {count} fiche{count > 1 ? "s" : ""} · {formatEuros(total)}
       </span>

@@ -6,11 +6,12 @@ import { readCache, writeCache } from "@/lib/board/localCache";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { Building2, Check, Loader2, Plus, RotateCcw } from "lucide-react";
-import { confirmMyInvoiceUpload, getMyInvoiceItems, getPayables, getStaffOverview, getStandaloneInvoices, prepareMyInvoiceUpload, setPaid } from "@/app/actions/staff";
+import { confirmMyInvoiceUpload, getMyInvoiceItems, getPayables, getStaffOverview, getStandaloneInvoices, prepareMyInvoiceUpload, reviewInvoice, setPaid } from "@/app/actions/staff";
 import type { InvoiceRequestItem } from "@/app/actions/invoice-public";
 import { InvoiceItemCard, stateOf, type InvoiceItemState } from "@/components/invoice/InvoiceUploadCard";
 import { InvoiceLine } from "@/components/board/invoices/InvoiceLine";
 import { CompanyModal, StandaloneInvoiceModal } from "@/components/board/invoices/InvoiceForms";
+import { BulkBar, SelectBox, bulkReport, runBulk, useSelection } from "@/components/board/expenses/BulkSelect";
 import { INVOICE_STATUS_LABELS, euros, invoiceMissing, standaloneAsEngagement, type Engagement, type Payable, type StaffOverview, type StandaloneInvoice } from "@/lib/board/staff";
 import {
   FilterChip,
@@ -223,6 +224,10 @@ export function PrestataireInvoices({ scope, period, menu, onChanged }: { scope:
   const [others, setOthers] = useState<StandaloneInvoice[]>([]);
   const [adding, setAdding] = useState(false);
   const [company, setCompany] = useState<{ id: string; name: string } | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const [bulkRejecting, setBulkRejecting] = useState(false);
+  const [bulkComment, setBulkComment] = useState("");
 
   const load = useCallback(
     () =>
@@ -275,6 +280,27 @@ export function PrestataireInvoices({ scope, period, menu, onChanged }: { scope:
     onChanged?.();
   };
 
+  // Sélection multiple : les factures déposées en attente, à valider / refuser d'un coup.
+  const pendingId = (e: Engagement) => (e.invoice?.status === "pending" ? e.invoice.id : null);
+  const sel = useSelection(visible.map(pendingId).filter((id): id is string => !!id));
+  const selectedTotal = visible.filter((e) => sel.selected.has(pendingId(e) ?? "")).reduce((n, e) => n + lineAmount(e), 0);
+  const bulkDecide = async (decision: "approved" | "rejected") => {
+    const ids = [...sel.selected];
+    if (!ids.length) return;
+    setBulkBusy(true);
+    setBulkMsg(null);
+    const errors = await runBulk(ids, async (id) => {
+      const res = await reviewInvoice(id, decision, decision === "rejected" ? bulkComment : undefined);
+      return res.ok ? null : res.error;
+    });
+    setBulkBusy(false);
+    setBulkRejecting(false);
+    setBulkComment("");
+    sel.clear();
+    setBulkMsg(bulkReport(ids.length, errors, decision === "approved" ? "validé" : "refusé"));
+    await changed();
+  };
+
   return (
     <div className="space-y-3 md:flex md:items-start md:gap-4 md:space-y-0">
       {menu ? <PeriodMenu menu={menu} period={period} stats={monthStats} /> : <YearMonthBar year={year} onYear={period.setYear} month={monthIdx} onMonth={period.setMonthIdx} stats={monthStats} />}
@@ -297,6 +323,41 @@ export function PrestataireInvoices({ scope, period, menu, onChanged }: { scope:
           ))}
         </div>
         <FiltersRow query={query} onQuery={setQuery} />
+        <BulkBar
+          count={sel.selected.size}
+          selectableCount={visible.filter(pendingId).length}
+          total={euros(selectedTotal)}
+          allSelected={sel.allSelected}
+          onToggleAll={sel.selectAll}
+          onClear={() => {
+            sel.clear();
+            setBulkRejecting(false);
+          }}
+          busy={bulkBusy}
+          message={bulkMsg}
+          actions={
+            bulkRejecting
+              ? [
+                  { label: "Annuler", tone: "neutral", onClick: () => setBulkRejecting(false) },
+                  { label: `Refuser (${sel.selected.size})`, tone: "bad", onClick: () => void bulkDecide("rejected") },
+                ]
+              : [
+                  { label: "Refuser", tone: "bad", onClick: () => setBulkRejecting(true) },
+                  { label: `Valider (${sel.selected.size})`, tone: "good", icon: <Check size={13} />, onClick: () => void bulkDecide("approved") },
+                ]
+          }
+          extra={
+            bulkRejecting && (
+              <input
+                autoFocus
+                value={bulkComment}
+                onChange={(ev) => setBulkComment(ev.target.value)}
+                placeholder="Commentaire envoyé à chaque prestataire (facultatif)"
+                className="w-full rounded-btn border border-line bg-card px-3 py-2 text-sm outline-none focus:border-link"
+              />
+            )
+          }
+        />
         {error && <p className="text-xs text-bad">{error}</p>}
         {!data ? (
           <div className="p-6 text-sm text-ink-4">Chargement…</div>
@@ -312,7 +373,16 @@ export function PrestataireInvoices({ scope, period, menu, onChanged }: { scope:
                 <div key={personId}>
                   <div className="flex items-center gap-2 bg-subtle pr-2">
                     <div className="min-w-0 flex-1">
-                      <GroupHeader label={person.name} count={list.length} total={list.reduce((n, e) => n + lineAmount(e), 0)} />
+                      <GroupHeader
+                        label={person.name}
+                        count={list.length}
+                        total={list.reduce((n, e) => n + lineAmount(e), 0)}
+                        select={(() => {
+                          const ids = list.map(pendingId).filter((id): id is string => !!id);
+                          if (!ids.length) return undefined;
+                          return { checked: ids.every((id) => sel.selected.has(id)), partial: ids.some((id) => sel.selected.has(id)), onToggle: () => sel.toggleMany(ids) };
+                        })()}
+                      />
                     </div>
                     <button
                       onClick={() => setCompany(person)}
@@ -323,8 +393,12 @@ export function PrestataireInvoices({ scope, period, menu, onChanged }: { scope:
                     </button>
                   </div>
                   {list.map((e) => (
-                    <div key={`${e.userId}|${e.eventId || e.invoice?.id}`} className="border-b border-line px-4 py-3 last:border-b-0">
+                    <div
+                      key={`${e.userId}|${e.eventId || e.invoice?.id}`}
+                      className={`border-b border-line px-4 py-3 last:border-b-0 ${sel.selected.has(pendingId(e) ?? "") ? "bg-sel-bg" : ""}`}
+                    >
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        {pendingId(e) && <SelectBox checked={sel.selected.has(pendingId(e)!)} onChange={() => sel.toggle(pendingId(e)!)} label={`Sélectionner ${e.title}`} />}
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
                             <span className="truncate text-sm font-bold text-ink">{e.title}</span>
@@ -395,6 +469,8 @@ export function Payables({ period, menu }: { period: Period; menu?: MobileMenu }
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [paidOn, setPaidOn] = useState(todayISO);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
 
   const load = useCallback(
     () =>
@@ -432,6 +508,27 @@ export function Payables({ period, menu }: { period: Period; menu?: MobileMenu }
   for (const p of visible) groups.set(monthKey(p.date), [...(groups.get(monthKey(p.date)) ?? []), p]);
   const due = inPeriod.filter((p) => !p.paidAt && (kind === "all" || p.kind === kind));
 
+  // Sélection multiple : marquer payés (à la date choisie) ou annuler le paiement d'un coup.
+  const keyOf = (p: Payable) => `${p.kind}:${p.id}`;
+  const sel = useSelection(visible.map(keyOf));
+  const picked = visible.filter((p) => sel.selected.has(keyOf(p)));
+  const pickedUnpaid = picked.filter((p) => !p.paidAt);
+  const pickedPaid = picked.filter((p) => p.paidAt);
+  const bulkMark = async (list: Payable[], on: string | null) => {
+    if (!list.length) return;
+    setBulkBusy(true);
+    setBulkMsg(null);
+    const errors = await runBulk(list, async (p) => {
+      const res = await setPaid(p.kind, p.id, on);
+      return res.ok ? null : res.error;
+    });
+    setBulkBusy(false);
+    sel.clear();
+    setBulkMsg(bulkReport(list.length, errors, on ? "marqué payé" : "remis à payer"));
+    void load();
+  };
+  const paidOnLabel = paidOn ? new Date(`${paidOn}T12:00:00`).toLocaleDateString("fr-FR") : "";
+
   return (
     <div className="space-y-3 md:flex md:items-start md:gap-4 md:space-y-0">
       {menu ? <PeriodMenu menu={menu} period={period} stats={monthStats} /> : <YearMonthBar year={year} onYear={period.setYear} month={monthIdx} onMonth={period.setMonthIdx} stats={monthStats} />}
@@ -463,6 +560,24 @@ export function Payables({ period, menu }: { period: Period; menu?: MobileMenu }
           ))}
         </div>
         <FiltersRow query={query} onQuery={setQuery} />
+        <BulkBar
+          count={sel.selected.size}
+          selectableCount={visible.length}
+          total={euros(picked.reduce((n, p) => n + p.amount, 0))}
+          allSelected={sel.allSelected}
+          onToggleAll={sel.selectAll}
+          onClear={sel.clear}
+          busy={bulkBusy}
+          message={bulkMsg}
+          actions={[
+            ...(pickedPaid.length
+              ? [{ label: `Annuler le paiement (${pickedPaid.length})`, tone: "neutral" as const, icon: <RotateCcw size={12} />, onClick: () => void bulkMark(pickedPaid, null) }]
+              : []),
+            ...(pickedUnpaid.length && paidOn
+              ? [{ label: `Payé le ${paidOnLabel} (${pickedUnpaid.length})`, tone: "good" as const, icon: <Check size={13} />, onClick: () => void bulkMark(pickedUnpaid, paidOn) }]
+              : []),
+          ]}
+        />
         {error && <p className="text-xs text-bad">{error}</p>}
         {!items ? (
           <div className="p-6 text-sm text-ink-4">Chargement…</div>
@@ -472,10 +587,23 @@ export function Payables({ period, menu }: { period: Period; menu?: MobileMenu }
           <div className="overflow-hidden rounded-panel border border-line bg-card">
             {[...groups.entries()].map(([key, list]) => (
               <div key={key}>
-                <GroupHeader label={monthLabel(key)} count={list.length} total={list.reduce((n, p) => n + p.amount, 0)} />
+                <GroupHeader
+                  label={monthLabel(key)}
+                  count={list.length}
+                  total={list.reduce((n, p) => n + p.amount, 0)}
+                  select={{
+                    checked: list.every((p) => sel.selected.has(keyOf(p))),
+                    partial: list.some((p) => sel.selected.has(keyOf(p))),
+                    onToggle: () => sel.toggleMany(list.map(keyOf)),
+                  }}
+                />
                 {list.map((p) => (
-                  <div key={`${p.kind}:${p.id}`} className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3 last:border-b-0 md:flex-nowrap">
-                    <div className="min-w-0 basis-full md:flex-1 md:basis-auto">
+                  <div
+                    key={keyOf(p)}
+                    className={`flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3 last:border-b-0 md:flex-nowrap ${sel.selected.has(keyOf(p)) ? "bg-sel-bg" : ""}`}
+                  >
+                    <SelectBox checked={sel.selected.has(keyOf(p))} onChange={() => sel.toggle(keyOf(p))} label={`Sélectionner ${p.personName} · ${p.title}`} />
+                    <div className="min-w-0 flex-1 md:basis-auto">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className={`rounded-chip px-1.5 py-0.5 text-[10px] font-bold ${p.kind === "invoice" ? "bg-warn-bg text-warn" : "bg-sel-bg text-link"}`}>
                           {p.kind === "invoice" ? "Facture" : "Frais"}

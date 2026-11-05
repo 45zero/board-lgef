@@ -41,7 +41,7 @@ import { GoogleEventModal } from "@/components/board/calendar/GoogleEventModal";
 import { ORG_COLORS, type OrgKey } from "@/lib/board/tokens";
 import { CalendarSidebar } from "@/components/board/calendar/CalendarSidebar";
 import { StaffEventsMap } from "@/components/board/calendar/StaffEventsMap";
-import { isMultiDayEvent, layoutBanners, type CalendarEvent } from "@/lib/board/calendar";
+import { isMultiDayEvent, isMyEvent, layoutBanners, type CalendarEvent } from "@/lib/board/calendar";
 import { useMyTravelTimes } from "@/hooks/board/useMyTravelTimes";
 import { departureTime, formatTravel } from "@/lib/board/geo";
 
@@ -199,7 +199,7 @@ export function CalendrierScreen() {
   const visibleEvents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return events.filter((e) => {
-      if (mineOnly && !e.solicited) return false;
+      if (mineOnly && !isMyEvent(e)) return false;
       if (!passesCoverageFilters(e, coverage)) return false;
       if (hiddenOrgs.has(e.org)) return false;
       if (q && !e.title.toLowerCase().includes(q)) return false;

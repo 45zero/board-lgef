@@ -25,6 +25,7 @@ import { RECEIPT_ACCEPT } from "@/lib/board/receiptUpload";
 import { ExpenseExportModal } from "@/components/board/expenses/ExpenseExportModal";
 import { ExpenseMailSettings } from "@/components/board/expenses/ExpenseMailSettings";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
+import { BulkBar, SelectBox, bulkReport, runBulk, useSelection } from "@/components/board/expenses/BulkSelect";
 import { lineParts } from "@/lib/board/expenseCategories";
 import { ExpenseStatusBadge, EXPENSE_STATUS_META, confirmNoExpense, formatEuros } from "@/components/board/expenses/ExpenseStatus";
 import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
@@ -474,6 +475,10 @@ function ToValidate({ onChanged, period, menu, scope = "mine" }: { onChanged: ()
   const [rejecting, setRejecting] = useState<SubmissionToReview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const [bulkRejecting, setBulkRejecting] = useState(false);
+  const [bulkComment, setBulkComment] = useState("");
   const { year, monthIdx } = period;
 
   const load = useCallback(() => getSubmissionsToReview(status, scope).then(setSubs).catch(() => setSubs([])), [status, scope]);
@@ -509,6 +514,24 @@ function ToValidate({ onChanged, period, menu, scope = "mine" }: { onChanged: ()
     groups.set(s.person.id, g);
   }
 
+  // Sélection multiple : seulement les déclarations en attente, pour les valider / refuser d'un coup.
+  const sel = useSelection(status === "pending" ? visible.map((s) => s.submissionId) : []);
+  const selectedTotal = visible.filter((s) => sel.selected.has(s.submissionId)).reduce((n, s) => n + s.total, 0);
+  const bulkDecide = async (decision: "approved" | "rejected") => {
+    const ids = [...sel.selected];
+    if (!ids.length) return;
+    setBulkBusy(true);
+    setBulkMsg(null);
+    const errors = await runBulk(ids, async (id) => (await reviewSubmission(id, decision, decision === "rejected" ? bulkComment : "")).error);
+    setBulkBusy(false);
+    setBulkRejecting(false);
+    setBulkComment("");
+    sel.clear();
+    setBulkMsg(bulkReport(ids.length, errors, decision === "approved" ? "validé" : "refusé"));
+    void load();
+    onChanged();
+  };
+
   return (
     <div className="space-y-3 md:flex md:items-start md:gap-4 md:space-y-0">
       {menu ? (
@@ -519,12 +542,55 @@ function ToValidate({ onChanged, period, menu, scope = "mine" }: { onChanged: ()
       <div className="min-w-0 flex-1 space-y-3">
       <div className="-mx-3 flex items-center gap-1.5 overflow-x-auto px-3 md:mx-0 md:flex-wrap md:px-0">
         {(["pending", "approved", "rejected"] as const).map((st) => (
-          <FilterChip key={st} active={status === st} onClick={() => setStatus(st)}>
+          <FilterChip
+            key={st}
+            active={status === st}
+            onClick={() => {
+              setStatus(st);
+              setBulkMsg(null);
+            }}
+          >
             {EXPENSE_STATUS_META[st].label}
           </FilterChip>
         ))}
       </div>
       <FiltersRow query={query} onQuery={setQuery} />
+      <BulkBar
+        count={sel.selected.size}
+        selectableCount={status === "pending" ? visible.length : 0}
+        total={formatEuros(selectedTotal)}
+        allSelected={sel.allSelected}
+        onToggleAll={sel.selectAll}
+        onClear={() => {
+          sel.clear();
+          setBulkRejecting(false);
+        }}
+        busy={bulkBusy}
+        message={bulkMsg}
+        actions={
+          bulkRejecting
+            ? [
+                { label: "Annuler", tone: "neutral", onClick: () => setBulkRejecting(false) },
+                { label: `Refuser (${sel.selected.size})`, tone: "bad", onClick: () => void bulkDecide("rejected") },
+              ]
+            : [
+                { label: "Refuser", tone: "bad", onClick: () => setBulkRejecting(true) },
+                { label: `Valider (${sel.selected.size})`, tone: "good", icon: <Check size={13} />, onClick: () => void bulkDecide("approved") },
+              ]
+        }
+        extra={
+          bulkRejecting && (
+            <textarea
+              autoFocus
+              value={bulkComment}
+              onChange={(e) => setBulkComment(e.target.value)}
+              rows={2}
+              placeholder="Commentaire envoyé à chaque déclarant (facultatif)…"
+              className="w-full rounded-btn border border-line bg-card px-3 py-2 text-sm outline-none focus:border-link"
+            />
+          )
+        }
+      />
 
       {!subs ? (
         <div className="p-6 text-sm text-ink-4">Chargement…</div>
@@ -536,7 +602,20 @@ function ToValidate({ onChanged, period, menu, scope = "mine" }: { onChanged: ()
         <div className="overflow-hidden rounded-panel border border-line bg-card">
           {[...groups.entries()].map(([key, g]) => (
             <div key={key}>
-              <GroupHeader label={g.label} count={g.items.length} total={g.items.reduce((n, s) => n + s.total, 0)} />
+              <GroupHeader
+                label={g.label}
+                count={g.items.length}
+                total={g.items.reduce((n, s) => n + s.total, 0)}
+                select={
+                  status === "pending"
+                    ? {
+                        checked: g.items.every((s) => sel.selected.has(s.submissionId)),
+                        partial: g.items.some((s) => sel.selected.has(s.submissionId)),
+                        onToggle: () => sel.toggleMany(g.items.map((s) => s.submissionId)),
+                      }
+                    : undefined
+                }
+              />
               {g.items.map((s) => (
                 <div
                   key={s.submissionId}
@@ -549,9 +628,14 @@ function ToValidate({ onChanged, period, menu, scope = "mine" }: { onChanged: ()
                       setOpen(s);
                     }
                   }}
-                  className="flex w-full cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover md:flex-nowrap"
+                  className={`flex w-full cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3 text-left last:border-b-0 hover:bg-hover md:flex-nowrap ${
+                    sel.selected.has(s.submissionId) ? "bg-sel-bg" : ""
+                  }`}
                 >
-                  <div className="min-w-0 basis-full md:flex-1 md:basis-auto">
+                  {s.status === "pending" && (
+                    <SelectBox checked={sel.selected.has(s.submissionId)} onChange={() => sel.toggle(s.submissionId)} label={`Sélectionner ${s.event.title}`} />
+                  )}
+                  <div className={`min-w-0 md:flex-1 md:basis-auto ${s.status === "pending" ? "flex-1" : "basis-full"}`}>
                     <div className="flex items-center gap-1.5">
                       <span className="truncate text-sm font-bold text-ink">{s.event.title}</span>
                       {s.event.id && <EventArrow eventId={s.event.id} className="h-6 w-6" />}

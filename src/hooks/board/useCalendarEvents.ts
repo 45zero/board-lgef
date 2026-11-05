@@ -147,6 +147,7 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       photoCoverage: photoCovered.has(row.id),
       director: directorByEvent.get(row.id) ?? null,
       solicited: solicited.has(row.id),
+      myPersonal: row.event_type === "kanban" && row.created_by === user.id,
       awaitingMyAnswer: (() => {
         const c = coverageByEvent.get(row.id);
         return !!c && c.assigned_technician_id === user.id && c.status !== "rejected" && c.technician_response !== "accepted" && c.technician_response !== "rejected";

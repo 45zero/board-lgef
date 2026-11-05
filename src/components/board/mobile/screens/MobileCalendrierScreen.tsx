@@ -27,7 +27,7 @@ import { useSolicitedFilter } from "@/hooks/board/useSolicitedFilter";
 import { passesCoverageFilters, useCoverageFilters } from "@/hooks/board/useCoverageFilters";
 import { useCalendarDefaults, type CalendarView } from "@/hooks/board/useCalendarDefaults";
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
-import { isMultiDayEvent, CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
+import { isMultiDayEvent, isMyEvent, CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
 import type { CalendarEvent } from "@/lib/board/calendar";
 import { MobileEventModal } from "@/components/board/mobile/MobileEventModal";
@@ -87,7 +87,7 @@ export function MobileCalendrierScreen() {
   const filtered = useMemo(() => {
     return events.filter((e) => {
       if (orgFilter && e.org !== orgFilter) return false;
-      if (mineOnly && !e.solicited) return false;
+      if (mineOnly && !isMyEvent(e)) return false;
       if (!passesCoverageFilters(e, coverage)) return false;
       return true;
     });
