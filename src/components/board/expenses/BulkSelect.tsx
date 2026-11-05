@@ -99,6 +99,7 @@ export function BulkBar({
   busy,
   extra,
   message,
+  className = "",
 }: {
   count: number;
   selectableCount: number;
@@ -110,6 +111,8 @@ export function BulkBar({
   busy: boolean;
   extra?: React.ReactNode;
   message?: string | null;
+  /** Marges selon l'endroit (popup du tableau de bord…). */
+  className?: string;
 }) {
   if (!selectableCount && !message) return null;
   const tones = {
@@ -118,7 +121,7 @@ export function BulkBar({
     neutral: "border border-line text-ink-2 hover:bg-hover",
   };
   return (
-    <div className={`sticky top-0 z-10 space-y-2 rounded-panel border px-3 py-2 ${count ? "border-navy bg-sel-bg" : "border-line bg-card"}`}>
+    <div className={`sticky top-0 z-10 space-y-2 rounded-panel border px-3 py-2 ${count ? "border-navy bg-sel-bg" : "border-line bg-card"} ${className}`}>
       <div className="flex flex-wrap items-center gap-2">
         {selectableCount > 0 && (
           <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-ink-2">

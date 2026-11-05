@@ -31,7 +31,9 @@ import { useDirectorAttendance } from "@/hooks/board/useDirectorAttendance";
 import { listAccessRequests, type AccessRequest } from "@/app/actions/account-requests";
 import { AccessRequestCard } from "@/components/board/users/AccessRequestCard";
 import { unwrap } from "@/lib/board/actionResult";
-import { confirmMyInvoiceUpload, getInvoiceFiles, getMyInvoiceItems, prepareMyInvoiceUpload, reviewInvoice } from "@/app/actions/staff";
+import { confirmMyInvoiceUpload, getInvoiceFiles, getMyInvoiceItems, getPayables, prepareMyInvoiceUpload, reviewInvoice, setPaid } from "@/app/actions/staff";
+import { BulkBar, SelectBox, bulkReport, runBulk, useSelection } from "@/components/board/expenses/BulkSelect";
+import type { Payable } from "@/lib/board/staff";
 import type { InvoiceRequestItem } from "@/app/actions/invoice-public";
 import { InvoiceItemCard, stateOf } from "@/components/invoice/InvoiceUploadCard";
 import { ACTION_FRAIS_TAB, requestFraisTab } from "@/lib/board/fraisTab";
@@ -121,7 +123,19 @@ const btnGhost = "flex items-center gap-1 rounded-btn border border-line px-3 py
 
 /* ---------- Frais à valider (N+1) ---------- */
 
-function ValidateRow({ sub, onDone, onDetails }: { sub: SubmissionToReview; onDone: () => void; onDetails: () => void }) {
+function ValidateRow({
+  sub,
+  onDone,
+  onDetails,
+  selected,
+  onToggle,
+}: {
+  sub: SubmissionToReview;
+  onDone: () => void;
+  onDetails: () => void;
+  selected: boolean;
+  onToggle: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [refusing, setRefusing] = useState(false);
   const [reason, setReason] = useState("");
@@ -134,8 +148,9 @@ function ValidateRow({ sub, onDone, onDetails }: { sub: SubmissionToReview; onDo
     onDone();
   };
   return (
-    <div className="border-b border-line px-4 py-3 last:border-b-0">
+    <div className={`border-b border-line px-4 py-3 last:border-b-0 ${selected ? "bg-sel-bg" : ""}`}>
       <div className="flex flex-wrap items-center gap-2">
+        <SelectBox checked={selected} onChange={onToggle} label={`Sélectionner ${sub.person.name} · ${sub.event.title}`} />
         <button onClick={onDetails} className="min-w-0 flex-1 text-left">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-sm font-bold text-ink">
@@ -182,7 +197,7 @@ function ValidateRow({ sub, onDone, onDetails }: { sub: SubmissionToReview; onDo
 }
 
 /** Facture de prestataire : voir le fichier, valider ou refuser (commentaire facultatif) sans quitter l'accueil. */
-function InvoiceValidateRow({ item, onDone }: { item: DashboardActionItem; onDone: () => void }) {
+function InvoiceValidateRow({ item, onDone, selected, onToggle }: { item: DashboardActionItem; onDone: () => void; selected: boolean; onToggle: () => void }) {
   const [busy, setBusy] = useState<"view" | "approved" | "rejected" | null>(null);
   const [refusing, setRefusing] = useState(false);
   const [reason, setReason] = useState("");
@@ -209,8 +224,9 @@ function InvoiceValidateRow({ item, onDone }: { item: DashboardActionItem; onDon
     onDone();
   };
   return (
-    <div className="border-b border-line px-4 py-3 last:border-b-0">
+    <div className={`border-b border-line px-4 py-3 last:border-b-0 ${selected ? "bg-sel-bg" : ""}`}>
       <div className="flex flex-wrap items-center gap-2">
+        <SelectBox checked={selected} onChange={onToggle} label={`Sélectionner ${item.title}`} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-sm font-bold text-ink">
@@ -350,9 +366,83 @@ function AccessRequestList({ onChanged }: { onChanged: () => void }) {
   );
 }
 
+/** Valider / Refuser d'un coup les lignes cochées : barre commune aux notes de frais et aux factures. */
+function DecideBar({
+  sel,
+  total,
+  selectableCount,
+  commentFor,
+  onDecide,
+}: {
+  sel: ReturnType<typeof useSelection>;
+  total: number;
+  selectableCount: number;
+  /** « chaque déclarant », « chaque prestataire ». */
+  commentFor: string;
+  /** Applique la décision aux clés données ; renvoie les erreurs. */
+  onDecide: (ids: string[], decision: "approved" | "rejected", comment: string) => Promise<string[]>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [comment, setComment] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const decide = async (decision: "approved" | "rejected") => {
+    const ids = [...sel.selected];
+    if (!ids.length) return;
+    setBusy(true);
+    setMsg(null);
+    const errors = await onDecide(ids, decision, decision === "rejected" ? comment : "");
+    setBusy(false);
+    setRejecting(false);
+    setComment("");
+    sel.clear();
+    setMsg(bulkReport(ids.length, errors, decision === "approved" ? "validé" : "refusé"));
+  };
+  return (
+    <BulkBar
+      className="m-3"
+      count={sel.selected.size}
+      selectableCount={selectableCount}
+      total={formatEuros(total)}
+      allSelected={sel.allSelected}
+      onToggleAll={sel.selectAll}
+      onClear={() => {
+        sel.clear();
+        setRejecting(false);
+      }}
+      busy={busy}
+      message={msg}
+      actions={
+        rejecting
+          ? [
+              { label: "Annuler", tone: "neutral", onClick: () => setRejecting(false) },
+              { label: `Refuser (${sel.selected.size})`, tone: "bad", onClick: () => void decide("rejected") },
+            ]
+          : [
+              { label: "Refuser", tone: "bad", onClick: () => setRejecting(true) },
+              { label: `Valider (${sel.selected.size})`, tone: "good", icon: <Check size={12} />, onClick: () => void decide("approved") },
+            ]
+      }
+      extra={
+        rejecting && (
+          <input
+            autoFocus
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !busy && void decide("rejected")}
+            placeholder={`Commentaire envoyé à ${commentFor} (facultatif)…`}
+            className="w-full rounded-btn border border-line bg-card px-2.5 py-1.5 text-sm outline-none"
+          />
+        )
+      }
+    />
+  );
+}
+
 function ValidateList({ onChanged }: { onChanged: () => void }) {
   const [subs, setSubs] = useState<SubmissionToReview[] | null>(null);
   const [details, setDetails] = useState<SubmissionToReview | null>(null);
+  const sel = useSelection((subs ?? []).map((s) => s.submissionId));
   useEffect(() => {
     getSubmissionsToReview("pending", "mine")
       .then(setSubs)
@@ -366,8 +456,32 @@ function ValidateList({ onChanged }: { onChanged: () => void }) {
   };
   return (
     <>
+      <DecideBar
+        sel={sel}
+        selectableCount={subs.length}
+        total={subs.filter((s) => sel.selected.has(s.submissionId)).reduce((n, s) => n + s.total, 0)}
+        commentFor="chaque déclarant"
+        onDecide={async (ids, decision, comment) => {
+          const done = new Set<string>();
+          const errors = await runBulk(ids, async (id) => {
+            const res = await reviewSubmission(id, decision, comment);
+            if (!res.error) done.add(id);
+            return res.error;
+          });
+          setSubs((prev) => prev?.filter((x) => !done.has(x.submissionId)) ?? null);
+          onChanged();
+          return errors;
+        }}
+      />
       {subs.map((s) => (
-        <ValidateRow key={s.submissionId} sub={s} onDetails={() => setDetails(s)} onDone={() => remove(s.submissionId)} />
+        <ValidateRow
+          key={s.submissionId}
+          sub={s}
+          selected={sel.selected.has(s.submissionId)}
+          onToggle={() => sel.toggle(s.submissionId)}
+          onDetails={() => setDetails(s)}
+          onDone={() => remove(s.submissionId)}
+        />
       ))}
       {details && (
         <ReviewModal
@@ -379,6 +493,147 @@ function ValidateList({ onChanged }: { onChanged: () => void }) {
           }}
         />
       )}
+    </>
+  );
+}
+
+/** Factures de prestataires à valider : une à une ou en lot (cases à cocher). */
+function InvoiceValidateList({ items, onDone }: { items: DashboardActionItem[]; onDone: (ids: string[]) => void }) {
+  const sel = useSelection(items.map((i) => i.id));
+  return (
+    <>
+      <DecideBar
+        sel={sel}
+        selectableCount={items.length}
+        total={items.filter((i) => sel.selected.has(i.id)).reduce((n, i) => n + (i.amount ?? 0), 0)}
+        commentFor="chaque prestataire"
+        onDecide={async (ids, decision, comment) => {
+          const done: string[] = [];
+          const errors = await runBulk(ids, async (id) => {
+            const res = await reviewInvoice(id, decision, decision === "rejected" ? comment : undefined);
+            if (!res.ok) return res.error;
+            done.push(id);
+            return null;
+          });
+          if (done.length) onDone(done);
+          return errors;
+        }}
+      />
+      {items.map((i) => (
+        <InvoiceValidateRow key={i.id} item={i} selected={sel.selected.has(i.id)} onToggle={() => sel.toggle(i.id)} onDone={() => onDone([i.id])} />
+      ))}
+    </>
+  );
+}
+
+/* ---------- À payer (compta) ---------- */
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+/** Factures et notes de frais validées non réglées : marquer payé, une à une ou en lot, à la date choisie. */
+function PayList({ onChanged }: { onChanged: () => void }) {
+  const [items, setItems] = useState<Payable[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [paidOn, setPaidOn] = useState(todayISO);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const keyOf = (p: Payable) => `${p.kind}:${p.id}`;
+  const sel = useSelection((items ?? []).map(keyOf));
+  useEffect(() => {
+    getPayables(new Date().getFullYear())
+      .then((res) => {
+        if (!res.ok) {
+          setError(res.error);
+          return setItems([]);
+        }
+        // Comme le compteur du tableau de bord : non payées, notes de frais à montant positif.
+        setItems(res.data.filter((p) => !p.paidAt && (p.kind === "invoice" || p.amount > 0)).sort((a, b) => a.date.localeCompare(b.date)));
+      })
+      .catch(() => setItems([]));
+  }, []);
+  if (!items) return <p className="p-4 text-sm text-ink-4">Chargement…</p>;
+  const drop = (keys: string[]) => {
+    const gone = new Set(keys);
+    setItems((prev) => prev?.filter((p) => !gone.has(keyOf(p))) ?? null);
+    onChanged();
+  };
+  const markOne = async (p: Payable) => {
+    setBusy(keyOf(p));
+    setError(null);
+    const res = await setPaid(p.kind, p.id, paidOn);
+    setBusy(null);
+    if (!res.ok) return setError(res.error);
+    drop([keyOf(p)]);
+  };
+  const picked = items.filter((p) => sel.selected.has(keyOf(p)));
+  const markPicked = async () => {
+    if (!picked.length || !paidOn) return;
+    setBulkBusy(true);
+    setMsg(null);
+    const done: string[] = [];
+    const errors = await runBulk(picked, async (p) => {
+      const res = await setPaid(p.kind, p.id, paidOn);
+      if (!res.ok) return res.error;
+      done.push(keyOf(p));
+      return null;
+    });
+    setBulkBusy(false);
+    sel.clear();
+    setMsg(bulkReport(picked.length, errors, "marqué payé"));
+    drop(done);
+  };
+  const paidOnLabel = paidOn ? new Date(`${paidOn}T12:00:00`).toLocaleDateString("fr-FR") : "";
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2.5">
+        <span className="text-xs text-ink-3">
+          {items.length} élément{items.length > 1 ? "s" : ""} · <strong className="text-ink">{formatEuros(items.reduce((n, p) => n + p.amount, 0))}</strong>
+        </span>
+        <label className="flex items-center gap-2 text-xs font-semibold text-ink-3">
+          Payé le
+          <input type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} className="rounded-btn border border-line bg-card px-2 py-1 text-sm outline-none" />
+        </label>
+      </div>
+      {items.length === 0 && !msg ? (
+        <p className="p-4 text-sm text-ink-3">Tout ce qui est validé est payé. 👍</p>
+      ) : (
+        <BulkBar
+          className="m-3"
+          count={sel.selected.size}
+          selectableCount={items.length}
+          total={formatEuros(picked.reduce((n, p) => n + p.amount, 0))}
+          allSelected={sel.allSelected}
+          onToggleAll={sel.selectAll}
+          onClear={sel.clear}
+          busy={bulkBusy}
+          message={msg}
+          actions={paidOn ? [{ label: `Payé le ${paidOnLabel} (${picked.length})`, tone: "good", icon: <Check size={12} />, onClick: () => void markPicked() }] : []}
+        />
+      )}
+      {error && <p className="px-4 pb-2 text-xs text-bad">{error}</p>}
+      {items.map((p) => (
+        <div key={keyOf(p)} className={`flex flex-wrap items-center gap-2 border-b border-line px-4 py-3 last:border-b-0 ${sel.selected.has(keyOf(p)) ? "bg-sel-bg" : ""}`}>
+          <SelectBox checked={sel.selected.has(keyOf(p))} onChange={() => sel.toggle(keyOf(p))} label={`Sélectionner ${p.personName} · ${p.title}`} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className={`shrink-0 rounded-chip px-1.5 py-0.5 text-[10px] font-bold ${p.kind === "invoice" ? "bg-warn-bg text-warn" : "bg-sel-bg text-link"}`}>
+                {p.kind === "invoice" ? "Facture" : "Frais"}
+              </span>
+              <span className="truncate text-sm font-bold text-ink">
+                {p.personName} · {formatEuros(p.amount)}
+              </span>
+              {p.eventId && <EventArrow eventId={p.eventId} className="h-6 w-6" />}
+            </div>
+            <div className="truncate text-[11px] text-ink-4">
+              {p.title} · {new Date(p.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}
+            </div>
+          </div>
+          <button disabled={busy === keyOf(p) || bulkBusy || !paidOn} onClick={() => void markOne(p)} className={btnOk}>
+            {busy === keyOf(p) ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} {p.kind === "invoice" ? "Payée" : "Remboursé"}
+          </button>
+        </div>
+      ))}
     </>
   );
 }
@@ -709,7 +964,18 @@ export function ActionPopup({
       body = <InvoiceDepositList refused onChanged={onChanged} />;
       break;
     case "factures-valider":
-      body = items.length ? items.map((i) => <InvoiceValidateRow key={i.id} item={i} onDone={() => removeItem(i.id)} />) : null;
+      body = items.length ? (
+        <InvoiceValidateList
+          items={items}
+          onDone={(ids) => {
+            setItems((prev) => prev.filter((i) => !ids.includes(i.id)));
+            onChanged();
+          }}
+        />
+      ) : null;
+      break;
+    case "a-payer":
+      body = <PayList onChanged={onChanged} />;
       break;
     case "captation-repondre":
       body = items.length ? items.map((i) => <CoverageRow key={i.id} item={i} onDone={() => removeItem(i.id)} />) : null;

@@ -24,6 +24,8 @@ export type DashboardActionItem = {
   /** Type de l'événement — couleur de sa pastille sur la carte. */
   eventType?: DbEventType | null;
   detail?: string;
+  /** Montant (factures à valider) — total de la sélection dans le popup. */
+  amount?: number | null;
 };
 
 export type DashboardAction = {
@@ -144,7 +146,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
         app: "frais",
         tone: "red",
         count: toValidate.length,
-        items: toValidate.map((i) => ({ id: i.id, eventId: i.eventId, title: `${i.personName} · ${i.title}`, date: i.date, detail: i.amount !== null ? euros(i.amount) : undefined })),
+        items: toValidate.map((i) => ({ id: i.id, eventId: i.eventId, title: `${i.personName} · ${i.title}`, date: i.date, detail: i.amount !== null ? euros(i.amount) : undefined, amount: i.amount })),
         title: "Factures à valider",
         detail: "Factures de prestataires en attente",
       });
