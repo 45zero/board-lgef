@@ -18,6 +18,7 @@ import {
   declareExpenses,
   getMyExpenses,
   getSubmissionsToReview,
+  notifyExpenseBatch,
   reviewSubmission,
   type MyExpenseItem,
   type SubmissionToReview,
@@ -32,7 +33,7 @@ import { useDirectorAttendance } from "@/hooks/board/useDirectorAttendance";
 import { listAccessRequests, type AccessRequest } from "@/app/actions/account-requests";
 import { AccessRequestCard } from "@/components/board/users/AccessRequestCard";
 import { unwrap } from "@/lib/board/actionResult";
-import { confirmMyInvoiceUpload, getInvoiceFiles, getMyInvoiceItems, getPayables, prepareMyInvoiceUpload, reviewInvoice, setPaid } from "@/app/actions/staff";
+import { confirmMyInvoiceUpload, getInvoiceFiles, getMyInvoiceItems, getPayables, prepareMyInvoiceUpload, reviewInvoice, setPaid, notifyInvoiceBatch, notifyPaidBatch } from "@/app/actions/staff";
 import { BulkBar, SelectBox, bulkReport, runBulk, useSelection } from "@/components/board/expenses/BulkSelect";
 import type { Payable } from "@/lib/board/staff";
 import type { InvoiceRequestItem } from "@/app/actions/invoice-public";
@@ -492,10 +493,12 @@ function ValidateList({ onChanged }: { onChanged: () => void }) {
         onDecide={async (ids, decision, comment) => {
           const done = new Set<string>();
           const errors = await runBulk(ids, async (id) => {
-            const res = await reviewSubmission(id, decision, comment);
+            const res = await reviewSubmission(id, decision, comment, { silent: true });
             if (!res.error) done.add(id);
             return res.error;
           });
+          // Un seul message par déclarant.
+          await notifyExpenseBatch({ type: "review", decision, comment, submissionIds: [...done] });
           setSubs((prev) => prev?.filter((x) => !done.has(x.submissionId)) ?? null);
           onChanged();
           return errors;
@@ -543,11 +546,13 @@ function InvoiceValidateList({ items, onDone }: { items: DashboardActionItem[]; 
         onDecide={async (ids, decision, comment) => {
           const done: string[] = [];
           const errors = await runBulk(ids, async (id) => {
-            const res = await reviewInvoice(id, decision, decision === "rejected" ? comment : undefined);
+            const res = await reviewInvoice(id, decision, decision === "rejected" ? comment : undefined, { silent: true });
             if (!res.ok) return res.error;
             done.push(id);
             return null;
           });
+          // Un seul message (et e-mail) par prestataire.
+          if (done.length) await notifyInvoiceBatch({ decision, comment, invoiceIds: done });
           if (done.length) onDone(done);
           return errors;
         }}
@@ -608,12 +613,16 @@ function PayList({ onChanged }: { onChanged: () => void }) {
     setBulkBusy(true);
     setMsg(null);
     const done: string[] = [];
+    const paid: { kind: Payable["kind"]; id: string }[] = [];
     const errors = await runBulk(picked, async (p) => {
-      const res = await setPaid(p.kind, p.id, paidOn);
+      const res = await setPaid(p.kind, p.id, paidOn, { silent: true });
       if (!res.ok) return res.error;
       done.push(keyOf(p));
+      paid.push({ kind: p.kind, id: p.id });
       return null;
     });
+    // Un seul message par personne.
+    if (paid.length) await notifyPaidBatch({ paidOn, items: paid });
     setBulkBusy(false);
     sel.clear();
     setMsg(bulkReport(picked.length, errors, "marqué payé"));

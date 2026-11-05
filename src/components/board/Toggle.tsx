@@ -11,8 +11,9 @@ export function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => 
       role="switch"
       aria-checked={on}
     >
+      {/* left-0 : sans lui, la pastille part du centre du bouton (contenu centré) et sort du curseur une fois activé. */}
       <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-card transition-transform ${
+        className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow-card transition-transform ${
           on ? "translate-x-[22px]" : "translate-x-0.5"
         }`}
       />

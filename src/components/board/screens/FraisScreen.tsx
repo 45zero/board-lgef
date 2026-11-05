@@ -14,6 +14,7 @@ import {
   getMyExpenses,
   getMyValidatorScope,
   getSubmissionsToReview,
+  notifyExpenseBatch,
   reviewSubmission,
   type MyExpenseItem,
   type SubmissionToReview,
@@ -26,7 +27,7 @@ import { ExpenseExportModal } from "@/components/board/expenses/ExpenseExportMod
 import { ExpenseMailSettings } from "@/components/board/expenses/ExpenseMailSettings";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { BulkBar, SelectBox, bulkReport, runBulk, useSelection } from "@/components/board/expenses/BulkSelect";
-import { lineParts } from "@/lib/board/expenseCategories";
+import { lineParts, type ExpenseTarget } from "@/lib/board/expenseCategories";
 import { ExpenseStatusBadge, EXPENSE_STATUS_META, confirmNoExpense, formatEuros } from "@/components/board/expenses/ExpenseStatus";
 import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
@@ -133,7 +134,15 @@ export function DeclareBar({
     if (!list.length) return;
     setBusy(true);
     setMsg(null);
-    const errors = await runBulk(list, async (i) => (await declareExpenses(i.eventId ? { eventId: i.eventId } : { month: i.month! }, none)).error);
+    // Déclarées sans prévenir une à une, puis un seul message au N+1 (« Pas de frais » ne prévient pas).
+    const done: ExpenseTarget[] = [];
+    const errors = await runBulk(list, async (i) => {
+      const target: ExpenseTarget = i.eventId ? { eventId: i.eventId } : { month: i.month! };
+      const res = await declareExpenses(target, none, { silent: true });
+      if (!res.error) done.push(target);
+      return res.error;
+    });
+    if (!none) await notifyExpenseBatch({ type: "declare", targets: done });
     setBusy(false);
     sel.clear();
     setMsg(bulkReport(list.length, errors, none ? "clôturé" : "déclaré"));
@@ -595,7 +604,15 @@ function ToValidate({ onChanged, period, menu, scope = "mine" }: { onChanged: ()
     if (!ids.length) return;
     setBulkBusy(true);
     setBulkMsg(null);
-    const errors = await runBulk(ids, async (id) => (await reviewSubmission(id, decision, decision === "rejected" ? bulkComment : "")).error);
+    // Une fiche à la fois sans prévenir, puis un seul message par personne.
+    const comment = decision === "rejected" ? bulkComment : "";
+    const done: string[] = [];
+    const errors = await runBulk(ids, async (id) => {
+      const res = await reviewSubmission(id, decision, comment, { silent: true });
+      if (!res.error) done.push(id);
+      return res.error;
+    });
+    await notifyExpenseBatch({ type: "review", decision, comment, submissionIds: done });
     setBulkBusy(false);
     setBulkRejecting(false);
     setBulkComment("");

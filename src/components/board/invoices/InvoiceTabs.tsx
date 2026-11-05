@@ -6,7 +6,7 @@ import { readCache, writeCache } from "@/lib/board/localCache";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { Building2, Check, Loader2, Plus, RotateCcw } from "lucide-react";
-import { confirmMyInvoiceUpload, getMyInvoiceItems, getPayables, getStaffOverview, getStandaloneInvoices, prepareMyInvoiceUpload, reviewInvoice, setPaid } from "@/app/actions/staff";
+import { confirmMyInvoiceUpload, getMyInvoiceItems, getPayables, getStaffOverview, getStandaloneInvoices, prepareMyInvoiceUpload, reviewInvoice, setPaid, notifyInvoiceBatch, notifyPaidBatch } from "@/app/actions/staff";
 import type { InvoiceRequestItem } from "@/app/actions/invoice-public";
 import { InvoiceItemCard, stateOf, type InvoiceItemState } from "@/components/invoice/InvoiceUploadCard";
 import { InvoiceLine } from "@/components/board/invoices/InvoiceLine";
@@ -289,10 +289,16 @@ export function PrestataireInvoices({ scope, period, menu, onChanged }: { scope:
     if (!ids.length) return;
     setBulkBusy(true);
     setBulkMsg(null);
+    // Une facture à la fois sans prévenir, puis un seul message (et e-mail) par prestataire.
+    const comment = decision === "rejected" ? bulkComment : "";
+    const done: string[] = [];
     const errors = await runBulk(ids, async (id) => {
-      const res = await reviewInvoice(id, decision, decision === "rejected" ? bulkComment : undefined);
-      return res.ok ? null : res.error;
+      const res = await reviewInvoice(id, decision, comment || undefined, { silent: true });
+      if (!res.ok) return res.error;
+      done.push(id);
+      return null;
     });
+    if (done.length) await notifyInvoiceBatch({ decision, comment, invoiceIds: done });
     setBulkBusy(false);
     setBulkRejecting(false);
     setBulkComment("");
@@ -518,10 +524,15 @@ export function Payables({ period, menu }: { period: Period; menu?: MobileMenu }
     if (!list.length) return;
     setBulkBusy(true);
     setBulkMsg(null);
+    // Un paiement à la fois sans prévenir, puis un seul message par personne.
+    const done: { kind: Payable["kind"]; id: string }[] = [];
     const errors = await runBulk(list, async (p) => {
-      const res = await setPaid(p.kind, p.id, on);
-      return res.ok ? null : res.error;
+      const res = await setPaid(p.kind, p.id, on, { silent: true });
+      if (!res.ok) return res.error;
+      done.push({ kind: p.kind, id: p.id });
+      return null;
     });
+    if (on && done.length) await notifyPaidBatch({ paidOn: on, items: done });
     setBulkBusy(false);
     sel.clear();
     setBulkMsg(bulkReport(list.length, errors, on ? "marqué payé" : "remis à payer"));

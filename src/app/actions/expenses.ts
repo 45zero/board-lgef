@@ -192,7 +192,7 @@ async function targetTitle(service: Service, target: ExpenseTarget) {
  * déclaration passe en attente de validation et mon N+1 est prévenu. Possible tant qu'elle n'est
  * pas validée (y compris après un refus).
  */
-export async function declareExpenses(target: ExpenseTarget, noExpense = false): Promise<{ error: string | null }> {
+export async function declareExpenses(target: ExpenseTarget, noExpense = false, opts: { silent?: boolean } = {}): Promise<{ error: string | null }> {
   try {
     const { userId, service } = await currentUser();
     if ("month" in target && noExpense) throw new Error("« Pas de frais » ne concerne que les événements.");
@@ -228,7 +228,8 @@ export async function declareExpenses(target: ExpenseTarget, noExpense = false):
       : await service.from("expense_submissions").insert(payload);
     if (error) throw new Error(error.message);
 
-    if (!noExpense) {
+    // `silent` : déclaration en lot, le N+1 reçoit un seul message à la fin (notifyExpenseBatch).
+    if (!noExpense && !opts.silent) {
       const { data: me } = await service.from("profiles").select("first_name, last_name, email, expense_validator_id").eq("id", userId).single();
       if (me?.expense_validator_id) {
         await notify(
@@ -363,7 +364,8 @@ export async function getSubmissionsToReview(
 export async function reviewSubmission(
   submissionId: string,
   decision: "approved" | "rejected",
-  comment: string
+  comment: string,
+  opts: { silent?: boolean } = {}
 ): Promise<{ error: string | null }> {
   try {
     const { userId, seesAll, service } = await currentUser();
@@ -389,6 +391,8 @@ export async function reviewSubmission(
       })
       .eq("id", submissionId);
     if (error) throw new Error(error.message);
+    // `silent` : validation en lot, le déclarant reçoit un seul message à la fin (notifyExpenseBatch).
+    if (opts.silent) return { error: null };
 
     const what = await targetTitle(service, sub.event_id ? { eventId: sub.event_id } : { month: sub.period_month! });
     await notify(
@@ -403,6 +407,93 @@ export async function reviewSubmission(
     return { error: null };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Erreur inattendue." };
+  }
+}
+
+/** Titres des fiches (événement ou mois hors événement), en une requête. */
+async function titlesOf(service: Service, rows: { event_id: string | null; period_month: string | null }[]) {
+  const eventIds = [...new Set(rows.map((r) => r.event_id).filter((id): id is string => !!id))];
+  const { data } = eventIds.length ? await service.from("events").select("id, title").in("id", eventIds) : { data: [] };
+  const byId = new Map((data ?? []).map((e) => [e.id, e.title]));
+  return rows.map((r) => (r.event_id ? `« ${byId.get(r.event_id) ?? "un événement"} »` : `les frais hors événement de ${monthLabel(r.period_month!).toLowerCase()}`));
+}
+
+/** « A, B, C et 4 autres » : liste courte pour un message groupé. */
+function shortList(titles: string[], max = 4) {
+  if (titles.length <= max) return titles.join(", ");
+  const rest = titles.length - max;
+  return `${titles.slice(0, max).join(", ")} et ${rest} autre${rest > 1 ? "s" : ""}`;
+}
+
+/**
+ * Après une action en lot (fiches traitées avec `silent`) : un seul message par personne au lieu
+ * d'un par fiche. Relit en base ce que l'utilisateur vient réellement de faire — validé / refusé
+ * par lui, ou ses propres déclarations en attente — et ne peut donc rien annoncer d'autre.
+ */
+export async function notifyExpenseBatch(
+  batch:
+    | { type: "review"; decision: "approved" | "rejected"; comment: string; submissionIds: string[] }
+    | { type: "declare"; targets: ExpenseTarget[] }
+): Promise<void> {
+  try {
+    const { userId, service } = await currentUser();
+    if (batch.type === "review") {
+      if (!batch.submissionIds.length) return;
+      const { data } = await service
+        .from("expense_submissions")
+        .select("id, user_id, event_id, period_month, total_amount")
+        .in("id", batch.submissionIds)
+        .eq("reviewed_by", userId)
+        .eq("status", batch.decision);
+      const byUser = new Map<string, NonNullable<typeof data>>();
+      for (const r of data ?? []) byUser.set(r.user_id, [...(byUser.get(r.user_id) ?? []), r]);
+      const comment = batch.comment.trim();
+      for (const [uid, rows] of byUser) {
+        const titles = await titlesOf(service, rows);
+        const total = rows.reduce((n, r) => n + Number(r.total_amount ?? 0), 0);
+        const one = rows.length === 1;
+        const what = one ? titles[0] : `${rows.length} fiches (${shortList(titles)})`;
+        await notify(
+          service,
+          [uid],
+          batch.decision === "approved" ? "Frais validés" : "Frais refusés",
+          batch.decision === "approved"
+            ? `Vos frais (${total.toFixed(2)} €) pour ${what} ont été validés.`
+            : `Vos frais pour ${what} ont été refusés${comment ? ` : ${comment}` : "."}`,
+          { kind: "expense_reviewed", decision: batch.decision, count: rows.length, ...(one ? { event_id: rows[0].event_id, period_month: rows[0].period_month } : {}) }
+        );
+      }
+      return;
+    }
+    if (!batch.targets.length) return;
+    const eventIds = batch.targets.flatMap((t) => ("eventId" in t ? [t.eventId] : []));
+    const months = batch.targets.flatMap((t) => ("month" in t ? [t.month] : []));
+    const [{ data: me }, byEvent, byMonth] = await Promise.all([
+      service.from("profiles").select("first_name, last_name, email, expense_validator_id").eq("id", userId).single(),
+      eventIds.length
+        ? service.from("expense_submissions").select("event_id, period_month, total_amount").eq("user_id", userId).eq("status", "pending").in("event_id", eventIds)
+        : Promise.resolve({ data: [] }),
+      months.length
+        ? service.from("expense_submissions").select("event_id, period_month, total_amount").eq("user_id", userId).eq("status", "pending").is("event_id", null).in("period_month", months)
+        : Promise.resolve({ data: [] }),
+    ]);
+    const rows = [...(byEvent.data ?? []), ...(byMonth.data ?? [])];
+    if (!me?.expense_validator_id || !rows.length) return;
+    const titles = await titlesOf(service, rows);
+    const total = rows.reduce((n, r) => n + Number(r.total_amount ?? 0), 0);
+    const one = rows.length === 1;
+    await notify(
+      service,
+      [me.expense_validator_id],
+      "Frais à valider",
+      one
+        ? `${personName(me)} a déclaré ${total.toFixed(2)} € pour ${titles[0]}.`
+        : `${personName(me)} a déclaré ${rows.length} notes de frais (${total.toFixed(2)} €) : ${shortList(titles)}.`,
+      { kind: "expense_to_validate", count: rows.length, ...(one ? { event_id: rows[0].event_id, period_month: rows[0].period_month } : {}) }
+    );
+  } catch (e) {
+    // Les fiches sont traitées : un message manqué ne doit pas faire croire à un échec.
+    console.error("[notifyExpenseBatch]", e);
   }
 }
 

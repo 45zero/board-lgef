@@ -355,12 +355,97 @@ async function archiveInvoice(service: Service, invoice: { id: string; file_url:
   return archived;
 }
 
+/** Facture traitée, pour le message au prestataire. */
+type ReviewedInvoice = { eventId: string | null; title: string; amount: number | null };
+
+/**
+ * Prévient le prestataire de la décision sur une ou plusieurs de ses factures : une notification
+ * (sans e-mail générique) et un e-mail détaillé qui les liste ; en cas de refus, un seul lien pour
+ * redéposer toutes les factures refusées.
+ */
+async function sendInvoiceReviewNotice(v: Viewer, userId: string, decision: "approved" | "rejected", motive: string, items: ReviewedInvoice[]) {
+  if (!items.length) return;
+  const [{ data: person }, { data: me }] = await Promise.all([
+    v.service.from("profiles").select("first_name, last_name, email").eq("id", userId).single(),
+    v.service.from("profiles").select("first_name, last_name, email").eq("id", v.userId).single(),
+  ]);
+  const who = person ? personName(person) : "—";
+  const reviewer = me ? personName(me) : "Votre responsable";
+  const eur = (n: number | null) => (n !== null ? n.toLocaleString("fr-FR", { style: "currency", currency: "EUR" }) : null);
+  const one = items.length === 1;
+  const total = items.reduce((n, i) => n + (i.amount ?? 0), 0);
+  const label = (i: ReviewedInvoice) => `« ${i.title} »${eur(i.amount) ? ` (${eur(i.amount)})` : ""}`;
+  const names = items.map((i) => `« ${i.title} »`);
+  const list = names.length <= 4 ? names.join(", ") : `${names.slice(0, 4).join(", ")} et ${names.length - 4} autre${names.length > 5 ? "s" : ""}`;
+  const approved = decision === "approved";
+  const title = approved ? (one ? "Facture validée" : "Factures validées") : one ? "Facture refusée" : "Factures refusées";
+
+  await v.service.rpc("create_notification", {
+    p_user_id: userId,
+    p_type: approved ? "expense_approved" : "expense_rejected",
+    p_title: title,
+    p_message: one
+      ? approved
+        ? `Votre facture pour ${label(items[0])} a été validée.`
+        : `Votre facture pour « ${items[0].title} » a été refusée${motive ? ` : ${motive}` : "."}`
+      : approved
+        ? `${items.length} factures (${eur(total)}) ont été validées : ${list}.`
+        : `${items.length} factures ont été refusées${motive ? ` : ${motive}` : ""} (${list}).`,
+    p_actor_name: reviewer,
+    // Déjà prévenu par l'e-mail détaillé ci-dessous : pas de second e-mail de notification.
+    p_data: { kind: "invoice_reviewed", decision, count: items.length, skip_email: true, ...(one ? { event_id: items[0].eventId } : {}) },
+  });
+
+  if (!person?.email || !isTransactionalEmailConfigured()) return;
+  const first = person.first_name?.trim() || who;
+  const rejectedEvents = approved ? [] : items.map((i) => i.eventId).filter((id): id is string => !!id);
+  const link = rejectedEvents.length
+    ? `${(process.env.NEXT_PUBLIC_SITE_URL || "https://board.lgef.fr").replace(/\/$/, "")}/facture/${createInvoiceToken({ eventIds: rejectedEvents, userId, requesterId: v.userId, comment: null })}`
+    : null;
+  const lines = one
+    ? approved
+      ? [`Votre facture pour ${label(items[0])} a été validée par ${reviewer}.`, "Elle sera transmise pour paiement."]
+      : [`Votre facture pour « ${items[0].title} » a été refusée par ${reviewer}.`]
+    : approved
+      ? [`${reviewer} a validé ${items.length} de vos factures (${eur(total)}) :`]
+      : [`${reviewer} a refusé ${items.length} de vos factures :`];
+  const listed = one ? [] : items.map(label);
+  const after = [
+    ...(!approved && motive ? [`Motif : ${motive}`] : []),
+    ...(approved
+      ? one
+        ? []
+        : ["Elles seront transmises pour paiement."]
+      : [link ? "Vous pouvez déposer les factures corrigées avec le bouton ci-dessous." : "Vous pouvez déposer une facture corrigée depuis le board (Factures)."]),
+  ];
+  const html = `<!doctype html><html><body style="margin:0;background:#f2f5fb;font-family:Arial,Helvetica,sans-serif;color:#07172e">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5fb;padding:24px 0"><tr><td align="center">
+<table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden">
+<tr><td style="background:${approved ? "#146447" : "#0b1d3c"};padding:22px 28px;color:#ffffff">
+<div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.7">Ligue du Grand Est de Football</div>
+<div style="font-size:20px;font-weight:bold;margin-top:6px">${title}</div></td></tr>
+<tr><td style="padding:24px 28px;font-size:15px;line-height:1.55">
+<p style="margin:0 0 14px">Bonjour ${esc(first)},</p>
+${lines.map((l) => `<p style="margin:0 0 12px">${esc(l)}</p>`).join("")}
+${listed.length ? `<ul style="margin:0 0 12px;padding-left:20px">${listed.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
+${after.map((l) => `<p style="margin:0 0 12px">${esc(l)}</p>`).join("")}
+${link ? `<p style="margin:18px 0"><a href="${link}" style="display:inline-block;background:#e1141b;color:#ffffff;text-decoration:none;font-weight:bold;padding:13px 22px;border-radius:12px">Déposer ${one ? "une facture corrigée" : "les factures corrigées"}</a></p>` : ""}
+<p style="margin:12px 0 0;font-size:12px;color:#79859a">Pour toute question, répondez simplement à cet e-mail.</p>
+</td></tr></table></td></tr></table></body></html>`;
+  const text = [`Bonjour ${first},`, "", ...lines, ...listed.map((l) => `- ${l}`), ...after, ...(link ? ["", `Déposer ${one ? "une facture corrigée" : "les factures corrigées"} : ${link}`] : []), "", "Pour toute question, répondez à cet e-mail."].join("\n");
+  await sendTransactionalBatch(
+    [{ to: [person.email], subject: `${title} — ${one ? items[0].title : `${items.length} factures`}`, html, text, replyTo: me?.email ?? null }],
+    async () => {}
+  ).catch((e) => console.error("[staff.invoiceReviewNotice.mail]", e));
+}
+
 /**
  * Le N+1 (ou un administrateur) valide ou refuse une facture. Le prestataire est prévenu (board et
  * e-mail) ; en cas de refus, l'e-mail donne le motif et un nouveau lien de dépôt. Validée : copiée
- * dans le Drive du board avec l'événement.
+ * dans le Drive du board avec l'événement. `silent` : validation en lot, le prestataire reçoit un
+ * seul message à la fin (notifyInvoiceBatch).
  */
-export const reviewInvoice = async (invoiceId: string, decision: "approved" | "rejected", comment?: string) =>
+export const reviewInvoice = async (invoiceId: string, decision: "approved" | "rejected", comment?: string, opts: { silent?: boolean } = {}) =>
   toResult(async (): Promise<{ archived: number }> => {
     const v = await viewer();
     const { data: invoice } = await v.service.from("event_invoices").select("id, user_id, event_id, file_url, amount_ttc, status, label").eq("id", invoiceId).maybeSingle();
@@ -374,61 +459,48 @@ export const reviewInvoice = async (invoiceId: string, decision: "approved" | "r
       .eq("id", invoiceId);
     if (error) throw new Error(error.message);
 
-    const [{ data: person }, { data: me }, { data: event }] = await Promise.all([
+    const [{ data: person }, { data: event }] = await Promise.all([
       v.service.from("profiles").select("first_name, last_name, email").eq("id", invoice.user_id).single(),
-      v.service.from("profiles").select("first_name, last_name, email").eq("id", v.userId).single(),
       invoice.event_id ? v.service.from("events").select("title, start_date").eq("id", invoice.event_id).single() : Promise.resolve({ data: null }),
     ]);
     const who = person ? personName(person) : "—";
-    const reviewer = me ? personName(me) : "Votre responsable";
-    // Facture sans événement : son objet (forfait, matériel…).
-    const eventTitle = event?.title ?? invoice.label ?? "votre facture";
-    const amount = invoice.amount_ttc !== null ? Number(invoice.amount_ttc).toLocaleString("fr-FR", { style: "currency", currency: "EUR" }) : null;
-
-    await v.service.rpc("create_notification", {
-      p_user_id: invoice.user_id,
-      p_type: decision === "approved" ? "expense_approved" : "expense_rejected",
-      p_title: decision === "approved" ? "Facture validée" : "Facture refusée",
-      p_message:
-        decision === "approved"
-          ? `Votre facture pour « ${eventTitle} »${amount ? ` (${amount})` : ""} a été validée.`
-          : `Votre facture pour « ${eventTitle} » a été refusée${motive ? ` : ${motive}` : "."}`,
-      p_actor_name: reviewer,
-      // Déjà prévenu par l'e-mail détaillé ci-dessous : pas de second e-mail de notification.
-      p_data: { event_id: invoice.event_id, kind: "invoice_reviewed", decision, skip_email: true },
-    });
-
-    if (person?.email && isTransactionalEmailConfigured()) {
-      const first = person.first_name?.trim() || who;
-      const link =
-        decision === "rejected" && invoice.event_id
-          ? `${(process.env.NEXT_PUBLIC_SITE_URL || "https://board.lgef.fr").replace(/\/$/, "")}/facture/${createInvoiceToken({ eventIds: [invoice.event_id], userId: invoice.user_id, requesterId: v.userId, comment: null })}`
-          : null;
-      const lines =
-        decision === "approved"
-          ? [`Votre facture pour « ${eventTitle} »${amount ? ` (${amount})` : ""} a été validée par ${reviewer}.`, "Elle sera transmise pour paiement."]
-          : [`Votre facture pour « ${eventTitle} » a été refusée par ${reviewer}.`, ...(motive ? [`Motif : ${motive}`] : []), link ? "Vous pouvez déposer une facture corrigée avec le bouton ci-dessous." : "Vous pouvez déposer une facture corrigée depuis le board (Factures)."];
-      const html = `<!doctype html><html><body style="margin:0;background:#f2f5fb;font-family:Arial,Helvetica,sans-serif;color:#07172e">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5fb;padding:24px 0"><tr><td align="center">
-<table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden">
-<tr><td style="background:${decision === "approved" ? "#146447" : "#0b1d3c"};padding:22px 28px;color:#ffffff">
-<div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.7">Ligue du Grand Est de Football</div>
-<div style="font-size:20px;font-weight:bold;margin-top:6px">${decision === "approved" ? "Facture validée" : "Facture refusée"}</div></td></tr>
-<tr><td style="padding:24px 28px;font-size:15px;line-height:1.55">
-<p style="margin:0 0 14px">Bonjour ${esc(first)},</p>
-${lines.map((l) => `<p style="margin:0 0 12px">${esc(l)}</p>`).join("")}
-${link ? `<p style="margin:18px 0"><a href="${link}" style="display:inline-block;background:#e1141b;color:#ffffff;text-decoration:none;font-weight:bold;padding:13px 22px;border-radius:12px">Déposer une facture corrigée</a></p>` : ""}
-<p style="margin:12px 0 0;font-size:12px;color:#79859a">Pour toute question, répondez simplement à cet e-mail.</p>
-</td></tr></table></td></tr></table></body></html>`;
-      const text = [`Bonjour ${first},`, "", ...lines, ...(link ? ["", `Déposer une facture corrigée : ${link}`] : []), "", "Pour toute question, répondez à cet e-mail."].join("\n");
-      await sendTransactionalBatch(
-        [{ to: [person.email], subject: `${decision === "approved" ? "Facture validée" : "Facture refusée"} — ${eventTitle}`, html, text, replyTo: me?.email ?? null }],
-        async () => {}
-      ).catch((e) => console.error("[staff.reviewInvoice.mail]", e));
+    if (!opts.silent) {
+      // Facture sans événement : son objet (forfait, matériel…).
+      await sendInvoiceReviewNotice(v, invoice.user_id, decision, motive, [
+        { eventId: invoice.event_id, title: event?.title ?? invoice.label ?? "votre facture", amount: invoice.amount_ttc !== null ? Number(invoice.amount_ttc) : null },
+      ]);
     }
 
     const archived = decision === "approved" && event ? await archiveInvoice(v.service, invoice, who, event).catch((e) => (console.error("[staff.reviewInvoice.archive]", e), 0)) : 0;
     return { archived };
+  });
+
+/**
+ * Après une validation en lot (factures traitées avec `silent`) : un seul message par prestataire.
+ * Relit les factures en base (statut = la décision, personnes que j'ai le droit de gérer).
+ */
+export const notifyInvoiceBatch = async (batch: { decision: "approved" | "rejected"; comment: string; invoiceIds: string[] }) =>
+  toResult(async () => {
+    if (!batch.invoiceIds.length) return;
+    const v = await viewer();
+    const { data } = await v.service.from("event_invoices").select("id, user_id, event_id, amount_ttc, label").in("id", batch.invoiceIds).eq("status", batch.decision);
+    const rows = (data ?? []).filter((r) => r.user_id);
+    const eventIds = [...new Set(rows.map((r) => r.event_id).filter((id): id is string => !!id))];
+    const { data: events } = eventIds.length ? await v.service.from("events").select("id, title").in("id", eventIds) : { data: [] };
+    const titleBy = new Map((events ?? []).map((e) => [e.id, e.title]));
+    const byUser = new Map<string, ReviewedInvoice[]>();
+    for (const r of rows) {
+      const item = { eventId: r.event_id, title: (r.event_id && titleBy.get(r.event_id)) || r.label || "votre facture", amount: r.amount_ttc !== null ? Number(r.amount_ttc) : null };
+      byUser.set(r.user_id!, [...(byUser.get(r.user_id!) ?? []), item]);
+    }
+    for (const [uid, items] of byUser) {
+      try {
+        await requireCanManage(v, uid);
+        await sendInvoiceReviewNotice(v, uid, batch.decision, batch.comment.trim(), items);
+      } catch (e) {
+        console.error("[staff.notifyInvoiceBatch]", uid, e);
+      }
+    }
   });
 
 /* ---------- Factures : le prestataire connecté (module Frais → « Factures ») ---------- */
@@ -621,7 +693,7 @@ export const getPayables = async (year: number) =>
  * Marque payée (date AAAA-MM-JJ) ou non payée (null) une facture validée ou une note de frais
  * validée (remboursée). La personne est prévenue du paiement.
  */
-export const setPaid = async (kind: "invoice" | "expense", id: string, paidOn: string | null) =>
+export const setPaid = async (kind: "invoice" | "expense", id: string, paidOn: string | null, opts: { silent?: boolean } = {}) =>
   toResult(async () => {
     const v = await viewer();
     requireCompta(v);
@@ -637,7 +709,8 @@ export const setPaid = async (kind: "invoice" | "expense", id: string, paidOn: s
         ? await v.service.from("event_invoices").update({ payment_status: paidAt ? "paid" : "unpaid", paid_at: paidAt, paid_by: paidBy, updated_at: new Date().toISOString() }).eq("id", id)
         : await v.service.from("expense_submissions").update({ paid_at: paidAt, paid_by: paidBy }).eq("id", id);
     if (error) throw new Error(error.message);
-    if (paidOn) {
+    // `silent` : paiement en lot, un seul message par personne à la fin (notifyPaidBatch).
+    if (paidOn && !opts.silent) {
       const { error: nErr } = await v.service.rpc("create_notification", {
         p_user_id: row.user_id,
         p_type: "expense_approved",
@@ -647,6 +720,54 @@ export const setPaid = async (kind: "invoice" | "expense", id: string, paidOn: s
         p_data: { kind: kind === "invoice" ? "invoice_paid" : "expense_paid", id },
       });
       if (nErr) console.error("[staff.setPaid.notify]", nErr);
+    }
+  });
+
+/**
+ * Après un paiement en lot (`silent`) : un seul message par personne (« 3 factures payées et
+ * 2 notes de frais remboursées le … »). Relit ce que j'ai marqué payé (paid_by = moi).
+ */
+export const notifyPaidBatch = async (batch: { paidOn: string; items: { kind: "invoice" | "expense"; id: string }[] }) =>
+  toResult(async () => {
+    const v = await viewer();
+    requireCompta(v);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(batch.paidOn)) throw new Error("Date de paiement invalide.");
+    const invIds = batch.items.filter((i) => i.kind === "invoice").map((i) => i.id);
+    const subIds = batch.items.filter((i) => i.kind === "expense").map((i) => i.id);
+    const [{ data: invs }, { data: subs }] = await Promise.all([
+      invIds.length ? v.service.from("event_invoices").select("user_id, amount_ttc").in("id", invIds).eq("payment_status", "paid").eq("paid_by", v.userId) : Promise.resolve({ data: [] }),
+      subIds.length ? v.service.from("expense_submissions").select("user_id, total_amount").in("id", subIds).not("paid_at", "is", null).eq("paid_by", v.userId) : Promise.resolve({ data: [] }),
+    ]);
+    const byUser = new Map<string, { invoices: number; expenses: number; total: number }>();
+    const add = (uid: string | null, key: "invoices" | "expenses", amount: unknown) => {
+      if (!uid) return;
+      const cur = byUser.get(uid) ?? { invoices: 0, expenses: 0, total: 0 };
+      cur[key] += 1;
+      cur.total += Number(amount ?? 0);
+      byUser.set(uid, cur);
+    };
+    for (const r of invs ?? []) add(r.user_id, "invoices", r.amount_ttc);
+    for (const r of subs ?? []) add(r.user_id, "expenses", r.total_amount);
+    const day = new Date(`${batch.paidOn}T12:00:00`).toLocaleDateString("fr-FR");
+    const eur = (n: number) => n.toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+    for (const [uid, c] of byUser) {
+      const parts = [
+        c.invoices ? (c.invoices > 1 ? `${c.invoices} factures payées` : "votre facture a été payée") : null,
+        c.expenses ? (c.expenses > 1 ? `${c.expenses} notes de frais remboursées` : "vos frais ont été remboursés") : null,
+      ].filter(Boolean);
+      const single = c.invoices + c.expenses === 1;
+      const message = single
+        ? `${c.invoices ? "Votre facture a été payée" : "Vos frais ont été remboursés"} le ${day}.`
+        : `${parts.join(" et ").replace(/^./, (m) => m.toUpperCase())} le ${day} (${eur(c.total)}).`;
+      const { error } = await v.service.rpc("create_notification", {
+        p_user_id: uid,
+        p_type: "expense_approved",
+        p_title: c.invoices && c.expenses ? "Paiements effectués" : c.invoices ? (c.invoices > 1 ? "Factures payées" : "Facture payée") : "Frais remboursés",
+        p_message: message,
+        p_actor_name: "Comptabilité",
+        p_data: { kind: c.invoices ? "invoice_paid" : "expense_paid", count: c.invoices + c.expenses },
+      });
+      if (error) console.error("[staff.notifyPaidBatch]", uid, error);
     }
   });
 
