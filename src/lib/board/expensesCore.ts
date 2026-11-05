@@ -59,7 +59,8 @@ export async function countPendingForValidator(service: Service, userId: string)
 /**
  * Mes frais : les événements (12 derniers mois) où je suis sollicité — membre ou responsable
  * d'équipe, assigné, comité directeur à la présence confirmée, technicien ayant accepté la
- * captation — ou où j'ai saisi des frais / une déclaration, plus mes frais hors événement par mois.
+ * captation —, mes propres événements Perso (« Pas de frais » s'il n'y en a pas), ou ceux où j'ai
+ * saisi des frais / une déclaration, plus mes frais hors événement par mois.
  * Un prestataire facture ses interventions (Mes factures) : seuls les événements où il a saisi des
  * frais ou déclaré quelque chose sont listés, rien n'est « à déclarer » d'office.
  */
@@ -67,7 +68,7 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
   const since = new Date(Date.now() - 365 * 86_400_000).toISOString();
 
   // Frais : seulement les sollicitations effectives (présence confirmée, captation acceptée).
-  const [roles, submissions, allLines, prestataire] = await Promise.all([
+  const [roles, submissions, allLines, prestataire, perso] = await Promise.all([
     getSolicitations(service, userId),
     service
       .from("expense_submissions")
@@ -75,7 +76,13 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
       .eq("user_id", userId),
     service.from("event_expenses").select("event_id, total_amount, expense_date, created_at, currency, exchange_rate").eq("user_id", userId).gte("created_at", since),
     isPrestataire(service, userId),
+    // Mes événements Perso (event_type « kanban » réutilisé pour Perso, cf. calendar.ts).
+    service.from("events").select("id").eq("created_by", userId).eq("event_type", "kanban").gte("start_date", since),
   ]);
+  for (const e of perso.data ?? []) {
+    if (!roles.has(e.id)) roles.set(e.id, new Set());
+    roles.get(e.id)!.add("Perso");
+  }
 
   const subs = submissions.data ?? [];
   const subByEvent = new Map(subs.filter((s) => s.event_id).map((s) => [s.event_id as string, s]));

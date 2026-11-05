@@ -19,7 +19,8 @@ import type { Database } from "@/lib/supabase/database.types";
 export const technicianFilter = (userId: string) =>
   `assigned_technician_id.eq.${userId},and(assigned_technician_id.is.null,technician_id.eq.${userId})`;
 
-export type SolicitationRole = "Responsable" | "Membre" | "Assigné" | "Comité directeur" | "Comité directeur (à confirmer)" | "Captation";
+/** « Perso » : mon propre événement Perso — ajouté par le module Frais seulement (computeMyExpenses). */
+export type SolicitationRole = "Responsable" | "Membre" | "Assigné" | "Comité directeur" | "Comité directeur (à confirmer)" | "Captation" | "Perso";
 
 export async function getSolicitations(
   client: SupabaseClient<Database>,
