@@ -11,7 +11,7 @@ import { type SolicitationRole } from "@/lib/board/solicitation";
 import { computeMyExpenses, countPendingForValidator, isEmptyDeclaration, lineMonth, personName, toStatus } from "@/lib/board/expensesCore";
 import { countAllPendingExpenses, invoicesToValidate, unpaidPayables } from "@/lib/board/gedCore";
 import { EXPENSE_CATEGORIES, CATEGORY_META, lineParts, monthLabel, type ExpenseTarget } from "@/lib/board/expenseCategories";
-import { shouldAlert, type FraisCategory } from "@/lib/board/notificationPrefs";
+import { quietAValider, type NotificationCategory } from "@/lib/board/notificationPrefs";
 
 // Gestion des frais du board. Données partagées avec l'appli calendrier :
 // - event_expenses : lignes de frais d'une personne, sur un événement ou hors événement (event_id nul) ;
@@ -170,22 +170,17 @@ export async function getMyExpenses(): Promise<MyExpenseItem[]> {
 }
 
 /**
- * Notification du board, plus push et e-mail si la personne le veut pour cette catégorie
- * (Paramètres → Notifications, voir notificationPrefs.ts) ; sinon le board seulement.
+ * Notification du board ; l'e-mail (cron notification-emails) et le push (notificationPush.ts)
+ * suivent les choix de la personne pour la catégorie (Paramètres → Notifications). « À valider »
+ * regroupé : au plus un e-mail / push toutes les 12 h, les suivantes restent discrètes (`quiet`).
  */
-async function notify(service: Service, userIds: string[], title: string, message: string, data: Record<string, unknown>, category: FraisCategory) {
+async function notify(service: Service, userIds: string[], title: string, message: string, data: Record<string, unknown>, category: NotificationCategory) {
   for (const userId of userIds) {
-    const alert = await shouldAlert(service, userId, category);
-    const payload = alert ? data : { ...data, skip_email: true };
-    const { data: notif } = await service
+    const quiet = category === "frais_a_valider" && (await quietAValider(service, userId));
+    const { error } = await service
       .from("notifications")
-      .insert({ user_id: userId, type: "expense_to_validate", title, message, data: payload as never })
-      .select("id")
-      .single();
-    if (!alert) continue;
-    await service
-      .from("push_outbox")
-      .insert({ user_id: userId, title, body: message, data, type: "expense_to_validate", notification_id: notif?.id ?? null } as never);
+      .insert({ user_id: userId, type: "expense_to_validate", title, message, data: (quiet ? { ...data, quiet: true } : data) as never });
+    if (error) console.error("[expenses.notify]", error);
   }
 }
 

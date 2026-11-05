@@ -4,6 +4,7 @@ import { isTransactionalEmailConfigured, sendTransactionalBatch, type EmailMessa
 import { CHOICES, NOT_EMAILED, renderNotificationEmail, type EmailEvent, type EmailNotification } from "@/lib/email/notificationEmails";
 import { createActionToken } from "@/lib/email/actionTokens";
 import { sendNotificationPushes } from "@/lib/push/notificationPush";
+import { wantsChannel, type NotificationPrefs } from "@/lib/board/notificationPrefs";
 import { DISCUSSION_TYPES, discussionSourceOf, loadThreadForEmail, renderDiscussionEmail } from "@/lib/email/discussionEmails";
 import { isBoardDiscussion, sourceKey, type ChatSource } from "@/lib/board/discussions";
 
@@ -64,7 +65,7 @@ export async function GET(request: Request) {
 
   const eventIdOf = (r: (typeof rows)[number]) => r.event_id ?? (typeof r.data?.event_id === "string" ? r.data.event_id : null);
   const [{ data: profiles }, { data: events }] = await Promise.all([
-    service.from("profiles").select("id, email, first_name, notify_email").in("id", [...new Set(rows.map((r) => r.user_id))]),
+    service.from("profiles").select("id, email, first_name, notify_email, notification_prefs").in("id", [...new Set(rows.map((r) => r.user_id))]),
     service
       .from("events")
       .select("id, title, start_date, end_date, location")
@@ -82,7 +83,14 @@ export async function GET(request: Request) {
     const profile = profileById.get(r.user_id);
     // Rappels envoyés par le board (/api/cron/event-reminders) : e-mailés ici, contrairement à ceux de l'ancien calendrier.
     const boardReminder = r.type === "event_reminder" && r.data?.board_reminder === true;
-    if (!profile?.email || profile.notify_email === false || (NOT_EMAILED.has(r.type) && !boardReminder) || r.data?.skip_email === true) {
+    // notification_prefs : e-mail choisi ou non pour la catégorie (Paramètres → Notifications).
+    if (
+      !profile?.email ||
+      profile.notify_email === false ||
+      (NOT_EMAILED.has(r.type) && !boardReminder) ||
+      r.data?.skip_email === true ||
+      !wantsChannel(profile.notification_prefs as NotificationPrefs, r, "email")
+    ) {
       skipped.push(r.id);
       continue;
     }

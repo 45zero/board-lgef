@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Sparkles, X, PanelLeft, LayoutGrid, LogOut, Users, Lock, UserRound } from "lucide-react";
+import { Sparkles, X, PanelLeft, LayoutGrid, LogOut, Users, Lock, UserRound, Mail, Bell } from "lucide-react";
 import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 import { useUserRole } from "@/hooks/board/useUserRole";
@@ -16,7 +16,7 @@ import {
   setCoverageReceivers,
 } from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
-import { FRAIS_PREF_OPTIONS, type FraisCategory } from "@/lib/board/notificationPrefs";
+import { NOTIFICATION_CATEGORIES, channelsFor, isGrouped, type Channel, type NotificationCategory } from "@/lib/board/notificationPrefs";
 import { isNativeApp, webPushIssue, isWebPushEnabled, enableWebPush, disableWebPush } from "@/lib/web/webPush";
 import { sendTestWebPush } from "@/app/actions/web-push";
 import { useAuth } from "@/contexts/AuthContext";
@@ -108,55 +108,61 @@ function ComputerPushRow() {
  * visible seulement des personnes concernées : administrateurs et super users, personnes désignées
  * ici, et celles qui ont accès au centre de publication (auteurs des publications).
  */
-const FRAIS_ROWS: { key: FraisCategory; title: string; subtitle: string }[] = [
-  { key: "frais_decision", title: "Frais et factures validés ou payés", subtitle: "Une bonne nouvelle, rien à faire" },
-  { key: "frais_refus", title: "Frais et factures refusés", subtitle: "À corriger et renvoyer" },
-  { key: "frais_a_valider", title: "Frais et factures à valider", subtitle: "Si vous validez pour votre équipe ou la GED" },
-];
-
 /**
- * Frais et factures : pour chaque catégorie, push et e-mail tout de suite, au plus toutes les 12 h
- * (à valider), ou dans le board seulement. Les interrupteurs e-mail / push ci-dessus restent prioritaires.
+ * Notifications par application : pour chaque catégorie, e-mail et/ou push (notificationPrefs.ts).
+ * La notification reste toujours dans le board ; les interrupteurs généraux ci-dessus restent prioritaires.
  */
-export function FraisNotificationsSection({ notif: shared }: { notif?: ReturnType<typeof useNotificationPreferences> }) {
+export function NotificationChannelsSection({ notif: shared }: { notif?: ReturnType<typeof useNotificationPreferences> }) {
   // Paramètres mobiles : pas de préférences déjà chargées, la section charge les siennes.
   const own = useNotificationPreferences();
   const notif = shared ?? own;
+  const role = useUserRole();
+  const isAdmin = role.isAdmin || role.isSuperUser;
+  const rows = NOTIFICATION_CATEGORIES.filter((c) => !c.adminOnly || isAdmin);
+  const channelButton = (key: NotificationCategory, channel: Channel, on: boolean, disabledGlobally: boolean) => (
+    <button
+      type="button"
+      onClick={() => void notif.setChannel(key, channel, !on)}
+      aria-pressed={on}
+      title={disabledGlobally ? `${channel === "email" ? "E-mails" : "Push"} coupés dans les réglages généraux ci-dessus` : undefined}
+      className={`flex w-[68px] items-center justify-center gap-1 rounded-[6px] px-2 py-1.5 text-xs font-semibold ${
+        on && !disabledGlobally ? "bg-navy text-white" : on ? "bg-line text-ink-3" : "bg-card text-ink-4 hover:bg-hover"
+      }`}
+    >
+      {channel === "email" ? <Mail size={12} /> : <Bell size={12} />} {channel === "email" ? "E-mail" : "Push"}
+    </button>
+  );
   return (
     <div className="mt-5">
-      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Notifications · Frais et factures</div>
-      <div className="space-y-3 rounded-btn border border-line p-3">
-        {FRAIS_ROWS.map((row) => {
-          const value = notif.fraisPrefs[row.key] ?? "instant";
+      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Notifications par application</div>
+      <div className="divide-y divide-line rounded-btn border border-line">
+        {rows.map((row) => {
+          const ch = channelsFor(notif.prefs, row.key);
           return (
-            <div key={row.key} className="space-y-1.5">
-              <div>
-                <div className="text-sm font-semibold text-ink-2">{row.title}</div>
-                <div className="text-xs text-ink-4">{row.subtitle}</div>
+            <div key={row.key} className="px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-ink-2">{row.title}</div>
+                  <div className="text-xs text-ink-4">{row.subtitle}</div>
+                </div>
+                <div className="flex shrink-0 gap-1 rounded-btn bg-subtle p-0.5">
+                  {channelButton(row.key, "email", ch.email, !notif.notifyEmail)}
+                  {channelButton(row.key, "push", ch.push, !notif.notifyPush)}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-1 rounded-btn bg-subtle p-0.5">
-                {FRAIS_PREF_OPTIONS[row.key].map((o) => (
-                  <button
-                    key={o.value}
-                    type="button"
-                    onClick={() => void notif.setFraisPref(row.key, o.value)}
-                    aria-pressed={value === o.value}
-                    className={`flex-1 whitespace-nowrap rounded-[6px] px-2.5 py-1.5 text-xs font-semibold ${
-                      value === o.value ? "bg-navy text-white" : "text-ink-3 hover:bg-hover"
-                    }`}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
+              {row.key === "frais_a_valider" && (ch.email || ch.push) && (
+                <label className="mt-2 flex cursor-pointer items-center justify-between gap-3 text-xs text-ink-3">
+                  <span>Au plus un rappel toutes les 12 h (les suivants restent dans le board)</span>
+                  <Toggle on={isGrouped(notif.prefs)} onClick={() => void notif.setGrouped(!isGrouped(notif.prefs))} />
+                </label>
+              )}
             </div>
           );
         })}
-        <p className="text-[11px] text-ink-4">
-          « Tout de suite » : push et e-mail (selon les réglages ci-dessus). La notification reste toujours dans le board, et le programme de 7 h rappelle ce qui
-          est à valider.
-        </p>
       </div>
+      <p className="mt-1.5 text-[11px] text-ink-4">
+        Aucun des deux : la notification reste dans le board seulement. Les rappels d&rsquo;événements se règlent dans chaque événement.
+      </p>
     </div>
   );
 }
@@ -694,7 +700,7 @@ export function BoardSettingsModal({
           </div>
         </div>
 
-        <FraisNotificationsSection notif={notif} />
+        <NotificationChannelsSection notif={notif} />
 
         <HateAlertsSection notif={notif} />
 

@@ -200,12 +200,7 @@ export async function notifyImported(service: Service, userId: string, count: nu
     toConvert === 0 ? "" : toConvert === 1 ? " Une facture est en devise étrangère : convertissez-la en euros." : ` ${toConvert} factures sont en devise étrangère : convertissez-les en euros.`;
   const message = `${count > 1 ? `${count} factures reçues par e-mail ont été lues et ajoutées` : "Une facture reçue par e-mail a été lue et ajoutée"} à vos frais${toConvert < count ? ` (${euros(total)})` : ""}.${convert} Vérifiez avant de déclarer.`;
   const data = { kind: "expense_mail_import", app: "frais" };
-  const { data: notif } = await service
-    .from("notifications")
-    .insert({ user_id: userId, type: "expense_submitted", title, message, data: data as never })
-    .select("id")
-    .single();
-  await service
-    .from("push_outbox")
-    .insert({ user_id: userId, title, body: message, data, type: "expense_submitted", notification_id: notif?.id ?? null } as never);
+  // Push et e-mail selon les Paramètres (catégorie « Frais et factures validés, payés »), par les crons.
+  const { error } = await service.from("notifications").insert({ user_id: userId, type: "expense_submitted", title, message, data: data as never });
+  if (error) console.error("[expenseMailImport.notify]", error);
 }
