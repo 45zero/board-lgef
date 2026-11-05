@@ -2710,6 +2710,7 @@ export type Database = {
           notify_push: boolean
           hate_alert_email: boolean
           hate_alert_push: boolean
+          notification_prefs: Json
           expense_validator_id: string | null
           daily_digest_email: boolean
           daily_digest_sent_on: string | null
@@ -2740,6 +2741,7 @@ export type Database = {
           notify_push?: boolean
           hate_alert_email?: boolean
           hate_alert_push?: boolean
+          notification_prefs?: Json
           expense_validator_id?: string | null
           daily_digest_email?: boolean
           daily_digest_sent_on?: string | null
@@ -2770,6 +2772,7 @@ export type Database = {
           notify_push?: boolean
           hate_alert_email?: boolean
           hate_alert_push?: boolean
+          notification_prefs?: Json
           expense_validator_id?: string | null
           daily_digest_email?: boolean
           daily_digest_sent_on?: string | null

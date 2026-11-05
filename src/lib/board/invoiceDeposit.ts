@@ -1,6 +1,7 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { COMPTA_SLUG } from "@/lib/board/fraisFlavor";
+import { shouldAlert } from "@/lib/board/notificationPrefs";
 
 // Dépôt d'une facture de prestataire, commun au lien sans compte (/facture/<jeton>,
 // actions/invoice-public.ts) et au prestataire connecté au board (Factures, actions/staff.ts) :
@@ -172,13 +173,15 @@ async function notifyDeposit(service: Service, userId: string, title: string, ev
   if (!notifyIds.length) return;
   const { data: person } = await service.from("profiles").select("first_name, last_name, email").eq("id", userId).maybeSingle();
   for (const id of notifyIds) {
+    // « À valider » selon les Paramètres de chacun : e-mail tout de suite, au plus toutes les 12 h, ou board seulement.
+    const alert = await shouldAlert(service, id, "frais_a_valider");
     const { error } = await service.rpc("create_notification", {
       p_user_id: id,
       p_type: "expense_submitted",
       p_title: "Facture déposée",
       p_message: `${personName(person)} a déposé sa facture pour « ${title} » (${amountTtc.toLocaleString("fr-FR")} € TTC).`,
       p_actor_name: personName(person),
-      p_data: { event_id: eventId, kind: "invoice_submitted" },
+      p_data: { event_id: eventId, kind: "invoice_submitted", ...(alert ? {} : { skip_email: true }) },
     });
     if (error) console.error("[invoiceDeposit.notify]", error);
   }

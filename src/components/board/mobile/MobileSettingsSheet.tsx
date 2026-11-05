@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Camera, Video, X, Ban, ChevronRight, UserRound, ChevronUp, ChevronDown } from "lucide-react";
 import { MyProfileModal } from "@/components/board/profile/MyProfileModal";
+import { FraisNotificationsSection } from "@/components/board/BoardSettingsModal";
 import { NAV_SLOTS, NAV_BAR_SIZE, type MobileTab } from "@/components/board/mobile/MobileBottomNav";
 import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
 
@@ -182,6 +183,7 @@ export function MobileSettingsSheet({
             );
           })}
         </div>
+        <FraisNotificationsSection />
       </div>
       {profileOpen && <MyProfileModal onClose={() => setProfileOpen(false)} />}
     </div>

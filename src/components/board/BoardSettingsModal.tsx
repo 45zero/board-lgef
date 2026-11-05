@@ -16,6 +16,7 @@ import {
   setCoverageReceivers,
 } from "@/app/actions/board-settings";
 import { Toggle } from "@/components/board/Toggle";
+import { FRAIS_PREF_OPTIONS, type FraisCategory } from "@/lib/board/notificationPrefs";
 import { isNativeApp, webPushIssue, isWebPushEnabled, enableWebPush, disableWebPush } from "@/lib/web/webPush";
 import { sendTestWebPush } from "@/app/actions/web-push";
 import { useAuth } from "@/contexts/AuthContext";
@@ -107,6 +108,59 @@ function ComputerPushRow() {
  * visible seulement des personnes concernées : administrateurs et super users, personnes désignées
  * ici, et celles qui ont accès au centre de publication (auteurs des publications).
  */
+const FRAIS_ROWS: { key: FraisCategory; title: string; subtitle: string }[] = [
+  { key: "frais_decision", title: "Frais et factures validés ou payés", subtitle: "Une bonne nouvelle, rien à faire" },
+  { key: "frais_refus", title: "Frais et factures refusés", subtitle: "À corriger et renvoyer" },
+  { key: "frais_a_valider", title: "Frais et factures à valider", subtitle: "Si vous validez pour votre équipe ou la GED" },
+];
+
+/**
+ * Frais et factures : pour chaque catégorie, push et e-mail tout de suite, au plus toutes les 12 h
+ * (à valider), ou dans le board seulement. Les interrupteurs e-mail / push ci-dessus restent prioritaires.
+ */
+export function FraisNotificationsSection({ notif: shared }: { notif?: ReturnType<typeof useNotificationPreferences> }) {
+  // Paramètres mobiles : pas de préférences déjà chargées, la section charge les siennes.
+  const own = useNotificationPreferences();
+  const notif = shared ?? own;
+  return (
+    <div className="mt-5">
+      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Notifications · Frais et factures</div>
+      <div className="space-y-3 rounded-btn border border-line p-3">
+        {FRAIS_ROWS.map((row) => {
+          const value = notif.fraisPrefs[row.key] ?? "instant";
+          return (
+            <div key={row.key} className="space-y-1.5">
+              <div>
+                <div className="text-sm font-semibold text-ink-2">{row.title}</div>
+                <div className="text-xs text-ink-4">{row.subtitle}</div>
+              </div>
+              <div className="flex flex-wrap gap-1 rounded-btn bg-subtle p-0.5">
+                {FRAIS_PREF_OPTIONS[row.key].map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => void notif.setFraisPref(row.key, o.value)}
+                    aria-pressed={value === o.value}
+                    className={`flex-1 whitespace-nowrap rounded-[6px] px-2.5 py-1.5 text-xs font-semibold ${
+                      value === o.value ? "bg-navy text-white" : "text-ink-3 hover:bg-hover"
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        <p className="text-[11px] text-ink-4">
+          « Tout de suite » : push et e-mail (selon les réglages ci-dessus). La notification reste toujours dans le board, et le programme de 7 h rappelle ce qui
+          est à valider.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function HateAlertsSection({ notif }: { notif: ReturnType<typeof useNotificationPreferences> }) {
   const role = useUserRole();
   const { user } = useAuth();
@@ -639,6 +693,8 @@ export function BoardSettingsModal({
             <ComputerPushRow />
           </div>
         </div>
+
+        <FraisNotificationsSection notif={notif} />
 
         <HateAlertsSection notif={notif} />
 

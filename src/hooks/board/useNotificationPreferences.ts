@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import type { FraisCategory, FraisPrefValue, NotificationPrefs } from "@/lib/board/notificationPrefs";
 
 /** Préférences de notification propres au compte (pas au device) — email et push,
  * lues/écrites sur profiles. Le push n'a pas encore de canal de livraison réel
@@ -14,6 +15,7 @@ export function useNotificationPreferences() {
   const [hateAlertEmail, setHateAlertEmailState] = useState(true);
   const [hateAlertPush, setHateAlertPushState] = useState(true);
   const [dailyDigest, setDailyDigestState] = useState(false);
+  const [fraisPrefs, setFraisPrefsState] = useState<NotificationPrefs>({});
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -21,7 +23,7 @@ export function useNotificationPreferences() {
     const supabase = createClient();
     supabase
       .from("profiles")
-      .select("notify_email, notify_push, hate_alert_email, hate_alert_push, daily_digest_email")
+      .select("notify_email, notify_push, hate_alert_email, hate_alert_push, daily_digest_email, notification_prefs")
       .eq("id", user.id)
       .single()
       .then(({ data }) => {
@@ -31,6 +33,7 @@ export function useNotificationPreferences() {
           setHateAlertEmailState(data.hate_alert_email);
           setHateAlertPushState(data.hate_alert_push);
           setDailyDigestState(data.daily_digest_email);
+          setFraisPrefsState((data.notification_prefs ?? {}) as NotificationPrefs);
         }
         setLoaded(true);
       });
@@ -70,7 +73,22 @@ export function useNotificationPreferences() {
     await createClient().from("profiles").update({ daily_digest_email: value }).eq("id", user.id);
   };
 
+  /**
+   * Module Frais : tout de suite, au plus toutes les 12 h, ou board seulement, par catégorie
+   * (notificationPrefs.ts). Relu avant d'écrire pour garder la date du dernier rappel posée par le serveur.
+   */
+  const setFraisPref = async (category: FraisCategory, value: FraisPrefValue) => {
+    setFraisPrefsState((prev) => ({ ...prev, [category]: value }));
+    if (!user?.id) return;
+    const supabase = createClient();
+    const { data } = await supabase.from("profiles").select("notification_prefs").eq("id", user.id).single();
+    const current = (data?.notification_prefs ?? {}) as NotificationPrefs;
+    await supabase.from("profiles").update({ notification_prefs: { ...current, [category]: value } }).eq("id", user.id);
+  };
+
   return {
+    fraisPrefs,
+    setFraisPref,
     dailyDigest,
     setDailyDigest,
     notifyEmail,

@@ -21,6 +21,7 @@ import { uploadFile } from "@/lib/google/drive";
 import { isTransactionalEmailConfigured, sendTransactionalBatch } from "@/lib/email/transactional";
 import { invoiceValidatorIds, prepareInvoiceDeposit, recordInvoiceDeposit, recordStandaloneInvoice, type StandaloneInput } from "@/lib/board/invoiceDeposit";
 import { COMPTA_SLUG } from "@/lib/board/fraisFlavor";
+import { shouldAlert } from "@/lib/board/notificationPrefs";
 import type { InvoiceRequestItem } from "@/app/actions/invoice-public";
 
 // Effectif (sql/2026-10-03_staff_costs.sql) : mes N-1 (profiles.expense_validator_id = moi), tout le
@@ -379,6 +380,8 @@ async function sendInvoiceReviewNotice(v: Viewer, userId: string, decision: "app
   const list = names.length <= 4 ? names.join(", ") : `${names.slice(0, 4).join(", ")} et ${names.length - 4} autre${names.length > 5 ? "s" : ""}`;
   const approved = decision === "approved";
   const title = approved ? (one ? "Facture validée" : "Factures validées") : one ? "Facture refusée" : "Factures refusées";
+  // « Dans le board seulement » (Paramètres) : la notification, sans l'e-mail détaillé.
+  const alert = await shouldAlert(v.service, userId, approved ? "frais_decision" : "frais_refus");
 
   await v.service.rpc("create_notification", {
     p_user_id: userId,
@@ -396,7 +399,7 @@ async function sendInvoiceReviewNotice(v: Viewer, userId: string, decision: "app
     p_data: { kind: "invoice_reviewed", decision, count: items.length, skip_email: true, ...(one ? { event_id: items[0].eventId } : {}) },
   });
 
-  if (!person?.email || !isTransactionalEmailConfigured()) return;
+  if (!alert || !person?.email || !isTransactionalEmailConfigured()) return;
   const first = person.first_name?.trim() || who;
   const rejectedEvents = approved ? [] : items.map((i) => i.eventId).filter((id): id is string => !!id);
   const link = rejectedEvents.length
@@ -717,7 +720,7 @@ export const setPaid = async (kind: "invoice" | "expense", id: string, paidOn: s
         p_title: kind === "invoice" ? "Facture payée" : "Frais remboursés",
         p_message: `${kind === "invoice" ? "Votre facture a été payée" : "Vos frais ont été remboursés"} le ${new Date(`${paidOn}T12:00:00`).toLocaleDateString("fr-FR")}.`,
         p_actor_name: "Comptabilité",
-        p_data: { kind: kind === "invoice" ? "invoice_paid" : "expense_paid", id },
+        p_data: { kind: kind === "invoice" ? "invoice_paid" : "expense_paid", id, ...((await shouldAlert(v.service, row.user_id, "frais_decision")) ? {} : { skip_email: true }) },
       });
       if (nErr) console.error("[staff.setPaid.notify]", nErr);
     }
@@ -765,7 +768,7 @@ export const notifyPaidBatch = async (batch: { paidOn: string; items: { kind: "i
         p_title: c.invoices && c.expenses ? "Paiements effectués" : c.invoices ? (c.invoices > 1 ? "Factures payées" : "Facture payée") : "Frais remboursés",
         p_message: message,
         p_actor_name: "Comptabilité",
-        p_data: { kind: c.invoices ? "invoice_paid" : "expense_paid", count: c.invoices + c.expenses },
+        p_data: { kind: c.invoices ? "invoice_paid" : "expense_paid", count: c.invoices + c.expenses, ...((await shouldAlert(v.service, uid, "frais_decision")) ? {} : { skip_email: true }) },
       });
       if (error) console.error("[staff.notifyPaidBatch]", uid, error);
     }

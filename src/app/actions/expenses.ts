@@ -11,6 +11,7 @@ import { type SolicitationRole } from "@/lib/board/solicitation";
 import { computeMyExpenses, countPendingForValidator, isEmptyDeclaration, lineMonth, personName, toStatus } from "@/lib/board/expensesCore";
 import { countAllPendingExpenses, invoicesToValidate, unpaidPayables } from "@/lib/board/gedCore";
 import { EXPENSE_CATEGORIES, CATEGORY_META, lineParts, monthLabel, type ExpenseTarget } from "@/lib/board/expenseCategories";
+import { shouldAlert, type FraisCategory } from "@/lib/board/notificationPrefs";
 
 // Gestion des frais du board. Données partagées avec l'appli calendrier :
 // - event_expenses : lignes de frais d'une personne, sur un événement ou hors événement (event_id nul) ;
@@ -168,13 +169,20 @@ export async function getMyExpenses(): Promise<MyExpenseItem[]> {
   return computeMyExpenses(service, userId);
 }
 
-async function notify(service: Service, userIds: string[], title: string, message: string, data: Record<string, unknown>) {
+/**
+ * Notification du board, plus push et e-mail si la personne le veut pour cette catégorie
+ * (Paramètres → Notifications, voir notificationPrefs.ts) ; sinon le board seulement.
+ */
+async function notify(service: Service, userIds: string[], title: string, message: string, data: Record<string, unknown>, category: FraisCategory) {
   for (const userId of userIds) {
+    const alert = await shouldAlert(service, userId, category);
+    const payload = alert ? data : { ...data, skip_email: true };
     const { data: notif } = await service
       .from("notifications")
-      .insert({ user_id: userId, type: "expense_to_validate", title, message, data: data as never })
+      .insert({ user_id: userId, type: "expense_to_validate", title, message, data: payload as never })
       .select("id")
       .single();
+    if (!alert) continue;
     await service
       .from("push_outbox")
       .insert({ user_id: userId, title, body: message, data, type: "expense_to_validate", notification_id: notif?.id ?? null } as never);
@@ -237,7 +245,8 @@ export async function declareExpenses(target: ExpenseTarget, noExpense = false, 
           [me.expense_validator_id],
           "Frais à valider",
           `${personName(me)} a déclaré ${payload.total_amount.toFixed(2)} € pour ${await targetTitle(service, target)}.`,
-          { kind: "expense_to_validate", event_id: payload.event_id, period_month: payload.period_month }
+          { kind: "expense_to_validate", event_id: payload.event_id, period_month: payload.period_month },
+          "frais_a_valider"
         );
       }
     }
@@ -402,7 +411,8 @@ export async function reviewSubmission(
       decision === "approved"
         ? `Vos frais (${Number(sub.total_amount ?? 0).toFixed(2)} €) pour ${what} ont été validés.`
         : `Vos frais pour ${what} ont été refusés${comment.trim() ? ` : ${comment.trim()}` : "."}`,
-      { kind: "expense_reviewed", event_id: sub.event_id, period_month: sub.period_month, decision }
+      { kind: "expense_reviewed", event_id: sub.event_id, period_month: sub.period_month, decision },
+      decision === "approved" ? "frais_decision" : "frais_refus"
     );
     return { error: null };
   } catch (e) {
@@ -460,7 +470,8 @@ export async function notifyExpenseBatch(
           batch.decision === "approved"
             ? `Vos frais (${total.toFixed(2)} €) pour ${what} ont été validés.`
             : `Vos frais pour ${what} ont été refusés${comment ? ` : ${comment}` : "."}`,
-          { kind: "expense_reviewed", decision: batch.decision, count: rows.length, ...(one ? { event_id: rows[0].event_id, period_month: rows[0].period_month } : {}) }
+          { kind: "expense_reviewed", decision: batch.decision, count: rows.length, ...(one ? { event_id: rows[0].event_id, period_month: rows[0].period_month } : {}) },
+          batch.decision === "approved" ? "frais_decision" : "frais_refus"
         );
       }
       return;
@@ -489,7 +500,8 @@ export async function notifyExpenseBatch(
       one
         ? `${personName(me)} a déclaré ${total.toFixed(2)} € pour ${titles[0]}.`
         : `${personName(me)} a déclaré ${rows.length} notes de frais (${total.toFixed(2)} €) : ${shortList(titles)}.`,
-      { kind: "expense_to_validate", count: rows.length, ...(one ? { event_id: rows[0].event_id, period_month: rows[0].period_month } : {}) }
+      { kind: "expense_to_validate", count: rows.length, ...(one ? { event_id: rows[0].event_id, period_month: rows[0].period_month } : {}) },
+      "frais_a_valider"
     );
   } catch (e) {
     // Les fiches sont traitées : un message manqué ne doit pas faire croire à un échec.
