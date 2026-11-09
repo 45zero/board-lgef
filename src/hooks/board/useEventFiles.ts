@@ -18,7 +18,8 @@ function formatMb(bytes: number) {
 }
 
 /** Pièces jointes d'un événement (photo/vidéo) + publication YouTube/Facebook. */
-export function useEventFiles(eventId: string | undefined, canManage: boolean) {
+/** `canUpload` : ajouter des fichiers sans pouvoir retirer ceux des autres (prestataires, équipe). */
+export function useEventFiles(eventId: string | undefined, canManage: boolean, canUpload = canManage) {
   const { user } = useAuth();
   const { runTask } = useBackgroundTasks();
   const [files, setFiles] = useState<EventFile[]>([]);
@@ -54,7 +55,7 @@ export function useEventFiles(eventId: string | undefined, canManage: boolean) {
    * progression s'affiche en bas à droite et on peut quitter l'événement ou changer de module.
    */
   const addFiles = (fileList: FileList | File[]) => {
-    if (!eventId || !canManage) return;
+    if (!eventId || !(canManage || canUpload)) return;
     const files = Array.from(fileList);
     if (files.length === 0) return;
     setUploading(true);

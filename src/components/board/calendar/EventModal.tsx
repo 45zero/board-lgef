@@ -1,7 +1,6 @@
 "use client";
 
 import { EventWeather } from "@/components/board/calendar/DayWeather";
-import { EventCosts } from "@/components/board/calendar/EventCosts";
 import { EventTeamCards } from "@/components/board/team/TeamCardOpener";
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
@@ -21,7 +20,7 @@ import {
   DiscussionTab,
   EquipeTab,
   FraisTab,
-  GestionFraisPlaceholder,
+  GestionFraisTab,
   CarteTab,
   CoverageActions,
   DirectorAttendanceSection,
@@ -370,8 +369,6 @@ export function EventModal({
 
               {isEditing && <EventTeamCards eventId={event!.id} />}
 
-              {isEditing && <EventCosts eventId={event!.id} />}
-
               {isEditing && (
                 <div>
                   <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
@@ -381,6 +378,7 @@ export function EventModal({
                     eventId={event!.id}
                     eventTitle={m.title}
                     canManage={m.role.canAssignCoverage || m.team.canManageMembers}
+                    canUpload={m.role.isTechPrestataire || m.team.isMember}
                     canPublish={m.role.canAssignCoverage}
                   />
                 </div>
@@ -391,7 +389,7 @@ export function EventModal({
           {tab === "discussion" && isEditing && <DiscussionTab hook={m.comments} />}
           {tab === "equipe" && isEditing && <EquipeTab hook={m.team} />}
           {tab === "frais" && isEditing && event && <FraisTab eventId={event.id} onDeclared={() => void m.expenses.refetch()} />}
-          {tab === "gestion" && <GestionFraisPlaceholder />}
+          {tab === "gestion" && <GestionFraisTab eventId={isEditing && event ? event.id : null} />}
           {tab === "carte" && (
             <CarteTab location={m.location} event={event ? { id: event.id, title: m.title, org: m.org, start: m.start.toISOString() } : null} />
           )}

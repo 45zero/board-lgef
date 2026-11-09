@@ -10,28 +10,35 @@ export function useUserRole() {
   const { user } = useAuth();
   const [role, setRole] = useState<string>("user");
   const [isTechSalarie, setIsTechSalarie] = useState(false);
+  const [isTechPrestataire, setIsTechPrestataire] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const refetch = useCallback(async () => {
     if (!user?.id) {
       setRole("user");
       setIsTechSalarie(false);
+      setIsTechPrestataire(false);
       setLoading(false);
       return;
     }
     setLoading(true);
     const supabase = createClient();
-    const [{ data: profile }, { data: specialty }] = await Promise.all([
+    const [{ data: profile }, { data: specialties }] = await Promise.all([
       supabase.from("profiles").select("role").eq("id", user.id).single(),
       supabase
         .from("profile_specialties")
         .select("specialties!inner(slug)")
         .eq("user_id", user.id)
-        .eq("specialties.slug", "tech-salarie")
-        .maybeSingle(),
+        .in("specialties.slug", ["tech-salarie", "tech-prestataire"]),
     ]);
     setRole(profile?.role ?? "user");
-    setIsTechSalarie(!!specialty);
+    const slugs = new Set(
+      ((specialties ?? []) as unknown as { specialties: { slug: string } | { slug: string }[] }[]).flatMap((r) =>
+        (Array.isArray(r.specialties) ? r.specialties : [r.specialties]).map((s) => s.slug)
+      )
+    );
+    setIsTechSalarie(slugs.has("tech-salarie"));
+    setIsTechPrestataire(slugs.has("tech-prestataire"));
     setLoading(false);
   }, [user?.id]);
 
@@ -45,5 +52,5 @@ export function useUserRole() {
   // Réseau salarié — peut voir/assigner n'importe quelle demande de couverture (cf. policies RLS covreq_*).
   const canAssignCoverage = isSuperUser || isTechSalarie;
 
-  return { role, loading, isAdmin, isSuperUser, isOrganizer, isTechSalarie, canAssignCoverage, refetch };
+  return { role, loading, isAdmin, isSuperUser, isOrganizer, isTechSalarie, isTechPrestataire, canAssignCoverage, refetch };
 }

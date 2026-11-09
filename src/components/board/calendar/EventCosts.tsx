@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { RotateCcw } from "lucide-react";
 import { getEventCosts, setEventCostAdjustment, type EventCostLine } from "@/app/actions/staff";
 import { KM_RATE, STAFF_STATUS_LABELS, costTotals, euros, formatKm } from "@/lib/board/staff";
@@ -11,12 +11,14 @@ import { AmountInput } from "@/components/board/staff/AmountInput";
  * sollicitée dont il a la charge, son forfait ou le montant ajusté pour cet événement (modifiable).
  * Rien ne s'affiche pour les autres lecteurs, ni quand personne n'a de coût.
  */
-export function EventCosts({ eventId }: { eventId: string }) {
+export function EventCosts({ eventId, empty = null }: { eventId: string; /** Affiché quand il n'y a rien à montrer. */ empty?: ReactNode }) {
   const [lines, setLines] = useState<EventCostLine[] | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
     const res = await getEventCosts(eventId);
     if (res.ok) setLines(res.data);
+    setLoaded(true);
   }, [eventId]);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- l'état n'est posé qu'à la réponse du serveur
@@ -24,7 +26,8 @@ export function EventCosts({ eventId }: { eventId: string }) {
   }, [load]);
 
   const shown = (lines ?? []).filter((l) => l.amount > 0 || l.status === "tech-prestataire" || l.status === "tech-reseau");
-  if (!shown.length) return null;
+  if (!loaded) return null;
+  if (!shown.length) return <>{empty}</>;
   const t = costTotals(shown);
 
   const save = async (l: EventCostLine, amount: number | null) => {

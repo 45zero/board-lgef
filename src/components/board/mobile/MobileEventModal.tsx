@@ -19,7 +19,7 @@ import {
   DiscussionTab,
   EquipeTab,
   FraisTab,
-  GestionFraisPlaceholder,
+  GestionFraisTab,
   CarteTab,
   CoverageActions,
   DirectorAttendanceSection,
@@ -361,6 +361,7 @@ export function MobileEventModal({
                   eventId={event!.id}
                   eventTitle={m.title}
                   canManage={m.role.canAssignCoverage || m.team.canManageMembers}
+                  canUpload={m.role.isTechPrestataire || m.team.isMember}
                   canPublish={m.role.canAssignCoverage}
                 />
               </div>
@@ -371,7 +372,7 @@ export function MobileEventModal({
         {tab === "discussion" && isEditing && <DiscussionTab hook={m.comments} />}
         {tab === "equipe" && isEditing && <EquipeTab hook={m.team} />}
         {tab === "frais" && isEditing && event && <FraisTab eventId={event.id} onDeclared={() => void m.expenses.refetch()} />}
-        {tab === "gestion" && <GestionFraisPlaceholder />}
+        {tab === "gestion" && <GestionFraisTab eventId={isEditing && event ? event.id : null} />}
         {tab === "carte" && (
           <CarteTab location={m.location} event={event ? { id: event.id, title: m.title, org: m.org, start: m.start.toISOString() } : null} />
         )}

@@ -41,6 +41,7 @@ import type { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnici
 import { type useEventCoverage, type CoverageRequest } from "@/hooks/board/useEventCoverage";
 import type { DirectorProfile, useDirectorAttendance } from "@/hooks/board/useDirectorAttendance";
 import { DirectorDeclineForm } from "@/components/board/calendar/DirectorDeclineForm";
+import { EventCosts } from "@/components/board/calendar/EventCosts";
 
 export function personName(
   p: { first_name: string | null; last_name: string | null; email: string | null } | null
@@ -353,14 +354,13 @@ export function FraisTab({ eventId, onDeclared }: { eventId?: string; onDeclared
   return <ExpenseLinesEditor target={{ eventId }} onChanged={onDeclared} />;
 }
 
-export function GestionFraisPlaceholder() {
-  return (
-    <div className="rounded-panel border border-dashed border-line bg-card/60 p-6 text-sm text-ink-3">
-      La validation des notes de frais par un administrateur n&rsquo;est pas encore construite dans Board
-      LGEF — elle nécessite de porter <code>useAdminExpenseReports</code> et{" "}
-      <code>useExpenseSubmissions</code> de calendrier-lgef. À venir dans une prochaine passe.
-    </div>
+/** Onglet Gestion frais : coût des intervenants, pour leur N+1 et les administrateurs. */
+export function GestionFraisTab({ eventId }: { eventId: string | null }) {
+  const note = (text: string) => (
+    <div className="rounded-panel border border-dashed border-line bg-card/60 p-6 text-sm text-ink-3">{text}</div>
   );
+  if (!eventId) return note("Enregistrez l\u2019événement pour voir le coût des intervenants.");
+  return <EventCosts eventId={eventId} empty={note("Aucun coût d\u2019intervenant à gérer pour vous sur cet événement.")} />;
 }
 
 /** Onglet Carte : l'événement sur la carte du Grand Est, avec les techniciens et leurs temps de route. */
@@ -1055,14 +1055,18 @@ const isMediaFile = (f: EventFile) => /^(image|video)\//.test(f.content_type ?? 
 export function AttachmentsField({
   eventId,
   canManage,
+  canUpload = canManage,
   canPublish,
 }: {
   eventId: string;
   eventTitle: string;
   canManage: boolean;
+  /** Peut ajouter des fichiers (prestataires, équipe) ; ne retire que les siens. */
+  canUpload?: boolean;
   canPublish: boolean;
 }) {
-  const hook = useEventFiles(eventId, canManage);
+  const { user } = useAuth();
+  const hook = useEventFiles(eventId, canManage, canUpload);
   const inputRef = useRef<HTMLInputElement>(null);
   // Publier un média : même compositeur que le centre de publication (réseaux, publier ou programmer).
   const [composerPub, setComposerPub] = useState<MediaPublication | null>(null);
@@ -1107,7 +1111,7 @@ export function AttachmentsField({
               <AttachmentRow
                 key={f.id}
                 file={f}
-                canManage={canManage}
+                canManage={canManage || (canUpload && f.uploaded_by === user?.id)}
                 canPublish={canPublish}
                 onRemove={() => askRemove(f)}
                 onPublishClick={() => openingId !== f.id && void openComposer(f)}
@@ -1116,7 +1120,7 @@ export function AttachmentsField({
           </div>
         ))}
 
-      {canManage && (
+      {(canManage || canUpload) && (
         <>
           <input
             ref={inputRef}

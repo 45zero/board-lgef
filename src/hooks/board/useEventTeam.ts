@@ -32,6 +32,7 @@ export function useEventTeam(eventId: string, createdBy: string | null) {
   const isCreator = user?.id === createdBy;
   const isResponsable = team.some((m) => m.user_id === user?.id && m.role === "responsable");
   const canManageMembers = isCreator || isResponsable;
+  const isMember = team.some((m) => m.user_id === user?.id);
 
   const addMember = async (userId: string, role: "responsable" | "membre") => {
     if (!canManageMembers) return;
@@ -72,5 +73,5 @@ export function useEventTeam(eventId: string, createdBy: string | null) {
     fetchTeam();
   };
 
-  return { team, addMember, removeMember, setResponsable, isCreator, isResponsable, canManageMembers };
+  return { team, addMember, removeMember, setResponsable, isCreator, isResponsable, isMember, canManageMembers };
 }
