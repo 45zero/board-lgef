@@ -281,7 +281,7 @@ export function GroupHeader({
         {label}
       </span>
       <span>
-        {count} fiche{count > 1 ? "s" : ""} · {formatEuros(total)}
+        {count} fiche{count > 1 ? "s" : ""} · total : {formatEuros(total)}
       </span>
     </div>
   );
@@ -298,7 +298,7 @@ export function withOffEventBlock<T>(items: T[], isOff: (t: T) => boolean): { it
   return [...on, ...off].map((item, idx) => ({ item, header: off.length > 0 && idx === on.length ? off : null }));
 }
 
-/** Intertitre « Hors événement » à l'intérieur d'un groupe. */
+/** Intertitre « Hors événement » à l'intérieur d'un groupe : une part du total du groupe (« dont… »), pas un total à ajouter. */
 export function SubGroupHeader({
   label,
   total,
@@ -316,8 +316,8 @@ export function SubGroupHeader({
         {select && <SelectBox checked={select.checked} partial={select.partial} onChange={select.onToggle} label={`Sélectionner ${label}`} />}
         {label}
       </span>
-      <span>
-        {count} facture{count > 1 ? "s" : ""} · {formatEuros(total)}
+      <span title="Déjà compris dans le total ci-dessus">
+        dont {count} facture{count > 1 ? "s" : ""} ({formatEuros(total)})
       </span>
     </div>
   );
