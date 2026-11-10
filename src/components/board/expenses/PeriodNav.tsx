@@ -287,6 +287,42 @@ export function GroupHeader({
   );
 }
 
+/**
+ * Ordre d'affichage d'un groupe : les événements d'abord, puis les dépenses hors événement réunies
+ * sous un intertitre (`header` : la liste du bloc, posée sur sa première ligne). Chacune reste une
+ * fiche à part, validée seule.
+ */
+export function withOffEventBlock<T>(items: T[], isOff: (t: T) => boolean): { item: T; header: T[] | null }[] {
+  const on = items.filter((t) => !isOff(t));
+  const off = items.filter(isOff);
+  return [...on, ...off].map((item, idx) => ({ item, header: off.length > 0 && idx === on.length ? off : null }));
+}
+
+/** Intertitre « Hors événement » à l'intérieur d'un groupe. */
+export function SubGroupHeader({
+  label,
+  total,
+  count,
+  select,
+}: {
+  label: string;
+  total: number;
+  count: number;
+  select?: { checked: boolean; partial: boolean; onToggle: () => void };
+}) {
+  return (
+    <div className="flex items-center justify-between border-b border-line px-4 py-1.5 text-[11px] font-semibold text-ink-4">
+      <span className="flex items-center gap-2">
+        {select && <SelectBox checked={select.checked} partial={select.partial} onChange={select.onToggle} label={`Sélectionner ${label}`} />}
+        {label}
+      </span>
+      <span>
+        {count} facture{count > 1 ? "s" : ""} · {formatEuros(total)}
+      </span>
+    </div>
+  );
+}
+
 export function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button

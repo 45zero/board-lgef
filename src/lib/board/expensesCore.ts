@@ -2,7 +2,7 @@ import "server-only";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { DbEventType } from "@/lib/board/calendar";
 import { getSolicitations } from "@/lib/board/solicitation";
-import { monthLabel } from "@/lib/board/expenseCategories";
+import { lineLabel } from "@/lib/board/expenseCategories";
 import type { ExpenseStatus, MyExpenseItem } from "@/app/actions/expenses";
 
 // Calculs de frais indépendants de la session : utilisés par les actions serveur (utilisateur
@@ -60,7 +60,8 @@ export async function countPendingForValidator(service: Service, userId: string)
  * Mes frais : les événements (12 derniers mois) où je suis sollicité — membre ou responsable
  * d'équipe, assigné, comité directeur à la présence confirmée, technicien ayant accepté la
  * captation —, mes propres événements Perso (« Pas de frais » s'il n'y en a pas), ou ceux où j'ai
- * saisi des frais / une déclaration, plus mes frais hors événement par mois.
+ * saisi des frais / une déclaration, plus chacune de mes dépenses hors événement (une fiche par
+ * dépense : déclarée, validée et payée seule).
  * Un prestataire facture ses interventions (Mes factures) : seuls les événements où il a saisi des
  * frais ou déclaré quelque chose sont listés, rien n'est « à déclarer » d'office.
  */
@@ -72,9 +73,15 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
     getSolicitations(service, userId),
     service
       .from("expense_submissions")
-      .select("id, event_id, period_month, status, total_amount, expense_ids, submitted_at, reviewed_at, reviewed_by, reviewer_comments, reviewer_comment")
+      .select("id, event_id, expense_id, period_month, status, total_amount, expense_ids, submitted_at, reviewed_at, reviewed_by, reviewer_comments, reviewer_comment")
       .eq("user_id", userId),
-    service.from("event_expenses").select("event_id, total_amount, expense_date, created_at, currency, exchange_rate").eq("user_id", userId).gte("created_at", since),
+    service
+      .from("event_expenses")
+      .select(
+        "id, event_id, total_amount, expense_date, created_at, currency, exchange_rate, merchant_name, description, other_fees_description, transport_fees, fuel_fees, toll_fees, parking_fees, car_rental_fees, hotel_fees, meal_fees, other_fees"
+      )
+      .eq("user_id", userId)
+      .gte("created_at", since),
     isPrestataire(service, userId),
     // Mes événements Perso (event_type « kanban » réutilisé pour Perso, cf. calendar.ts).
     service.from("events").select("id").eq("created_by", userId).eq("event_type", "kanban").gte("start_date", since),
@@ -86,7 +93,7 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
 
   const subs = submissions.data ?? [];
   const subByEvent = new Map(subs.filter((s) => s.event_id).map((s) => [s.event_id as string, s]));
-  const subByMonth = new Map(subs.filter((s) => !s.event_id && s.period_month).map((s) => [s.period_month as string, s]));
+  const subByLine = new Map(subs.filter((s) => !s.event_id && s.expense_id).map((s) => [s.expense_id as string, s]));
 
   const totals = new Map<string, { total: number; count: number }>();
   const add = (key: string, amount: number) => {
@@ -96,7 +103,8 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
   // Ligne en devise étrangère pas encore convertie : comptée dans les lignes, pas dans le total en euros.
   const euros = (l: { total_amount: number | null; currency: string | null; exchange_rate: number | null }) =>
     l.currency && l.currency.toUpperCase() !== "EUR" && l.exchange_rate == null ? 0 : Number(l.total_amount ?? 0);
-  for (const l of allLines.data ?? []) add(l.event_id ? `event:${l.event_id}` : `month:${lineMonth(l)}`, euros(l));
+  const offEvent = (allLines.data ?? []).filter((l) => !l.event_id);
+  for (const l of allLines.data ?? []) if (l.event_id) add(`event:${l.event_id}`, euros(l));
 
   const withLines = [...totals.keys()].filter((k) => k.startsWith("event:")).map((k) => k.slice(6));
   const declared = [...subByEvent.entries()].filter(([, s]) => !prestataire || !isEmptyDeclaration(s)).map(([id]) => id);
@@ -136,7 +144,7 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
         upcoming: e.start_date > now && t.count === 0 && !subByEvent.has(e.id),
         key: `event:${e.id}`,
         eventId: e.id,
-        month: null,
+        lineId: null,
         title: e.title,
         start: e.start_date,
         end: e.end_date,
@@ -148,24 +156,24 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
       };
     });
 
-  const months = new Set([...[...totals.keys()].filter((k) => k.startsWith("month:")).map((k) => k.slice(6)), ...subByMonth.keys()]);
-  const monthItems: MyExpenseItem[] = [...months].map((m) => {
-    const t = totals.get(`month:${m}`) ?? { total: 0, count: 0 };
+  // Une fiche par dépense hors événement.
+  const lineItems: MyExpenseItem[] = offEvent.map((l) => {
+    const day = l.expense_date ? `${l.expense_date.slice(0, 10)}T12:00:00.000Z` : l.created_at;
     return {
-      key: `month:${m}`,
+      key: `line:${l.id}`,
       eventId: null,
-      month: m,
-      title: `Frais hors événement · ${monthLabel(m)}`,
-      start: `${m}-01T00:00:00.000Z`,
-      end: `${m}-01T00:00:00.000Z`,
+      lineId: l.id,
+      title: lineLabel(l),
+      start: day,
+      end: day,
       eventType: null,
       roles: [],
-      total: t.total,
-      lineCount: t.count,
-      ...subFields(subByMonth.get(m), t.count),
+      total: euros(l),
+      lineCount: 1,
+      ...subFields(subByLine.get(l.id), 1),
     };
   });
 
-  return [...eventItems, ...monthItems].sort((a, b) => b.start.localeCompare(a.start));
+  return [...eventItems, ...lineItems].sort((a, b) => b.start.localeCompare(a.start));
 }
 

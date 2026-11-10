@@ -644,7 +644,7 @@ export const getPayables = async (year: number) =>
     requireCompta(v);
     const [{ data: invs, error: e1 }, { data: subs, error: e2 }] = await Promise.all([
       v.service.from("event_invoices").select(INVOICE_COLUMNS).eq("status", "approved"),
-      v.service.from("expense_submissions").select("id, user_id, event_id, period_month, total_amount, paid_at, submitted_at").eq("status", "approved"),
+      v.service.from("expense_submissions").select("id, user_id, event_id, expense_id, period_month, total_amount, paid_at, submitted_at").eq("status", "approved"),
     ]);
     if (e1 || e2) throw new Error((e1 ?? e2)!.message);
     const eventIds = [...new Set([...(invs ?? []), ...(subs ?? [])].map((r) => r.event_id).filter((id): id is string => !!id))];
@@ -654,6 +654,17 @@ export const getPayables = async (year: number) =>
       events.push(...(data ?? []));
     }
     const eventBy = new Map(events.map((e) => [e.id, e]));
+    // Dépenses hors événement (une déclaration chacune) : fournisseur et date de la dépense.
+    const lineIds = [...new Set((subs ?? []).map((r) => (r.event_id ? null : r.expense_id)).filter((id): id is string => !!id))];
+    const offLines: { id: string; expense_date: string | null; created_at: string; merchant_name: string | null; description: string | null; other_fees_description: string | null }[] = [];
+    for (let i = 0; i < lineIds.length; i += 200) {
+      const { data } = await v.service
+        .from("event_expenses")
+        .select("id, expense_date, created_at, merchant_name, description, other_fees_description")
+        .in("id", lineIds.slice(i, i + 200));
+      offLines.push(...(data ?? []));
+    }
+    const lineBy = new Map(offLines.map((l) => [l.id, l]));
     const personIds = [...new Set([...(invs ?? []).map((r) => r.user_id), ...(subs ?? []).map((r) => r.user_id)].filter((id): id is string => !!id))];
     const { data: people } = personIds.length ? await v.service.from("profiles").select("id, first_name, last_name, email").in("id", personIds) : { data: [] };
     const nameBy = new Map((people ?? []).map((p) => [p.id, personName(p)]));
@@ -675,6 +686,8 @@ export const getPayables = async (year: number) =>
     }
     for (const r of subs ?? []) {
       const ev = r.event_id ? eventBy.get(r.event_id) : null;
+      const line = !r.event_id && r.expense_id ? lineBy.get(r.expense_id) : null;
+      const lineName = line ? line.merchant_name?.trim() || line.description?.trim() || line.other_fees_description?.trim() : null;
       // « Pas de frais » validé : rien à rembourser.
       if ((r.event_id && !ev) || Number(r.total_amount ?? 0) <= 0) continue;
       out.push({
@@ -682,9 +695,11 @@ export const getPayables = async (year: number) =>
         id: r.id,
         personId: r.user_id,
         personName: nameBy.get(r.user_id) ?? "—",
-        title: ev?.title ?? `Frais hors événement`,
+        title: ev?.title ?? (lineName ? `Hors événement · ${lineName}` : "Frais hors événement"),
         eventId: ev ? r.event_id : null,
-        date: ev?.start_date ?? (r.period_month ? `${r.period_month}-01T12:00:00.000Z` : r.submitted_at),
+        date:
+          ev?.start_date ??
+          (line ? `${(line.expense_date ?? line.created_at).slice(0, 10)}T12:00:00.000Z` : r.period_month ? `${r.period_month}-01T12:00:00.000Z` : r.submitted_at),
         amount: Number(r.total_amount ?? 0),
         paidAt: r.paid_at,
       });

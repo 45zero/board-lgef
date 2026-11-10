@@ -94,7 +94,7 @@ function EventPicker({ draft, onChange }: { draft: Draft; onChange: (event: Even
           </div>
           <div className="max-h-64 overflow-y-auto">
             <button onClick={() => pick(null)} className="block w-full rounded-btn px-2 py-1.5 text-left text-sm text-ink-3 hover:bg-hover">
-              Hors événement (frais du mois)
+              Hors événement
             </button>
             {results === null && <p className="px-2 py-1.5 text-xs text-ink-4">Recherche…</p>}
             {list.map((e) => (

@@ -2054,6 +2054,7 @@ export type Database = {
           notified_at: string | null
           notified_month: string | null
           period_month: string | null
+          expense_id: string | null
           paid_at: string | null
           paid_by: string | null
         }
@@ -2081,6 +2082,7 @@ export type Database = {
           notified_at?: string | null
           notified_month?: string | null
           period_month?: string | null
+          expense_id?: string | null
           paid_at?: string | null
           paid_by?: string | null
         }
@@ -2108,6 +2110,7 @@ export type Database = {
           notified_at?: string | null
           notified_month?: string | null
           period_month?: string | null
+          expense_id?: string | null
           paid_at?: string | null
           paid_by?: string | null
         }

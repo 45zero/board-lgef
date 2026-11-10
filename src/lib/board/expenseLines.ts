@@ -36,6 +36,8 @@ export async function insertExpenseLines(
 ): Promise<{ ids: string[]; toArchive: ReceiptToArchive[] }> {
   const prefix = receiptPrefix(userId);
   const ids: string[] = [];
+  // Tout est contrôlé avant la première insertion : une ligne refusée n'en laisse pas d'autres
+  // enregistrées à moitié (et un nouvel essai ne crée pas de doublon).
   for (const line of input) {
     if (!EXPENSE_CATEGORIES.includes(line.category)) throw new Error("Catégorie inconnue.");
     if (!(line.amount > 0) || line.amount > 100_000) throw new Error("Montant invalide.");
@@ -44,12 +46,20 @@ export async function insertExpenseLines(
     // Justificatifs : uniquement des fichiers déposés par la personne elle-même.
     if (line.attachments.some((a) => !a.url.startsWith(prefix))) throw new Error("Justificatif non reconnu.");
 
-    const q = service.from("expense_submissions").select("status").eq("user_id", userId);
-    const { data: sub } = line.eventId
-      ? await q.eq("event_id", line.eventId).maybeSingle()
-      : await q.is("event_id", null).eq("period_month", (line.date ?? new Date().toISOString()).slice(0, 7)).maybeSingle();
-    if (sub?.status === "approved") throw new Error("Ces frais sont déjà validés : impossible d'y ajouter une ligne.");
-
+    // Une dépense hors événement est une fiche à elle seule : rien ne la bloque. Sur un événement,
+    // la note de frais déjà validée ne bouge plus.
+    if (line.eventId) {
+      const { data: sub } = await service.from("expense_submissions").select("status").eq("user_id", userId).eq("event_id", line.eventId).maybeSingle();
+      if (sub?.status === "approved") {
+        const { data: ev } = await service.from("events").select("title").eq("id", line.eventId).maybeSingle();
+        const who = line.merchant?.trim() ? ` (${line.merchant.trim()})` : "";
+        throw new Error(
+          `Vos frais de « ${ev?.title ?? "cet événement"} » sont déjà validés : impossible d'y ajouter une ligne${who}. Choisissez « Hors événement » ou un autre événement.`
+        );
+      }
+    }
+  }
+  for (const line of input) {
     const amount = Math.round(line.amount * 100) / 100;
     const byCategory: Partial<Record<ExpenseAmountColumn, number>> = { [CATEGORY_META[line.category].column]: amount };
     const { data, error } = await service

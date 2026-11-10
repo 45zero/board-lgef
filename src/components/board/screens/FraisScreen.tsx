@@ -3,7 +3,7 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Receipt, ShieldCheck, X, ChevronRight, Download, Settings, Check, Camera, Paperclip, FileText, Briefcase, Banknote } from "lucide-react";
 import { useFraisFlavor } from "@/hooks/board/useFraisFlavor";
 import { takeFraisTab, type FraisTab } from "@/lib/board/fraisTab";
@@ -36,6 +36,8 @@ import {
   FilterChip,
   FiltersRow,
   GroupHeader,
+  SubGroupHeader,
+  withOffEventBlock,
   MONTH_LONG,
   PeriodMenu,
   YearMonthBar,
@@ -75,7 +77,7 @@ function OrgChip({ eventType }: { eventType: MyExpenseItem["eventType"] }) {
 
 /* ---------- Mes frais ---------- */
 
-/** Fiche de frais (événement ou hors événement d'un mois) : lignes, justificatifs, déclaration au N+1. */
+/** Fiche de frais (événement, ou une dépense hors événement) : lignes, justificatifs, déclaration au N+1. */
 export function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpenseItem; onClose: () => void; onChanged: () => void }) {
   const locked = item.status === "approved";
   return (
@@ -87,7 +89,7 @@ export function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpens
               <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-white/70">Note de frais</div>
               <h3 className="mt-1 truncate text-base font-extrabold">{item.title}</h3>
               <div className="mt-0.5 text-xs text-white/80">
-                {item.eventId ? `${fmtDate(item.start)} · ${item.roles.join(", ") || "—"}` : "Dépenses sans événement, déclarées pour le mois"}
+                {item.eventId ? `${fmtDate(item.start)} · ${item.roles.join(", ") || "—"}` : `Hors événement · ${fmtDate(item.start)} · validée seule`}
               </div>
               {item.eventId && (
                 <OpenEventButton eventId={item.eventId} className="mt-2 flex items-center gap-1 text-xs font-semibold text-white/90 hover:underline" />
@@ -99,7 +101,7 @@ export function ExpenseSheetModal({ item, onClose, onChanged }: { item: MyExpens
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-5">
-          <ExpenseLinesEditor target={item.eventId ? { eventId: item.eventId } : { month: item.month! }} locked={locked} onChanged={onChanged} />
+          <ExpenseLinesEditor target={item.eventId ? { eventId: item.eventId } : { lineId: item.lineId! }} locked={locked} onChanged={onChanged} />
         </div>
       </div>
     </div>
@@ -137,7 +139,7 @@ export function DeclareBar({
     // Déclarées sans prévenir une à une, puis un seul message au N+1 (« Pas de frais » ne prévient pas).
     const done: ExpenseTarget[] = [];
     const errors = await runBulk(list, async (i) => {
-      const target: ExpenseTarget = i.eventId ? { eventId: i.eventId } : { month: i.month! };
+      const target: ExpenseTarget = i.eventId ? { eventId: i.eventId } : { lineId: i.lineId! };
       const res = await declareExpenses(target, none, { silent: true });
       if (!res.error) done.push(target);
       return res.error;
@@ -289,9 +291,21 @@ function MyExpenses({ period, menu, reloadKey = 0 }: { period: Period; menu?: Mo
                   return { checked: keys.every((k) => sel.selected.has(k)), partial: keys.some((k) => sel.selected.has(k)), onToggle: () => sel.toggleMany(keys) };
                 })()}
               />
-              {group.map((i) => (
+              {withOffEventBlock(group, (i) => !i.eventId).map(({ item: i, header }) => (
+                <Fragment key={i.key}>
+                {header && (
+                  <SubGroupHeader
+                    label="Hors événement"
+                    count={header.length}
+                    total={header.reduce((n, x) => n + x.total, 0)}
+                    select={(() => {
+                      const keys = header.filter(declarableInBulk).map((x) => x.key);
+                      if (keys.length < 2) return undefined;
+                      return { checked: keys.every((k) => sel.selected.has(k)), partial: keys.some((k) => sel.selected.has(k)), onToggle: () => sel.toggleMany(keys) };
+                    })()}
+                  />
+                )}
                 <div
-                  key={i.key}
                   role="button"
                   tabIndex={0}
                   onClick={() => setOpen(i)}
@@ -313,8 +327,8 @@ function MyExpenses({ period, menu, reloadKey = 0 }: { period: Period; menu?: Mo
                       {i.eventId && <EventArrow eventId={i.eventId} className="h-6 w-6" />}
                     </div>
                     <div className="mt-0.5 text-[11px] text-ink-4">
-                      {i.eventId ? `${fmtDate(i.start)} · ${i.roles.join(", ") || "Frais saisis"}` : "Hors événement"}
-                      {i.lineCount > 0 && ` · ${i.lineCount} ligne${i.lineCount > 1 ? "s" : ""}`}
+                      {i.eventId ? `${fmtDate(i.start)} · ${i.roles.join(", ") || "Frais saisis"}` : `Hors événement · ${fmtDate(i.start)}`}
+                      {i.eventId && i.lineCount > 0 && ` · ${i.lineCount} ligne${i.lineCount > 1 ? "s" : ""}`}
                     </div>
                     {i.status === "rejected" && i.reviewerComment && <div className="mt-0.5 truncate text-[11px] text-bad">Motif : {i.reviewerComment}</div>}
                   </div>
@@ -346,6 +360,7 @@ function MyExpenses({ period, menu, reloadKey = 0 }: { period: Period; menu?: Mo
                     <ExpenseStatusBadge status={i.status} />
                   )}
                 </div>
+                </Fragment>
               ))}
             </div>
           ))}
@@ -706,9 +721,25 @@ function ToValidate({ onChanged, period, menu, scope = "mine" }: { onChanged: ()
                     : undefined
                 }
               />
-              {g.items.map((s) => (
+              {withOffEventBlock(g.items, (s) => !s.event.id).map(({ item: s, header }) => (
+                <Fragment key={s.submissionId}>
+                {header && (
+                  <SubGroupHeader
+                    label="Hors événement"
+                    count={header.length}
+                    total={header.reduce((n, x) => n + x.total, 0)}
+                    select={
+                      status === "pending" && header.length > 1
+                        ? {
+                            checked: header.every((x) => sel.selected.has(x.submissionId)),
+                            partial: header.some((x) => sel.selected.has(x.submissionId)),
+                            onToggle: () => sel.toggleMany(header.map((x) => x.submissionId)),
+                          }
+                        : undefined
+                    }
+                  />
+                )}
                 <div
-                  key={s.submissionId}
                   role="button"
                   tabIndex={0}
                   onClick={() => setOpen(s)}
@@ -763,6 +794,7 @@ function ToValidate({ onChanged, period, menu, scope = "mine" }: { onChanged: ()
                     <ChevronRight size={16} className="shrink-0 text-ink-4" />
                   )}
                 </div>
+                </Fragment>
               ))}
             </div>
           ))}

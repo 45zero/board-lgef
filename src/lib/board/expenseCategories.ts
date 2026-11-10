@@ -33,10 +33,29 @@ export function lineParts(line: Partial<Record<ExpenseAmountColumn, number | nul
   );
 }
 
-/** Frais d'un événement, ou frais hors événement d'un mois ('YYYY-MM'). */
-export type ExpenseTarget = { eventId: string } | { month: string };
+/**
+ * Frais d'un événement, ou UNE dépense hors événement : chacune est déclarée, validée et payée
+ * seule (sql/2026-11-10_expenses_per_line.sql).
+ */
+export type ExpenseTarget = { eventId: string } | { lineId: string };
 
-export const targetKey = (t: ExpenseTarget) => ("eventId" in t ? `event:${t.eventId}` : `month:${t.month}`);
+export const targetKey = (t: ExpenseTarget) => ("eventId" in t ? `event:${t.eventId}` : `line:${t.lineId}`);
+
+type LineLabelSource = Partial<Record<ExpenseAmountColumn, number | null>> & {
+  merchant_name?: string | null;
+  description?: string | null;
+  other_fees_description?: string | null;
+};
+
+/** Nom court d'une dépense hors événement : fournisseur, à défaut précision, à défaut catégorie. */
+export const lineLabel = (l: LineLabelSource) =>
+  l.merchant_name?.trim() ||
+  l.description?.trim() ||
+  l.other_fees_description?.trim() ||
+  lineParts(l)
+    .map((p) => p.label.replace(/ \(.*\)$/, ""))
+    .join(" + ") ||
+  "Dépense";
 
 export const monthLabel = (key: string) => {
   const [y, m] = key.split("-").map(Number);

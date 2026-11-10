@@ -10,14 +10,16 @@ import type { DbEventType } from "@/lib/board/calendar";
 import { type SolicitationRole } from "@/lib/board/solicitation";
 import { computeMyExpenses, countPendingForValidator, isEmptyDeclaration, lineMonth, personName, toStatus } from "@/lib/board/expensesCore";
 import { countAllPendingExpenses, invoicesToValidate, unpaidPayables } from "@/lib/board/gedCore";
-import { EXPENSE_CATEGORIES, CATEGORY_META, lineParts, monthLabel, type ExpenseTarget } from "@/lib/board/expenseCategories";
+import { EXPENSE_CATEGORIES, CATEGORY_META, lineLabel, lineParts, type ExpenseTarget } from "@/lib/board/expenseCategories";
 import { quietAValider, type NotificationCategory } from "@/lib/board/notificationPrefs";
 
 // Gestion des frais du board. Données partagées avec l'appli calendrier :
 // - event_expenses : lignes de frais d'une personne, sur un événement ou hors événement (event_id nul) ;
 // - event_expense_attachments : justificatifs d'une ligne (en plus de event_expenses.file_url) ;
-// - expense_submissions : la déclaration (une par personne et par événement, ou par mois pour les
-//   frais hors événement — period_month), statut pending → approved / rejected, ou no_expense.
+// - expense_submissions : la déclaration (une par personne et par événement, ou une par dépense hors
+//   événement — expense_id, period_month = son mois), statut pending → approved / rejected, ou
+//   no_expense. Hors événement, chaque dépense est validée seule : en ajouter une n'est jamais
+//   bloqué par celles déjà validées (sql/2026-11-10_expenses_per_line.sql).
 // Les déclarations ne sont modifiables en base que par les admins (RLS) : ces actions passent par
 // le client service role APRÈS avoir vérifié elles-mêmes le droit (la personne, son N+1, un admin).
 
@@ -25,12 +27,12 @@ export type ExpenseStatus = "a_declarer" | "pending" | "approved" | "rejected" |
 export type { SolicitationRole } from "@/lib/board/solicitation";
 
 export type MyExpenseItem = {
-  /** Identifiant stable de la fiche (événement ou mois hors événement). */
+  /** Identifiant stable de la fiche (événement, ou dépense hors événement). */
   key: string;
-  /** Nul pour les frais hors événement. */
+  /** Nul pour une dépense hors événement. */
   eventId: string | null;
-  /** 'YYYY-MM' pour les frais hors événement. */
-  month: string | null;
+  /** Dépense hors événement : sa ligne (une fiche par dépense). */
+  lineId: string | null;
   title: string;
   start: string;
   end: string;
@@ -85,7 +87,7 @@ export type SubmissionToReview = {
   reviewedAt: string | null;
   reviewerComment: string | null;
   person: { id: string; name: string; email: string | null };
-  /** `id` nul : frais hors événement du mois `start`. */
+  /** `id` nul : dépense hors événement (`title` = son fournisseur, `start` = sa date). */
   event: { id: string | null; title: string; start: string; eventType: DbEventType | null };
   lines: ExpenseLine[];
   attachments: ExpenseAttachment[];
@@ -127,15 +129,11 @@ function monthRange(month: string): [string, string] {
 }
 
 
-/** Lignes d'une personne pour une fiche (événement, ou hors événement sur un mois). */
+/** Lignes d'une personne pour une fiche (événement, ou la dépense hors événement elle-même). */
 async function linesOf(service: Service, userId: string, target: ExpenseTarget) {
   const q = service.from("event_expenses").select("*").eq("user_id", userId);
   if ("eventId" in target) return (await q.eq("event_id", target.eventId)).data ?? [];
-  const [from, to] = monthRange(target.month);
-  const { data } = await q
-    .is("event_id", null)
-    .or(`and(expense_date.gte.${from},expense_date.lt.${to}),and(expense_date.is.null,created_at.gte.${from},created_at.lt.${to})`);
-  return data ?? [];
+  return (await q.is("event_id", null).eq("id", target.lineId)).data ?? [];
 }
 
 async function submissionOf(service: Service, userId: string, target: ExpenseTarget) {
@@ -144,7 +142,7 @@ async function submissionOf(service: Service, userId: string, target: ExpenseTar
     .select("id, status, total_amount, expense_ids, reviewed_by, reviewed_at, reviewer_comments, reviewer_comment")
     .eq("user_id", userId);
   const { data } =
-    "eventId" in target ? await q.eq("event_id", target.eventId).maybeSingle() : await q.is("event_id", null).eq("period_month", target.month).maybeSingle();
+    "eventId" in target ? await q.eq("event_id", target.eventId).maybeSingle() : await q.is("event_id", null).eq("expense_id", target.lineId).maybeSingle();
   return data;
 }
 
@@ -184,8 +182,15 @@ async function notify(service: Service, userIds: string[], title: string, messag
   }
 }
 
+/** « la dépense hors événement « Supabase » du 18 oct. » */
+const lineTitle = (l: Parameters<typeof lineLabel>[0] & { expense_date: string | null; created_at: string }) =>
+  `la dépense hors événement « ${lineLabel(l)} » du ${new Date(`${(l.expense_date ?? l.created_at).slice(0, 10)}T12:00:00`).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`;
+
 async function targetTitle(service: Service, target: ExpenseTarget) {
-  if ("month" in target) return `les frais hors événement de ${monthLabel(target.month).toLowerCase()}`;
+  if ("lineId" in target) {
+    const { data } = await service.from("event_expenses").select("*").eq("id", target.lineId).single();
+    return data ? lineTitle(data) : "une dépense hors événement";
+  }
   const { data } = await service.from("events").select("title").eq("id", target.eventId).single();
   return `« ${data?.title ?? "un événement"} »`;
 }
@@ -198,7 +203,7 @@ async function targetTitle(service: Service, target: ExpenseTarget) {
 export async function declareExpenses(target: ExpenseTarget, noExpense = false, opts: { silent?: boolean } = {}): Promise<{ error: string | null }> {
   try {
     const { userId, service } = await currentUser();
-    if ("month" in target && noExpense) throw new Error("« Pas de frais » ne concerne que les événements.");
+    if ("lineId" in target && noExpense) throw new Error("« Pas de frais » ne concerne que les événements.");
     const existing = await submissionOf(service, userId, target);
     if (existing?.status === "approved") throw new Error("Ces frais sont déjà validés.");
 
@@ -210,13 +215,14 @@ export async function declareExpenses(target: ExpenseTarget, noExpense = false, 
       if (error) throw new Error(error.message);
       lines = [];
     }
-    if (!noExpense && lines.length === 0) throw new Error("Ajoutez au moins une ligne de frais avant de déclarer.");
+    if (!noExpense && lines.length === 0) throw new Error("lineId" in target ? "Dépense introuvable." : "Ajoutez au moins une ligne de frais avant de déclarer.");
     if (!noExpense && lines.some(needsConversion)) throw new Error("Convertissez d'abord en euros les lignes en devise étrangère.");
 
     const payload = {
       user_id: userId,
       event_id: "eventId" in target ? target.eventId : null,
-      period_month: "month" in target ? target.month : null,
+      expense_id: "lineId" in target ? target.lineId : null,
+      period_month: "lineId" in target ? lineMonth(lines[0]) : null,
       expense_ids: lines.map((l) => l.id),
       total_amount: noExpense ? 0 : lines.reduce((n, l) => n + Number(l.total_amount ?? 0), 0),
       status: noExpense ? "no_expense" : "pending",
@@ -240,7 +246,7 @@ export async function declareExpenses(target: ExpenseTarget, noExpense = false, 
           [me.expense_validator_id],
           "Frais à valider",
           `${personName(me)} a déclaré ${payload.total_amount.toFixed(2)} € pour ${await targetTitle(service, target)}.`,
-          { kind: "expense_to_validate", event_id: payload.event_id, period_month: payload.period_month },
+          { kind: "expense_to_validate", event_id: payload.event_id, period_month: payload.period_month, expense_id: payload.expense_id },
           "frais_a_valider"
         );
       }
@@ -313,7 +319,7 @@ export async function getSubmissionsToReview(
 
   let q = service
     .from("expense_submissions")
-    .select("id, user_id, event_id, period_month, expense_ids, total_amount, status, submitted_at, reviewed_at, reviewer_comments, reviewer_comment")
+    .select("id, user_id, event_id, expense_id, period_month, expense_ids, total_amount, status, submitted_at, reviewed_at, reviewer_comments, reviewer_comment")
     .in("status", status === "pending" ? ["pending", "revision_requested"] : [status])
     .order("submitted_at", { ascending: status === "pending", nullsFirst: false })
     .limit(200);
@@ -324,8 +330,8 @@ export async function getSubmissionsToReview(
 
   const personIds = [...new Set(subs.map((s) => s.user_id))];
   const eventIds = [...new Set(subs.map((s) => s.event_id).filter((id): id is string => !!id))];
-  // Lignes hors événement : celles retenues au moment de la déclaration.
-  const monthLineIds = subs.filter((s) => !s.event_id).flatMap((s) => s.expense_ids ?? []);
+  // Dépenses hors événement : une déclaration par dépense.
+  const monthLineIds = subs.filter((s) => !s.event_id).flatMap((s) => (s.expense_id ? [s.expense_id] : []));
   const [{ data: people }, { data: events }, { data: eventLines }, { data: monthLines }] = await Promise.all([
     service.from("profiles").select("id, first_name, last_name, email").in("id", personIds),
     eventIds.length
@@ -340,13 +346,13 @@ export async function getSubmissionsToReview(
   const eventsById = new Map((events ?? []).map((e) => [e.id, e]));
 
   return subs
-    .filter((s) => (s.event_id ? eventsById.has(s.event_id) : !!s.period_month))
+    .filter((s) => (s.event_id ? eventsById.has(s.event_id) : lines.some((l) => l.id === s.expense_id)))
     .map((s) => {
       const event = s.event_id ? eventsById.get(s.event_id)! : null;
       const person = peopleById.get(s.user_id);
       const myLines = event
         ? lines.filter((l) => l.event_id === s.event_id && (l as unknown as { user_id: string }).user_id === s.user_id)
-        : lines.filter((l) => (s.expense_ids ?? []).includes(l.id));
+        : lines.filter((l) => l.id === s.expense_id);
       return {
         submissionId: s.id,
         status: toStatus(s.status),
@@ -357,7 +363,12 @@ export async function getSubmissionsToReview(
         person: { id: s.user_id, name: personName(person), email: person?.email ?? null },
         event: event
           ? { id: event.id, title: event.title, start: event.start_date, eventType: event.event_type as DbEventType | null }
-          : { id: null, title: `Frais hors événement · ${monthLabel(s.period_month!)}`, start: `${s.period_month}-01T00:00:00.000Z`, eventType: null },
+          : {
+              id: null,
+              title: `Hors événement · ${lineLabel(myLines[0])}`,
+              start: myLines[0].expense_date ? `${myLines[0].expense_date.slice(0, 10)}T12:00:00.000Z` : myLines[0].created_at,
+              eventType: null,
+            },
         lines: myLines,
         attachments: myLines.flatMap((l) => l.attachments),
       };
@@ -375,7 +386,7 @@ export async function reviewSubmission(
     const { userId, seesAll, service } = await currentUser();
     const { data: sub } = await service
       .from("expense_submissions")
-      .select("id, user_id, event_id, period_month, total_amount")
+      .select("id, user_id, event_id, expense_id, period_month, total_amount")
       .eq("id", submissionId)
       .single();
     if (!sub) throw new Error("Déclaration introuvable.");
@@ -398,7 +409,7 @@ export async function reviewSubmission(
     // `silent` : validation en lot, le déclarant reçoit un seul message à la fin (notifyExpenseBatch).
     if (opts.silent) return { error: null };
 
-    const what = await targetTitle(service, sub.event_id ? { eventId: sub.event_id } : { month: sub.period_month! });
+    const what = await targetTitle(service, sub.event_id ? { eventId: sub.event_id } : { lineId: sub.expense_id! });
     await notify(
       service,
       [sub.user_id],
@@ -406,7 +417,7 @@ export async function reviewSubmission(
       decision === "approved"
         ? `Vos frais (${Number(sub.total_amount ?? 0).toFixed(2)} €) pour ${what} ont été validés.`
         : `Vos frais pour ${what} ont été refusés${comment.trim() ? ` : ${comment.trim()}` : "."}`,
-      { kind: "expense_reviewed", event_id: sub.event_id, period_month: sub.period_month, decision },
+      { kind: "expense_reviewed", event_id: sub.event_id, period_month: sub.period_month, expense_id: sub.expense_id, decision },
       decision === "approved" ? "frais_decision" : "frais_refus"
     );
     return { error: null };
@@ -415,12 +426,21 @@ export async function reviewSubmission(
   }
 }
 
-/** Titres des fiches (événement ou mois hors événement), en une requête. */
-async function titlesOf(service: Service, rows: { event_id: string | null; period_month: string | null }[]) {
+/** Titres des fiches (événement ou dépense hors événement), en deux requêtes au plus. */
+async function titlesOf(service: Service, rows: { event_id: string | null; expense_id: string | null }[]) {
   const eventIds = [...new Set(rows.map((r) => r.event_id).filter((id): id is string => !!id))];
-  const { data } = eventIds.length ? await service.from("events").select("id, title").in("id", eventIds) : { data: [] };
-  const byId = new Map((data ?? []).map((e) => [e.id, e.title]));
-  return rows.map((r) => (r.event_id ? `« ${byId.get(r.event_id) ?? "un événement"} »` : `les frais hors événement de ${monthLabel(r.period_month!).toLowerCase()}`));
+  const lineIds = [...new Set(rows.map((r) => (r.event_id ? null : r.expense_id)).filter((id): id is string => !!id))];
+  const [{ data: events }, { data: lines }] = await Promise.all([
+    eventIds.length ? service.from("events").select("id, title").in("id", eventIds) : Promise.resolve({ data: [] as { id: string; title: string }[] }),
+    lineIds.length ? service.from("event_expenses").select("*").in("id", lineIds) : Promise.resolve({ data: [] }),
+  ]);
+  const eventById = new Map((events ?? []).map((e) => [e.id, e.title]));
+  const lineById = new Map((lines ?? []).map((l) => [l.id, l]));
+  return rows.map((r) => {
+    if (r.event_id) return `« ${eventById.get(r.event_id) ?? "un événement"} »`;
+    const line = r.expense_id ? lineById.get(r.expense_id) : null;
+    return line ? lineTitle(line) : "une dépense hors événement";
+  });
 }
 
 /** « A, B, C et 4 autres » : liste courte pour un message groupé. */
@@ -446,7 +466,7 @@ export async function notifyExpenseBatch(
       if (!batch.submissionIds.length) return;
       const { data } = await service
         .from("expense_submissions")
-        .select("id, user_id, event_id, period_month, total_amount")
+        .select("id, user_id, event_id, expense_id, period_month, total_amount")
         .in("id", batch.submissionIds)
         .eq("reviewed_by", userId)
         .eq("status", batch.decision);
@@ -465,7 +485,12 @@ export async function notifyExpenseBatch(
           batch.decision === "approved"
             ? `Vos frais (${total.toFixed(2)} €) pour ${what} ont été validés.`
             : `Vos frais pour ${what} ont été refusés${comment ? ` : ${comment}` : "."}`,
-          { kind: "expense_reviewed", decision: batch.decision, count: rows.length, ...(one ? { event_id: rows[0].event_id, period_month: rows[0].period_month } : {}) },
+          {
+            kind: "expense_reviewed",
+            decision: batch.decision,
+            count: rows.length,
+            ...(one ? { event_id: rows[0].event_id, period_month: rows[0].period_month, expense_id: rows[0].expense_id } : {}),
+          },
           batch.decision === "approved" ? "frais_decision" : "frais_refus"
         );
       }
@@ -473,17 +498,23 @@ export async function notifyExpenseBatch(
     }
     if (!batch.targets.length) return;
     const eventIds = batch.targets.flatMap((t) => ("eventId" in t ? [t.eventId] : []));
-    const months = batch.targets.flatMap((t) => ("month" in t ? [t.month] : []));
-    const [{ data: me }, byEvent, byMonth] = await Promise.all([
+    const lineIds = batch.targets.flatMap((t) => ("lineId" in t ? [t.lineId] : []));
+    const [{ data: me }, byEvent, byLine] = await Promise.all([
       service.from("profiles").select("first_name, last_name, email, expense_validator_id").eq("id", userId).single(),
       eventIds.length
-        ? service.from("expense_submissions").select("event_id, period_month, total_amount").eq("user_id", userId).eq("status", "pending").in("event_id", eventIds)
+        ? service.from("expense_submissions").select("event_id, expense_id, period_month, total_amount").eq("user_id", userId).eq("status", "pending").in("event_id", eventIds)
         : Promise.resolve({ data: [] }),
-      months.length
-        ? service.from("expense_submissions").select("event_id, period_month, total_amount").eq("user_id", userId).eq("status", "pending").is("event_id", null).in("period_month", months)
+      lineIds.length
+        ? service
+            .from("expense_submissions")
+            .select("event_id, expense_id, period_month, total_amount")
+            .eq("user_id", userId)
+            .eq("status", "pending")
+            .is("event_id", null)
+            .in("expense_id", lineIds)
         : Promise.resolve({ data: [] }),
     ]);
-    const rows = [...(byEvent.data ?? []), ...(byMonth.data ?? [])];
+    const rows = [...(byEvent.data ?? []), ...(byLine.data ?? [])];
     if (!me?.expense_validator_id || !rows.length) return;
     const titles = await titlesOf(service, rows);
     const total = rows.reduce((n, r) => n + Number(r.total_amount ?? 0), 0);
@@ -495,7 +526,11 @@ export async function notifyExpenseBatch(
       one
         ? `${personName(me)} a déclaré ${total.toFixed(2)} € pour ${titles[0]}.`
         : `${personName(me)} a déclaré ${rows.length} notes de frais (${total.toFixed(2)} €) : ${shortList(titles)}.`,
-      { kind: "expense_to_validate", count: rows.length, ...(one ? { event_id: rows[0].event_id, period_month: rows[0].period_month } : {}) },
+      {
+        kind: "expense_to_validate",
+        count: rows.length,
+        ...(one ? { event_id: rows[0].event_id, period_month: rows[0].period_month, expense_id: rows[0].expense_id } : {}),
+      },
       "frais_a_valider"
     );
   } catch (e) {
@@ -586,7 +621,7 @@ export async function convertExpenseLine(lineId: string): Promise<{ error: strin
     const { data: line } = await service.from("event_expenses").select("*").eq("id", lineId).eq("user_id", userId).single();
     if (!line) throw new Error("Ligne introuvable.");
     if (!needsConversion(line)) throw new Error("Cette ligne est déjà en euros.");
-    const sub = await submissionOf(service, userId, line.event_id ? { eventId: line.event_id } : { month: lineMonth(line) });
+    const sub = await submissionOf(service, userId, line.event_id ? { eventId: line.event_id } : { lineId: line.id });
     if (sub?.status === "approved") throw new Error("Ces frais sont déjà validés.");
 
     const currency = line.currency!.toUpperCase();
@@ -627,19 +662,19 @@ export async function convertExpenseLine(lineId: string): Promise<{ error: strin
   }
 }
 
-/** Supprime une de mes lignes (tant que la fiche n'est pas validée). */
+/** Supprime une de mes lignes (tant que sa fiche n'est pas validée) ; hors événement, sa déclaration part avec. */
 export async function deleteExpenseLine(lineId: string): Promise<{ error: string | null }> {
   try {
     const { userId, service } = await currentUser();
     const { data: line } = await service
       .from("event_expenses")
-      .select("id, event_id, expense_date, created_at")
+      .select("id, event_id")
       .eq("id", lineId)
       .eq("user_id", userId)
       .single();
     if (!line) throw new Error("Ligne introuvable.");
-    const sub = await submissionOf(service, userId, line.event_id ? { eventId: line.event_id } : { month: lineMonth(line) });
-    if (sub?.status === "approved") throw new Error("Ces frais sont déjà validés.");
+    const sub = await submissionOf(service, userId, line.event_id ? { eventId: line.event_id } : { lineId: line.id });
+    if (sub?.status === "approved") throw new Error("Cette dépense est déjà validée.");
     await service.from("event_expense_attachments").delete().eq("expense_id", lineId);
     const { error } = await service.from("event_expenses").delete().eq("id", lineId).eq("user_id", userId);
     if (error) throw new Error(error.message);
@@ -696,7 +731,7 @@ export async function getMyExpenseExport(month: string): Promise<ExpenseExport> 
 
   const lines: ExpenseExportLine[] = [];
   for (const item of inMonth) {
-    const raw = await linesOf(service, userId, item.eventId ? { eventId: item.eventId } : { month: item.month! });
+    const raw = await linesOf(service, userId, item.eventId ? { eventId: item.eventId } : { lineId: item.lineId! });
     for (const l of await withAttachments(service, raw as Record<string, unknown>[])) {
       const attachments = (
         await Promise.all(l.attachments.map(async (a) => ({ ...a, url: (await readableUrl(service, a.url)) ?? "" })))

@@ -96,16 +96,17 @@ export function ReceiptButtons({ onFiles, disabled }: { onFiles: (files: File[])
 }
 
 /**
- * Lignes de frais d'une fiche (événement, ou hors événement sur un mois) : liste avec justificatifs,
+ * Lignes de frais d'une fiche (événement, ou une dépense hors événement) : liste avec justificatifs,
  * ajout d'une ligne (catégorie, montant, date, fournisseur) avec photo ou pièce jointe lue par
- * Claude pour pré-remplir, puis la barre de déclaration au N+1.
+ * Claude pour pré-remplir, puis la barre de déclaration au N+1. Une dépense hors événement est sa
+ * propre fiche : on n'y ajoute pas d'autre ligne (une nouvelle facture = une nouvelle fiche).
  */
 export function ExpenseLinesEditor({ target, locked = false, onChanged }: { target: ExpenseTarget; locked?: boolean; onChanged?: () => void }) {
   const eventId = "eventId" in target ? target.eventId : null;
   const [lines, setLines] = useState<ExpenseLine[] | null>(null);
   const [category, setCategory] = useState<ExpenseCategory>("meal");
   const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(() => ("month" in target ? `${target.month}-01` : new Date().toISOString().slice(0, 10)));
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [merchant, setMerchant] = useState("");
   const [description, setDescription] = useState("");
   /** Devise lue sur le justificatif (EUR par défaut). */
@@ -269,7 +270,7 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
         )
       )}
 
-      {!locked && (
+      {!locked && eventId && (
         <div className="space-y-2.5 rounded-panel border border-line p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs font-bold text-ink-2">Ajouter une dépense</div>
