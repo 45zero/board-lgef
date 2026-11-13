@@ -59,6 +59,10 @@ export interface FiefOverview {
   pending: FiefApplicationRow[];
   settings: FiefSettings;
   functions: { slug: string; label: string; active: boolean; position: number }[];
+  /** Destinataires des alertes « nouvelle demande » (vide : les super admins). */
+  recipients: string[];
+  /** Personnes qui voient l'onglet FIEF (choix possibles des destinataires). */
+  candidates: { userId: string; name: string; role: string }[];
 }
 
 async function requireManager() {
@@ -117,7 +121,7 @@ export async function getFiefOverview(): Promise<ActionResult<FiefOverview>> {
       service.from("fief_applications").select("*", { count: "exact", head: true }).eq("status", status).then((r) => r.count ?? 0);
     const countMembers = (status: FiefMemberRow["status"]) =>
       service.from("fief_members").select("*", { count: "exact", head: true }).eq("status", status).then((r) => r.count ?? 0);
-    const [pending, awaitingParent, members, suspended, rows, { data: s }, { data: fns }] = await Promise.all([
+    const [pending, awaitingParent, members, suspended, rows, { data: s }, { data: fns }, { data: cands }] = await Promise.all([
       countApps("pending"),
       countApps("awaiting_parent"),
       countMembers("active"),
@@ -125,6 +129,7 @@ export async function getFiefOverview(): Promise<ActionResult<FiefOverview>> {
       loadApplications(["pending"], 100),
       service.from("fief_settings").select("*").eq("id", true).maybeSingle(),
       service.from("fief_member_functions").select("slug, label, active, position").order("position"),
+      service.rpc("fief_manager_candidates"),
     ]);
     return {
       counts: { pending, awaitingParent, members, suspended },
@@ -136,7 +141,30 @@ export async function getFiefOverview(): Promise<ActionResult<FiefOverview>> {
         charterText: s?.charter_text ?? null,
       },
       functions: fns ?? [],
+      recipients: s?.request_recipient_ids ?? [],
+      candidates: ((cands ?? []) as { user_id: string; first_name: string | null; last_name: string | null; role: string }[]).map((c) => ({
+        userId: c.user_id,
+        name: `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim() || "Sans nom",
+        role: c.role,
+      })),
     };
+  });
+}
+
+/** Qui reçoit les alertes « nouvelle demande d'adhésion » (parmi les personnes qui voient l'onglet FIEF). */
+export async function saveFiefRequestRecipients(userIds: string[]): Promise<ActionResult<null>> {
+  return toResult(async () => {
+    const me = await requireManager();
+    const ids = [...new Set(userIds)].filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+    const service = createServiceClient();
+    const { data: cands, error: candError } = await service.rpc("fief_manager_candidates");
+    if (candError) throw new Error(candError.message);
+    const allowed = new Set(((cands ?? []) as { user_id: string }[]).map((c) => c.user_id));
+    const unknown = ids.filter((id) => !allowed.has(id));
+    if (unknown.length) throw new Error("Une personne choisie ne voit pas l'onglet FIEF : donnez-lui d'abord l'accès au module.");
+    const { error } = await service.from("fief_settings").update({ request_recipient_ids: ids, updated_by: me }).eq("id", true);
+    if (error) throw new Error(error.message);
+    return null;
   });
 }
 

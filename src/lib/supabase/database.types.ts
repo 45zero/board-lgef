@@ -342,6 +342,7 @@ export type Database = {
           min_age: number
           parental_consent_under: number
           charter_text: string | null
+          request_recipient_ids: string[]
           updated_by: string | null
           updated_at: string
         }
@@ -351,6 +352,7 @@ export type Database = {
           min_age?: number
           parental_consent_under?: number
           charter_text?: string | null
+          request_recipient_ids?: string[]
           updated_by?: string | null
           updated_at?: string
         }
@@ -359,6 +361,7 @@ export type Database = {
           min_age?: number
           parental_consent_under?: number
           charter_text?: string | null
+          request_recipient_ids?: string[]
           updated_by?: string | null
           updated_at?: string
         }

@@ -72,10 +72,16 @@ const applicationSchema = z
 
 export type FiefApplicationInput = z.input<typeof applicationSchema>;
 
-/** Personnes qui gèrent FIEF dans le board (règle du module « fief »). */
+/**
+ * Destinataires des alertes « nouvelle demande » : réglage de l'onglet FIEF (fief_settings.request_recipient_ids).
+ * Liste vide → les super admins, pour qu'aucune demande ne passe inaperçue.
+ */
 async function managerIds() {
-  const { data } = await createServiceClient().from("module_access").select("include_user_ids").eq("module_id", "fief").maybeSingle();
-  return data?.include_user_ids ?? [];
+  const service = createServiceClient();
+  const { data } = await service.from("fief_settings").select("request_recipient_ids").eq("id", true).maybeSingle();
+  if (data?.request_recipient_ids?.length) return data.request_recipient_ids;
+  const { data: supers } = await service.from("profiles").select("id").eq("role", "super_user");
+  return (supers ?? []).map((p) => p.id);
 }
 
 async function notifyManagers(fullName: string) {

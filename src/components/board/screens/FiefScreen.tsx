@@ -14,6 +14,7 @@ import {
   listFiefMembers,
   refuseFiefApplication,
   saveFiefFunction,
+  saveFiefRequestRecipients,
   setFiefMemberStatus,
   updateFiefSettings,
   type FiefApplicationRow,
@@ -507,6 +508,8 @@ function SettingsTab({ overview, onSaved }: { overview: FiefOverview; onSaved: (
         </div>
       </section>
 
+      <RecipientsSection overview={overview} onSaved={onSaved} />
+
       <section className="space-y-3 rounded-card border border-line bg-card p-4">
         <h2 className="font-extrabold text-ink">Fonctions proposées</h2>
         <p className="text-xs text-ink-3">Les rôles que les membres cochent à l&apos;inscription. Une fonction masquée n&apos;est plus proposée mais reste sur les fiches existantes.</p>
@@ -623,6 +626,54 @@ function EventsTab() {
             )}
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+const ROLE_LABELS: Record<string, string> = { super_user: "Super admin", admin: "Administrateur", organizer: "Organisateur", comite_directeur: "Comité directeur", technician: "Technicien", user: "Utilisateur" };
+
+/** Qui reçoit les alertes « nouvelle demande d'adhésion » (notification du board, avec push / e-mail selon ses réglages). */
+function RecipientsSection({ overview, onSaved }: { overview: FiefOverview; onSaved: () => void }) {
+  const [ids, setIds] = useState<string[]>(overview.recipients);
+  const [state, setState] = useState<{ busy: boolean; msg: string | null; ok: boolean }>({ busy: false, msg: null, ok: true });
+  const dirty = [...ids].sort().join() !== [...overview.recipients].sort().join();
+
+  const save = async () => {
+    setState({ busy: true, msg: null, ok: true });
+    const r = await saveFiefRequestRecipients(ids);
+    setState({ busy: false, msg: r.ok ? "Destinataires enregistrés." : r.error, ok: r.ok });
+    if (r.ok) onSaved();
+  };
+
+  return (
+    <section className="space-y-3 rounded-card border border-line bg-card p-4 lg:col-span-2">
+      <h2 className="font-extrabold text-ink">Alertes des nouvelles demandes</h2>
+      <p className="text-xs text-ink-3">
+        Qui est prévenu quand une demande d&apos;adhésion arrive (notification du board, avec push et e-mail selon les réglages de chacun). Seules les personnes qui voient l&apos;onglet FIEF
+        peuvent être choisies. Si personne n&apos;est coché, les super admins sont prévenus.
+      </p>
+      <div className="grid gap-1 sm:grid-cols-2">
+        {overview.candidates.map((c) => (
+          <label key={c.userId} className="flex cursor-pointer items-center gap-2.5 rounded-btn px-2 py-1.5 text-sm hover:bg-hover">
+            <input
+              type="checkbox"
+              checked={ids.includes(c.userId)}
+              onChange={() => setIds((prev) => (prev.includes(c.userId) ? prev.filter((x) => x !== c.userId) : [...prev, c.userId]))}
+              className="accent-navy"
+            />
+            <span className="flex-1 text-ink">{c.name}</span>
+            <span className="text-[11px] text-ink-4">{ROLE_LABELS[c.role] ?? c.role}</span>
+          </label>
+        ))}
+        {overview.candidates.length === 0 && <p className="text-xs text-ink-3">Liste indisponible.</p>}
+      </div>
+      <div className="flex items-center gap-3">
+        <button disabled={state.busy || !dirty} onClick={() => void save()} className="rounded-btn bg-navy px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+          {state.busy ? "Enregistrement…" : "Enregistrer"}
+        </button>
+        {ids.length === 0 && <span className="text-xs text-ink-3">Personne de coché : les super admins seront prévenus.</span>}
+        {state.msg && <span className={`text-xs font-semibold ${state.ok ? "text-good" : "text-bad"}`}>{state.msg}</span>}
       </div>
     </section>
   );
