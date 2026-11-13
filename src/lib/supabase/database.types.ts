@@ -334,6 +334,158 @@ export type Database = {
         }
         Relationships: []
       }
+      // FIEF (sql/2026-11-13_fief_membres.sql) — ajout manuel.
+      fief_settings: {
+        Row: {
+          id: boolean
+          minors_allowed: boolean
+          min_age: number
+          parental_consent_under: number
+          charter_text: string | null
+          updated_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: boolean
+          minors_allowed?: boolean
+          min_age?: number
+          parental_consent_under?: number
+          charter_text?: string | null
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          minors_allowed?: boolean
+          min_age?: number
+          parental_consent_under?: number
+          charter_text?: string | null
+          updated_by?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      fief_member_functions: {
+        Row: { slug: string; label: string; position: number; active: boolean }
+        Insert: { slug: string; label: string; position?: number; active?: boolean }
+        Update: { slug?: string; label?: string; position?: number; active?: boolean }
+        Relationships: []
+      }
+      fief_applications: {
+        Row: {
+          id: string
+          email: string
+          first_name: string
+          last_name: string
+          birth_date: string
+          phone: string | null
+          club_number: string | null
+          club_name: string | null
+          club_not_listed: boolean
+          functions: string[]
+          message: string | null
+          status: "awaiting_parent" | "pending" | "approved" | "refused" | "withdrawn"
+          parent_name: string | null
+          parent_email: string | null
+          parent_token_hash: string | null
+          parent_consent_at: string | null
+          charter_accepted_at: string
+          refusal_reason: string | null
+          reviewed_by: string | null
+          reviewed_at: string | null
+          user_id: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          email: string
+          first_name: string
+          last_name: string
+          birth_date: string
+          phone?: string | null
+          club_number?: string | null
+          club_name?: string | null
+          club_not_listed?: boolean
+          functions?: string[]
+          message?: string | null
+          status?: "awaiting_parent" | "pending" | "approved" | "refused" | "withdrawn"
+          parent_name?: string | null
+          parent_email?: string | null
+          parent_token_hash?: string | null
+          parent_consent_at?: string | null
+          charter_accepted_at: string
+          refusal_reason?: string | null
+          reviewed_by?: string | null
+          reviewed_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          status?: "awaiting_parent" | "pending" | "approved" | "refused" | "withdrawn"
+          parent_token_hash?: string | null
+          parent_consent_at?: string | null
+          refusal_reason?: string | null
+          reviewed_by?: string | null
+          reviewed_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      fief_members: {
+        Row: {
+          user_id: string
+          application_id: string | null
+          email: string
+          first_name: string
+          last_name: string
+          birth_date: string | null
+          phone: string | null
+          club_number: string | null
+          club_name: string | null
+          functions: string[]
+          bio: string | null
+          avatar_path: string | null
+          show_phone: boolean
+          status: "active" | "suspended" | "left"
+          status_reason: string | null
+          approved_by: string | null
+          joined_at: string
+          last_seen_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          application_id?: string | null
+          email: string
+          first_name: string
+          last_name: string
+          birth_date?: string | null
+          phone?: string | null
+          club_number?: string | null
+          club_name?: string | null
+          functions?: string[]
+          bio?: string | null
+          avatar_path?: string | null
+          show_phone?: boolean
+          status?: "active" | "suspended" | "left"
+          status_reason?: string | null
+          approved_by?: string | null
+        }
+        Update: {
+          first_name?: string
+          last_name?: string
+          phone?: string | null
+          club_number?: string | null
+          club_name?: string | null
+          functions?: string[]
+          bio?: string | null
+          avatar_path?: string | null
+          show_phone?: boolean
+          status?: "active" | "suspended" | "left"
+          status_reason?: string | null
+          last_seen_at?: string | null
+        }
+        Relationships: []
+      }
       module_access: {
         Row: {
           module_id: string

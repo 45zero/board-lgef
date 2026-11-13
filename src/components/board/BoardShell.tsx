@@ -21,6 +21,7 @@ import { WeekendScreen } from "./screens/WeekendScreen";
 import { TeamScreen } from "./screens/TeamScreen";
 import { EffectifScreen } from "./screens/EffectifScreen";
 import { TransferScreen } from "./screens/TransferScreen";
+import { FiefScreen } from "./screens/FiefScreen";
 import { MobileShell } from "./mobile/MobileShell";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useBoardPreferences } from "@/hooks/board/useBoardPreferences";
@@ -36,7 +37,7 @@ export type NavLayout = "rail" | "list";
 export type Theme = "light" | "dark";
 
 /** Modules gardés en mémoire une fois ouverts (les autres n'existent pas encore). */
-const KEEP_ALIVE_APPS = ["accueil", "trello", "effectif", "mails", "calendrier", "ged", "audiovisuel", "drive", "transfer", "inscription", "cartographie", "frais", "weekend"];
+const KEEP_ALIVE_APPS = ["accueil", "trello", "effectif", "mails", "calendrier", "ged", "audiovisuel", "drive", "transfer", "inscription", "cartographie", "frais", "weekend", "fief"];
 /** Préchargés en arrière-plan juste après l'ouverture du board : les plus consultés. */
 const PRELOAD_APPS = ["mails", "calendrier"];
 
@@ -66,6 +67,8 @@ function renderScreen(id: string, props: { punchedIn: boolean; onTogglePunch: ()
       return <EffectifScreen />;
     case "weekend":
       return <WeekendScreen />;
+    case "fief":
+      return <FiefScreen />;
     case "trello":
       return <TeamScreen />;
     default:

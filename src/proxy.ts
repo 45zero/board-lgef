@@ -17,7 +17,13 @@ export async function proxy(request: NextRequest) {
     if (!/^\/(transfer|t\/|api\/transfer\/|privacy|terms)/.test(pathname)) return NextResponse.redirect(new URL("/", request.url));
   }
 
-  let response = NextResponse.next({ request });
+  // fief.lgef.fr : seules les pages FIEF (/fief/…) y sont servies, sous des adresses courtes (/adhesion → /fief/adhesion).
+  const { pathname } = request.nextUrl;
+  const fiefHost = request.headers.get("host")?.startsWith("fief.") ?? false;
+  const rewriteTo = fiefHost && !isFiefPath(pathname) ? new URL(`/fief${pathname === "/" ? "" : pathname}${request.nextUrl.search}`, request.url) : null;
+  const pass = () => (rewriteTo ? NextResponse.rewrite(rewriteTo, { request }) : NextResponse.next({ request }));
+
+  let response = pass();
   const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
       getAll() {
@@ -25,17 +31,43 @@ export async function proxy(request: NextRequest) {
       },
       setAll(cookiesToSet) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        response = NextResponse.next({ request });
+        response = pass();
         cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
       },
     },
   });
+  let accessToken: string | null = null;
   try {
-    await supabase.auth.getSession();
+    accessToken = (await supabase.auth.getSession()).data.session?.access_token ?? null;
   } catch {
     // Supabase injoignable : on laisse passer, la page gère l'absence de session.
   }
+
+  // Cloison FIEF (voir sql/2026-11-13_fief_cloison.sql) : un compte FIEF n'ouvre ni le board, ni ses
+  // API, ni ses server actions. Le marqueur est lu dans le jeton signé : le modifier l'invalide, et
+  // chaque action du board le refuse alors (getClaims / getUser).
+  if (accessToken && isFiefToken(accessToken)) {
+    if (request.headers.has("next-action")) return new NextResponse("Accès réservé au board.", { status: 403 });
+    if (pathname.startsWith("/api/") && !pathname.startsWith("/api/fief/")) return new NextResponse("Accès réservé au board.", { status: 403 });
+    if (!fiefHost && !isFiefPath(pathname)) {
+      const target = process.env.NEXT_PUBLIC_FIEF_URL ? new URL(process.env.NEXT_PUBLIC_FIEF_URL) : new URL("/fief", request.url);
+      return NextResponse.redirect(target);
+    }
+  }
   return response;
+}
+
+const isFiefPath = (p: string) => p === "/fief" || p.startsWith("/fief/") || p.startsWith("/api/fief/");
+
+/** Lit app_metadata.realm dans la charge utile du JWT (sans vérifier la signature : voir plus haut). */
+function isFiefToken(token: string) {
+  try {
+    const payload = token.split(".")[1];
+    const json = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "=")));
+    return json?.app_metadata?.realm === "fief";
+  } catch {
+    return false;
+  }
 }
 
 export const config = {

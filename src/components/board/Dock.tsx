@@ -26,6 +26,7 @@ import {
   Wallet,
   Camera,
   Send,
+  Sprout,
 } from "lucide-react";
 
 const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>> = {
@@ -47,6 +48,7 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>
   communication: Volume2,
   inscription: ClipboardCheck,
   cartographie: MapIcon,
+  fief: Sprout,
   effectif: Wallet,
 };
 

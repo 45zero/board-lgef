@@ -1,0 +1,352 @@
+"use server";
+
+import { z } from "zod";
+import { toResult, type ActionResult } from "@/lib/board/actionResult";
+import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/serviceClient";
+import { sendFiefEmail } from "@/lib/fief/email";
+import { DEFAULT_CHARTER, fiefUrl, type FiefSettings } from "@/lib/fief/shared";
+
+// FIEF — actions de l'onglet FIEF du board (module « fief », Claire et les administrateurs) :
+// demandes d'adhésion, membres, réglages. Le contrôle passe par fief_is_manager() (règle du module).
+//
+// Validation d'une demande :
+//  - nouvelle adresse → compte créé avec app_metadata.realm = 'fief' (cloisonné du board,
+//    sql/2026-11-13_fief_cloison.sql) et lien « choisir mon mot de passe » sur fief.lgef.fr ;
+//  - adresse déjà connue (compte du board ou d'un autre outil LGEF) → le compte reste tel quel
+//    (pas de marqueur, qui le couperait de ses autres outils) ; e-mail « connectez-vous ».
+
+export interface FiefApplicationRow {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  birthDate: string;
+  clubNumber: string | null;
+  clubName: string | null;
+  clubNotListed: boolean;
+  functions: string[];
+  message: string | null;
+  status: "awaiting_parent" | "pending" | "approved" | "refused" | "withdrawn";
+  parentName: string | null;
+  parentEmail: string | null;
+  parentConsentAt: string | null;
+  refusalReason: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+
+export interface FiefMemberRow {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  birthDate: string | null;
+  clubNumber: string | null;
+  clubName: string | null;
+  functions: string[];
+  status: "active" | "suspended" | "left";
+  statusReason: string | null;
+  joinedAt: string;
+  lastSeenAt: string | null;
+}
+
+export interface FiefOverview {
+  counts: { pending: number; awaitingParent: number; members: number; suspended: number };
+  pending: FiefApplicationRow[];
+  settings: FiefSettings;
+  functions: { slug: string; label: string; active: boolean; position: number }[];
+}
+
+async function requireManager() {
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getClaims();
+  const userId = data?.claims?.sub;
+  if (!userId) throw new Error("Non authentifié");
+  const { data: ok, error } = await supabase.rpc("fief_is_manager");
+  if (error || ok !== true) throw new Error("Réservé à l'équipe FIEF.");
+  return userId;
+}
+
+const APP_COLUMNS =
+  "id, first_name, last_name, email, phone, birth_date, club_number, club_name, club_not_listed, functions, message, status, parent_name, parent_email, parent_consent_at, refusal_reason, reviewed_at, created_at";
+
+async function loadApplications(statuses: FiefApplicationRow["status"][], limit = 200) {
+  const { data, error } = await createServiceClient()
+    .from("fief_applications")
+    .select(APP_COLUMNS)
+    .in("status", statuses)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+type AppDb = Awaited<ReturnType<typeof loadApplications>>[number];
+
+const toApp = (r: AppDb): FiefApplicationRow => ({
+  id: r.id,
+  firstName: r.first_name,
+  lastName: r.last_name,
+  email: r.email,
+  phone: r.phone,
+  birthDate: r.birth_date,
+  clubNumber: r.club_number,
+  clubName: r.club_name,
+  clubNotListed: r.club_not_listed,
+  functions: r.functions,
+  message: r.message,
+  status: r.status,
+  parentName: r.parent_name,
+  parentEmail: r.parent_email,
+  parentConsentAt: r.parent_consent_at,
+  refusalReason: r.refusal_reason,
+  reviewedAt: r.reviewed_at,
+  createdAt: r.created_at,
+});
+
+/** Ouverture de l'onglet : chiffres, demandes à traiter, réglages, fonctions — en un appel. */
+export async function getFiefOverview(): Promise<ActionResult<FiefOverview>> {
+  return toResult(async () => {
+    await requireManager();
+    const service = createServiceClient();
+    const countApps = (status: FiefApplicationRow["status"]) =>
+      service.from("fief_applications").select("*", { count: "exact", head: true }).eq("status", status).then((r) => r.count ?? 0);
+    const countMembers = (status: FiefMemberRow["status"]) =>
+      service.from("fief_members").select("*", { count: "exact", head: true }).eq("status", status).then((r) => r.count ?? 0);
+    const [pending, awaitingParent, members, suspended, rows, { data: s }, { data: fns }] = await Promise.all([
+      countApps("pending"),
+      countApps("awaiting_parent"),
+      countMembers("active"),
+      countMembers("suspended"),
+      loadApplications(["pending"], 100),
+      service.from("fief_settings").select("*").eq("id", true).maybeSingle(),
+      service.from("fief_member_functions").select("slug, label, active, position").order("position"),
+    ]);
+    return {
+      counts: { pending, awaitingParent, members, suspended },
+      pending: rows.map(toApp),
+      settings: {
+        minorsAllowed: s?.minors_allowed ?? false,
+        minAge: s?.min_age ?? 13,
+        parentalConsentUnder: s?.parental_consent_under ?? 18,
+        charterText: s?.charter_text ?? null,
+      },
+      functions: fns ?? [],
+    };
+  });
+}
+
+/** Demandes par état : à traiter, en attente du parent, ou déjà traitées (historique). */
+export async function listFiefApplications(scope: "pending" | "awaiting_parent" | "processed"): Promise<ActionResult<FiefApplicationRow[]>> {
+  return toResult(async () => {
+    await requireManager();
+    const statuses: FiefApplicationRow["status"][] = scope === "processed" ? ["approved", "refused", "withdrawn"] : [scope];
+    return (await loadApplications(statuses)).map(toApp);
+  });
+}
+
+/** Accepte une demande : compte FIEF (ou compte existant), fiche membre, e-mail d'accueil. */
+export async function approveFiefApplication(id: string): Promise<ActionResult<{ emailed: boolean; existingAccount: boolean }>> {
+  return toResult(async () => {
+    const reviewerId = await requireManager();
+    const service = createServiceClient();
+    const { data: app } = await service.from("fief_applications").select("*").eq("id", id).eq("status", "pending").maybeSingle();
+    if (!app) throw new Error("Demande introuvable ou déjà traitée.");
+
+    // Nouvelle adresse : l'invitation crée le compte. Adresse connue : l'invitation échoue, on retrouve le compte.
+    const meta = { data: { first_name: app.first_name, last_name: app.last_name } };
+    const invite = await service.auth.admin.generateLink({ type: "invite", email: app.email, options: meta });
+    let userId: string;
+    let existingAccount = false;
+    let passwordLink: string | null = null;
+    if (!invite.error && invite.data.user) {
+      userId = invite.data.user.id;
+      const { error } = await service.auth.admin.updateUserById(userId, { app_metadata: { realm: "fief" } });
+      if (error) {
+        // Jamais de compte FIEF sans marqueur : il ne serait pas cloisonné du board.
+        await service.auth.admin.deleteUser(userId);
+        throw new Error(`Compte non créé (cloison impossible) : ${error.message}`);
+      }
+      passwordLink = fiefUrl(`/mot-de-passe?token_hash=${encodeURIComponent(invite.data.properties.hashed_token)}&type=invite`);
+    } else {
+      // generateLink « recovery » ne fait que retrouver le compte : aucun e-mail n'est envoyé, le mot de passe ne change pas.
+      const found = await service.auth.admin.generateLink({ type: "recovery", email: app.email });
+      if (found.error || !found.data.user) throw new Error(invite.error?.message ?? "Création du compte impossible.");
+      userId = found.data.user.id;
+      existingAccount = true;
+    }
+
+    const { error: memberError } = await service.from("fief_members").upsert(
+      {
+        user_id: userId,
+        application_id: app.id,
+        email: app.email,
+        first_name: app.first_name,
+        last_name: app.last_name,
+        birth_date: app.birth_date,
+        phone: app.phone,
+        club_number: app.club_number,
+        club_name: app.club_name,
+        functions: app.functions,
+        status: "active",
+        status_reason: null,
+        approved_by: reviewerId,
+      },
+      { onConflict: "user_id" }
+    );
+    if (memberError) throw new Error(`Compte prêt mais fiche membre non enregistrée : ${memberError.message}`);
+
+    const { error: updateError } = await service
+      .from("fief_applications")
+      .update({ status: "approved", reviewed_by: reviewerId, reviewed_at: new Date().toISOString(), user_id: userId })
+      .eq("id", app.id);
+    if (updateError) throw new Error(updateError.message);
+
+    const welcome = "Votre demande d'adhésion a été acceptée : vous faites maintenant partie du réseau des femmes engagées dans le football du Grand Est.";
+    const emailed = await sendFiefEmail({
+      to: app.email,
+      firstName: app.first_name,
+      subject: "Bienvenue sur FIEF !",
+      paragraphs: passwordLink
+        ? [welcome, "Choisissez votre mot de passe pour vous connecter. Le lien est personnel et valable 24 heures."]
+        : [welcome, "Votre adresse est déjà liée à un compte de la Ligue : connectez-vous sur FIEF avec vos identifiants habituels (ou « Mot de passe oublié »)."],
+      link: passwordLink ? { href: passwordLink, label: "Choisir mon mot de passe" } : { href: fiefUrl("/connexion"), label: "Me connecter à FIEF" },
+    });
+    return { emailed, existingAccount };
+  });
+}
+
+/** Refuse une demande ; le motif (facultatif) est repris dans l'e-mail. */
+export async function refuseFiefApplication(id: string, reason: string, notify: boolean): Promise<ActionResult<{ emailed: boolean }>> {
+  return toResult(async () => {
+    const reviewerId = await requireManager();
+    const motive = reason.trim().slice(0, 2000);
+    const { data: app, error } = await createServiceClient()
+      .from("fief_applications")
+      .update({ status: "refused", refusal_reason: motive || null, reviewed_by: reviewerId, reviewed_at: new Date().toISOString() })
+      .eq("id", id)
+      .in("status", ["pending", "awaiting_parent"])
+      .select("email, first_name")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!app) throw new Error("Demande introuvable ou déjà traitée.");
+    if (!notify) return { emailed: false };
+    const emailed = await sendFiefEmail({
+      to: app.email,
+      firstName: app.first_name,
+      subject: "Votre demande d'adhésion à FIEF",
+      paragraphs: [
+        "Merci pour votre intérêt pour FIEF. Votre demande d'adhésion n'a pas été retenue.",
+        ...(motive ? [`Motif : ${motive}`] : []),
+        "Pour toute question, vous pouvez contacter l'équipe FIEF de la Ligue du Grand Est de Football.",
+      ],
+    });
+    return { emailed };
+  });
+}
+
+/** Annuaire complet pour l'équipe FIEF (toutes les fiches, y compris suspendues). */
+export async function listFiefMembers(): Promise<ActionResult<FiefMemberRow[]>> {
+  return toResult(async () => {
+    await requireManager();
+    const { data, error } = await createServiceClient()
+      .from("fief_members")
+      .select("user_id, first_name, last_name, email, phone, birth_date, club_number, club_name, functions, status, status_reason, joined_at, last_seen_at")
+      .order("last_name")
+      .order("first_name");
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((m) => ({
+      userId: m.user_id,
+      firstName: m.first_name,
+      lastName: m.last_name,
+      email: m.email,
+      phone: m.phone,
+      birthDate: m.birth_date,
+      clubNumber: m.club_number,
+      clubName: m.club_name,
+      functions: m.functions,
+      status: m.status,
+      statusReason: m.status_reason,
+      joinedAt: m.joined_at,
+      lastSeenAt: m.last_seen_at,
+    }));
+  });
+}
+
+/** Suspendre / réactiver une membre (une membre suspendue ne voit plus le réseau). */
+export async function setFiefMemberStatus(userId: string, status: "active" | "suspended", reason: string): Promise<ActionResult<null>> {
+  return toResult(async () => {
+    await requireManager();
+    const { error } = await createServiceClient()
+      .from("fief_members")
+      .update({ status, status_reason: status === "suspended" ? reason.trim().slice(0, 500) || null : null })
+      .eq("user_id", userId);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+}
+
+const settingsSchema = z
+  .object({
+    minorsAllowed: z.boolean(),
+    minAge: z.number().int().min(10).max(18),
+    parentalConsentUnder: z.number().int().min(15).max(18),
+    charterText: z.string().trim().max(5000).nullable(),
+  })
+  .refine((s) => !s.minorsAllowed || s.parentalConsentUnder >= s.minAge, {
+    message: "L'âge de l'accord parental doit être au moins égal à l'âge minimum.",
+  });
+
+export async function updateFiefSettings(input: FiefSettings): Promise<ActionResult<null>> {
+  return toResult(async () => {
+    const userId = await requireManager();
+    const parsed = settingsSchema.safeParse(input);
+    if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Réglages invalides.");
+    const s = parsed.data;
+    const { error } = await createServiceClient()
+      .from("fief_settings")
+      .update({
+        minors_allowed: s.minorsAllowed,
+        min_age: s.minAge,
+        parental_consent_under: s.parentalConsentUnder,
+        charter_text: s.charterText && s.charterText !== DEFAULT_CHARTER ? s.charterText : null,
+        updated_by: userId,
+      })
+      .eq("id", true);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+}
+
+const slugify = (label: string) =>
+  label
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+
+/** Ajoute une fonction proposée à l'inscription, ou en change le libellé / l'affichage. */
+export async function saveFiefFunction(input: { slug?: string; label: string; active: boolean }): Promise<ActionResult<null>> {
+  return toResult(async () => {
+    await requireManager();
+    const label = input.label.trim().slice(0, 80);
+    if (label.length < 2) throw new Error("Libellé trop court.");
+    const service = createServiceClient();
+    if (input.slug) {
+      const { error } = await service.from("fief_member_functions").update({ label, active: input.active }).eq("slug", input.slug);
+      if (error) throw new Error(error.message);
+      return null;
+    }
+    const slug = slugify(label);
+    if (!slug) throw new Error("Libellé invalide.");
+    const { data: last } = await service.from("fief_member_functions").select("position").neq("slug", "autre").order("position", { ascending: false }).limit(1);
+    const { error } = await service.from("fief_member_functions").insert({ slug, label, active: input.active, position: (last?.[0]?.position ?? 0) + 10 });
+    if (error) throw new Error(error.code === "23505" ? "Cette fonction existe déjà." : error.message);
+    return null;
+  });
+}

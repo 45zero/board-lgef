@@ -83,6 +83,7 @@ export const BOARD_APPS: BoardApp[] = [
   { id: "transfer", label: "LGEF Transfer", kicker: "ENVOI DE FICHIERS" },
   { id: "inscription", label: "Inscription", kicker: "RSVP CLUBS" },
   { id: "cartographie", label: "Cartographie", kicker: "CLUBS DU GRAND EST" },
+  { id: "fief", label: "FIEF", kicker: "RÉSEAU FÉMININ" },
   { id: "frais", label: "Frais", kicker: "NOTES DE FRAIS" },
   { id: "effectif", label: "Effectif", kicker: "N-1 & COÛTS" },
   { id: "compta", label: "Compta", kicker: "FACTURATION" },
