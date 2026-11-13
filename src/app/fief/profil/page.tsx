@@ -5,6 +5,7 @@ import { LogOut, Mail, MapPin, Phone } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import { FiefButton, FiefLabel, fiefInput, MemberGate, type FiefMe } from "@/components/fief/ui";
+import { PushToggle } from "@/components/fief/notifications";
 
 // Profil de la membre : fiche (identité et club gérés par l'équipe FIEF), téléphone et sa visibilité,
 // présentation courte, déconnexion. Écriture directe sur sa fiche (RLS + garde fief_members_guard).
@@ -97,6 +98,8 @@ function Profile({ me }: { me: FiefMe }) {
         </FiefButton>
         {saved === "error" && <p className="text-sm text-[#B91F26]">Enregistrement impossible. Réessayez.</p>}
       </form>
+
+      <PushToggle variant="row" />
 
       <FiefButton variant="outline" onClick={() => void logout()}>
         <LogOut size={18} /> Se déconnecter

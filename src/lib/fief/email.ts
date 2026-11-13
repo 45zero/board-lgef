@@ -1,6 +1,6 @@
 import "server-only";
 import { esc, siteUrl } from "@/lib/email/notificationEmails";
-import { isTransactionalEmailConfigured, sendTransactionalBatch } from "@/lib/email/transactional";
+import { isTransactionalEmailConfigured, sendTransactionalBatch, type EmailMessage } from "@/lib/email/transactional";
 
 // E-mails FIEF : même circuit d'envoi que le board (Brevo, sinon Resend), habillage FIEF (bleu marine,
 // liseré rouge, écusson « Graines d'éducatrices »).
@@ -8,18 +8,16 @@ import { isTransactionalEmailConfigured, sendTransactionalBatch } from "@/lib/em
 const NAVY = "#0E2754";
 const RED = "#D7262E";
 
-export async function sendFiefEmail(opts: {
+export interface FiefEmail {
   to: string;
   firstName: string | null;
   subject: string;
   paragraphs: string[];
   link?: { href: string; label: string };
   footer?: string;
-}) {
-  if (!isTransactionalEmailConfigured()) {
-    console.warn("[fief] envoi d'e-mails non configuré (Brevo / Resend) — e-mail non envoyé à", opts.to);
-    return false;
-  }
+}
+
+function renderFiefEmail(opts: FiefEmail): EmailMessage {
   const crest = `${siteUrl()}/fief/crest.png`;
   const html = `<div style="background:#EEF2F8;padding:24px 12px;font-family:Arial,Helvetica,sans-serif">
 <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;color:${NAVY}">
@@ -48,6 +46,21 @@ export async function sendFiefEmail(opts: {
   ]
     .filter(Boolean)
     .join("\n\n");
-  const { sent } = await sendTransactionalBatch([{ to: [opts.to], subject: opts.subject, html, text }], async () => {});
-  return sent > 0;
+  return { to: [opts.to], subject: opts.subject, html, text };
+}
+
+/** Un e-mail FIEF ; vrai s'il est parti. */
+export async function sendFiefEmail(opts: FiefEmail) {
+  return (await sendFiefEmails([opts])) > 0;
+}
+
+/** Plusieurs e-mails FIEF personnalisés, par lots ; renvoie le nombre d'e-mails partis. */
+export async function sendFiefEmails(list: FiefEmail[]) {
+  if (!list.length) return 0;
+  if (!isTransactionalEmailConfigured()) {
+    console.warn("[fief] envoi d'e-mails non configuré (Brevo / Resend) —", list.length, "e-mail(s) non envoyé(s)");
+    return 0;
+  }
+  const { sent } = await sendTransactionalBatch(list.map(renderFiefEmail), async () => {});
+  return sent;
 }

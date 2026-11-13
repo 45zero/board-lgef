@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Bell, CalendarDays, FileText, Home, LogOut, User } from "lucide-react";
+import { CalendarDays, FileText, Home, LogOut, User } from "lucide-react";
+import { BellLink } from "@/components/fief/notifications";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 
@@ -157,9 +158,7 @@ export function MemberShell({ children }: { children: ReactNode }) {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-1">
-            <span className="flex h-10 w-10 items-center justify-center rounded-full text-white/80" title="Notifications (bientôt)">
-              <Bell size={20} />
-            </span>
+            <BellLink href={href("/notifications")} />
             <button type="button" onClick={() => void logout()} className="hidden h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-white/80 hover:bg-white/10 md:flex">
               <LogOut size={16} /> Déconnexion
             </button>

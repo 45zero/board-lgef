@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, ExternalLink, LayoutDashboard, Plus, Search, Settings, UserCheck, Users, X } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, ExternalLink, LayoutDashboard, Plus, Search, Settings, UserCheck, Users, X } from "lucide-react";
+import { FiefEventShare } from "@/components/board/fief/FiefEventShare";
 import { unwrap } from "@/lib/board/actionResult";
 import { Toggle } from "@/components/board/Toggle";
 import { ageOn, DEFAULT_CHARTER, type FiefSettings } from "@/lib/fief/shared";
@@ -9,12 +10,15 @@ import {
   approveFiefApplication,
   getFiefOverview,
   listFiefApplications,
+  listFiefEvents,
   listFiefMembers,
   refuseFiefApplication,
   saveFiefFunction,
   setFiefMemberStatus,
   updateFiefSettings,
   type FiefApplicationRow,
+  type FiefEventRow,
+  type FiefAudience,
   type FiefMemberRow,
   type FiefOverview,
 } from "@/app/actions/fief-admin";
@@ -23,7 +27,7 @@ import {
 // demandes d'adhésion, membres, réglages (mineures, charte, fonctions). Fil, documents et
 // événements « Visible sur FIEF » arrivent avec les lots suivants. Site des membres : fief.lgef.fr.
 
-type Tab = "home" | "requests" | "members" | "settings";
+type Tab = "home" | "requests" | "members" | "events" | "settings";
 
 const PUBLIC_URL = (process.env.NEXT_PUBLIC_FIEF_URL || "").replace(/\/+$/, "") || "/fief";
 
@@ -54,6 +58,7 @@ export function FiefScreen() {
     { id: "home", label: "Tableau de bord", icon: LayoutDashboard },
     { id: "requests", label: "Demandes", icon: UserCheck, badge: overview?.counts.pending },
     { id: "members", label: "Membres", icon: Users },
+    { id: "events", label: "Événements", icon: CalendarDays },
     { id: "settings", label: "Réglages", icon: Settings },
   ];
 
@@ -116,12 +121,13 @@ export function FiefScreen() {
               </div>
             )}
           </section>
-          <p className="text-xs text-ink-4">Fil d&apos;actualités, documents et événements « Visible sur FIEF » : prochaines étapes.</p>
+          <p className="text-xs text-ink-4">Fil d&apos;actualités et documents : prochaines étapes.</p>
         </>
       )}
 
       {overview && tab === "requests" && <RequestsTab labels={functionLabels} onChanged={reload} />}
       {overview && tab === "members" && <MembersTab labels={functionLabels} onChanged={reload} />}
+      {overview && tab === "events" && <EventsTab />}
       {overview && tab === "settings" && <SettingsTab overview={overview} onSaved={reload} />}
     </div>
   );
@@ -552,5 +558,72 @@ function FunctionRow({ slug, label, active, onSave }: { slug: string; label: str
       )}
       <Toggle on={active} onClick={() => void onSave({ slug, label, active: !active })} />
     </div>
+  );
+}
+
+const AUDIENCE_LABEL: Record<FiefAudience, string> = {
+  all: "Toutes les membres",
+  clubs: "Club(s)",
+  functions: "Fonction(s)",
+  members: "Sélection",
+};
+
+/** Événements à venir du board : visibles ou non sur FIEF, réglage du partage en dépliant la ligne. */
+function EventsTab() {
+  const [rows, setRows] = useState<FiefEventRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [onlyShared, setOnlyShared] = useState(false);
+
+  const load = useCallback(() => {
+    listFiefEvents().then((r) => (r.ok ? setRows(r.data) : setError(r.error)));
+  }, []);
+  useEffect(load, [load]);
+
+  const shown = (rows ?? []).filter((e) => !onlyShared || e.share);
+  const when = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+  const time = (iso: string) => new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  return (
+    <section className="rounded-card border border-line bg-card p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <h2 className="font-extrabold text-ink">Calendrier — visible sur FIEF</h2>
+        <label className="ml-auto flex items-center gap-2 text-xs text-ink-2">
+          <input type="checkbox" checked={onlyShared} onChange={(e) => setOnlyShared(e.target.checked)} /> Seulement les événements visibles sur FIEF
+        </label>
+      </div>
+      {error && <p className="text-sm text-bad">{error}</p>}
+      {!rows && !error && <p className="py-6 text-center text-sm text-ink-3">Chargement…</p>}
+      {rows && shown.length === 0 && <p className="py-6 text-center text-sm text-ink-3">Aucun événement dans les quatre prochains mois.</p>}
+      <div className="divide-y divide-line">
+        {shown.map((e) => (
+          <div key={e.id} className="py-2.5">
+            <button onClick={() => setOpenId(openId === e.id ? null : e.id)} className="flex w-full items-center gap-3 text-left">
+              <span className="w-24 shrink-0 text-xs font-semibold uppercase text-ink-3">{when(e.startDate)}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-semibold text-ink">{e.title}</span>
+                <span className="block truncate text-xs text-ink-4">
+                  {time(e.startDate)}
+                  {e.location ? ` · ${e.location}` : ""}
+                </span>
+              </span>
+              {e.share ? (
+                <span className="rounded-full bg-good-bg px-2 py-0.5 text-[11px] font-semibold text-good">
+                  Visible · {AUDIENCE_LABEL[e.share.audience]}
+                  {e.share.notifiedAt ? " · notifiées" : ""}
+                </span>
+              ) : (
+                <span className="text-[11px] text-ink-4">Non visible</span>
+              )}
+              <ChevronDown size={16} className={`text-ink-4 ${openId === e.id ? "rotate-180" : ""}`} />
+            </button>
+            {openId === e.id && (
+              <div className="mt-3 rounded-btn bg-panel p-3">
+                <FiefEventShare eventId={e.id} onSaved={load} />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { CalendarDays, FileText, Newspaper, UserPlus, LogIn, Users, Bell, Smartphone } from "lucide-react";
 import { ComingSoon, Crest, MemberGate, useFiefHref, useFiefMe, Wordmark } from "@/components/fief/ui";
+import { PushToggle } from "@/components/fief/notifications";
 
 // Accueil FIEF : écran de bienvenue (pas connectée) ou espace membre (connectée et validée).
 
@@ -79,6 +80,7 @@ function MemberHome({ firstName }: { firstName: string }) {
         <h1 className="text-2xl font-extrabold">Bonjour {firstName} 👋</h1>
         <p className="text-[#5B6B86]">Bienvenue sur votre espace FIEF</p>
       </div>
+      <PushToggle />
       <div className="relative overflow-hidden rounded-3xl bg-[linear-gradient(120deg,#0E2754_0%,#1B3A73_100%)] p-6 text-white md:p-10">
         <Crest size={150} className="pointer-events-none absolute -right-6 -top-4 opacity-20 md:right-8 md:top-4 md:opacity-90" />
         <p className="text-sm font-semibold uppercase tracking-wider text-white/70">Bienvenue sur FIEF</p>

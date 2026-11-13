@@ -4,13 +4,15 @@ import { EventWeather } from "@/components/board/calendar/DayWeather";
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
-import { X, Trash2, MapPin, ChevronDown, Camera, Video, ClipboardCheck, FileText, MessageSquare, Users, Receipt, Wallet, Map as MapIcon } from "lucide-react";
+import { X, Trash2, MapPin, ChevronDown, Camera, Video, ClipboardCheck, FileText, MessageSquare, Users, Receipt, Wallet, Map as MapIcon, Sprout } from "lucide-react";
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
 import { CALENDAR_ORG_KEYS, type CalendarEvent } from "@/lib/board/calendar";
 import { useEventModalState } from "@/hooks/board/useEventModalState";
 import { PersonName } from "@/components/board/calendar/PersonName";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { Toggle } from "@/components/board/Toggle";
+import { FiefEventShare } from "@/components/board/fief/FiefEventShare";
+import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
 import { DraftNotice } from "@/components/board/calendar/VoiceEvent";
 import { RoutePreview, ScheduleConflictWarning } from "@/components/board/calendar/EventSchedule";
 import type { EventDraft } from "@/app/actions/event-dictation";
@@ -28,7 +30,7 @@ import {
   AttachmentsField,
 } from "@/components/board/calendar/EventTabs";
 
-type Tab = "details" | "discussion" | "equipe" | "frais" | "gestion" | "carte";
+type Tab = "details" | "discussion" | "equipe" | "frais" | "gestion" | "carte" | "fief";
 
 // Onglets en icônes (le nom en info-bulle et pour les lecteurs d'écran).
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
@@ -38,6 +40,7 @@ const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
   { id: "frais", label: "Mes frais", icon: Receipt },
   { id: "gestion", label: "Gestion frais", icon: Wallet },
   { id: "carte", label: "Carte", icon: MapIcon },
+  { id: "fief", label: "FIEF", icon: Sprout },
 ];
 
 export function MobileEventModal({
@@ -64,6 +67,8 @@ export function MobileEventModal({
   const mapsLoaded = useGoogleMapsScript();
   const m = useEventModalState({ event, defaultStart, defaultEnd, draft, onClose, onSaved });
   const { isEditing } = m;
+  // Onglet FIEF : équipe FIEF seulement (module « fief »).
+  const showFief = canShowModule(useVisibleModules(), "fief");
   const orgColor = ORG_COLORS[m.org];
 
   useEffect(() => {
@@ -126,7 +131,7 @@ export function MobileEventModal({
       </div>
 
       <div className="grid shrink-0 grid-cols-6 gap-1 border-b border-line px-3 pb-2">
-        {TABS.map((t) => {
+        {TABS.filter((t) => t.id !== "fief" || showFief).map((t) => {
           const count =
             t.id === "equipe"
               ? m.team.team.length
@@ -373,6 +378,7 @@ export function MobileEventModal({
         {tab === "equipe" && isEditing && <EquipeTab hook={m.team} />}
         {tab === "frais" && isEditing && event && <FraisTab eventId={event.id} onDeclared={() => void m.expenses.refetch()} />}
         {tab === "gestion" && <GestionFraisTab eventId={isEditing && event ? event.id : null} />}
+        {tab === "fief" && isEditing && event && showFief && <FiefEventShare eventId={event.id} />}
         {tab === "carte" && (
           <CarteTab location={m.location} event={event ? { id: event.id, title: m.title, org: m.org, start: m.start.toISOString() } : null} />
         )}

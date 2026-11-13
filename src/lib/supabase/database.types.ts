@@ -486,6 +486,70 @@ export type Database = {
         }
         Relationships: []
       }
+      // FIEF lot 2 (sql/2026-11-13_fief_evenements.sql) — ajout manuel.
+      fief_event_shares: {
+        Row: {
+          event_id: string
+          audience: "all" | "clubs" | "functions" | "members"
+          club_numbers: string[]
+          functions: string[]
+          member_ids: string[]
+          shared_by: string | null
+          shared_at: string
+          notified_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          event_id: string
+          audience?: "all" | "clubs" | "functions" | "members"
+          club_numbers?: string[]
+          functions?: string[]
+          member_ids?: string[]
+          shared_by?: string | null
+          shared_at?: string
+          notified_at?: string | null
+        }
+        Update: {
+          audience?: "all" | "clubs" | "functions" | "members"
+          club_numbers?: string[]
+          functions?: string[]
+          member_ids?: string[]
+          shared_by?: string | null
+          notified_at?: string | null
+        }
+        Relationships: []
+      }
+      fief_notifications: {
+        Row: {
+          id: string
+          user_id: string
+          kind: "event" | "membership" | "info"
+          title: string
+          body: string | null
+          route: string | null
+          event_id: string | null
+          read_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          kind: "event" | "membership" | "info"
+          title: string
+          body?: string | null
+          route?: string | null
+          event_id?: string | null
+          read_at?: string | null
+        }
+        Update: { read_at?: string | null }
+        Relationships: []
+      }
+      fief_push_subscriptions: {
+        Row: { endpoint: string; user_id: string; p256dh: string; auth: string; created_at: string }
+        Insert: { endpoint: string; user_id: string; p256dh: string; auth: string }
+        Update: { user_id?: string; p256dh?: string; auth?: string }
+        Relationships: []
+      }
       module_access: {
         Row: {
           module_id: string

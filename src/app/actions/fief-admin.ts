@@ -4,7 +4,8 @@ import { z } from "zod";
 import { toResult, type ActionResult } from "@/lib/board/actionResult";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
-import { sendFiefEmail } from "@/lib/fief/email";
+import { sendFiefEmail, sendFiefEmails } from "@/lib/fief/email";
+import { sendFiefPush } from "@/lib/fief/push";
 import { DEFAULT_CHARTER, fiefUrl, type FiefSettings } from "@/lib/fief/shared";
 
 // FIEF — actions de l'onglet FIEF du board (module « fief », Claire et les administrateurs) :
@@ -348,5 +349,200 @@ export async function saveFiefFunction(input: { slug?: string; label: string; ac
     const { error } = await service.from("fief_member_functions").insert({ slug, label, active: input.active, position: (last?.[0]?.position ?? 0) + 10 });
     if (error) throw new Error(error.code === "23505" ? "Cette fonction existe déjà." : error.message);
     return null;
+  });
+}
+
+// ── Événements « Visible sur FIEF » (lot 2, sql/2026-11-13_fief_evenements.sql) ──────────────────────
+
+export type FiefAudience = "all" | "clubs" | "functions" | "members";
+
+export interface FiefShareInput {
+  audience: FiefAudience;
+  clubNumbers: string[];
+  functions: string[];
+  memberIds: string[];
+}
+
+export interface FiefEventShareState {
+  share: (FiefShareInput & { sharedAt: string; notifiedAt: string | null }) | null;
+  options: {
+    clubs: { clubNumber: string; clubName: string; count: number }[];
+    functions: { slug: string; label: string }[];
+    members: { userId: string; name: string; clubName: string | null }[];
+  };
+}
+
+/** Partage FIEF d'un événement + choix possibles (clubs des membres, fonctions, membres). */
+export async function getFiefEventShare(eventId: string): Promise<ActionResult<FiefEventShareState>> {
+  return toResult(async () => {
+    await requireManager();
+    const service = createServiceClient();
+    const [{ data: share }, { data: members }, { data: fns }] = await Promise.all([
+      service.from("fief_event_shares").select("*").eq("event_id", eventId).maybeSingle(),
+      service.from("fief_members").select("user_id, first_name, last_name, club_number, club_name").eq("status", "active").order("last_name"),
+      service.from("fief_member_functions").select("slug, label").order("position"),
+    ]);
+    const clubs = new Map<string, { clubNumber: string; clubName: string; count: number }>();
+    for (const m of members ?? []) {
+      if (!m.club_number) continue;
+      const c = clubs.get(m.club_number) ?? { clubNumber: m.club_number, clubName: m.club_name ?? m.club_number, count: 0 };
+      c.count += 1;
+      clubs.set(m.club_number, c);
+    }
+    return {
+      share: share
+        ? {
+            audience: share.audience,
+            clubNumbers: share.club_numbers,
+            functions: share.functions,
+            memberIds: share.member_ids,
+            sharedAt: share.shared_at,
+            notifiedAt: share.notified_at,
+          }
+        : null,
+      options: {
+        clubs: [...clubs.values()].sort((a, b) => a.clubName.localeCompare(b.clubName, "fr")),
+        functions: fns ?? [],
+        members: (members ?? []).map((m) => ({ userId: m.user_id, name: `${m.first_name} ${m.last_name}`, clubName: m.club_name })),
+      },
+    };
+  });
+}
+
+const shareSchema = z.object({
+  enabled: z.boolean(),
+  audience: z.enum(["all", "clubs", "functions", "members"]),
+  clubNumbers: z.array(z.string().max(20)).max(200),
+  functions: z.array(z.string().max(40)).max(50),
+  memberIds: z.array(z.string().uuid()).max(2000),
+  notify: z.boolean(),
+});
+
+const whenFr = (start: string, end: string | null) => {
+  const opts = { timeZone: "Europe/Paris" } as const;
+  const day = new Date(start).toLocaleDateString("fr-FR", { ...opts, weekday: "long", day: "numeric", month: "long" });
+  const from = new Date(start).toLocaleTimeString("fr-FR", { ...opts, hour: "2-digit", minute: "2-digit" });
+  const to = end ? new Date(end).toLocaleTimeString("fr-FR", { ...opts, hour: "2-digit", minute: "2-digit" }) : null;
+  return `${day} · ${from}${to && to !== from ? ` – ${to}` : ""}`;
+};
+
+/**
+ * Active / met à jour / retire le partage FIEF d'un événement. Avec `notify`, le public reçoit une
+ * notification FIEF, un push (appareils abonnés) et un e-mail.
+ */
+export async function saveFiefEventShare(
+  eventId: string,
+  input: z.input<typeof shareSchema>
+): Promise<ActionResult<{ shared: boolean; notified: number; pushed: number; emailed: number }>> {
+  return toResult(async () => {
+    const userId = await requireManager();
+    const parsed = shareSchema.safeParse(input);
+    if (!parsed.success) throw new Error("Réglage de partage invalide.");
+    const s = parsed.data;
+    const service = createServiceClient();
+
+    if (!s.enabled) {
+      const { error } = await service.from("fief_event_shares").delete().eq("event_id", eventId);
+      if (error) throw new Error(error.message);
+      return { shared: false, notified: 0, pushed: 0, emailed: 0 };
+    }
+    if (s.audience === "clubs" && !s.clubNumbers.length) throw new Error("Choisissez au moins un club.");
+    if (s.audience === "functions" && !s.functions.length) throw new Error("Choisissez au moins une fonction.");
+    if (s.audience === "members" && !s.memberIds.length) throw new Error("Choisissez au moins une personne.");
+
+    const { data: event } = await service.from("events").select("id, title, start_date, end_date, location, event_address").eq("id", eventId).maybeSingle();
+    if (!event) throw new Error("Événement introuvable.");
+
+    const { error } = await service.from("fief_event_shares").upsert(
+      {
+        event_id: eventId,
+        audience: s.audience,
+        club_numbers: s.audience === "clubs" ? s.clubNumbers : [],
+        functions: s.audience === "functions" ? s.functions : [],
+        member_ids: s.audience === "members" ? s.memberIds : [],
+        shared_by: userId,
+      },
+      { onConflict: "event_id" }
+    );
+    if (error) throw new Error(error.message);
+    if (!s.notify) return { shared: true, notified: 0, pushed: 0, emailed: 0 };
+
+    const { data: audience, error: audError } = await service.rpc("fief_event_audience", { p_event_id: eventId });
+    if (audError) throw new Error(audError.message);
+    const people = (audience ?? []) as { user_id: string; email: string; first_name: string }[];
+    if (!people.length) return { shared: true, notified: 0, pushed: 0, emailed: 0 };
+
+    const when = whenFr(event.start_date, event.end_date);
+    const place = event.event_address || event.location;
+    const body = `${when}${place ? ` · ${place}` : ""}`;
+    const route = `/calendrier?event=${eventId}`;
+    const { error: notifError } = await service
+      .from("fief_notifications")
+      .insert(people.map((p) => ({ user_id: p.user_id, kind: "event" as const, title: `Nouvel événement : ${event.title}`, body, route, event_id: eventId })));
+    if (notifError) throw new Error(`Partage enregistré mais notifications non créées : ${notifError.message}`);
+
+    const ids = people.map((p) => p.user_id);
+    const [pushed, emailed] = await Promise.all([
+      sendFiefPush(ids, { title: `FIEF · ${event.title}`, body, route, tag: `fief-event-${eventId}` }),
+      sendFiefEmails(
+        people.map((p) => ({
+          to: p.email,
+          firstName: p.first_name,
+          subject: `Nouvel événement FIEF : ${event.title}`,
+          paragraphs: [`Vous êtes invitée à « ${event.title} ».`, `Quand : ${when}`, ...(place ? [`Où : ${place}`] : []), "Retrouvez-le dans votre calendrier FIEF."],
+          link: { href: fiefUrl(route), label: "Voir dans mon calendrier" },
+        }))
+      ),
+    ]);
+    await service.from("fief_event_shares").update({ notified_at: new Date().toISOString() }).eq("event_id", eventId);
+    return { shared: true, notified: people.length, pushed: pushed.size, emailed };
+  });
+}
+
+export interface FiefEventRow {
+  id: string;
+  title: string;
+  startDate: string;
+  endDate: string | null;
+  location: string | null;
+  share: { audience: FiefAudience; count: number; notifiedAt: string | null } | null;
+}
+
+/** Événements à venir du board (4 mois), avec leur état de partage FIEF — onglet FIEF → Événements. */
+export async function listFiefEvents(): Promise<ActionResult<FiefEventRow[]>> {
+  return toResult(async () => {
+    await requireManager();
+    const service = createServiceClient();
+    const now = new Date();
+    const until = new Date(now.getTime() + 120 * 86_400_000);
+    const [{ data: events, error }, { data: shares }] = await Promise.all([
+      service
+        .from("events")
+        .select("id, title, start_date, end_date, location, event_address")
+        .gte("start_date", new Date(now.getTime() - 86_400_000).toISOString())
+        .lte("start_date", until.toISOString())
+        .order("start_date")
+        .limit(300),
+      service.from("fief_event_shares").select("event_id, audience, club_numbers, functions, member_ids, notified_at"),
+    ]);
+    if (error) throw new Error(error.message);
+    const byEvent = new Map((shares ?? []).map((s) => [s.event_id, s]));
+    return (events ?? []).map((e) => {
+      const s = byEvent.get(e.id);
+      return {
+        id: e.id,
+        title: e.title,
+        startDate: e.start_date,
+        endDate: e.end_date,
+        location: e.event_address || e.location,
+        share: s
+          ? {
+              audience: s.audience,
+              count: s.audience === "clubs" ? s.club_numbers.length : s.audience === "functions" ? s.functions.length : s.audience === "members" ? s.member_ids.length : 0,
+              notifiedAt: s.notified_at,
+            }
+          : null,
+      };
+    });
   });
 }
