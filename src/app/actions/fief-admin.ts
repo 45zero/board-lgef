@@ -678,3 +678,13 @@ export async function resolveFiefReport(reportId: string): Promise<ActionResult<
     return null;
   });
 }
+
+/** Lien du dossier « FIEF » dans le Drive du board (onglet FIEF → Documents). */
+export async function getFiefDriveFolderUrl(): Promise<ActionResult<string | null>> {
+  return toResult(async () => {
+    await requireManager();
+    const { getFiefStorage } = await import("@/lib/fief/storage");
+    const storage = await getFiefStorage();
+    return storage ? storage.folderUrl([]) : null;
+  });
+}

@@ -602,6 +602,19 @@ export type Database = {
         Update: { body?: string }
         Relationships: []
       }
+      // FIEF lot 4 (sql/2026-11-13_fief_documents.sql) — ajout manuel.
+      fief_doc_folders: {
+        Row: { id: string; name: string; position: number; created_at: string }
+        Insert: { id?: string; name: string; position?: number }
+        Update: { name?: string; position?: number }
+        Relationships: []
+      }
+      fief_documents: {
+        Row: { id: string; owner_id: string; as_team: boolean; folder_id: string | null; name: string; description: string | null; mime_type: string; size_bytes: number; visibility: "private" | "shared"; status: "uploading" | "ready"; storage_id: string | null; upload_url: string | null; created_at: string; updated_at: string }
+        Insert: { id?: string; owner_id: string; as_team?: boolean; folder_id?: string | null; name: string; description?: string | null; mime_type?: string; size_bytes?: number; visibility?: "private" | "shared"; status?: "uploading" | "ready"; storage_id?: string | null; upload_url?: string | null }
+        Update: { folder_id?: string | null; name?: string; description?: string | null; visibility?: "private" | "shared"; status?: "uploading" | "ready"; storage_id?: string | null; upload_url?: string | null }
+        Relationships: []
+      }
       module_access: {
         Row: {
           module_id: string

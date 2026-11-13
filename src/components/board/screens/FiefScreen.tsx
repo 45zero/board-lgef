@@ -1,7 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Check, ChevronDown, ExternalLink, Flag, LayoutDashboard, Newspaper, Plus, Search, Settings, UserCheck, Users, X } from "lucide-react";
+import {
+  CalendarDays,
+  Check,
+  ChevronDown,
+  ExternalLink,
+  FileText,
+  Flag,
+  LayoutDashboard,
+  Newspaper,
+  Plus,
+  Search,
+  Settings,
+  UserCheck,
+  Users,
+  X,
+} from "lucide-react";
+import { DocumentsView } from "@/components/fief/documents";
 import { Feed, type FeedModeration } from "@/components/fief/feed";
 import { FiefEventShare } from "@/components/board/fief/FiefEventShare";
 import { unwrap } from "@/lib/board/actionResult";
@@ -9,6 +25,7 @@ import { Toggle } from "@/components/board/Toggle";
 import { ageOn, DEFAULT_CHARTER, type FiefSettings } from "@/lib/fief/shared";
 import {
   approveFiefApplication,
+  getFiefDriveFolderUrl,
   getFiefOverview,
   listFiefApplications,
   listFiefEvents,
@@ -34,7 +51,7 @@ import {
 // demandes d'adhésion, membres, réglages (mineures, charte, fonctions). Fil, documents et
 // événements « Visible sur FIEF » arrivent avec les lots suivants. Site des membres : fief.lgef.fr.
 
-type Tab = "home" | "requests" | "members" | "feed" | "events" | "settings";
+type Tab = "home" | "requests" | "members" | "feed" | "documents" | "events" | "settings";
 
 const PUBLIC_URL = (process.env.NEXT_PUBLIC_FIEF_URL || "").replace(/\/+$/, "") || "/fief";
 
@@ -66,6 +83,7 @@ export function FiefScreen() {
     { id: "requests", label: "Demandes", icon: UserCheck, badge: overview?.counts.pending },
     { id: "members", label: "Membres", icon: Users },
     { id: "feed", label: "Fil", icon: Newspaper },
+    { id: "documents", label: "Documents", icon: FileText },
     { id: "events", label: "Événements", icon: CalendarDays },
     { id: "settings", label: "Réglages", icon: Settings },
   ];
@@ -91,7 +109,9 @@ export function FiefScreen() {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex items-center gap-2 rounded-btn px-3.5 py-2 text-sm font-semibold ${tab === t.id ? "bg-navy text-white" : "bg-card text-ink-2 hover:bg-hover"}`}
+            className={`flex items-center gap-2 rounded-btn px-3.5 py-2 text-sm font-semibold ${
+              tab === t.id ? "bg-navy text-white" : "bg-card text-ink-2 hover:bg-hover"
+            }`}
           >
             <t.icon size={15} /> {t.label}
             {!!t.badge && <span className={`rounded-full px-1.5 text-[11px] ${tab === t.id ? "bg-white/20" : "bg-red text-white"}`}>{t.badge}</span>}
@@ -129,13 +149,23 @@ export function FiefScreen() {
               </div>
             )}
           </section>
-          <p className="text-xs text-ink-4">Documents : prochaine étape.</p>
         </>
       )}
 
       {overview && tab === "requests" && <RequestsTab labels={functionLabels} onChanged={reload} />}
       {overview && tab === "members" && <MembersTab labels={functionLabels} onChanged={reload} />}
       {overview && tab === "feed" && <FeedTab />}
+      {overview && tab === "documents" && (
+        <div className="rounded-card border border-line bg-[#F3F6FB] p-4">
+          <DocumentsView
+            team
+            driveUrl={async () => {
+              const r = await getFiefDriveFolderUrl();
+              return r.ok ? r.data : null;
+            }}
+          />
+        </div>
+      )}
       {overview && tab === "events" && <EventsTab />}
       {overview && tab === "settings" && <SettingsTab overview={overview} onSaved={reload} />}
     </div>
@@ -220,11 +250,19 @@ function ApplicationRow({ app, labels, onDone }: { app: FiefApplicationRow; labe
         {actionable && !msg?.ok && (
           <div className="flex gap-1.5">
             {app.status === "pending" && (
-              <button disabled={busy} onClick={() => void approve()} className="rounded-btn bg-good px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+              <button
+                disabled={busy}
+                onClick={() => void approve()}
+                className="rounded-btn bg-good px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+              >
                 Valider
               </button>
             )}
-            <button disabled={busy} onClick={() => setRefusing((v) => !v)} className="rounded-btn border border-bad px-3 py-1.5 text-xs font-bold text-bad disabled:opacity-50">
+            <button
+              disabled={busy}
+              onClick={() => setRefusing((v) => !v)}
+              className="rounded-btn border border-bad px-3 py-1.5 text-xs font-bold text-bad disabled:opacity-50"
+            >
               Refuser
             </button>
           </div>
@@ -241,7 +279,12 @@ function ApplicationRow({ app, labels, onDone }: { app: FiefApplicationRow; labe
           <Field label="Club" value={app.clubName ? `${app.clubName}${app.clubNumber ? ` · n° ${app.clubNumber}` : " · hors liste"}` : "Sans club"} />
           <Field label="Fonctions" value={app.functions.map((f) => labels[f] ?? f).join(", ")} />
           {app.parentEmail && (
-            <Field label="Parent" value={`${app.parentName ?? ""} · ${app.parentEmail} — ${app.parentConsentAt ? `accord le ${fmtDate(app.parentConsentAt)}` : "accord en attente"}`} />
+            <Field
+              label="Parent"
+              value={`${app.parentName ?? ""} · ${app.parentEmail} — ${
+                app.parentConsentAt ? `accord le ${fmtDate(app.parentConsentAt)}` : "accord en attente"
+              }`}
+            />
           )}
           {app.message && (
             <div className="sm:col-span-2">
@@ -267,7 +310,11 @@ function ApplicationRow({ app, labels, onDone }: { app: FiefApplicationRow; labe
             <label className="flex items-center gap-2 text-xs text-ink-2">
               <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> Prévenir par e-mail
             </label>
-            <button disabled={busy} onClick={() => void refuse()} className="ml-auto rounded-btn bg-bad px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+            <button
+              disabled={busy}
+              onClick={() => void refuse()}
+              className="ml-auto rounded-btn bg-bad px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+            >
               Confirmer le refus
             </button>
             <button onClick={() => setRefusing(false)} className="rounded-btn px-2 py-1.5 text-xs font-semibold text-ink-3 hover:bg-hover">
@@ -332,7 +379,11 @@ function RequestsTab({ labels, onChanged }: { labels: Record<string, string>; on
         {current?.rows.map((a) => (
           <div key={a.id}>
             {scope === "processed" && (
-              <span className={`mt-3 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${a.status === "approved" ? "bg-good-bg text-good" : "bg-bad-bg text-bad"}`}>
+              <span
+                className={`mt-3 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                  a.status === "approved" ? "bg-good-bg text-good" : "bg-bad-bg text-bad"
+                }`}
+              >
                 {a.status === "approved" ? "Acceptée" : a.status === "refused" ? "Refusée" : "Retirée"}
                 {a.reviewedAt ? ` le ${fmtDate(a.reviewedAt)}` : ""}
               </span>
@@ -401,7 +452,11 @@ function MembersTab({ labels, onChanged }: { labels: Record<string, string>; onC
             </option>
           ))}
         </select>
-        {rows && <span className="text-xs text-ink-4">{shown.length} membre{shown.length > 1 ? "s" : ""}</span>}
+        {rows && (
+          <span className="text-xs text-ink-4">
+            {shown.length} membre{shown.length > 1 ? "s" : ""}
+          </span>
+        )}
       </div>
       {error && <p className="text-sm text-bad">{error}</p>}
       {!rows && !error && <p className="py-6 text-center text-sm text-ink-3">Chargement…</p>}
@@ -413,7 +468,11 @@ function MembersTab({ labels, onChanged }: { labels: Record<string, string>; onC
             <div className="min-w-0 flex-1">
               <p className="truncate font-bold text-ink">
                 {m.firstName} {m.lastName}
-                {m.status !== "active" && <span className="ml-2 rounded-full bg-bad-bg px-2 py-0.5 text-[11px] font-semibold text-bad">{m.status === "suspended" ? "Suspendue" : "Partie"}</span>}
+                {m.status !== "active" && (
+                  <span className="ml-2 rounded-full bg-bad-bg px-2 py-0.5 text-[11px] font-semibold text-bad">
+                    {m.status === "suspended" ? "Suspendue" : "Partie"}
+                  </span>
+                )}
               </p>
               <p className="truncate text-xs text-ink-3">
                 {m.clubName ?? "Sans club"} · {m.email}
@@ -432,7 +491,9 @@ function MembersTab({ labels, onChanged }: { labels: Record<string, string>; onC
               <button
                 disabled={busyId === m.userId}
                 onClick={() => void toggle(m)}
-                className={`rounded-btn px-2.5 py-1 text-xs font-semibold disabled:opacity-50 ${m.status === "active" ? "text-bad hover:bg-bad-bg" : "text-good hover:bg-good-bg"}`}
+                className={`rounded-btn px-2.5 py-1 text-xs font-semibold disabled:opacity-50 ${
+                  m.status === "active" ? "text-bad hover:bg-bad-bg" : "text-good hover:bg-good-bg"
+                }`}
               >
                 {m.status === "active" ? "Suspendre" : "Réactiver"}
               </button>
@@ -495,7 +556,8 @@ function SettingsTab({ overview, onSaved }: { overview: FiefOverview; onSaved: (
               {ageSelect(s.parentalConsentUnder, 15, 18, (n) => setS((p) => ({ ...p, parentalConsentUnder: n })))}
             </div>
             <p className="text-xs text-ink-4">
-              En France, l&apos;accord d&apos;un parent est obligatoire avant 15 ans pour un réseau social. Le parent reçoit un e-mail et confirme d&apos;un clic avant que la demande ne vous arrive.
+              En France, l&apos;accord d&apos;un parent est obligatoire avant 15 ans pour un réseau social. Le parent reçoit un e-mail et confirme d&apos;un
+              clic avant que la demande ne vous arrive.
             </p>
           </div>
         )}
@@ -520,7 +582,9 @@ function SettingsTab({ overview, onSaved }: { overview: FiefOverview; onSaved: (
 
       <section className="space-y-3 rounded-card border border-line bg-card p-4">
         <h2 className="font-extrabold text-ink">Fonctions proposées</h2>
-        <p className="text-xs text-ink-3">Les rôles que les membres cochent à l&apos;inscription. Une fonction masquée n&apos;est plus proposée mais reste sur les fiches existantes.</p>
+        <p className="text-xs text-ink-3">
+          Les rôles que les membres cochent à l&apos;inscription. Une fonction masquée n&apos;est plus proposée mais reste sur les fiches existantes.
+        </p>
         <div className="divide-y divide-line">
           {overview.functions.map((f) => (
             <FunctionRow key={`${f.slug}:${f.label}`} slug={f.slug} label={f.label} active={f.active} onSave={fnSave} />
@@ -547,7 +611,17 @@ function SettingsTab({ overview, onSaved }: { overview: FiefOverview; onSaved: (
   );
 }
 
-function FunctionRow({ slug, label, active, onSave }: { slug: string; label: string; active: boolean; onSave: (i: { slug: string; label: string; active: boolean }) => Promise<void> }) {
+function FunctionRow({
+  slug,
+  label,
+  active,
+  onSave,
+}: {
+  slug: string;
+  label: string;
+  active: boolean;
+  onSave: (i: { slug: string; label: string; active: boolean }) => Promise<void>;
+}) {
   const [value, setValue] = useState(label);
   const dirty = value.trim() !== label;
   return (
@@ -555,7 +629,9 @@ function FunctionRow({ slug, label, active, onSave }: { slug: string; label: str
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        className={`flex-1 rounded-btn border border-transparent bg-transparent px-2 py-1 text-sm hover:border-line focus:border-line-strong focus:outline-none ${active ? "text-ink" : "text-ink-4 line-through"}`}
+        className={`flex-1 rounded-btn border border-transparent bg-transparent px-2 py-1 text-sm hover:border-line focus:border-line-strong focus:outline-none ${
+          active ? "text-ink" : "text-ink-4 line-through"
+        }`}
       />
       {dirty && (
         <>
@@ -639,7 +715,14 @@ function EventsTab() {
   );
 }
 
-const ROLE_LABELS: Record<string, string> = { super_user: "Super admin", admin: "Administrateur", organizer: "Organisateur", comite_directeur: "Comité directeur", technician: "Technicien", user: "Utilisateur" };
+const ROLE_LABELS: Record<string, string> = {
+  super_user: "Super admin",
+  admin: "Administrateur",
+  organizer: "Organisateur",
+  comite_directeur: "Comité directeur",
+  technician: "Technicien",
+  user: "Utilisateur",
+};
 
 /** Qui reçoit les alertes « nouvelle demande d'adhésion » (notification du board, avec push / e-mail selon ses réglages). */
 function RecipientsSection({ overview, onSaved }: { overview: FiefOverview; onSaved: () => void }) {
@@ -658,8 +741,8 @@ function RecipientsSection({ overview, onSaved }: { overview: FiefOverview; onSa
     <section className="space-y-3 rounded-card border border-line bg-card p-4 lg:col-span-2">
       <h2 className="font-extrabold text-ink">Alertes des nouvelles demandes</h2>
       <p className="text-xs text-ink-3">
-        Qui est prévenu quand une demande d&apos;adhésion arrive (notification du board, avec push et e-mail selon les réglages de chacun). Seules les personnes qui voient l&apos;onglet FIEF
-        peuvent être choisies. Si personne n&apos;est coché, les super admins sont prévenus.
+        Qui est prévenu quand une demande d&apos;adhésion arrive (notification du board, avec push et e-mail selon les réglages de chacun). Seules les personnes
+        qui voient l&apos;onglet FIEF peuvent être choisies. Si personne n&apos;est coché, les super admins sont prévenus.
       </p>
       <div className="grid gap-1 sm:grid-cols-2">
         {overview.candidates.map((c) => (
@@ -677,7 +760,11 @@ function RecipientsSection({ overview, onSaved }: { overview: FiefOverview; onSa
         {overview.candidates.length === 0 && <p className="text-xs text-ink-3">Liste indisponible.</p>}
       </div>
       <div className="flex items-center gap-3">
-        <button disabled={state.busy || !dirty} onClick={() => void save()} className="rounded-btn bg-navy px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+        <button
+          disabled={state.busy || !dirty}
+          onClick={() => void save()}
+          className="rounded-btn bg-navy px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+        >
           {state.busy ? "Enregistrement…" : "Enregistrer"}
         </button>
         {ids.length === 0 && <span className="text-xs text-ink-3">Personne de coché : les super admins seront prévenus.</span>}
@@ -736,8 +823,8 @@ function FeedTab() {
         {reports?.map((r) => (
           <div key={r.id} className="space-y-2 rounded-btn border border-line p-3 text-sm">
             <p className="text-xs text-ink-3">
-              {r.reporter} a signalé {r.kind === "post" ? "une publication" : r.kind === "comment" ? "un commentaire" : "un message privé"} de <strong className="text-ink">{r.author}</strong> ·{" "}
-              {fmtDate(r.createdAt)}
+              {r.reporter} a signalé {r.kind === "post" ? "une publication" : r.kind === "comment" ? "un commentaire" : "un message privé"} de{" "}
+              <strong className="text-ink">{r.author}</strong> · {fmtDate(r.createdAt)}
             </p>
             <p className="whitespace-pre-line rounded-btn bg-panel px-2.5 py-2 text-ink-2">{r.excerpt}</p>
             {r.reason && <p className="text-xs text-ink-3">Motif : {r.reason}</p>}
@@ -747,7 +834,10 @@ function FeedTab() {
                   Masquer et clore
                 </button>
               )}
-              <button onClick={() => void resolve(r, false)} className="rounded-btn border border-line px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-hover">
+              <button
+                onClick={() => void resolve(r, false)}
+                className="rounded-btn border border-line px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-hover"
+              >
                 {r.kind === "message" ? "Traité" : "Laisser et clore"}
               </button>
             </div>
