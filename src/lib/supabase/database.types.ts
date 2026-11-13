@@ -526,7 +526,7 @@ export type Database = {
         Row: {
           id: string
           user_id: string
-          kind: "event" | "membership" | "info"
+          kind: "event" | "membership" | "info" | "comment" | "message" | "post"
           title: string
           body: string | null
           route: string | null
@@ -537,7 +537,7 @@ export type Database = {
         Insert: {
           id?: string
           user_id: string
-          kind: "event" | "membership" | "info"
+          kind: "event" | "membership" | "info" | "comment" | "message" | "post"
           title: string
           body?: string | null
           route?: string | null
@@ -551,6 +551,55 @@ export type Database = {
         Row: { endpoint: string; user_id: string; p256dh: string; auth: string; created_at: string }
         Insert: { endpoint: string; user_id: string; p256dh: string; auth: string }
         Update: { user_id?: string; p256dh?: string; auth?: string }
+        Relationships: []
+      }
+      // FIEF lot 3 (sql/2026-11-13_fief_social.sql) — ajout manuel.
+      fief_posts: {
+        Row: { id: string; author_id: string; as_team: boolean; body: string; pinned: boolean; hidden_at: string | null; hidden_by: string | null; hidden_reason: string | null; edited_at: string | null; created_at: string }
+        Insert: { id?: string; author_id: string; as_team?: boolean; body?: string; pinned?: boolean; hidden_at?: string | null; hidden_by?: string | null; hidden_reason?: string | null }
+        Update: { body?: string; pinned?: boolean; hidden_at?: string | null; hidden_by?: string | null; hidden_reason?: string | null; edited_at?: string | null }
+        Relationships: []
+      }
+      fief_media: {
+        Row: { id: string; uploader_id: string; post_id: string | null; storage_id: string; mime_type: string; size_bytes: number; width: number | null; height: number | null; position: number; created_at: string }
+        Insert: { id?: string; uploader_id: string; post_id?: string | null; storage_id: string; mime_type: string; size_bytes?: number; width?: number | null; height?: number | null; position?: number }
+        Update: { post_id?: string | null; position?: number }
+        Relationships: []
+      }
+      fief_comments: {
+        Row: { id: string; post_id: string; author_id: string; as_team: boolean; body: string; hidden_at: string | null; hidden_by: string | null; created_at: string }
+        Insert: { id?: string; post_id: string; author_id: string; as_team?: boolean; body: string }
+        Update: { hidden_at?: string | null; hidden_by?: string | null }
+        Relationships: []
+      }
+      fief_reactions: {
+        Row: { post_id: string; user_id: string; created_at: string }
+        Insert: { post_id: string; user_id: string }
+        Update: { created_at?: string }
+        Relationships: []
+      }
+      fief_reports: {
+        Row: { id: string; reporter_id: string; post_id: string | null; comment_id: string | null; message_id: string | null; reason: string | null; status: "open" | "resolved"; resolved_by: string | null; resolved_at: string | null; created_at: string }
+        Insert: { id?: string; reporter_id: string; post_id?: string | null; comment_id?: string | null; message_id?: string | null; reason?: string | null }
+        Update: { status?: "open" | "resolved"; resolved_by?: string | null; resolved_at?: string | null }
+        Relationships: []
+      }
+      fief_conversations: {
+        Row: { id: string; created_at: string; last_message_at: string }
+        Insert: { id?: string; last_message_at?: string }
+        Update: { last_message_at?: string }
+        Relationships: []
+      }
+      fief_conversation_members: {
+        Row: { conversation_id: string; user_id: string; last_read_at: string }
+        Insert: { conversation_id: string; user_id: string; last_read_at?: string }
+        Update: { last_read_at?: string }
+        Relationships: []
+      }
+      fief_messages: {
+        Row: { id: string; conversation_id: string; sender_id: string; body: string; created_at: string }
+        Insert: { id?: string; conversation_id: string; sender_id: string; body: string }
+        Update: { body?: string }
         Relationships: []
       }
       module_access: {

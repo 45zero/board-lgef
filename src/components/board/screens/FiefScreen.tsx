@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Check, ChevronDown, ExternalLink, LayoutDashboard, Plus, Search, Settings, UserCheck, Users, X } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, ExternalLink, Flag, LayoutDashboard, Newspaper, Plus, Search, Settings, UserCheck, Users, X } from "lucide-react";
+import { Feed, type FeedModeration } from "@/components/fief/feed";
 import { FiefEventShare } from "@/components/board/fief/FiefEventShare";
 import { unwrap } from "@/lib/board/actionResult";
 import { Toggle } from "@/components/board/Toggle";
@@ -11,6 +12,10 @@ import {
   getFiefOverview,
   listFiefApplications,
   listFiefEvents,
+  listFiefReports,
+  moderateFiefComment,
+  moderateFiefPost,
+  resolveFiefReport,
   listFiefMembers,
   refuseFiefApplication,
   saveFiefFunction,
@@ -19,6 +24,7 @@ import {
   updateFiefSettings,
   type FiefApplicationRow,
   type FiefEventRow,
+  type FiefReportRow,
   type FiefAudience,
   type FiefMemberRow,
   type FiefOverview,
@@ -28,7 +34,7 @@ import {
 // demandes d'adhésion, membres, réglages (mineures, charte, fonctions). Fil, documents et
 // événements « Visible sur FIEF » arrivent avec les lots suivants. Site des membres : fief.lgef.fr.
 
-type Tab = "home" | "requests" | "members" | "events" | "settings";
+type Tab = "home" | "requests" | "members" | "feed" | "events" | "settings";
 
 const PUBLIC_URL = (process.env.NEXT_PUBLIC_FIEF_URL || "").replace(/\/+$/, "") || "/fief";
 
@@ -59,6 +65,7 @@ export function FiefScreen() {
     { id: "home", label: "Tableau de bord", icon: LayoutDashboard },
     { id: "requests", label: "Demandes", icon: UserCheck, badge: overview?.counts.pending },
     { id: "members", label: "Membres", icon: Users },
+    { id: "feed", label: "Fil", icon: Newspaper },
     { id: "events", label: "Événements", icon: CalendarDays },
     { id: "settings", label: "Réglages", icon: Settings },
   ];
@@ -122,12 +129,13 @@ export function FiefScreen() {
               </div>
             )}
           </section>
-          <p className="text-xs text-ink-4">Fil d&apos;actualités et documents : prochaines étapes.</p>
+          <p className="text-xs text-ink-4">Documents : prochaine étape.</p>
         </>
       )}
 
       {overview && tab === "requests" && <RequestsTab labels={functionLabels} onChanged={reload} />}
       {overview && tab === "members" && <MembersTab labels={functionLabels} onChanged={reload} />}
+      {overview && tab === "feed" && <FeedTab />}
       {overview && tab === "events" && <EventsTab />}
       {overview && tab === "settings" && <SettingsTab overview={overview} onSaved={reload} />}
     </div>
@@ -676,5 +684,77 @@ function RecipientsSection({ overview, onSaved }: { overview: FiefOverview; onSa
         {state.msg && <span className={`text-xs font-semibold ${state.ok ? "text-good" : "text-bad"}`}>{state.msg}</span>}
       </div>
     </section>
+  );
+}
+
+const MODERATION: FeedModeration = {
+  setPost: async (postId, change) => {
+    const r = await moderateFiefPost(postId, change);
+    return r.ok ? null : r.error;
+  },
+  setComment: async (commentId, hidden) => {
+    const r = await moderateFiefComment(commentId, hidden);
+    return r.ok ? null : r.error;
+  },
+};
+
+/** Fil FIEF vu par l'équipe : signalements ouverts, puis le fil avec épingler / masquer / supprimer. */
+function FeedTab() {
+  const [reports, setReports] = useState<FiefReportRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [feedKey, setFeedKey] = useState(0);
+
+  const load = useCallback(() => {
+    listFiefReports().then((r) => (r.ok ? setReports(r.data) : setError(r.error)));
+  }, []);
+  useEffect(load, [load]);
+
+  const resolve = async (r: FiefReportRow, hide: boolean) => {
+    if (hide && r.kind !== "message") {
+      const res = r.kind === "post" ? await moderateFiefPost(r.targetId, { hidden: true }) : await moderateFiefComment(r.targetId, true);
+      if (!res.ok) return setError(res.error);
+      setFeedKey((k) => k + 1);
+    }
+    const res = await resolveFiefReport(r.id);
+    if (!res.ok) return setError(res.error);
+    load();
+  };
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
+      <div className="order-2 rounded-card border border-line bg-[#F3F6FB] p-4 lg:order-1">
+        <Feed key={feedKey} moderation={MODERATION} />
+      </div>
+      <section className="order-1 h-fit space-y-3 rounded-card border border-line bg-card p-4 lg:order-2">
+        <h2 className="flex items-center gap-2 font-extrabold text-ink">
+          <Flag size={16} className="text-red" /> Signalements
+          {!!reports?.length && <span className="rounded-full bg-red px-1.5 text-[11px] text-white">{reports.length}</span>}
+        </h2>
+        {error && <p className="text-xs text-bad">{error}</p>}
+        {reports === null && !error && <p className="text-sm text-ink-3">Chargement…</p>}
+        {reports?.length === 0 && <p className="text-sm text-ink-3">Aucun signalement en attente.</p>}
+        {reports?.map((r) => (
+          <div key={r.id} className="space-y-2 rounded-btn border border-line p-3 text-sm">
+            <p className="text-xs text-ink-3">
+              {r.reporter} a signalé {r.kind === "post" ? "une publication" : r.kind === "comment" ? "un commentaire" : "un message privé"} de <strong className="text-ink">{r.author}</strong> ·{" "}
+              {fmtDate(r.createdAt)}
+            </p>
+            <p className="whitespace-pre-line rounded-btn bg-panel px-2.5 py-2 text-ink-2">{r.excerpt}</p>
+            {r.reason && <p className="text-xs text-ink-3">Motif : {r.reason}</p>}
+            <div className="flex flex-wrap gap-2">
+              {r.kind !== "message" && !r.hidden && (
+                <button onClick={() => void resolve(r, true)} className="rounded-btn bg-bad px-2.5 py-1 text-xs font-bold text-white">
+                  Masquer et clore
+                </button>
+              )}
+              <button onClick={() => void resolve(r, false)} className="rounded-btn border border-line px-2.5 py-1 text-xs font-semibold text-ink-2 hover:bg-hover">
+                {r.kind === "message" ? "Traité" : "Laisser et clore"}
+              </button>
+            </div>
+          </div>
+        ))}
+        <p className="text-[11px] text-ink-4">Les messages privés ne sont jamais visibles de l&apos;équipe, sauf un message signalé, montré ici.</p>
+      </section>
+    </div>
   );
 }

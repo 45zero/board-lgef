@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import { CalendarDays, FileText, Home, LogOut, User } from "lucide-react";
+import { CalendarDays, FileText, Home, LogOut, MessageCircle, User } from "lucide-react";
 import { BellLink } from "@/components/fief/notifications";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
@@ -128,6 +128,7 @@ export function useFiefMe() {
 const TABS = [
   { path: "/", label: "Accueil", icon: Home },
   { path: "/calendrier", label: "Calendrier", icon: CalendarDays },
+  { path: "/messages", label: "Messages", icon: MessageCircle },
   { path: "/documents", label: "Documents", icon: FileText },
   { path: "/profil", label: "Profil", icon: User },
 ];
@@ -167,7 +168,7 @@ export function MemberShell({ children }: { children: ReactNode }) {
       </header>
       <main className="mx-auto max-w-6xl px-4 py-5">{children}</main>
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-[#DCE3EF] bg-white pb-[env(safe-area-inset-bottom)] md:hidden">
-        <div className="mx-auto grid max-w-md grid-cols-4">
+        <div className="mx-auto grid max-w-md grid-cols-5">
           {TABS.map((t) => {
             const active = current === t.path;
             return (

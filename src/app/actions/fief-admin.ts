@@ -574,3 +574,107 @@ export async function listFiefEvents(): Promise<ActionResult<FiefEventRow[]>> {
     });
   });
 }
+
+// ── Modération du fil (lot 3, sql/2026-11-13_fief_social.sql) ──────────────────────────────────────
+
+/** Épingler / masquer une publication (masquée : visible de son autrice et de l'équipe seulement). */
+export async function moderateFiefPost(postId: string, change: { pinned?: boolean; hidden?: boolean; reason?: string }): Promise<ActionResult<null>> {
+  return toResult(async () => {
+    const userId = await requireManager();
+    const patch: { pinned?: boolean; hidden_at?: string | null; hidden_by?: string | null; hidden_reason?: string | null } = {};
+    if (change.pinned !== undefined) patch.pinned = change.pinned;
+    if (change.hidden !== undefined) {
+      patch.hidden_at = change.hidden ? new Date().toISOString() : null;
+      patch.hidden_by = change.hidden ? userId : null;
+      patch.hidden_reason = change.hidden ? change.reason?.trim().slice(0, 500) || null : null;
+    }
+    const { error } = await createServiceClient().from("fief_posts").update(patch).eq("id", postId);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+}
+
+export async function moderateFiefComment(commentId: string, hidden: boolean): Promise<ActionResult<null>> {
+  return toResult(async () => {
+    const userId = await requireManager();
+    const { error } = await createServiceClient()
+      .from("fief_comments")
+      .update({ hidden_at: hidden ? new Date().toISOString() : null, hidden_by: hidden ? userId : null })
+      .eq("id", commentId);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+}
+
+export interface FiefReportRow {
+  id: string;
+  createdAt: string;
+  reporter: string;
+  reason: string | null;
+  kind: "post" | "comment" | "message";
+  targetId: string;
+  /** Texte signalé (le message privé signalé n'est montré qu'ici). */
+  excerpt: string;
+  author: string;
+  postId: string | null;
+  hidden: boolean;
+}
+
+/** Signalements ouverts, avec le contenu signalé. */
+export async function listFiefReports(): Promise<ActionResult<FiefReportRow[]>> {
+  return toResult(async () => {
+    await requireManager();
+    const service = createServiceClient();
+    const { data: reports, error } = await service.from("fief_reports").select("*").eq("status", "open").order("created_at", { ascending: false }).limit(100);
+    if (error) throw new Error(error.message);
+    const rows = reports ?? [];
+    const postIds = rows.map((r) => r.post_id).filter((x): x is string => !!x);
+    const commentIds = rows.map((r) => r.comment_id).filter((x): x is string => !!x);
+    const messageIds = rows.map((r) => r.message_id).filter((x): x is string => !!x);
+    const [{ data: posts }, { data: comments }, { data: messages }] = await Promise.all([
+      postIds.length ? service.from("fief_posts").select("id, author_id, as_team, body, hidden_at").in("id", postIds) : Promise.resolve({ data: [] }),
+      commentIds.length ? service.from("fief_comments").select("id, post_id, author_id, as_team, body, hidden_at").in("id", commentIds) : Promise.resolve({ data: [] }),
+      messageIds.length ? service.from("fief_messages").select("id, sender_id, body").in("id", messageIds) : Promise.resolve({ data: [] }),
+    ]);
+    const people = new Set<string>(rows.map((r) => r.reporter_id));
+    for (const p of posts ?? []) people.add(p.author_id);
+    for (const c of comments ?? []) people.add(c.author_id);
+    for (const m of messages ?? []) people.add(m.sender_id);
+    const { data: members } = await service.from("fief_members").select("user_id, first_name, last_name").in("user_id", [...people]);
+    const name = (id: string, team = false) => {
+      if (team) return "Équipe FIEF";
+      const m = (members ?? []).find((x) => x.user_id === id);
+      return m ? `${m.first_name} ${m.last_name}` : "Équipe FIEF";
+    };
+    return rows.map((r) => {
+      const post = (posts ?? []).find((p) => p.id === r.post_id);
+      const comment = (comments ?? []).find((c) => c.id === r.comment_id);
+      const message = (messages ?? []).find((m) => m.id === r.message_id);
+      const kind: FiefReportRow["kind"] = r.post_id ? "post" : r.comment_id ? "comment" : "message";
+      return {
+        id: r.id,
+        createdAt: r.created_at,
+        reporter: name(r.reporter_id),
+        reason: r.reason,
+        kind,
+        targetId: (r.post_id ?? r.comment_id ?? r.message_id)!,
+        excerpt: (post?.body ?? comment?.body ?? message?.body ?? "(contenu supprimé)").slice(0, 600),
+        author: post ? name(post.author_id, post.as_team) : comment ? name(comment.author_id, comment.as_team) : message ? name(message.sender_id) : "—",
+        postId: post?.id ?? comment?.post_id ?? null,
+        hidden: !!(post?.hidden_at ?? comment?.hidden_at),
+      };
+    });
+  });
+}
+
+export async function resolveFiefReport(reportId: string): Promise<ActionResult<null>> {
+  return toResult(async () => {
+    const userId = await requireManager();
+    const { error } = await createServiceClient()
+      .from("fief_reports")
+      .update({ status: "resolved", resolved_by: userId, resolved_at: new Date().toISOString() })
+      .eq("id", reportId);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+}

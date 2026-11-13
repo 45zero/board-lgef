@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { CalendarDays, FileText, Newspaper, UserPlus, LogIn, Users, Bell, Smartphone } from "lucide-react";
-import { ComingSoon, Crest, MemberGate, useFiefHref, useFiefMe, Wordmark } from "@/components/fief/ui";
+import { Crest, MemberGate, useFiefHref, useFiefMe, Wordmark } from "@/components/fief/ui";
+import { Feed } from "@/components/fief/feed";
 import { PushToggle } from "@/components/fief/notifications";
 
 // Accueil FIEF : écran de bienvenue (pas connectée) ou espace membre (connectée et validée).
@@ -70,7 +73,7 @@ function Welcome() {
 function MemberHome({ firstName }: { firstName: string }) {
   const href = useFiefHref();
   const tiles = [
-    { icon: Newspaper, title: "Fil d'actu", text: "Actualités, partages et échanges", path: "/" },
+    { icon: Newspaper, title: "Fil d'actu", text: "Actualités, partages et échanges", path: "/#fil" },
     { icon: FileText, title: "Documents", text: "Mes documents et documents partagés", path: "/documents" },
     { icon: CalendarDays, title: "Calendrier", text: "Événements et rencontres", path: "/calendrier" },
   ];
@@ -102,12 +105,19 @@ function MemberHome({ firstName }: { firstName: string }) {
           </Link>
         ))}
       </div>
-      <h2 className="pt-2 text-lg font-extrabold">Fil d&apos;actualités</h2>
-      <ComingSoon
-        icon={Newspaper}
-        title="Le fil d'actualités arrive bientôt"
-        text="Vous pourrez y publier des messages et des photos, commenter et réagir aux publications des autres membres."
-      />
+      <h2 id="fil" className="scroll-mt-20 pt-2 text-lg font-extrabold">
+        Fil d&apos;actualités
+      </h2>
+      <Suspense fallback={null}>
+        <MemberFeed />
+      </Suspense>
     </div>
   );
+}
+
+/** Fil des membres ; lien d'une notification (?post=…) : publication ouverte avec ses commentaires. */
+function MemberFeed() {
+  const href = useFiefHref();
+  const focus = useSearchParams().get("post");
+  return <Feed focusPostId={focus} messageHref={(id) => href(`/messages?to=${id}`)} />;
 }
