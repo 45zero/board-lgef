@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EyeOff, Flag, Heart, ImagePlus, Loader2, MessageCircle, MoreHorizontal, Pencil, Pin, Send, Trash2, X } from "lucide-react";
+import { Check, EyeOff, Flag, Globe, Heart, ImagePlus, Loader2, Lock, MessageCircle, MoreHorizontal, Pencil, Pin, Search, Send, Trash2, Users, X } from "lucide-react";
+import { MentionTextarea, TextWithMentions, keptMentions, type Mention } from "@/components/fief/mentions";
+import { foldText, useDirectory } from "@/components/fief/directory";
 import { createClient } from "@/lib/supabase/client";
 
 // Fil d'actualités FIEF (sql/2026-11-13_fief_social.sql) : publier (texte + photos), aimer, commenter,
@@ -29,6 +31,9 @@ interface FeedPost {
   liked: boolean;
   comment_count: number;
   mine: boolean;
+  audience: "all" | "custom" | "private";
+  audience_count: number;
+  mentions: Mention[];
 }
 
 interface FeedComment {
@@ -38,6 +43,7 @@ interface FeedComment {
   hidden: boolean;
   created_at: string;
   mine: boolean;
+  mentions: Mention[];
 }
 
 export interface FeedModeration {
@@ -174,6 +180,10 @@ export function Feed({
 
 function Composer({ me, canPostAsTeam, onPosted }: { me?: { id: string; firstName: string }; canPostAsTeam: boolean; onPosted: () => void }) {
   const [body, setBody] = useState("");
+  const [mentions, setMentions] = useState<Mention[]>([]);
+  const [audience, setAudience] = useState<"all" | "custom" | "private">("all");
+  const [audienceIds, setAudienceIds] = useState<string[]>([]);
+  const [picking, setPicking] = useState(false);
   const [photos, setPhotos] = useState<{ key: string; preview: string; id: string | null; error?: string }[]>([]);
   const [asTeam, setAsTeam] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -207,9 +217,18 @@ function Composer({ me, canPostAsTeam, onPosted }: { me?: { id: string; firstNam
     setBusy(true);
     setError(null);
     try {
-      await api("/api/fief/feed", { action: "post", body, mediaIds: photos.filter((p) => p.id).map((p) => p.id), asTeam: canPostAsTeam && asTeam });
+      await api("/api/fief/feed", {
+        action: "post",
+        body,
+        mediaIds: photos.filter((p) => p.id).map((p) => p.id),
+        asTeam: canPostAsTeam && asTeam,
+        audience,
+        audienceIds: audience === "custom" ? audienceIds : [],
+        mentionIds: keptMentions(body, mentions).map((m) => m.id),
+      });
       photos.forEach((p) => URL.revokeObjectURL(p.preview));
       setBody("");
+      setMentions([]);
       setPhotos([]);
       onPosted();
     } catch (e) {
@@ -222,9 +241,12 @@ function Composer({ me, canPostAsTeam, onPosted }: { me?: { id: string; firstNam
     <div className="rounded-2xl bg-f-surface p-4 border border-f-border">
       <div className="flex items-start gap-2.5">
         {me && <Avatar author={{ id: me.id, team: false }} size={40} />}
-        <textarea
+        <MentionTextarea
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onValueChange={setBody}
+          mentions={mentions}
+          onMentionsChange={setMentions}
+          excludeId={me?.id}
           rows={body ? Math.min(8, Math.max(2, body.split("\n").length)) : 1}
           maxLength={5000}
           id="fief-composer"
@@ -275,6 +297,28 @@ function Composer({ me, canPostAsTeam, onPosted }: { me?: { id: string; firstNam
         >
           <ImagePlus size={18} /> Photos
         </button>
+        <div className="flex items-center gap-1.5">
+          <AudienceIcon audience={audience} />
+          <select
+            value={audience}
+            onChange={(e) => {
+              const v = e.target.value as typeof audience;
+              setAudience(v);
+              if (v === "custom") setPicking(true);
+            }}
+            aria-label="Qui peut voir cette publication"
+            className="rounded-lg bg-f-subtle px-2 py-1.5 text-sm font-semibold text-f-text outline-none"
+          >
+            <option value="all">Tous les membres</option>
+            <option value="custom">Certaines personnes…</option>
+            <option value="private">Moi uniquement</option>
+          </select>
+          {audience === "custom" && (
+            <button type="button" onClick={() => setPicking(true)} className="text-sm font-semibold text-f-link hover:underline">
+              {audienceIds.length} personne{audienceIds.length > 1 ? "s" : ""}
+            </button>
+          )}
+        </div>
         {canPostAsTeam && (
           <label className="flex items-center gap-2 text-sm text-f-muted">
             <input type="checkbox" checked={asTeam} onChange={(e) => setAsTeam(e.target.checked)} className="accent-f-accent" /> Au nom de l&apos;équipe FIEF
@@ -288,6 +332,83 @@ function Composer({ me, canPostAsTeam, onPosted }: { me?: { id: string; firstNam
         >
           <Send size={15} /> {busy ? "Publication…" : uploading ? "Envoi des photos…" : "Publier"}
         </button>
+      </div>
+      {picking && (
+        <AudiencePicker
+          excludeId={me?.id}
+          initial={audienceIds}
+          onClose={(ids) => {
+            setPicking(false);
+            if (ids) setAudienceIds(ids);
+            if ((ids ?? audienceIds).length === 0) setAudience("all");
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function AudienceIcon({ audience, size = 15 }: { audience: "all" | "custom" | "private"; size?: number }) {
+  const Icon = audience === "all" ? Globe : audience === "custom" ? Users : Lock;
+  return <Icon size={size} className="shrink-0 text-f-muted" aria-hidden />;
+}
+
+/** Choix des personnes qui verront une publication « Certaines personnes ». */
+function AudiencePicker({ excludeId, initial, onClose }: { excludeId?: string; initial: string[]; onClose: (ids: string[] | null) => void }) {
+  const people = useDirectory();
+  const [ids, setIds] = useState<string[]>(initial);
+  const [q, setQ] = useState("");
+  const shown = (people ?? []).filter(
+    (p) => p.user_id !== excludeId && (!q.trim() || foldText(`${p.first_name} ${p.last_name} ${p.club_name ?? ""}`).includes(foldText(q.trim())))
+  );
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={() => onClose(null)}>
+      <div className="flex max-h-[80dvh] w-full max-w-md flex-col overflow-hidden rounded-t-3xl bg-f-surface text-f-text sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 pb-2 pt-5">
+          <h2 className="text-lg font-extrabold">Qui peut voir cette publication ?</h2>
+          <button onClick={() => onClose(null)} aria-label="Fermer" className="rounded-full p-1.5 hover:bg-f-subtle">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="px-5 pb-3">
+          <div className="relative">
+            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-f-faint" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nom ou club" className="w-full rounded-xl bg-f-subtle py-2.5 pl-10 pr-3 text-[15px] outline-none" />
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto px-2">
+          {people === null && <p className="px-3 py-4 text-sm text-f-muted">Chargement…</p>}
+          {shown.map((p) => {
+            const on = ids.includes(p.user_id);
+            return (
+              <button
+                key={p.user_id}
+                type="button"
+                onClick={() => setIds((prev) => (on ? prev.filter((x) => x !== p.user_id) : [...prev, p.user_id]))}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-f-subtle"
+              >
+                <Avatar author={{ id: p.user_id, team: false }} size={36} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">
+                    {p.first_name} {p.last_name}
+                  </span>
+                  {p.club_name && <span className="block truncate text-xs text-f-muted">{p.club_name}</span>}
+                </span>
+                <span className={`flex h-6 w-6 items-center justify-center rounded-full border-2 ${on ? "border-f-accent bg-f-accent text-white" : "border-f-border-strong"}`}>
+                  {on && <Check size={14} strokeWidth={3} />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-3 border-t border-f-border px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+          <span className="text-sm text-f-muted">
+            {ids.length} sélectionnée{ids.length > 1 ? "s" : ""}
+          </span>
+          <button onClick={() => onClose(ids)} className="ml-auto rounded-xl bg-f-accent px-4 py-2 text-sm font-bold text-white">
+            Valider
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -383,8 +504,9 @@ function PostCard({
     });
   const saveEdit = () =>
     run(async () => {
-      await api("/api/fief/feed", { action: "edit", postId: post.id, body: draft });
-      onChange({ body: draft.trim(), edited_at: new Date().toISOString() });
+      const kept = keptMentions(draft, post.mentions ?? []);
+      await api("/api/fief/feed", { action: "edit", postId: post.id, body: draft, mentionIds: kept.map((m) => m.id) });
+      onChange({ body: draft.trim(), edited_at: new Date().toISOString(), mentions: kept });
       setEditing(false);
     });
   const moderate = (change: { pinned?: boolean; hidden?: boolean }) =>
@@ -409,7 +531,15 @@ function PostCard({
               post.author.name
             )}
           </p>
-          <p className="text-xs text-f-muted">{[post.author.club, ago(post.created_at), post.edited_at ? "modifié" : null].filter(Boolean).join(" · ")}</p>
+          <p className="flex items-center gap-1 text-xs text-f-muted">
+            {[post.author.club, ago(post.created_at), post.edited_at ? "modifié" : null].filter(Boolean).join(" · ")}
+            <span
+              title={post.audience === "all" ? "Tous les membres" : post.audience === "custom" ? `${post.audience_count} personne(s) choisie(s)` : "Moi uniquement"}
+              className="inline-flex items-center gap-1"
+            >
+              · <AudienceIcon audience={post.audience} size={12} />
+            </span>
+          </p>
         </div>
         {post.pinned && (
           <span className="flex items-center gap-1 rounded-full bg-f-subtle px-2 py-0.5 text-[11px] font-semibold text-f-link">
@@ -482,7 +612,11 @@ function PostCard({
           </div>
         </div>
       ) : (
-        post.body && <p className="mt-3 whitespace-pre-line break-words text-[15px] leading-relaxed">{post.body}</p>
+        post.body && (
+          <p className="mt-3 whitespace-pre-line break-words text-[15px] leading-relaxed">
+            <TextWithMentions body={post.body} mentions={post.mentions ?? []} />
+          </p>
+        )
       )}
       <PhotoGrid media={post.media} onOpen={setLightbox} />
       {error && <p className="mt-2 text-sm text-f-danger">{error}</p>}
@@ -514,6 +648,7 @@ function MenuItem({ icon: Icon, children, onClick, danger }: { icon: typeof Pin;
 function Comments({ postId, moderation, onCount }: { postId: string; moderation?: FeedModeration; onCount: (n: number) => void }) {
   const [list, setList] = useState<FeedComment[] | null>(null);
   const [body, setBody] = useState("");
+  const [mentions, setMentions] = useState<Mention[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -537,8 +672,9 @@ function Comments({ postId, moderation, onCount }: { postId: string; moderation?
     setBusy(true);
     setError(null);
     try {
-      await api("/api/fief/feed", { action: "comment", postId, body, asTeam: !!moderation });
+      await api("/api/fief/feed", { action: "comment", postId, body, asTeam: !!moderation, mentionIds: keptMentions(body, mentions).map((m) => m.id) });
       setBody("");
+      setMentions([]);
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Commentaire impossible.");
@@ -579,7 +715,9 @@ function Comments({ postId, moderation, onCount }: { postId: string; moderation?
                 {c.author.name}
                 {c.hidden && <span className="ml-2 text-[11px] font-semibold text-f-danger">masqué</span>}
               </p>
-              <p className="whitespace-pre-line break-words text-sm">{c.body}</p>
+              <p className="whitespace-pre-line break-words text-sm">
+                <TextWithMentions body={c.body} mentions={c.mentions ?? []} />
+              </p>
             </div>
             <div className="mt-0.5 flex gap-3 px-2 text-[11px] font-semibold text-f-faint">
               <span>{ago(c.created_at)}</span>
@@ -604,9 +742,11 @@ function Comments({ postId, moderation, onCount }: { postId: string; moderation?
       ))}
       {error && <p className="text-sm text-f-danger">{error}</p>}
       <div className="flex items-end gap-2">
-        <textarea
+        <MentionTextarea
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onValueChange={setBody}
+          mentions={mentions}
+          onMentionsChange={setMentions}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();

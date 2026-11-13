@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Bell, CalendarDays, Info, UserCheck } from "lucide-react";
+import { AtSign, Bell, CalendarDays, Info, MessageCircle, Newspaper, UserCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ComingSoon, useFiefHref } from "@/components/fief/ui";
 import { MemberGate } from "@/components/fief/shell";
@@ -12,7 +12,7 @@ import { PushToggle } from "@/components/fief/notifications";
 
 interface Notif {
   id: string;
-  kind: "event" | "membership" | "info";
+  kind: "event" | "membership" | "info" | "comment" | "message" | "post" | "mention";
   title: string;
   body: string | null;
   route: string | null;
@@ -30,7 +30,8 @@ function ago(iso: string) {
   return d < 7 ? `Il y a ${d} j` : new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 }
 
-const ICONS = { event: CalendarDays, membership: UserCheck, info: Info } as const;
+// Une icône par type ; type inconnu (ajouté plus tard) : icône par défaut, jamais de plantage.
+const ICONS: Record<string, typeof Info> = { event: CalendarDays, membership: UserCheck, info: Info, comment: MessageCircle, message: MessageCircle, post: Newspaper, mention: AtSign };
 
 function Notifications() {
   const href = useFiefHref();
@@ -68,7 +69,7 @@ function Notifications() {
       {rows && shown.length === 0 && <ComingSoon icon={Bell} title="Rien de nouveau" text="Vous serez prévenue ici dès qu'un événement FIEF vous concerne." />}
       <div className="space-y-2">
         {shown.map((n) => {
-          const I = ICONS[n.kind];
+          const I = ICONS[n.kind] ?? Bell;
           const content = (
             <>
               <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${n.read_at ? "bg-f-subtle text-f-link" : "bg-f-danger-bg text-[#D7262E]"}`}>

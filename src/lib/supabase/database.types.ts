@@ -526,7 +526,7 @@ export type Database = {
         Row: {
           id: string
           user_id: string
-          kind: "event" | "membership" | "info" | "comment" | "message" | "post"
+          kind: "event" | "membership" | "info" | "comment" | "message" | "post" | "mention"
           title: string
           body: string | null
           route: string | null
@@ -537,7 +537,7 @@ export type Database = {
         Insert: {
           id?: string
           user_id: string
-          kind: "event" | "membership" | "info" | "comment" | "message" | "post"
+          kind: "event" | "membership" | "info" | "comment" | "message" | "post" | "mention"
           title: string
           body?: string | null
           route?: string | null
@@ -555,9 +555,9 @@ export type Database = {
       }
       // FIEF lot 3 (sql/2026-11-13_fief_social.sql) — ajout manuel.
       fief_posts: {
-        Row: { id: string; author_id: string; as_team: boolean; body: string; pinned: boolean; hidden_at: string | null; hidden_by: string | null; hidden_reason: string | null; edited_at: string | null; created_at: string }
-        Insert: { id?: string; author_id: string; as_team?: boolean; body?: string; pinned?: boolean; hidden_at?: string | null; hidden_by?: string | null; hidden_reason?: string | null }
-        Update: { body?: string; pinned?: boolean; hidden_at?: string | null; hidden_by?: string | null; hidden_reason?: string | null; edited_at?: string | null }
+        Row: { id: string; author_id: string; as_team: boolean; body: string; pinned: boolean; hidden_at: string | null; hidden_by: string | null; hidden_reason: string | null; edited_at: string | null; created_at: string; audience: "all" | "custom" | "private"; audience_ids: string[]; mention_ids: string[] }
+        Insert: { id?: string; author_id: string; as_team?: boolean; body?: string; pinned?: boolean; hidden_at?: string | null; hidden_by?: string | null; hidden_reason?: string | null; audience?: "all" | "custom" | "private"; audience_ids?: string[]; mention_ids?: string[] }
+        Update: { body?: string; pinned?: boolean; hidden_at?: string | null; hidden_by?: string | null; hidden_reason?: string | null; edited_at?: string | null; mention_ids?: string[] }
         Relationships: []
       }
       fief_media: {
@@ -567,8 +567,8 @@ export type Database = {
         Relationships: []
       }
       fief_comments: {
-        Row: { id: string; post_id: string; author_id: string; as_team: boolean; body: string; hidden_at: string | null; hidden_by: string | null; created_at: string }
-        Insert: { id?: string; post_id: string; author_id: string; as_team?: boolean; body: string }
+        Row: { id: string; post_id: string; author_id: string; as_team: boolean; body: string; hidden_at: string | null; hidden_by: string | null; created_at: string; mention_ids: string[] }
+        Insert: { id?: string; post_id: string; author_id: string; as_team?: boolean; body: string; mention_ids?: string[] }
         Update: { hidden_at?: string | null; hidden_by?: string | null }
         Relationships: []
       }

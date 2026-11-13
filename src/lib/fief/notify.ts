@@ -8,7 +8,7 @@ import { sendFiefPush } from "@/lib/fief/push";
 
 export async function notifyFief(
   userIds: string[],
-  n: { kind: "comment" | "message" | "post" | "info"; title: string; body?: string | null; route: string; tag?: string; bell?: boolean }
+  n: { kind: "comment" | "message" | "post" | "info" | "mention"; title: string; body?: string | null; route: string; tag?: string; bell?: boolean }
 ) {
   const ids = [...new Set(userIds)];
   if (!ids.length) return;

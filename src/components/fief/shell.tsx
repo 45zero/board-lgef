@@ -3,11 +3,14 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Bell, CalendarDays, FileText, Heart, Home, LogOut, MessageCircle, Monitor, Moon, PlusSquare, Search, Sun, X } from "lucide-react";
+import { Bell, CalendarDays, FileText, Heart, Home, LogOut, Maximize2, MessageCircle, Minus, Monitor, Moon, PlusSquare, Search, Sun, X } from "lucide-react";
+import { ChatThread } from "@/components/fief/chat";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar } from "@/components/fief/feed";
 import { useFiefUnread } from "@/components/fief/notifications";
+import { useDirectory } from "@/components/fief/directory";
+export { loadDirectory, useDirectory, type DirectoryEntry } from "@/components/fief/directory";
 import { Crest, FiefButton, PublicFrame, useFiefHref, useFiefMe, type FiefMe } from "@/components/fief/ui";
 
 // Structure des pages membres de FIEF, dans l'esprit des réseaux sociaux (maquette Instagram fournie le 13/11) :
@@ -81,42 +84,18 @@ export function ThemeChoice() {
 
 // ── Données partagées (annuaire, conversations, événements) ───────────────────────────────────────────
 
-export interface DirectoryEntry {
-  user_id: string;
-  first_name: string;
-  last_name: string;
-  club_name: string | null;
-  joined_at: string;
-}
-
-let directoryPromise: Promise<DirectoryEntry[]> | null = null;
-export function loadDirectory() {
-  directoryPromise ??= Promise.resolve(createClient().rpc("fief_directory")).then(({ data }) => (data ?? []) as DirectoryEntry[]);
-  return directoryPromise;
-}
-
-export function useDirectory() {
-  const [list, setList] = useState<DirectoryEntry[] | null>(null);
-  useEffect(() => {
-    let alive = true;
-    void loadDirectory().then((l) => {
-      if (alive) setList(l);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-  return list;
-}
-
 interface ConversationLite {
   id: string;
-  other: { id: string; name: string; team: boolean };
+  other: { id: string; name: string; team: boolean; club: string | null };
   unread: number;
+  last_body: string | null;
+  last_at: string;
+  last_mine: boolean;
 }
 
 function useConversations() {
   const [convs, setConvs] = useState<ConversationLite[]>([]);
+  const [tick, setTick] = useState(0);
   const pathname = usePathname();
   useEffect(() => {
     let alive = true;
@@ -132,8 +111,8 @@ function useConversations() {
       alive = false;
       window.removeEventListener("focus", load);
     };
-  }, [pathname]);
-  return convs;
+  }, [pathname, tick]);
+  return { convs, refresh: () => setTick((t) => t + 1) };
 }
 
 interface UpcomingEvent {
@@ -445,28 +424,106 @@ function LeftSidebar({ me, unreadMessages, unreadNotifs }: { me: FiefMe; unreadM
   );
 }
 
-function MessagesPill({ convs, unread }: { convs: ConversationLite[]; unread: number }) {
+/** Chat en bas à droite (ordinateur), façon Messenger : pastille → liste des discussions → fenêtre de conversation. */
+function ChatDock({ me, convs, unread, onChanged }: { me: FiefMe; convs: ConversationLite[]; unread: number; onChanged: () => void }) {
   const href = useFiefHref();
   const current = useCurrentPath();
+  const [panel, setPanel] = useState(false);
+  const [active, setActive] = useState<ConversationLite | null>(null);
   if (current === "/messages") return null;
+
+  if (active)
+    return (
+      <div className="fixed bottom-0 right-6 z-40 hidden h-[480px] w-[340px] flex-col overflow-hidden rounded-t-2xl border border-f-border bg-f-surface shadow-2xl lg:flex">
+        <ChatThread
+          compact
+          meId={me.userId}
+          conversation={{ id: active.id, other: active.other }}
+          draftTo={null}
+          onSent={onChanged}
+          onRead={onChanged}
+          header={
+            <div className="flex items-center gap-2.5 border-b border-f-border px-3 py-2 shadow-sm">
+              <Avatar author={active.other} size={32} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-bold">{active.other.name}</span>
+                {active.other.club && <span className="block truncate text-[11px] text-f-muted">{active.other.club}</span>}
+              </span>
+              <Link href={href(`/messages?c=${active.id}`)} aria-label="Agrandir" title="Ouvrir dans Messages" className="rounded-full p-1.5 text-f-accent hover:bg-f-subtle">
+                <Maximize2 size={16} />
+              </Link>
+              <button onClick={() => setActive(null)} aria-label="Réduire" title="Réduire" className="rounded-full p-1.5 text-f-accent hover:bg-f-subtle">
+                <Minus size={18} />
+              </button>
+              <button
+                onClick={() => {
+                  setActive(null);
+                  setPanel(false);
+                }}
+                aria-label="Fermer"
+                className="rounded-full p-1.5 text-f-accent hover:bg-f-subtle"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          }
+        />
+      </div>
+    );
+
   return (
-    <Link
-      href={href("/messages")}
-      className="fixed bottom-6 right-6 z-30 hidden items-center gap-3 rounded-full border border-f-border bg-f-surface py-2.5 pl-5 pr-3 shadow-2xl transition hover:-translate-y-0.5 lg:flex"
-    >
-      <span className="relative">
-        <MessageCircle size={22} />
-        <Badge n={unread} />
-      </span>
-      <span className="font-extrabold">Messages</span>
-      <span className="flex -space-x-2">
-        {convs.slice(0, 3).map((c) => (
-          <span key={c.id} className="rounded-full ring-2 ring-f-surface">
-            <Avatar author={c.other} size={28} />
-          </span>
-        ))}
-      </span>
-    </Link>
+    <div className="fixed bottom-6 right-6 z-40 hidden flex-col items-end gap-3 lg:flex">
+      {panel && (
+        <div className="flex max-h-[min(520px,calc(100dvh-10rem))] w-[340px] flex-col overflow-hidden rounded-2xl border border-f-border bg-f-surface shadow-2xl">
+          <div className="flex items-center justify-between px-4 pb-2 pt-3">
+            <p className="text-xl font-extrabold">Discussions</p>
+            <Link href={href("/messages")} title="Ouvrir Messages" aria-label="Ouvrir Messages" className="rounded-full p-2 hover:bg-f-subtle">
+              <Maximize2 size={16} />
+            </Link>
+          </div>
+          <div className="flex-1 overflow-y-auto px-2 pb-2">
+            {convs.length === 0 && (
+              <p className="px-2 py-6 text-center text-sm text-f-muted">
+                Aucune discussion.{" "}
+                <Link href={href("/messages")} className="font-semibold text-f-link hover:underline">
+                  Écrire à une membre
+                </Link>
+              </p>
+            )}
+            {convs.map((c) => (
+              <button key={c.id} onClick={() => setActive(c)} className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-f-subtle">
+                <Avatar author={c.other} size={48} />
+                <span className="min-w-0 flex-1">
+                  <span className={`block truncate text-[15px] ${c.unread ? "font-extrabold" : "font-semibold"}`}>{c.other.name}</span>
+                  <span className={`block truncate text-[13px] ${c.unread ? "font-bold text-f-text" : "text-f-muted"}`}>
+                    {c.last_mine ? "Vous : " : ""}
+                    {c.last_body ?? "Nouvelle conversation"}
+                  </span>
+                </span>
+                {c.unread > 0 && <span className="h-3 w-3 shrink-0 rounded-full bg-f-accent" />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <button
+        onClick={() => setPanel((v) => !v)}
+        className="flex items-center gap-3 rounded-full border border-f-border bg-f-surface py-2.5 pl-5 pr-3 shadow-2xl transition hover:-translate-y-0.5"
+      >
+        <span className="relative">
+          <MessageCircle size={22} />
+          <Badge n={unread} />
+        </span>
+        <span className="font-extrabold">Messages</span>
+        <span className="flex -space-x-2">
+          {convs.slice(0, 3).map((c) => (
+            <span key={c.id} className="rounded-full ring-2 ring-f-surface">
+              <Avatar author={c.other} size={28} />
+            </span>
+          ))}
+        </span>
+      </button>
+    </div>
   );
 }
 
@@ -528,7 +585,7 @@ function MobileBottomNav({ me, unreadMessages }: { me: FiefMe; unreadMessages: n
 /** Espace connecté : barre du haut + colonne de gauche (ordinateur), en-tête + barre du bas (mobile). */
 export function MemberShell({ me, children }: { me: FiefMe; children: ReactNode }) {
   const unreadNotifs = useFiefUnread();
-  const convs = useConversations();
+  const { convs, refresh: refreshConvs } = useConversations();
   const unreadMessages = convs.filter((c) => c.unread > 0).length;
   useFiefTheme(); // applique le thème choisi (et suit le téléphone en « Auto »)
   return (
@@ -539,7 +596,7 @@ export function MemberShell({ me, children }: { me: FiefMe; children: ReactNode 
         <LeftSidebar me={me} unreadMessages={unreadMessages} unreadNotifs={unreadNotifs} />
         <main className="min-w-0 flex-1 px-3 py-4 sm:px-0 lg:py-4">{children}</main>
       </div>
-      <MessagesPill convs={convs} unread={unreadMessages} />
+      <ChatDock me={me} convs={convs} unread={unreadMessages} onChanged={refreshConvs} />
       <MobileBottomNav me={me} unreadMessages={unreadMessages} />
     </div>
   );
