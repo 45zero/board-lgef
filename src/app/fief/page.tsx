@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { CalendarDays, FileText, Newspaper, UserPlus, LogIn, Users, Bell, Smartphone } from "lucide-react";
-import { Crest, MemberGate, useFiefHref, useFiefMe, Wordmark } from "@/components/fief/ui";
+import { Crest, useFiefHref, useFiefMe, Wordmark, type FiefMe } from "@/components/fief/ui";
+import { AdsAside, MemberGate, StoriesRow } from "@/components/fief/shell";
 import { Feed } from "@/components/fief/feed";
-import { PushToggle } from "@/components/fief/notifications";
 
 // Accueil FIEF : écran de bienvenue (pas connectée) ou espace membre (connectée et validée).
 
@@ -14,7 +14,15 @@ export default function FiefHomePage() {
   const { user, loading } = useFiefMe();
   if (loading) return <div className="flex min-h-dvh items-center justify-center bg-[#0E2754]"><Crest size={72} className="animate-pulse" /></div>;
   if (!user) return <Welcome />;
-  return <MemberGate>{(me) => <MemberHome firstName={me.firstName} />}</MemberGate>;
+  return (
+    <MemberGate>
+      {(me) => (
+        <Suspense fallback={null}>
+          <MemberHome me={me} />
+        </Suspense>
+      )}
+    </MemberGate>
+  );
 }
 
 function Welcome() {
@@ -70,54 +78,28 @@ function Welcome() {
   );
 }
 
-function MemberHome({ firstName }: { firstName: string }) {
+function MemberHome({ me }: { me: FiefMe }) {
   const href = useFiefHref();
-  const tiles = [
-    { icon: Newspaper, title: "Fil d'actu", text: "Actualités, partages et échanges", path: "/#fil" },
-    { icon: FileText, title: "Documents", text: "Mes documents et documents partagés", path: "/documents" },
-    { icon: CalendarDays, title: "Calendrier", text: "Événements et rencontres", path: "/calendrier" },
-  ];
+  const params = useSearchParams();
+  const focus = params.get("post");
+  const publish = params.get("publier") === "1";
+  const openComposer = () => {
+    const el = document.getElementById("fief-composer");
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    el?.focus({ preventScroll: true });
+  };
+  // Bouton « + » de la barre mobile (?publier=1) : zone de publication ouverte d'emblée.
+  useEffect(() => {
+    if (publish) window.setTimeout(openComposer, 300);
+  }, [publish]);
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-extrabold">Bonjour {firstName} 👋</h1>
-        <p className="text-[#5B6B86]">Bienvenue sur votre espace FIEF</p>
+    <div className="flex justify-center gap-8">
+      <div className="w-full max-w-[680px] space-y-4">
+        <StoriesRow me={me} onPublish={openComposer} />
+        <Feed me={{ id: me.userId, firstName: me.firstName }} focusPostId={focus} messageHref={(id) => href(`/messages?to=${id}`)} />
       </div>
-      <PushToggle />
-      <div className="relative overflow-hidden rounded-3xl bg-[linear-gradient(120deg,#0E2754_0%,#1B3A73_100%)] p-6 text-white md:p-10">
-        <Crest size={150} className="pointer-events-none absolute -right-6 -top-4 opacity-20 md:right-8 md:top-4 md:opacity-90" />
-        <p className="text-sm font-semibold uppercase tracking-wider text-white/70">Bienvenue sur FIEF</p>
-        <p className="mt-1 max-w-md text-2xl font-extrabold md:text-3xl">Le réseau des femmes engagées du football en Grand Est</p>
-        <p className="mt-3 inline-block -skew-x-6 rounded-md bg-[#D7262E] px-3 py-1 text-sm font-bold italic">S&apos;engager • Partager • Grandir</p>
-      </div>
-      <div className="grid gap-3 md:grid-cols-3">
-        {tiles.map((t, i) => (
-          <Link
-            key={t.title}
-            href={href(t.path)}
-            className={`flex items-center gap-3 rounded-2xl p-5 shadow-sm md:flex-col md:items-start ${i === 0 ? "bg-[#0E2754] text-white" : "bg-white"}`}
-          >
-            <t.icon size={28} />
-            <span>
-              <span className="block text-lg font-extrabold">{t.title}</span>
-              <span className={`text-sm ${i === 0 ? "text-white/75" : "text-[#5B6B86]"}`}>{t.text}</span>
-            </span>
-          </Link>
-        ))}
-      </div>
-      <h2 id="fil" className="scroll-mt-20 pt-2 text-lg font-extrabold">
-        Fil d&apos;actualités
-      </h2>
-      <Suspense fallback={null}>
-        <MemberFeed />
-      </Suspense>
+      <AdsAside />
     </div>
   );
-}
-
-/** Fil des membres ; lien d'une notification (?post=…) : publication ouverte avec ses commentaires. */
-function MemberFeed() {
-  const href = useFiefHref();
-  const focus = useSearchParams().get("post");
-  return <Feed focusPostId={focus} messageHref={(id) => href(`/messages?to=${id}`)} />;
 }

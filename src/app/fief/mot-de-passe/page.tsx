@@ -44,13 +44,13 @@ function SetPassword() {
     window.location.replace(href("/"));
   };
 
-  if (status === "verifying") return <p className="text-center text-sm text-[#5B6B86]">Vérification du lien…</p>;
+  if (status === "verifying") return <p className="text-center text-sm text-f-muted">Vérification du lien…</p>;
   if (status === "invalid")
     return (
       <>
         <h1 className="text-xl font-extrabold">Lien expiré</h1>
-        <p className="mt-2 text-sm text-[#5B6B86]">Ce lien n&apos;est plus valable (il ne sert qu&apos;une fois). Demandez-en un nouveau depuis la page de connexion.</p>
-        <a href={href("/connexion")} className="mt-5 flex w-full items-center justify-center rounded-xl bg-[#0E2754] px-4 py-3 text-[15px] font-bold text-white">
+        <p className="mt-2 text-sm text-f-muted">Ce lien n&apos;est plus valable (il ne sert qu&apos;une fois). Demandez-en un nouveau depuis la page de connexion.</p>
+        <a href={href("/connexion")} className="mt-5 flex w-full items-center justify-center rounded-xl bg-f-accent px-4 py-3 text-[15px] font-bold text-white">
           Aller à la connexion
         </a>
       </>
@@ -59,7 +59,7 @@ function SetPassword() {
     <form onSubmit={submit} className="space-y-4">
       <div>
         <h1 className="text-xl font-extrabold">{type === "invite" ? "Bienvenue sur FIEF !" : "Nouveau mot de passe"}</h1>
-        <p className="mt-1 text-sm text-[#5B6B86]">Choisissez votre mot de passe (8 caractères minimum).</p>
+        <p className="mt-1 text-sm text-f-muted">Choisissez votre mot de passe (8 caractères minimum).</p>
       </div>
       <label className="block">
         <FiefLabel>Mot de passe</FiefLabel>
@@ -69,7 +69,7 @@ function SetPassword() {
         <FiefLabel>Confirmer</FiefLabel>
         <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={fiefInput} />
       </label>
-      {error && <p className="rounded-xl bg-[#FDECEC] px-3 py-2 text-sm text-[#B91F26]">{error}</p>}
+      {error && <p className="rounded-xl bg-f-danger-bg px-3 py-2 text-sm text-f-danger">{error}</p>}
       <FiefButton type="submit" disabled={saving}>
         {saving ? "Enregistrement…" : "Enregistrer et entrer"}
       </FiefButton>

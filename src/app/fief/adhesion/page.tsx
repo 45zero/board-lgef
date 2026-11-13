@@ -68,16 +68,16 @@ export default function FiefApplyPage() {
   if (done)
     return (
       <PublicFrame>
-        <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#E6F4EC] text-[#1F7A4D]">
+        <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-f-success-bg text-f-success">
           <Check size={30} strokeWidth={3} />
         </span>
         <h1 className="text-center text-xl font-extrabold">Demande envoyée !</h1>
-        <p className="mt-2 text-center text-sm text-[#5B6B86]">
+        <p className="mt-2 text-center text-sm text-f-muted">
           {done.awaitingParent
             ? "Nous avons envoyé un e-mail à votre parent ou responsable légal. Dès qu'il aura donné son accord, l'équipe FIEF examinera votre demande et vous répondra par e-mail."
             : "L'équipe FIEF de la Ligue va examiner votre demande. Vous recevrez un e-mail dès qu'elle sera acceptée, avec le lien pour choisir votre mot de passe."}
         </p>
-        <Link href={href("/")} className="mt-6 flex w-full items-center justify-center rounded-xl border-2 border-[#0E2754] px-4 py-3 text-[15px] font-bold text-[#0E2754]">
+        <Link href={href("/")} className="mt-6 flex w-full items-center justify-center rounded-xl border-2 border-f-accent px-4 py-3 text-[15px] font-bold text-f-text">
           Retour à l&apos;accueil
         </Link>
       </PublicFrame>
@@ -86,10 +86,10 @@ export default function FiefApplyPage() {
   return (
     <PublicFrame wide>
       <h1 className="text-2xl font-extrabold">Demander une adhésion</h1>
-      <p className="mt-1 text-sm text-[#5B6B86]">
+      <p className="mt-1 text-sm text-f-muted">
         FIEF réunit les femmes engagées dans le football du Grand Est : joueuses, dirigeantes, éducatrices, arbitres, bénévoles… Votre demande est examinée par l&apos;équipe FIEF de la Ligue.
       </p>
-      {loadError && <p className="mt-4 rounded-xl bg-[#FDECEC] px-3 py-2 text-sm text-[#B91F26]">{loadError}</p>}
+      {loadError && <p className="mt-4 rounded-xl bg-f-danger-bg px-3 py-2 text-sm text-f-danger">{loadError}</p>}
 
       <form onSubmit={submit} className="relative mt-6 space-y-5">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -114,24 +114,24 @@ export default function FiefApplyPage() {
             <input required type="date" max={new Date().toISOString().slice(0, 10)} value={birthDate} onChange={(e) => setBirthDate(e.target.value)} className={fiefInput} />
           </label>
         </div>
-        {elig && !elig.ok && <p className="rounded-xl bg-[#FDECEC] px-3 py-2 text-sm text-[#B91F26]">{elig.reason}</p>}
+        {elig && !elig.ok && <p className="rounded-xl bg-f-danger-bg px-3 py-2 text-sm text-f-danger">{elig.reason}</p>}
 
         <div>
           <FiefLabel required>Club</FiefLabel>
           {noClub ? (
-            <p className="flex items-center justify-between rounded-xl bg-[#EEF2F8] px-3.5 py-3 text-sm">
+            <p className="flex items-center justify-between rounded-xl bg-f-subtle px-3.5 py-3 text-sm">
               Je ne suis pas rattachée à un club
-              <button type="button" onClick={() => setNoClub(false)} className="font-semibold text-[#1B3A73] hover:underline">
+              <button type="button" onClick={() => setNoClub(false)} className="font-semibold text-f-link hover:underline">
                 Choisir un club
               </button>
             </p>
           ) : club ? (
-            <p className="flex items-center justify-between gap-3 rounded-xl bg-[#EEF2F8] px-3.5 py-3 text-sm">
+            <p className="flex items-center justify-between gap-3 rounded-xl bg-f-subtle px-3.5 py-3 text-sm">
               <span>
                 <strong>{club.clubName}</strong>
-                {club.clubNumber ? <span className="text-[#5B6B86]"> · n° {club.clubNumber}</span> : <span className="text-[#5B6B86]"> · saisi à la main</span>}
+                {club.clubNumber ? <span className="text-f-muted"> · n° {club.clubNumber}</span> : <span className="text-f-muted"> · saisi à la main</span>}
               </span>
-              <button type="button" onClick={() => setClub(null)} aria-label="Changer de club" className="rounded-full p-1 text-[#5B6B86] hover:bg-white">
+              <button type="button" onClick={() => setClub(null)} aria-label="Changer de club" className="rounded-full p-1 text-f-muted hover:bg-f-surface">
                 <X size={16} />
               </button>
             </p>
@@ -151,7 +151,7 @@ export default function FiefApplyPage() {
                   type="button"
                   aria-pressed={on}
                   onClick={() => setFunctions((prev) => (on ? prev.filter((s) => s !== f.slug) : [...prev, f.slug]))}
-                  className={`rounded-full border px-3.5 py-2 text-sm font-semibold transition ${on ? "border-[#0E2754] bg-[#0E2754] text-white" : "border-[#DCE3EF] bg-white text-[#0E2754] hover:border-[#0E2754]"}`}
+                  className={`rounded-full border px-3.5 py-2 text-sm font-semibold transition ${on ? "border-f-accent bg-f-accent text-white" : "border-f-border bg-f-surface text-f-text hover:border-f-accent"}`}
                 >
                   {on && <Check size={14} className="-ml-0.5 mr-1 inline" />}
                   {f.label}
@@ -162,8 +162,8 @@ export default function FiefApplyPage() {
         </div>
 
         {elig?.ok && elig.needsParent && (
-          <div className="space-y-4 rounded-2xl border border-[#F3C9CB] bg-[#FFF6F6] p-4">
-            <p className="text-sm text-[#0E2754]">
+          <div className="space-y-4 rounded-2xl border border-f-warn-border bg-f-warn-bg p-4">
+            <p className="text-sm text-f-text">
               <strong>Accord parental.</strong> Comme vous êtes mineure, un parent ou responsable légal doit donner son accord : nous lui envoyons un e-mail.
             </p>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -195,20 +195,20 @@ export default function FiefApplyPage() {
           aria-hidden
         />
 
-        <div className="rounded-2xl bg-[#F3F6FB] p-4">
-          <p className="mb-2 text-[13px] font-bold uppercase tracking-wide text-[#5B6B86]">Charte FIEF</p>
-          <p className="whitespace-pre-line text-sm text-[#0E2754]">{config?.settings.charterText}</p>
+        <div className="rounded-2xl bg-f-bg p-4">
+          <p className="mb-2 text-[13px] font-bold uppercase tracking-wide text-f-muted">Charte FIEF</p>
+          <p className="whitespace-pre-line text-sm text-f-text">{config?.settings.charterText}</p>
           <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-sm font-semibold">
-            <input type="checkbox" checked={charter} onChange={(e) => setCharter(e.target.checked)} className="mt-0.5 h-5 w-5 accent-[#0E2754]" />
+            <input type="checkbox" checked={charter} onChange={(e) => setCharter(e.target.checked)} className="mt-0.5 h-5 w-5 accent-f-accent" />
             J&apos;ai lu et j&apos;accepte la charte FIEF
           </label>
         </div>
 
-        {error && <p className="rounded-xl bg-[#FDECEC] px-3 py-2 text-sm text-[#B91F26]">{error}</p>}
+        {error && <p className="rounded-xl bg-f-danger-bg px-3 py-2 text-sm text-f-danger">{error}</p>}
         <FiefButton type="submit" disabled={busy || !config || (elig !== null && !elig.ok)}>
           {busy ? "Envoi…" : "Envoyer ma demande"}
         </FiefButton>
-        <p className="text-center text-xs text-[#5B6B86]">Vos informations servent uniquement à la gestion du réseau FIEF par la Ligue du Grand Est de Football.</p>
+        <p className="text-center text-xs text-f-muted">Vos informations servent uniquement à la gestion du réseau FIEF par la Ligue du Grand Est de Football.</p>
       </form>
     </PublicFrame>
   );
@@ -240,13 +240,13 @@ function ClubPicker({ onPick, onNoClub }: { onPick: (c: { clubNumber: string | n
         <input value={q} onChange={(e) => setQ(e.target.value)} className={`${fiefInput} pl-10`} placeholder="Nom du club, ville ou numéro d'affiliation" />
       </div>
       {shown.length > 0 && (
-        <ul className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-[#DCE3EF] bg-white">
+        <ul className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-f-border bg-f-surface">
           {shown.map((c) => (
             <li key={c.clubNumber}>
-              <button type="button" onClick={() => onPick({ clubNumber: c.clubNumber, clubName: c.clubName })} className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left text-sm hover:bg-[#F3F6FB]">
+              <button type="button" onClick={() => onPick({ clubNumber: c.clubNumber, clubName: c.clubName })} className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left text-sm hover:bg-f-bg">
                 <span className="font-semibold">{c.clubName}</span>
                 {c.city && (
-                  <span className="flex shrink-0 items-center gap-1 text-xs text-[#5B6B86]">
+                  <span className="flex shrink-0 items-center gap-1 text-xs text-f-muted">
                     <MapPin size={12} /> {c.city}
                   </span>
                 )}
@@ -257,11 +257,11 @@ function ClubPicker({ onPick, onNoClub }: { onPick: (c: { clubNumber: string | n
       )}
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
         {searched && (
-          <button type="button" onClick={() => onPick({ clubNumber: null, clubName: query })} className="font-semibold text-[#1B3A73] hover:underline">
+          <button type="button" onClick={() => onPick({ clubNumber: null, clubName: query })} className="font-semibold text-f-link hover:underline">
             Mon club n&apos;est pas dans la liste : utiliser « {query} »
           </button>
         )}
-        <button type="button" onClick={onNoClub} className="font-semibold text-[#5B6B86] hover:underline">
+        <button type="button" onClick={onNoClub} className="font-semibold text-f-muted hover:underline">
           Je ne suis pas rattachée à un club
         </button>
       </div>

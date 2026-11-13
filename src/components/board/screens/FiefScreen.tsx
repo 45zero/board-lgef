@@ -9,6 +9,7 @@ import {
   FileText,
   Flag,
   LayoutDashboard,
+  Megaphone,
   Newspaper,
   Plus,
   Search,
@@ -18,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { DocumentsView } from "@/components/fief/documents";
+import { FiefAdsAdmin } from "@/components/board/fief/FiefAdsAdmin";
 import { Feed, type FeedModeration } from "@/components/fief/feed";
 import { FiefEventShare } from "@/components/board/fief/FiefEventShare";
 import { unwrap } from "@/lib/board/actionResult";
@@ -51,7 +53,7 @@ import {
 // demandes d'adhésion, membres, réglages (mineures, charte, fonctions). Fil, documents et
 // événements « Visible sur FIEF » arrivent avec les lots suivants. Site des membres : fief.lgef.fr.
 
-type Tab = "home" | "requests" | "members" | "feed" | "documents" | "events" | "settings";
+type Tab = "home" | "requests" | "members" | "feed" | "documents" | "events" | "ads" | "settings";
 
 const PUBLIC_URL = (process.env.NEXT_PUBLIC_FIEF_URL || "").replace(/\/+$/, "") || "/fief";
 
@@ -85,6 +87,7 @@ export function FiefScreen() {
     { id: "feed", label: "Fil", icon: Newspaper },
     { id: "documents", label: "Documents", icon: FileText },
     { id: "events", label: "Événements", icon: CalendarDays },
+    { id: "ads", label: "Publicités", icon: Megaphone },
     { id: "settings", label: "Réglages", icon: Settings },
   ];
 
@@ -167,6 +170,7 @@ export function FiefScreen() {
         </div>
       )}
       {overview && tab === "events" && <EventsTab />}
+      {overview && tab === "ads" && <FiefAdsAdmin />}
       {overview && tab === "settings" && <SettingsTab overview={overview} onSaved={reload} />}
     </div>
   );

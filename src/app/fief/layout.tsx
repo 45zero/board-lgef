@@ -1,7 +1,8 @@
 import type { Metadata, Viewport } from "next";
 
 // FIEF — Femmes Investies dans l'Environnement du Football (fief.lgef.fr, voir src/proxy.ts).
-// Habillage propre, sans rien du board : titre, icônes et appli installable (PWA) FIEF.
+// Habillage propre, sans rien du board : titre, icônes, appli installable (PWA), thème clair / sombre
+// (couleurs .fief-theme dans globals.css ; choix enregistré sur l'appareil, sinon réglage du téléphone).
 
 export const metadata: Metadata = {
   title: { default: "FIEF — L'espace des femmes du football du Grand Est", template: "%s · FIEF" },
@@ -15,10 +16,21 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0E2754",
   viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#0E2754" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0f17" },
+  ],
 };
 
+// Thème posé avant le premier affichage (pas d'éclair blanc en mode sombre).
+const THEME_SCRIPT = `try{var t=localStorage.getItem("fief-theme");if(t!=="light"&&t!=="dark"){t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}document.documentElement.dataset.fiefTheme=t}catch(e){}`;
+
 export default function FiefLayout({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-dvh bg-[#F3F6FB] font-[family-name:var(--font-manrope)] antialiased">{children}</div>;
+  return (
+    <div className="fief-theme min-h-dvh bg-f-bg font-[family-name:var(--font-manrope)] text-f-text antialiased">
+      <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      {children}
+    </div>
+  );
 }

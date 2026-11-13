@@ -1,6 +1,6 @@
 "use client";
 
-import { MemberGate } from "@/components/fief/ui";
+import { MemberGate } from "@/components/fief/shell";
 import { DocumentsView } from "@/components/fief/documents";
 
 // Documents FIEF : « Documents partagés » (par dossiers) et « Mes documents », rangés dans le dossier FIEF du Drive du board.

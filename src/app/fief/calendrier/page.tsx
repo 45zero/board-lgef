@@ -4,7 +4,8 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, MapPin, Video, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { ComingSoon, MemberGate } from "@/components/fief/ui";
+import { ComingSoon } from "@/components/fief/ui";
+import { MemberGate } from "@/components/fief/shell";
 
 // Calendrier FIEF : les événements du board que l'équipe FIEF a rendus visibles pour la membre
 // (fief_my_events, sql/2026-11-13_fief_evenements.sql). Grille du mois + événements à venir.
@@ -117,17 +118,17 @@ function Calendar() {
     <div className="space-y-4">
       <h1 className="text-2xl font-extrabold">Calendrier</h1>
       <div className="grid gap-4 lg:grid-cols-[380px_1fr]">
-        <div className="rounded-3xl bg-white p-4 shadow-sm">
+        <div className="rounded-3xl bg-f-surface p-4 border border-f-border">
           <div className="mb-3 flex items-center justify-between">
-            <button onClick={() => { setSelectedDay(null); setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1)); }} aria-label="Mois précédent" className="rounded-full p-2 hover:bg-[#EEF2F8]">
+            <button onClick={() => { setSelectedDay(null); setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1)); }} aria-label="Mois précédent" className="rounded-full p-2 hover:bg-f-subtle">
               <ChevronLeft size={18} />
             </button>
             <p className="font-extrabold capitalize">{month.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}</p>
-            <button onClick={() => { setSelectedDay(null); setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1)); }} aria-label="Mois suivant" className="rounded-full p-2 hover:bg-[#EEF2F8]">
+            <button onClick={() => { setSelectedDay(null); setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1)); }} aria-label="Mois suivant" className="rounded-full p-2 hover:bg-f-subtle">
               <ChevronRight size={18} />
             </button>
           </div>
-          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-[#8A97AD]">
+          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-f-faint">
             {DAYS.map((d) => (
               <span key={d}>{d}</span>
             ))}
@@ -143,11 +144,11 @@ function Calendar() {
                   key={k}
                   onClick={() => setSelectedDay(selected ? null : has ? k : null)}
                   className={`relative flex h-10 items-center justify-center rounded-full text-sm font-semibold ${
-                    selected ? "bg-[#0E2754] text-white" : k === todayKey ? "ring-2 ring-[#0E2754]" : has ? "hover:bg-[#EEF2F8]" : "text-[#5B6B86]"
+                    selected ? "bg-f-accent text-white" : k === todayKey ? "ring-2 ring-f-accent" : has ? "hover:bg-f-subtle" : "text-f-muted"
                   }`}
                 >
                   {d.getDate()}
-                  {has && <span className={`absolute bottom-1 h-1.5 w-1.5 rounded-full ${selected ? "bg-white" : "bg-[#D7262E]"}`} />}
+                  {has && <span className={`absolute bottom-1 h-1.5 w-1.5 rounded-full ${selected ? "bg-f-surface" : "bg-[#D7262E]"}`} />}
                 </button>
               );
             })}
@@ -158,27 +159,27 @@ function Calendar() {
           <h2 className="text-lg font-extrabold">
             {selectedDay ? new Date(byDay.get(selectedDay)![0].start_date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }) : "Événements à venir"}
           </h2>
-          {list === null && <p className="text-sm text-[#5B6B86]">Chargement…</p>}
+          {list === null && <p className="text-sm text-f-muted">Chargement…</p>}
           {list?.length === 0 && (
             <ComingSoon icon={CalendarDays} title="Aucun événement pour l'instant" text="Les réunions, formations et rencontres FIEF qui vous concernent apparaîtront ici, et vous serez prévenue." />
           )}
           {list?.map((e) => {
             const d = new Date(e.start_date);
             return (
-              <button key={e.id} onClick={() => setOpenEvent(e)} className="flex w-full items-center gap-3 rounded-2xl bg-white p-3 text-left shadow-sm hover:ring-2 hover:ring-[#0E2754]/15">
-                <span className="flex w-14 shrink-0 flex-col items-center rounded-xl bg-[#FDECEC] py-1.5 text-[#D7262E]">
+              <button key={e.id} onClick={() => setOpenEvent(e)} className="flex w-full items-center gap-3 rounded-2xl bg-f-surface p-3 text-left border border-f-border hover:ring-2 hover:ring-f-accent/15">
+                <span className="flex w-14 shrink-0 flex-col items-center rounded-xl bg-f-danger-bg py-1.5 text-[#D7262E]">
                   <span className="text-[10px] font-bold uppercase">{d.toLocaleDateString("fr-FR", { weekday: "short" }).replace(".", "")}</span>
-                  <span className="text-xl font-black leading-none text-[#0E2754]">{d.getDate()}</span>
+                  <span className="text-xl font-black leading-none text-f-text">{d.getDate()}</span>
                   <span className="text-[10px] font-semibold uppercase">{d.toLocaleDateString("fr-FR", { month: "short" }).replace(".", "")}</span>
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-extrabold">{e.title}</span>
-                  <span className="block truncate text-sm text-[#5B6B86]">
+                  <span className="block truncate text-sm text-f-muted">
                     {time(e.start_date)}
                     {e.online_meeting ? " · En ligne" : e.location ? ` · ${e.location}` : ""}
                   </span>
                 </span>
-                <ChevronRight size={18} className="shrink-0 text-[#8A97AD]" />
+                <ChevronRight size={18} className="shrink-0 text-f-faint" />
               </button>
             );
           })}
@@ -194,30 +195,30 @@ function EventSheet({ event: e, onClose }: { event: FiefEvent; onClose: () => vo
   const day = new Date(e.start_date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:rounded-3xl" onClick={(ev) => ev.stopPropagation()}>
+      <div className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-f-surface p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:rounded-3xl" onClick={(ev) => ev.stopPropagation()}>
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-xl font-extrabold">{e.title}</h2>
-          <button onClick={onClose} aria-label="Fermer" className="rounded-full p-1.5 text-[#5B6B86] hover:bg-[#EEF2F8]">
+          <button onClick={onClose} aria-label="Fermer" className="rounded-full p-1.5 text-f-muted hover:bg-f-subtle">
             <X size={20} />
           </button>
         </div>
-        <p className="mt-2 flex items-center gap-2 text-sm font-semibold capitalize text-[#1B3A73]">
+        <p className="mt-2 flex items-center gap-2 text-sm font-semibold capitalize text-f-link">
           <CalendarDays size={16} /> {day} · {time(e.start_date)}
           {e.end_date ? ` – ${time(e.end_date)}` : ""}
         </p>
         {e.online_meeting ? (
-          <p className="mt-1 flex items-center gap-2 text-sm text-[#5B6B86]">
+          <p className="mt-1 flex items-center gap-2 text-sm text-f-muted">
             <Video size={16} /> En ligne
           </p>
         ) : (
           e.location && (
-            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.location)}`} target="_blank" rel="noopener" className="mt-1 flex items-center gap-2 text-sm text-[#5B6B86] underline-offset-2 hover:underline">
+            <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.location)}`} target="_blank" rel="noopener" className="mt-1 flex items-center gap-2 text-sm text-f-muted underline-offset-2 hover:underline">
               <MapPin size={16} /> {e.location}
             </a>
           )
         )}
-        {e.description && <p className="mt-4 whitespace-pre-line text-[15px] text-[#0E2754]">{e.description}</p>}
-        <button onClick={() => downloadIcs(e)} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-[#0E2754] px-4 py-3 text-[15px] font-bold text-white">
+        {e.description && <p className="mt-4 whitespace-pre-line text-[15px] text-f-text">{e.description}</p>}
+        <button onClick={() => downloadIcs(e)} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-f-accent px-4 py-3 text-[15px] font-bold text-white">
           <CalendarPlus size={18} /> Ajouter à mon agenda
         </button>
       </div>

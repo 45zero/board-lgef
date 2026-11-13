@@ -74,6 +74,24 @@
 }
 
 @theme inline {
+  /* FIEF (fief.lgef.fr) : couleurs nommées, valeurs selon le thème clair / sombre (.fief-theme ci-dessous). */
+  --color-f-bg: var(--f-bg);
+  --color-f-surface: var(--f-surface);
+  --color-f-subtle: var(--f-subtle);
+  --color-f-border: var(--f-border);
+  --color-f-border-strong: var(--f-border-strong);
+  --color-f-text: var(--f-text);
+  --color-f-muted: var(--f-muted);
+  --color-f-faint: var(--f-faint);
+  --color-f-link: var(--f-link);
+  --color-f-accent: var(--f-accent);
+  --color-f-avatar: var(--f-avatar);
+  --color-f-danger: var(--f-danger);
+  --color-f-danger-bg: var(--f-danger-bg);
+  --color-f-success: var(--f-success);
+  --color-f-success-bg: var(--f-success-bg);
+  --color-f-warn-bg: var(--f-warn-bg);
+  --color-f-warn-border: var(--f-warn-border);
   --font-sans: var(--font-manrope), sans-serif;
   --font-mono: var(--font-jetbrains-mono), monospace;
 
@@ -150,4 +168,47 @@ html.mobile-locked body {
 }
 *::-webkit-scrollbar {
   display: none;
+}
+
+/* FIEF — thème clair (par défaut) et sombre : <html data-fief-theme="dark"> posé par src/app/fief/layout.tsx
+   (choix enregistré sur l'appareil, sinon réglage du téléphone). Les vues FIEF intégrées au board restent claires. */
+.fief-theme {
+  --f-bg: #f3f6fb;
+  --f-surface: #ffffff;
+  --f-subtle: #eef2f8;
+  --f-border: #dce3ef;
+  --f-border-strong: #c9d4e6;
+  --f-text: #0e2754;
+  --f-muted: #5b6b86;
+  --f-faint: #8a97ad;
+  --f-link: #1b3a73;
+  --f-accent: #0e2754;
+  --f-avatar: #1b3a73;
+  --f-danger: #b91f26;
+  --f-danger-bg: #fdecec;
+  --f-success: #1f7a4d;
+  --f-success-bg: #e6f4ec;
+  --f-warn-bg: #fff6f6;
+  --f-warn-border: #f3c9cb;
+  color-scheme: light;
+}
+html[data-fief-theme="dark"] .fief-theme {
+  --f-bg: #0b0f17;
+  --f-surface: #141a24;
+  --f-subtle: #1e2633;
+  --f-border: #283142;
+  --f-border-strong: #3a4556;
+  --f-text: #f2f4f8;
+  --f-muted: #a3adbe;
+  --f-faint: #6f7a8c;
+  --f-link: #8fb0ff;
+  --f-accent: #4a6cf7;
+  --f-avatar: #2f4a85;
+  --f-danger: #ff8a8f;
+  --f-danger-bg: #3a1a1e;
+  --f-success: #6fd69a;
+  --f-success-bg: #16301f;
+  --f-warn-bg: #2a1a1c;
+  --f-warn-border: #5a2a2e;
+  color-scheme: dark;
 }

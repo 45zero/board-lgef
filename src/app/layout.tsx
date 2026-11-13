@@ -38,7 +38,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="fr" className={`${manrope.variable} ${jetbrainsMono.variable}`}>
+    // suppressHydrationWarning : FIEF pose data-fief-theme sur <html> avant l'hydratation (thème clair / sombre).
+    <html lang="fr" className={`${manrope.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
       <body>
         <AuthProvider>{children}</AuthProvider>
       </body>

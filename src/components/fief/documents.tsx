@@ -173,7 +173,7 @@ export function DocumentsView({ team = false, driveUrl }: { team?: boolean; driv
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         {!team && (
-          <div className="flex rounded-full bg-white p-1 shadow-sm">
+          <div className="flex rounded-full bg-f-surface p-1 border border-f-border">
             {(["shared", "mine"] as const).map((t) => (
               <button
                 key={t}
@@ -181,22 +181,22 @@ export function DocumentsView({ team = false, driveUrl }: { team?: boolean; driv
                   setTab(t);
                   setFolderId(null);
                 }}
-                className={`rounded-full px-4 py-1.5 text-sm font-bold ${tab === t ? "bg-[#0E2754] text-white" : "text-[#0E2754]"}`}
+                className={`rounded-full px-4 py-1.5 text-sm font-bold ${tab === t ? "bg-f-accent text-white" : "text-f-text"}`}
               >
                 {t === "shared" ? "Documents partagés" : "Mes documents"}
               </button>
             ))}
           </div>
         )}
-        <button onClick={() => setUploading(true)} className="ml-auto flex items-center gap-2 rounded-xl bg-[#0E2754] px-3.5 py-2 text-sm font-bold text-white">
+        <button onClick={() => setUploading(true)} className="ml-auto flex items-center gap-2 rounded-xl bg-f-accent px-3.5 py-2 text-sm font-bold text-white">
           <Upload size={16} /> {team ? "Déposer un document" : "Ajouter un document"}
         </button>
       </div>
-      {error && <p className="rounded-xl bg-[#FDECEC] px-3 py-2 text-sm text-[#B91F26]">{error}</p>}
+      {error && <p className="rounded-xl bg-f-danger-bg px-3 py-2 text-sm text-f-danger">{error}</p>}
 
       {tab === "shared" && !folderId && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {folders === null && <Loader2 className="animate-spin text-[#5B6B86]" />}
+          {folders === null && <Loader2 className="animate-spin text-f-muted" />}
           <FolderCard name="Tous les documents" count={(folders ?? []).reduce((n, f) => n + f.shared_count, 0)} onOpen={() => setFolderId("all")} />
           {folders?.map((f) => (
             <FolderCard
@@ -214,7 +214,7 @@ export function DocumentsView({ team = false, driveUrl }: { team?: boolean; driv
                 const name = window.prompt("Nom du nouveau dossier");
                 if (name?.trim()) void folderAction({ action: "createFolder", name });
               }}
-              className="flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-[#C9D4E6] p-4 text-sm font-bold text-[#1B3A73] hover:bg-white"
+              className="flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-f-border-strong p-4 text-sm font-bold text-f-link hover:bg-f-surface"
             >
               <FolderPlus size={18} /> Nouveau dossier
             </button>
@@ -226,13 +226,13 @@ export function DocumentsView({ team = false, driveUrl }: { team?: boolean; driv
       {(tab === "mine" || folderId) && (
         <div className="space-y-2">
           {tab === "shared" && (
-            <button onClick={() => setFolderId(null)} className="flex items-center gap-1.5 text-sm font-bold text-[#1B3A73]">
+            <button onClick={() => setFolderId(null)} className="flex items-center gap-1.5 text-sm font-bold text-f-link">
               <ArrowLeft size={16} /> {folderId === "all" ? "Tous les documents" : currentFolder?.name}
             </button>
           )}
-          {list === null && <Loader2 className="animate-spin text-[#5B6B86]" />}
+          {list === null && <Loader2 className="animate-spin text-f-muted" />}
           {list?.length === 0 && (
-            <div className="rounded-2xl bg-white p-8 text-center text-[#5B6B86] shadow-sm">
+            <div className="rounded-2xl bg-f-surface p-8 text-center text-f-muted border border-f-border">
               {tab === "mine" ? "Vous n'avez pas encore ajouté de document." : "Aucun document dans ce dossier pour l'instant."}
             </div>
           )}
@@ -258,23 +258,23 @@ export function DocumentsView({ team = false, driveUrl }: { team?: boolean; driv
 
 function FolderCard({ name, count, onOpen, onRename, onDelete }: { name: string; count: number; onOpen: () => void; onRename?: () => void; onDelete?: () => void }) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-sm hover:ring-2 hover:ring-[#0E2754]/15">
+    <div className="flex items-center gap-3 rounded-2xl bg-f-surface p-4 border border-f-border hover:ring-2 hover:ring-f-accent/15">
       <button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 text-left">
         <Folder size={34} className="shrink-0 fill-[#F5B83D] text-[#E0A12A]" />
         <span className="min-w-0">
           <span className="block truncate font-extrabold">{name}</span>
-          <span className="text-sm text-[#5B6B86]">
+          <span className="text-sm text-f-muted">
             {count} document{count > 1 ? "s" : ""}
           </span>
         </span>
       </button>
       {onRename && (
-        <button onClick={onRename} aria-label="Renommer" className="rounded-full p-1.5 text-[#8A97AD] hover:bg-[#EEF2F8]">
+        <button onClick={onRename} aria-label="Renommer" className="rounded-full p-1.5 text-f-faint hover:bg-f-subtle">
           <Pencil size={15} />
         </button>
       )}
       {onDelete && (
-        <button onClick={onDelete} aria-label="Supprimer le dossier" className="rounded-full p-1.5 text-[#8A97AD] hover:bg-[#FDECEC] hover:text-[#B91F26]">
+        <button onClick={onDelete} aria-label="Supprimer le dossier" className="rounded-full p-1.5 text-f-faint hover:bg-f-danger-bg hover:text-f-danger">
           <Trash2 size={15} />
         </button>
       )}
@@ -293,7 +293,7 @@ function DriveLink({ driveUrl }: { driveUrl: () => Promise<string | null> }) {
         setBusy(false);
         if (url) window.open(url, "_blank", "noopener");
       }}
-      className="flex items-center justify-center gap-2 rounded-2xl border border-[#DCE3EF] bg-white p-4 text-sm font-bold text-[#1B3A73] disabled:opacity-60"
+      className="flex items-center justify-center gap-2 rounded-2xl border border-f-border bg-f-surface p-4 text-sm font-bold text-f-link disabled:opacity-60"
     >
       {busy ? <Loader2 size={16} className="animate-spin" /> : <Folder size={16} />} Ouvrir le dossier FIEF dans le Drive
     </button>
@@ -316,45 +316,45 @@ function DocRow({ doc, folders, canManage, showVisibility, onChanged }: { doc: D
   };
   const url = `/api/fief/documents/${doc.id}`;
   return (
-    <div className="rounded-2xl bg-white p-3 shadow-sm">
+    <div className="rounded-2xl bg-f-surface p-3 border border-f-border">
       <div className="flex items-center gap-3">
         <TypeIcon mime={doc.mime_type} />
         <div className="min-w-0 flex-1">
           <p className="truncate font-bold">{doc.name}</p>
-          <p className="truncate text-xs text-[#5B6B86]">{[size(doc.size_bytes), doc.author.name, ago(doc.created_at), showVisibility ? null : doc.folder_name].filter(Boolean).join(" · ")}</p>
-          {doc.description && <p className="mt-0.5 line-clamp-2 text-sm text-[#0E2754]">{doc.description}</p>}
+          <p className="truncate text-xs text-f-muted">{[size(doc.size_bytes), doc.author.name, ago(doc.created_at), showVisibility ? null : doc.folder_name].filter(Boolean).join(" · ")}</p>
+          {doc.description && <p className="mt-0.5 line-clamp-2 text-sm text-f-text">{doc.description}</p>}
         </div>
         {showVisibility && (
-          <span className={`hidden rounded-full px-2 py-0.5 text-[11px] font-semibold sm:inline ${doc.visibility === "shared" ? "bg-[#E6F4EC] text-[#1F7A4D]" : "bg-[#EEF2F8] text-[#5B6B86]"}`}>
+          <span className={`hidden rounded-full px-2 py-0.5 text-[11px] font-semibold sm:inline ${doc.visibility === "shared" ? "bg-f-success-bg text-f-success" : "bg-f-subtle text-f-muted"}`}>
             {doc.visibility === "shared" ? `Partagé${doc.folder_name ? ` · ${doc.folder_name}` : ""}` : "Pour moi"}
           </span>
         )}
         {viewable(doc.mime_type) && (
-          <a href={`${url}?inline=1`} target="_blank" rel="noopener" aria-label="Ouvrir" className="rounded-full p-2 text-[#1B3A73] hover:bg-[#EEF2F8]">
+          <a href={`${url}?inline=1`} target="_blank" rel="noopener" aria-label="Ouvrir" className="rounded-full p-2 text-f-link hover:bg-f-subtle">
             <Eye size={18} />
           </a>
         )}
-        <a href={url} aria-label="Télécharger" className="rounded-full p-2 text-[#1B3A73] hover:bg-[#EEF2F8]">
+        <a href={url} aria-label="Télécharger" className="rounded-full p-2 text-f-link hover:bg-f-subtle">
           <Download size={18} />
         </a>
         {canManage && (
           <div className="relative">
-            <button onClick={() => setMenu((m) => !m)} aria-label="Options" className="rounded-full p-2 text-[#5B6B86] hover:bg-[#EEF2F8]">
+            <button onClick={() => setMenu((m) => !m)} aria-label="Options" className="rounded-full p-2 text-f-muted hover:bg-f-subtle">
               <MoreHorizontal size={18} />
             </button>
             {menu && (
-              <div className="absolute right-0 z-20 mt-1 w-60 overflow-hidden rounded-xl border border-[#DCE3EF] bg-white py-1 text-sm shadow-lg">
+              <div className="absolute right-0 z-20 mt-1 w-60 overflow-hidden rounded-xl border border-f-border bg-f-surface py-1 text-sm shadow-lg">
                 {!doc.author.team && (
-                  <button onClick={() => void run({ action: "update", id: doc.id, shared: doc.visibility !== "shared" })} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-[#F3F6FB]">
+                  <button onClick={() => void run({ action: "update", id: doc.id, shared: doc.visibility !== "shared" })} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-f-bg">
                     <Share2 size={15} /> {doc.visibility === "shared" ? "Ne plus partager (garder pour moi)" : "Partager avec les membres"}
                   </button>
                 )}
                 <div className="px-3 py-2">
-                  <p className="mb-1 text-[11px] font-semibold uppercase text-[#8A97AD]">Dossier</p>
+                  <p className="mb-1 text-[11px] font-semibold uppercase text-f-faint">Dossier</p>
                   <select
                     value={doc.folder_id ?? ""}
                     onChange={(e) => void run({ action: "update", id: doc.id, folderId: e.target.value || null })}
-                    className="w-full rounded-lg border border-[#DCE3EF] px-2 py-1.5 text-sm"
+                    className="w-full rounded-lg border border-f-border px-2 py-1.5 text-sm"
                   >
                     <option value="">Divers</option>
                     {folders.map((f) => (
@@ -370,11 +370,11 @@ function DocRow({ doc, folders, canManage, showVisibility, onChanged }: { doc: D
                     if (name?.trim() && name !== doc.name) void run({ action: "update", id: doc.id, name });
                     else setMenu(false);
                   }}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-[#F3F6FB]"
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-f-bg"
                 >
                   <Pencil size={15} /> Renommer
                 </button>
-                <button onClick={() => void run({ action: "delete", id: doc.id }, `Supprimer « ${doc.name} » ?`)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[#B91F26] hover:bg-[#F3F6FB]">
+                <button onClick={() => void run({ action: "delete", id: doc.id }, `Supprimer « ${doc.name} » ?`)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-f-danger hover:bg-f-bg">
                   <Trash2 size={15} /> Supprimer
                 </button>
               </div>
@@ -382,7 +382,7 @@ function DocRow({ doc, folders, canManage, showVisibility, onChanged }: { doc: D
           </div>
         )}
       </div>
-      {error && <p className="mt-2 text-sm text-[#B91F26]">{error}</p>}
+      {error && <p className="mt-2 text-sm text-f-danger">{error}</p>}
     </div>
   );
 }
@@ -431,12 +431,12 @@ function UploadDialog({
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={() => !busy && onClose()}>
       <div
-        className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-white p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] text-[#0E2754] sm:rounded-3xl"
+        className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-f-surface p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] text-f-text sm:rounded-3xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-extrabold">{team ? "Déposer un document" : "Ajouter un document"}</h2>
-          <button onClick={onClose} disabled={busy} aria-label="Fermer" className="rounded-full p-1.5 hover:bg-[#EEF2F8]">
+          <button onClick={onClose} disabled={busy} aria-label="Fermer" className="rounded-full p-1.5 hover:bg-f-subtle">
             <X size={20} />
           </button>
         </div>
@@ -444,7 +444,7 @@ function UploadDialog({
         <button
           onClick={() => input.current?.click()}
           disabled={busy}
-          className="mt-4 flex w-full flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-[#C9D4E6] px-4 py-6 text-sm font-semibold text-[#1B3A73] hover:bg-[#F3F6FB]"
+          className="mt-4 flex w-full flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-f-border-strong px-4 py-6 text-sm font-semibold text-f-link hover:bg-f-bg"
         >
           <Upload size={24} />
           {files.length ? `${files.length} fichier${files.length > 1 ? "s" : ""} choisi${files.length > 1 ? "s" : ""}` : "Choisir des fichiers (50 Mo max chacun)"}
@@ -454,18 +454,18 @@ function UploadDialog({
             {files.map((f) => {
               const p = progress[f.name];
               return (
-                <li key={f.name} className="rounded-lg bg-[#F3F6FB] px-3 py-2">
+                <li key={f.name} className="rounded-lg bg-f-bg px-3 py-2">
                   <div className="flex justify-between gap-2">
                     <span className="truncate">{f.name}</span>
-                    <span className="shrink-0 text-xs text-[#5B6B86]">{size(f.size)}</span>
+                    <span className="shrink-0 text-xs text-f-muted">{size(f.size)}</span>
                   </div>
                   {typeof p === "number" && (
-                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[#DCE3EF]">
-                      <div className="h-full bg-[#0E2754] transition-all" style={{ width: `${Math.round(p * 100)}%` }} />
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-f-border">
+                      <div className="h-full bg-f-accent transition-all" style={{ width: `${Math.round(p * 100)}%` }} />
                     </div>
                   )}
-                  {typeof p === "string" && <p className="mt-1 text-xs text-[#B91F26]">{p}</p>}
-                  {f.size > MAX_BYTES && <p className="mt-1 text-xs text-[#B91F26]">Trop lourd (50 Mo maximum).</p>}
+                  {typeof p === "string" && <p className="mt-1 text-xs text-f-danger">{p}</p>}
+                  {f.size > MAX_BYTES && <p className="mt-1 text-xs text-f-danger">Trop lourd (50 Mo maximum).</p>}
                 </li>
               );
             })}
@@ -473,7 +473,7 @@ function UploadDialog({
         )}
         <label className="mt-4 block">
           <span className="mb-1.5 block text-[13px] font-semibold">Dossier</span>
-          <select value={folderId ?? ""} onChange={(e) => setFolderId(e.target.value || null)} className="w-full rounded-xl border border-[#DCE3EF] px-3 py-2.5 text-[15px]">
+          <select value={folderId ?? ""} onChange={(e) => setFolderId(e.target.value || null)} className="w-full rounded-xl border border-f-border px-3 py-2.5 text-[15px]">
             <option value="">Divers</option>
             {folders.map((f) => (
               <option key={f.id} value={f.id}>
@@ -485,7 +485,7 @@ function UploadDialog({
         {files.length === 1 && (
           <label className="mt-3 block">
             <span className="mb-1.5 block text-[13px] font-semibold">Description (facultatif)</span>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} maxLength={500} className="w-full rounded-xl border border-[#DCE3EF] px-3 py-2 text-[15px]" />
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} maxLength={500} className="w-full rounded-xl border border-f-border px-3 py-2 text-[15px]" />
           </label>
         )}
         {!team && (
@@ -494,9 +494,9 @@ function UploadDialog({
               { v: false, label: "Garder pour moi", hint: "Dans « Mes documents »" },
               { v: true, label: "Partager", hint: "Visible de toutes les membres" },
             ].map((o) => (
-              <button key={o.label} onClick={() => setShared(o.v)} className={`rounded-xl border-2 px-3 py-2.5 text-left ${shared === o.v ? "border-[#0E2754] bg-[#EEF2F8]" : "border-[#DCE3EF]"}`}>
+              <button key={o.label} onClick={() => setShared(o.v)} className={`rounded-xl border-2 px-3 py-2.5 text-left ${shared === o.v ? "border-f-accent bg-f-subtle" : "border-f-border"}`}>
                 <span className="block text-sm font-bold">{o.label}</span>
-                <span className="text-xs text-[#5B6B86]">{o.hint}</span>
+                <span className="text-xs text-f-muted">{o.hint}</span>
               </button>
             ))}
           </div>
@@ -504,7 +504,7 @@ function UploadDialog({
         <button
           onClick={() => void send()}
           disabled={busy || !files.length || tooBig.length > 0}
-          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#0E2754] px-4 py-3 text-[15px] font-bold text-white disabled:opacity-50"
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-f-accent px-4 py-3 text-[15px] font-bold text-white disabled:opacity-50"
         >
           {busy ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />} {busy ? "Envoi en cours…" : "Envoyer"}
         </button>

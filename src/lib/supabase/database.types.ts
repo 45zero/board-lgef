@@ -615,6 +615,13 @@ export type Database = {
         Update: { folder_id?: string | null; name?: string; description?: string | null; visibility?: "private" | "shared"; status?: "uploading" | "ready"; storage_id?: string | null; upload_url?: string | null }
         Relationships: []
       }
+      // FIEF publicités (sql/2026-11-13_fief_ads.sql) — ajout manuel.
+      fief_ads: {
+        Row: { id: string; title: string; body: string | null; link_url: string | null; link_label: string | null; advertiser: string | null; image_storage_id: string | null; image_mime: string | null; active: boolean; starts_on: string | null; ends_on: string | null; position: number; clicks: number; created_by: string | null; created_at: string; updated_at: string }
+        Insert: { id?: string; title: string; body?: string | null; link_url?: string | null; link_label?: string | null; advertiser?: string | null; image_storage_id?: string | null; image_mime?: string | null; active?: boolean; starts_on?: string | null; ends_on?: string | null; position?: number; clicks?: number; created_by?: string | null }
+        Update: { title?: string; body?: string | null; link_url?: string | null; link_label?: string | null; advertiser?: string | null; image_storage_id?: string | null; image_mime?: string | null; active?: boolean; starts_on?: string | null; ends_on?: string | null; position?: number; clicks?: number }
+        Relationships: []
+      }
       module_access: {
         Row: {
           module_id: string

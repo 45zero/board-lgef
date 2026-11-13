@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Bell, CalendarDays, Info, UserCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { ComingSoon, MemberGate, useFiefHref } from "@/components/fief/ui";
+import { ComingSoon, useFiefHref } from "@/components/fief/ui";
+import { MemberGate } from "@/components/fief/shell";
 import { PushToggle } from "@/components/fief/notifications";
 
 // Notifications FIEF de la membre (fief_notifications) : toutes / non lues ; ouvrir la page marque comme lu.
@@ -58,35 +59,35 @@ function Notifications() {
       <PushToggle variant="row" />
       <div className="flex gap-2">
         {(["all", "unread"] as const).map((f) => (
-          <button key={f} onClick={() => setFilter(f)} className={`rounded-full px-4 py-1.5 text-sm font-bold ${filter === f ? "bg-[#0E2754] text-white" : "bg-white text-[#0E2754]"}`}>
+          <button key={f} onClick={() => setFilter(f)} className={`rounded-full px-4 py-1.5 text-sm font-bold ${filter === f ? "bg-f-accent text-white" : "bg-f-surface text-f-text"}`}>
             {f === "all" ? "Toutes" : `Non lues${unread ? ` (${unread})` : ""}`}
           </button>
         ))}
       </div>
-      {rows === null && <p className="text-sm text-[#5B6B86]">Chargement…</p>}
+      {rows === null && <p className="text-sm text-f-muted">Chargement…</p>}
       {rows && shown.length === 0 && <ComingSoon icon={Bell} title="Rien de nouveau" text="Vous serez prévenue ici dès qu'un événement FIEF vous concerne." />}
       <div className="space-y-2">
         {shown.map((n) => {
           const I = ICONS[n.kind];
           const content = (
             <>
-              <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${n.read_at ? "bg-[#EEF2F8] text-[#1B3A73]" : "bg-[#FDECEC] text-[#D7262E]"}`}>
+              <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${n.read_at ? "bg-f-subtle text-f-link" : "bg-f-danger-bg text-[#D7262E]"}`}>
                 <I size={18} />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block font-bold">{n.title}</span>
-                {n.body && <span className="block text-sm text-[#5B6B86]">{n.body}</span>}
-                <span className="block text-xs text-[#8A97AD]">{ago(n.created_at)}</span>
+                {n.body && <span className="block text-sm text-f-muted">{n.body}</span>}
+                <span className="block text-xs text-f-faint">{ago(n.created_at)}</span>
               </span>
               {!n.read_at && <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-[#D7262E]" />}
             </>
           );
           return n.route ? (
-            <Link key={n.id} href={href(n.route)} className="flex items-start gap-3 rounded-2xl bg-white p-4 shadow-sm hover:ring-2 hover:ring-[#0E2754]/15">
+            <Link key={n.id} href={href(n.route)} className="flex items-start gap-3 rounded-2xl bg-f-surface p-4 border border-f-border hover:ring-2 hover:ring-f-accent/15">
               {content}
             </Link>
           ) : (
-            <div key={n.id} className="flex items-start gap-3 rounded-2xl bg-white p-4 shadow-sm">
+            <div key={n.id} className="flex items-start gap-3 rounded-2xl bg-f-surface p-4 border border-f-border">
               {content}
             </div>
           );

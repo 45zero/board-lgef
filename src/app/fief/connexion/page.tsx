@@ -44,7 +44,7 @@ export default function FiefLoginPage() {
       {mode === "sent" ? (
         <>
           <h1 className="text-xl font-extrabold">Vérifiez vos e-mails</h1>
-          <p className="mt-2 text-sm text-[#5B6B86]">
+          <p className="mt-2 text-sm text-f-muted">
             Si un compte FIEF existe pour <strong>{email}</strong>, un lien pour choisir un nouveau mot de passe vient de vous être envoyé.
           </p>
           <FiefButton variant="outline" className="mt-5" onClick={() => setMode("login")}>
@@ -55,7 +55,7 @@ export default function FiefLoginPage() {
         <form onSubmit={mode === "login" ? login : reset} className="space-y-4">
           <div>
             <h1 className="text-xl font-extrabold">{mode === "login" ? "Se connecter" : "Mot de passe oublié"}</h1>
-            <p className="mt-1 text-sm text-[#5B6B86]">
+            <p className="mt-1 text-sm text-f-muted">
               {mode === "login" ? "Accédez à votre espace FIEF." : "Indiquez votre e-mail : nous vous envoyons un lien pour choisir un nouveau mot de passe."}
             </p>
           </div>
@@ -69,7 +69,7 @@ export default function FiefLoginPage() {
               <input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className={fiefInput} />
             </label>
           )}
-          {error && <p className="rounded-xl bg-[#FDECEC] px-3 py-2 text-sm text-[#B91F26]">{error}</p>}
+          {error && <p className="rounded-xl bg-f-danger-bg px-3 py-2 text-sm text-f-danger">{error}</p>}
           <FiefButton type="submit" disabled={busy}>
             {busy ? "Un instant…" : mode === "login" ? "Se connecter" : "Recevoir le lien"}
           </FiefButton>
@@ -80,7 +80,7 @@ export default function FiefLoginPage() {
                 setError("");
                 setMode(mode === "login" ? "reset" : "login");
               }}
-              className="font-semibold text-[#1B3A73] hover:underline"
+              className="font-semibold text-f-link hover:underline"
             >
               {mode === "login" ? "Mot de passe oublié ?" : "Retour à la connexion"}
             </button>

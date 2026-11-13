@@ -688,3 +688,43 @@ export async function getFiefDriveFolderUrl(): Promise<ActionResult<string | nul
     return storage ? storage.folderUrl([]) : null;
   });
 }
+
+// ── Publicités « Sponsorisé » (sql/2026-11-13_fief_ads.sql) ─────────────────────────────────────────────
+
+export interface FiefAdRow {
+  id: string;
+  title: string;
+  body: string | null;
+  linkUrl: string | null;
+  linkLabel: string | null;
+  advertiser: string | null;
+  hasImage: boolean;
+  active: boolean;
+  startsOn: string | null;
+  endsOn: string | null;
+  position: number;
+  clicks: number;
+}
+
+/** Toutes les publicités (onglet FIEF → Publicités) ; création / modification par la route /api/fief/ads. */
+export async function listFiefAds(): Promise<ActionResult<FiefAdRow[]>> {
+  return toResult(async () => {
+    await requireManager();
+    const { data, error } = await createServiceClient().from("fief_ads").select("*").order("position").order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((a) => ({
+      id: a.id,
+      title: a.title,
+      body: a.body,
+      linkUrl: a.link_url,
+      linkLabel: a.link_label,
+      advertiser: a.advertiser,
+      hasImage: !!a.image_storage_id,
+      active: a.active,
+      startsOn: a.starts_on,
+      endsOn: a.ends_on,
+      position: a.position,
+      clicks: a.clicks,
+    }));
+  });
+}

@@ -83,18 +83,18 @@ export function PushToggle({ variant = "card" }: { variant?: "card" | "row" }) {
 
   if (variant === "row")
     return (
-      <div className="flex items-center gap-3 rounded-3xl bg-white p-5 shadow-sm">
-        {state === "on" ? <BellRing size={22} className="text-[#0E2754]" /> : <BellOff size={22} className="text-[#8A97AD]" />}
+      <div className="flex items-center gap-3 rounded-3xl bg-f-surface p-5 border border-f-border">
+        {state === "on" ? <BellRing size={22} className="text-f-text" /> : <BellOff size={22} className="text-f-faint" />}
         <div className="min-w-0 flex-1">
           <p className="font-bold">Notifications sur cet appareil</p>
-          <p className="text-sm text-[#5B6B86]">{hint}</p>
+          <p className="text-sm text-f-muted">{hint}</p>
         </div>
         {canToggle && (
           <button
             type="button"
             disabled={busy}
             onClick={() => void toggle()}
-            className={`shrink-0 rounded-xl px-3.5 py-2 text-sm font-bold disabled:opacity-60 ${state === "on" ? "border-2 border-[#0E2754] text-[#0E2754]" : "bg-[#0E2754] text-white"}`}
+            className={`shrink-0 rounded-xl px-3.5 py-2 text-sm font-bold disabled:opacity-60 ${state === "on" ? "border-2 border-f-accent text-f-text" : "bg-f-accent text-white"}`}
           >
             {state === "on" ? "Désactiver" : "Activer"}
           </button>
@@ -103,16 +103,16 @@ export function PushToggle({ variant = "card" }: { variant?: "card" | "row" }) {
     );
 
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-[#F3C9CB] bg-[#FFF6F6] p-4">
+    <div className="flex items-center gap-3 rounded-2xl border border-f-warn-border bg-f-warn-bg p-4">
       <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#D7262E] text-white">
         <BellRing size={22} />
       </span>
       <div className="min-w-0 flex-1">
         <p className="font-bold">Activer les notifications</p>
-        <p className="text-sm text-[#5B6B86]">{hint}</p>
+        <p className="text-sm text-f-muted">{hint}</p>
       </div>
       {canToggle && (
-        <button type="button" disabled={busy} onClick={() => void toggle()} className="shrink-0 rounded-xl bg-[#0E2754] px-3.5 py-2 text-sm font-bold text-white disabled:opacity-60">
+        <button type="button" disabled={busy} onClick={() => void toggle()} className="shrink-0 rounded-xl bg-f-accent px-3.5 py-2 text-sm font-bold text-white disabled:opacity-60">
           Activer
         </button>
       )}

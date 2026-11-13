@@ -4,7 +4,8 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Flag, Loader2, MessageCircle, PenSquare, Search, Send, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { ComingSoon, MemberGate, useFiefHref, type FiefMe } from "@/components/fief/ui";
+import { ComingSoon, useFiefHref, type FiefMe } from "@/components/fief/ui";
+import { MemberGate } from "@/components/fief/shell";
 import { Avatar, ago, type FeedAuthor } from "@/components/fief/feed";
 
 // Messagerie privée FIEF (conversations à deux, sql/2026-11-13_fief_social.sql) : liste, nouvelle
@@ -108,14 +109,14 @@ function Messages({ me }: { me: FiefMe }) {
     <div className="space-y-4">
       <div className={`flex items-center justify-between ${showThread ? "hidden md:flex" : ""}`}>
         <h1 className="text-2xl font-extrabold">Messages</h1>
-        <button onClick={() => setPicking(true)} className="flex items-center gap-2 rounded-xl bg-[#0E2754] px-3.5 py-2 text-sm font-bold text-white">
+        <button onClick={() => setPicking(true)} className="flex items-center gap-2 rounded-xl bg-f-accent px-3.5 py-2 text-sm font-bold text-white">
           <PenSquare size={16} /> Nouveau message
         </button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-[320px_1fr]">
         <div className={`space-y-2 ${showThread ? "hidden md:block" : ""}`}>
-          {convs === null && <p className="text-sm text-[#5B6B86]">Chargement…</p>}
+          {convs === null && <p className="text-sm text-f-muted">Chargement…</p>}
           {convs?.length === 0 && (
             <ComingSoon
               icon={MessageCircle}
@@ -130,18 +131,18 @@ function Messages({ me }: { me: FiefMe }) {
                 setDraftTo(null);
                 router.push(href(`/messages?c=${c.id}`));
               }}
-              className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left shadow-sm ${
-                c.id === convParam ? "bg-[#0E2754] text-white" : "bg-white hover:ring-2 hover:ring-[#0E2754]/15"
+              className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left border border-f-border ${
+                c.id === convParam ? "bg-f-accent text-white" : "bg-f-surface hover:ring-2 hover:ring-f-accent/15"
               }`}
             >
               <Avatar author={c.other} size={44} />
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline justify-between gap-2">
                   <span className="truncate font-bold">{c.other.name}</span>
-                  <span className={`shrink-0 text-[11px] ${c.id === convParam ? "text-white/70" : "text-[#8A97AD]"}`}>{ago(c.last_at)}</span>
+                  <span className={`shrink-0 text-[11px] ${c.id === convParam ? "text-white/70" : "text-f-faint"}`}>{ago(c.last_at)}</span>
                 </span>
                 <span
-                  className={`block truncate text-sm ${c.id === convParam ? "text-white/80" : c.unread ? "font-semibold text-[#0E2754]" : "text-[#5B6B86]"}`}
+                  className={`block truncate text-sm ${c.id === convParam ? "text-white/80" : c.unread ? "font-semibold text-f-text" : "text-f-muted"}`}
                 >
                   {c.last_mine ? "Vous : " : ""}
                   {c.last_body ?? "Nouvelle conversation"}
@@ -172,7 +173,7 @@ function Messages({ me }: { me: FiefMe }) {
             onRead={() => setConvs((prev) => (prev ?? []).map((c) => (c.id === open?.id ? { ...c, unread: 0 } : c)))}
           />
         ) : (
-          <div className="hidden items-center justify-center rounded-3xl bg-white p-10 text-center text-[#5B6B86] shadow-sm md:flex">
+          <div className="hidden items-center justify-center rounded-3xl bg-f-surface p-10 text-center text-f-muted border border-f-border md:flex">
             Choisissez une conversation.
           </div>
         )}
@@ -289,31 +290,31 @@ function Thread({
   };
 
   return (
-    <div className="flex h-[calc(100dvh-11rem)] flex-col overflow-hidden rounded-3xl bg-white shadow-sm md:h-[calc(100dvh-9rem)]">
-      <div className="flex items-center gap-3 border-b border-[#EEF2F8] px-4 py-3">
-        <button onClick={onBack} aria-label="Retour" className="rounded-full p-1.5 hover:bg-[#EEF2F8] md:hidden">
+    <div className="flex h-[calc(100dvh-11rem)] flex-col overflow-hidden rounded-3xl bg-f-surface border border-f-border md:h-[calc(100dvh-9rem)]">
+      <div className="flex items-center gap-3 border-b border-f-subtle px-4 py-3">
+        <button onClick={onBack} aria-label="Retour" className="rounded-full p-1.5 hover:bg-f-subtle md:hidden">
           <ArrowLeft size={20} />
         </button>
         <Avatar author={other} size={38} />
         <div className="min-w-0">
           <p className="truncate font-bold">{other.name}</p>
-          {other.club && <p className="truncate text-xs text-[#5B6B86]">{other.club}</p>}
+          {other.club && <p className="truncate text-xs text-f-muted">{other.club}</p>}
         </div>
       </div>
-      <div className="flex-1 space-y-1.5 overflow-y-auto bg-[#F7F9FC] px-4 py-4">
+      <div className="flex-1 space-y-1.5 overflow-y-auto bg-f-bg px-4 py-4">
         {messages === null && (
-          <div className="flex justify-center py-8 text-[#5B6B86]">
+          <div className="flex justify-center py-8 text-f-muted">
             <Loader2 className="animate-spin" />
           </div>
         )}
-        {messages?.length === 0 && <p className="py-8 text-center text-sm text-[#5B6B86]">Écrivez votre premier message à {other.name.split(" ")[0]}.</p>}
+        {messages?.length === 0 && <p className="py-8 text-center text-sm text-f-muted">Écrivez votre premier message à {other.name.split(" ")[0]}.</p>}
         {messages?.map((m, i) => {
           const prev = messages[i - 1];
           const newDay = !prev || new Date(prev.created_at).toDateString() !== new Date(m.created_at).toDateString();
           return (
             <div key={m.id}>
               {newDay && (
-                <p className="py-2 text-center text-[11px] font-semibold uppercase text-[#8A97AD]">
+                <p className="py-2 text-center text-[11px] font-semibold uppercase text-f-faint">
                   {new Date(m.created_at).toLocaleDateString("fr-FR", {
                     weekday: "long",
                     day: "numeric",
@@ -324,11 +325,11 @@ function Thread({
               <div className={`group flex items-end gap-1.5 ${m.mine ? "justify-end" : "justify-start"}`}>
                 <div
                   className={`max-w-[78%] rounded-2xl px-3.5 py-2 text-[15px] ${
-                    m.mine ? "rounded-br-md bg-[#0E2754] text-white" : "rounded-bl-md bg-white text-[#0E2754] shadow-sm"
+                    m.mine ? "rounded-br-md bg-f-accent text-white" : "rounded-bl-md bg-f-surface text-f-text border border-f-border"
                   }`}
                 >
                   <p className="whitespace-pre-line break-words">{m.body}</p>
-                  <p className={`mt-0.5 text-right text-[10px] ${m.mine ? "text-white/60" : "text-[#8A97AD]"}`}>
+                  <p className={`mt-0.5 text-right text-[10px] ${m.mine ? "text-white/60" : "text-f-faint"}`}>
                     {new Date(m.created_at).toLocaleTimeString("fr-FR", {
                       hour: "2-digit",
                       minute: "2-digit",
@@ -336,7 +337,7 @@ function Thread({
                   </p>
                 </div>
                 {!m.mine && (
-                  <button onClick={() => void report(m)} aria-label="Signaler ce message" className="rounded-full p-1 text-[#C9D4E6] hover:text-[#B91F26]">
+                  <button onClick={() => void report(m)} aria-label="Signaler ce message" className="rounded-full p-1 text-f-border-strong hover:text-f-danger">
                     <Flag size={13} />
                   </button>
                 )}
@@ -346,8 +347,8 @@ function Thread({
         })}
         <div ref={bottom} />
       </div>
-      {error && <p className="px-4 pt-2 text-sm text-[#B91F26]">{error}</p>}
-      <div className="flex items-end gap-2 border-t border-[#EEF2F8] p-3">
+      {error && <p className="px-4 pt-2 text-sm text-f-danger">{error}</p>}
+      <div className="flex items-end gap-2 border-t border-f-subtle p-3">
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
@@ -360,13 +361,13 @@ function Thread({
           rows={1}
           maxLength={4000}
           placeholder="Votre message…"
-          className="max-h-32 min-h-[44px] flex-1 resize-none rounded-2xl border border-[#DCE3EF] px-3.5 py-2.5 text-[15px] outline-none focus:border-[#0E2754]"
+          className="max-h-32 min-h-[44px] flex-1 resize-none rounded-2xl border border-f-border px-3.5 py-2.5 text-[15px] outline-none focus:border-f-accent"
         />
         <button
           onClick={() => void send()}
           disabled={busy || !body.trim()}
           aria-label="Envoyer"
-          className="rounded-full bg-[#0E2754] p-3 text-white disabled:opacity-50"
+          className="rounded-full bg-f-accent p-3 text-white disabled:opacity-50"
         >
           <Send size={18} />
         </button>
@@ -389,10 +390,10 @@ function PeoplePicker({ meId, onPick, onClose }: { meId: string; onPick: (p: Fee
   }, [people, q]);
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="flex max-h-[80dvh] w-full max-w-md flex-col overflow-hidden rounded-t-3xl bg-white sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
+      <div className="flex max-h-[80dvh] w-full max-w-md flex-col overflow-hidden rounded-t-3xl bg-f-surface sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 pb-2 pt-5">
           <h2 className="text-lg font-extrabold">Nouveau message</h2>
-          <button onClick={onClose} aria-label="Fermer" className="rounded-full p-1.5 hover:bg-[#EEF2F8]">
+          <button onClick={onClose} aria-label="Fermer" className="rounded-full p-1.5 hover:bg-f-subtle">
             <X size={20} />
           </button>
         </div>
@@ -404,13 +405,13 @@ function PeoplePicker({ meId, onPick, onClose }: { meId: string; onPick: (p: Fee
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Nom ou club"
-              className="w-full rounded-xl border border-[#DCE3EF] py-2.5 pl-10 pr-3 text-[15px] outline-none focus:border-[#0E2754]"
+              className="w-full rounded-xl border border-f-border py-2.5 pl-10 pr-3 text-[15px] outline-none focus:border-f-accent"
             />
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
-          {people === null && <p className="px-3 py-4 text-sm text-[#5B6B86]">Chargement…</p>}
-          {people && shown.length === 0 && <p className="px-3 py-4 text-sm text-[#5B6B86]">Aucune membre trouvée.</p>}
+          {people === null && <p className="px-3 py-4 text-sm text-f-muted">Chargement…</p>}
+          {people && shown.length === 0 && <p className="px-3 py-4 text-sm text-f-muted">Aucune membre trouvée.</p>}
           {shown.map((p) => {
             const author = {
               id: p.user_id,
@@ -422,12 +423,12 @@ function PeoplePicker({ meId, onPick, onClose }: { meId: string; onPick: (p: Fee
               <button
                 key={p.user_id}
                 onClick={() => onPick(author)}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-[#F3F6FB]"
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-f-bg"
               >
                 <Avatar author={author} size={38} />
                 <span className="min-w-0">
                   <span className="block truncate font-semibold">{author.name}</span>
-                  {p.club_name && <span className="block truncate text-xs text-[#5B6B86]">{p.club_name}</span>}
+                  {p.club_name && <span className="block truncate text-xs text-f-muted">{p.club_name}</span>}
                 </span>
               </button>
             );
