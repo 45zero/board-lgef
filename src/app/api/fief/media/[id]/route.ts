@@ -1,7 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { fail, getFiefActor } from "@/lib/fief/actor";
 import { getFiefStorage } from "@/lib/fief/storage";
-import { canSeePost } from "@/lib/fief/visibility";
+import { canSeePost, POST_VISIBILITY_COLUMNS } from "@/lib/fief/visibility";
 
 // Photo du fil FIEF, servie aux seules membres actives et à l'équipe FIEF (jamais de lien public vers le Drive).
 // Publication masquée : visible de son autrice et de l'équipe seulement.
@@ -18,7 +18,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (!media.post_id) {
     if (media.uploader_id !== actor.userId) return fail(404, "Photo introuvable.");
   } else if (!actor.manager) {
-    const { data: post } = await service.from("fief_posts").select("hidden_at, author_id, audience, audience_ids").eq("id", media.post_id).maybeSingle();
+    const { data: post } = await service.from("fief_posts").select(POST_VISIBILITY_COLUMNS).eq("id", media.post_id).maybeSingle();
     if (!post || !canSeePost(actor, post)) return fail(404, "Photo introuvable.");
   }
 

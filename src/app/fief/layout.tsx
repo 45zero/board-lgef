@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 
-// FIEF — Femmes Investies dans l'Environnement du Football (fief.lgef.fr, voir src/proxy.ts).
+// FIEF — Femmes Investies dans l'Encadrement du Football (fief.lgef.fr, voir src/proxy.ts).
 // Habillage propre, sans rien du board : titre, icônes, appli installable (PWA), thème clair / sombre
 // (couleurs .fief-theme dans globals.css ; choix enregistré sur l'appareil, sinon réglage du téléphone).
 

@@ -6,11 +6,20 @@ import { documentFolder, getFiefStorage } from "@/lib/fief/storage";
 // Documents FIEF (sql/2026-11-13_fief_documents.sql) — écritures : préparer un envoi (session Drive,
 // les morceaux passent ensuite par /api/fief/documents/chunk), modifier (partage, dossier, nom),
 // supprimer ; dossiers (équipe FIEF). Lectures : fief_documents_list / fief_doc_folders_list.
+// Partage : réservé à l'équipe FIEF, à toutes les membres ou à un public choisi (personnes, fonctions,
+// clubs — sql/2026-11-16_fief_evolutions.sql). Une membre garde ses documents pour elle.
 
 export const maxDuration = 30;
 
 const MAX_BYTES = 50 * 1024 * 1024;
 const uuid = z.string().uuid();
+const audienceSchema = z.object({
+  audience: z.enum(["all", "custom"]),
+  ids: z.array(uuid).max(500).default([]),
+  functions: z.array(z.string().max(40)).max(50).default([]),
+  clubs: z.array(z.string().max(20)).max(200).default([]),
+});
+type AudienceInput = z.infer<typeof audienceSchema>;
 const schema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("start"),
@@ -21,6 +30,7 @@ const schema = z.discriminatedUnion("action", [
     shared: z.boolean(),
     description: z.string().trim().max(500).default(""),
     asTeam: z.boolean().default(false),
+    audience: audienceSchema.optional(),
   }),
   z.object({
     action: z.literal("update"),
@@ -29,6 +39,7 @@ const schema = z.discriminatedUnion("action", [
     folderId: uuid.nullable().optional(),
     name: z.string().trim().min(1).max(200).optional(),
     description: z.string().trim().max(500).optional(),
+    audience: audienceSchema.optional(),
   }),
   z.object({ action: z.literal("delete"), id: uuid }),
   z.object({ action: z.literal("createFolder"), name: z.string().trim().min(1).max(80) }),
@@ -37,6 +48,13 @@ const schema = z.discriminatedUnion("action", [
 ]);
 
 const ownerName = (a: FiefActor) => (a.member ? `${a.member.lastName} ${a.member.firstName}` : "Équipe FIEF");
+
+/** Colonnes du public d'un document ; null si un public « custom » est vide. */
+function audienceColumns(a: AudienceInput | undefined) {
+  if (!a || a.audience === "all") return { audience: "all" as const, audience_ids: [], audience_functions: [], audience_clubs: [] };
+  const cols = { audience: "custom" as const, audience_ids: [...new Set(a.ids)], audience_functions: [...new Set(a.functions)], audience_clubs: [...new Set(a.clubs)] };
+  return cols.audience_ids.length + cols.audience_functions.length + cols.audience_clubs.length ? cols : null;
+}
 
 async function folderName(id: string | null) {
   if (!id) return null;
@@ -76,6 +94,9 @@ export async function POST(request: Request) {
     if (input.asTeam && !actor.manager) return fail(403, "Réservé à l'équipe FIEF.");
     const asTeam = actor.manager && (input.asTeam || !actor.member);
     const shared = asTeam || input.shared;
+    if (shared && !actor.manager) return fail(403, "Seule l'équipe FIEF partage des documents : le vôtre reste dans « Mes documents ».");
+    const audience = audienceColumns(input.audience);
+    if (!audience) return fail(400, "Choisissez au moins une personne, une fonction ou un club.");
     const fName = await folderName(input.folderId);
     if (input.folderId && !fName) return fail(400, "Dossier introuvable.");
     // Garde-fou : 10 envois en cours maximum par personne.
@@ -94,6 +115,7 @@ export async function POST(request: Request) {
           mime_type: input.mimeType || "application/octet-stream",
           size_bytes: input.size,
           visibility: shared ? "shared" : "private",
+          ...audience,
           upload_url: uploadUrl,
         })
         .select("id")
@@ -111,6 +133,10 @@ export async function POST(request: Request) {
     if (!doc || (doc.owner_id !== actor.userId && !actor.manager)) return fail(403, "Vous ne pouvez modifier que vos documents.");
     if (doc.as_team && input.shared === false) return fail(400, "Un document de l'équipe reste partagé.");
     const shared = input.shared ?? doc.visibility === "shared";
+    if (shared && doc.visibility !== "shared" && !actor.manager) return fail(403, "Seule l'équipe FIEF partage des documents.");
+    if (input.audience && !actor.manager) return fail(403, "Réservé à l'équipe FIEF.");
+    const audience = input.audience ? audienceColumns(input.audience) : null;
+    if (input.audience && !audience) return fail(400, "Choisissez au moins une personne, une fonction ou un club.");
     const folderId = input.folderId === undefined ? doc.folder_id : input.folderId;
     const fName = await folderName(folderId);
     if (folderId && !fName) return fail(400, "Dossier introuvable.");
@@ -125,6 +151,7 @@ export async function POST(request: Request) {
       .from("fief_documents")
       .update({
         visibility: shared ? "shared" : "private",
+        ...(audience ?? {}),
         folder_id: folderId,
         ...(input.name ? { name: input.name } : {}),
         ...(input.description !== undefined ? { description: input.description || null } : {}),

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { refreshBadges } from "@/components/board/live/LiveProvider";
 import {
   CalendarDays,
   Check,
@@ -39,6 +40,9 @@ import {
   refuseFiefApplication,
   saveFiefFunction,
   saveFiefRequestRecipients,
+  getFiefAdmins,
+  setFiefAdmin,
+  type FiefAdminsState,
   setFiefMemberStatus,
   updateFiefSettings,
   type FiefApplicationRow,
@@ -100,7 +104,7 @@ export function FiefScreen() {
           <h1 className="text-lg font-extrabold text-ink">
             <span className="italic">FIEF</span> — Graines d&apos;éducatrices
           </h1>
-          <p className="text-xs text-ink-3">Femmes Investies dans l&apos;Environnement du Football</p>
+          <p className="text-xs text-ink-3">Femmes Investies dans l&apos;Encadrement du Football</p>
         </div>
         <a href={PUBLIC_URL} target="_blank" rel="noopener" className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-link hover:underline">
           Ouvrir fief.lgef.fr <ExternalLink size={12} />
@@ -216,6 +220,7 @@ function ApplicationRow({ app, labels, onDone }: { app: FiefApplicationRow; labe
         ? `Acceptée — compte existant, ${r.data.emailed ? "e-mail « connectez-vous » envoyé" : "e-mail non envoyé"}.`
         : `Acceptée — ${r.data.emailed ? "lien pour choisir son mot de passe envoyé" : "e-mail non envoyé (envoi non configuré)"}.`,
     });
+    refreshBadges();
     onDone();
   };
   const refuse = async () => {
@@ -226,6 +231,7 @@ function ApplicationRow({ app, labels, onDone }: { app: FiefApplicationRow; labe
     if (!r.ok) return setMsg({ ok: false, text: r.error });
     setRefusing(false);
     setMsg({ ok: true, text: `Refusée${notify ? (r.data.emailed ? " — e-mail envoyé" : " — e-mail non envoyé") : ""}.` });
+    refreshBadges();
     onDone();
   };
 
@@ -582,6 +588,7 @@ function SettingsTab({ overview, onSaved }: { overview: FiefOverview; onSaved: (
         </div>
       </section>
 
+      <AdminsSection onSaved={onSaved} />
       <RecipientsSection overview={overview} onSaved={onSaved} />
 
       <section className="space-y-3 rounded-card border border-line bg-card p-4">
@@ -699,8 +706,9 @@ function EventsTab() {
               </span>
               {e.share ? (
                 <span className="rounded-full bg-good-bg px-2 py-0.5 text-[11px] font-semibold text-good">
-                  Visible · {AUDIENCE_LABEL[e.share.audience]}
+                  {e.share.mode === "info" ? "Information" : "Invitation"} · {AUDIENCE_LABEL[e.share.audience]}
                   {e.share.notifiedAt ? " · notifiées" : ""}
+                  {e.share.mode === "invitation" && e.share.yes > 0 ? ` · ${e.share.yes} participe${e.share.yes > 1 ? "nt" : ""}` : ""}
                 </span>
               ) : (
                 <span className="text-[11px] text-ink-4">Non visible</span>
@@ -727,6 +735,92 @@ const ROLE_LABELS: Record<string, string> = {
   technician: "Technicien",
   user: "Utilisateur",
 };
+
+/** Administratrices FIEF : comptes du board qui voient l'onglet FIEF (règle du module « fief »). */
+function AdminsSection({ onSaved }: { onSaved: () => void }) {
+  const [state, setState] = useState<FiefAdminsState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = useCallback(() => {
+    getFiefAdmins().then((r) => (r.ok ? setState(r.data) : setError(r.error)));
+  }, []);
+  useEffect(load, [load]);
+
+  const change = async (userId: string, on: boolean) => {
+    setBusy(userId);
+    setError(null);
+    const r = await setFiefAdmin(userId, on);
+    setBusy(null);
+    if (!r.ok) return setError(r.error);
+    setQ("");
+    load();
+    onSaved();
+  };
+  const needle = q.trim().toLowerCase();
+  const matches = needle ? (state?.people ?? []).filter((p) => `${p.name} ${p.email ?? ""}`.toLowerCase().includes(needle)).slice(0, 8) : [];
+
+  return (
+    <section className="space-y-3 rounded-card border border-line bg-card p-4 lg:col-span-2">
+      <h2 className="font-extrabold text-ink">Administratrices FIEF</h2>
+      <p className="text-xs text-ink-3">
+        Les personnes nommées ici voient l&apos;onglet FIEF du board : demandes, membres, fil, documents, événements et réglages. L&apos;accès est enregistré dans
+        Paramètres → Modules. Les administrateurs du board y ont toujours accès.
+      </p>
+      {!state && !error && <p className="text-sm text-ink-3">Chargement…</p>}
+      {state && (
+        <ul className="divide-y divide-line rounded-card border border-line">
+          {state.admins.map((a) => (
+            <li key={a.userId} className="flex items-center gap-3 px-3 py-2 text-sm">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-semibold text-ink">{a.name}</span>
+                <span className="block truncate text-xs text-ink-4">
+                  {ROLE_LABELS[a.role] ?? a.role}
+                  {a.email ? ` · ${a.email}` : ""}
+                </span>
+              </span>
+              {a.locked ? (
+                <span className="text-[11px] text-ink-4">Accès permanent</span>
+              ) : (
+                <button
+                  disabled={busy === a.userId}
+                  onClick={() => window.confirm(`Retirer l'accès FIEF de ${a.name} ?`) && void change(a.userId, false)}
+                  className="rounded-btn px-2.5 py-1 text-xs font-semibold text-bad hover:bg-bad-bg disabled:opacity-50"
+                >
+                  Retirer
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {state && (
+        <div className="relative max-w-md">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Nommer une administratrice : nom ou e-mail d'un compte du board"
+            className="w-full rounded-btn border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-navy"
+          />
+          {matches.length > 0 && (
+            <ul className="absolute z-20 mt-1 w-full overflow-hidden rounded-card border border-line bg-card shadow-card">
+              {matches.map((p) => (
+                <li key={p.userId}>
+                  <button disabled={!!busy} onClick={() => void change(p.userId, true)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-hover">
+                    <span className="min-w-0 flex-1 truncate text-ink">{p.name}</span>
+                    <span className="truncate text-xs text-ink-4">{p.email}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {needle && matches.length === 0 && <p className="mt-1 text-xs text-ink-3">Aucun compte du board ne correspond.</p>}
+        </div>
+      )}
+      {error && <p className="text-xs font-semibold text-bad">{error}</p>}
+    </section>
+  );
+}
 
 /** Qui reçoit les alertes « nouvelle demande d'adhésion » (notification du board, avec push / e-mail selon ses réglages). */
 function RecipientsSection({ overview, onSaved }: { overview: FiefOverview; onSaved: () => void }) {

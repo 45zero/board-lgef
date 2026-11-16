@@ -13,7 +13,7 @@
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
-// Tournois (sql/2026-11-16_tournois.sql) — ajout manuel.
+// Tournois (sql/2026-11-16_tournois.sql, 2026-11-16_tournois_matchs_logiciel.sql) — ajout manuel.
 type TRow<R> = { Row: R; Insert: Partial<R>; Update: Partial<R>; Relationships: [] }
 type TournamentDistrict = { code: string; name: string; short_name: string; is_ligue: boolean; contact_name: string | null; emails: string[]; phone: string | null; address: string | null; auto_send: boolean; position: number; active: boolean }
 type TournamentClub = { club_number: string; name: string; district_code: string | null; address_line: string | null; address_extra: string | null; postal_code: string | null; city: string | null; contact_civility: string | null; contact_first_name: string | null; contact_last_name: string | null; contact_mobile: string | null; contact_email: string | null; official_email: string | null; active: boolean; imported_at: string }
@@ -25,12 +25,12 @@ type TournamentDeclaration = {
   title: string; start_date: string; end_date: string; start_time: string | null; end_time: string | null; address: string; lat: number | null; lng: number | null
   contact_first_name: string; contact_last_name: string; contact_phone: string; contact_landline: string | null; contact_email: string
   clubs_expected: number | null; other_districts: boolean | null; other_countries: boolean | null; participant_charter: boolean | null; educational_messages: string | null; match_sheets_at_start: boolean | null; discipline_commission: boolean | null
-  refreshments: boolean | null; catering: "internal" | "external" | "none" | null; hot_points: boolean | null; parking: string | null; first_aid: string | null; spectators_expected: number | null; animations: string | null; other_info: string | null
+  refreshments: boolean | null; catering: "internal" | "external" | "none" | null; hot_points: boolean | null; parking: string | null; first_aid: string | null; spectators_expected: number | null; animations: string | null; other_info: string | null; uses_league_software: boolean
   submitted_at: string; late: boolean; finalized_at: string | null
   assigned_to: string | null; district_opinion: "yes" | "no" | null; district_opinion_note: string | null; decision_note: string | null; decided_by: string | null; decided_at: string | null; calendar_event_id: string | null
   report: Json | null; report_at: string | null; created_at: string; updated_at: string
 }
-type TournamentDeclarationCategory = { declaration_id: string; category_slug: string; teams: number | null; play_date: string | null; players_per_team: number | null; substitutes: number | null; surface: string | null; format: "poules" | "elimination" | "poules_elimination" | "plateau" | null; match_minutes: number | null; min_play_minutes: number | null; max_play_minutes: number | null }
+type TournamentDeclarationCategory = { declaration_id: string; category_slug: string; teams: number | null; play_date: string | null; players_per_team: number | null; substitutes: number | null; surface: string | null; format: "poules" | "elimination" | "poules_elimination" | "plateau" | null; match_minutes: number | null; matches_per_team: number | null; min_play_minutes: number | null; max_play_minutes: number | null }
 type TournamentFile = { id: string; declaration_id: string; message_id: string | null; kind: "poster" | "rules" | "other" | "reply"; file_name: string; mime_type: string | null; size_bytes: number | null; status: "uploading" | "ready"; upload_url: string | null; storage_key: string | null; source: "form" | "board" | "reply"; uploaded_by: string | null; created_at: string }
 type TournamentMessage = { id: string; declaration_id: string; kind: "mail" | "forward" | "auto" | "note" | "reply"; subject: string | null; body: string | null; sent_by: string | null; copy_to_sender: boolean; include_pdf: boolean; parent_message_id: string | null; from_name: string | null; from_email: string | null; read_at: string | null; created_at: string }
 type TournamentMessageRecipient = { id: string; message_id: string; email: string; name: string | null; role: "contact" | "club" | "district" | "ligue" | "sender" | "other"; field: "to" | "cc" | "bcc"; delivery: "pending" | "sent" | "failed"; error: string | null; reply_token_hash: string | null; opened_at: string | null; replied_at: string | null }
@@ -537,9 +537,11 @@ export type Database = {
           shared_at: string
           notified_at: string | null
           updated_at: string
+          mode: "info" | "invitation"
         }
         Insert: {
           event_id: string
+          mode?: "info" | "invitation"
           audience?: "all" | "clubs" | "functions" | "members"
           club_numbers?: string[]
           functions?: string[]
@@ -549,6 +551,7 @@ export type Database = {
           notified_at?: string | null
         }
         Update: {
+          mode?: "info" | "invitation"
           audience?: "all" | "clubs" | "functions" | "members"
           club_numbers?: string[]
           functions?: string[]
@@ -556,6 +559,13 @@ export type Database = {
           shared_by?: string | null
           notified_at?: string | null
         }
+        Relationships: []
+      }
+      // FIEF évolutions (sql/2026-11-16_fief_evolutions.sql) — ajout manuel.
+      fief_event_responses: {
+        Row: { event_id: string; user_id: string; response: "yes" | "maybe" | "no"; responded_at: string }
+        Insert: { event_id: string; user_id: string; response: "yes" | "maybe" | "no"; responded_at?: string }
+        Update: { response?: "yes" | "maybe" | "no"; responded_at?: string }
         Relationships: []
       }
       fief_notifications: {
@@ -591,8 +601,8 @@ export type Database = {
       }
       // FIEF lot 3 (sql/2026-11-13_fief_social.sql) — ajout manuel.
       fief_posts: {
-        Row: { id: string; author_id: string; as_team: boolean; body: string; pinned: boolean; hidden_at: string | null; hidden_by: string | null; hidden_reason: string | null; edited_at: string | null; created_at: string; audience: "all" | "custom" | "private"; audience_ids: string[]; mention_ids: string[] }
-        Insert: { id?: string; author_id: string; as_team?: boolean; body?: string; pinned?: boolean; hidden_at?: string | null; hidden_by?: string | null; hidden_reason?: string | null; audience?: "all" | "custom" | "private"; audience_ids?: string[]; mention_ids?: string[] }
+        Row: { id: string; author_id: string; as_team: boolean; body: string; pinned: boolean; hidden_at: string | null; hidden_by: string | null; hidden_reason: string | null; edited_at: string | null; created_at: string; audience: "all" | "custom" | "private"; audience_ids: string[]; audience_functions: string[]; audience_clubs: string[]; mention_ids: string[] }
+        Insert: { id?: string; author_id: string; as_team?: boolean; body?: string; pinned?: boolean; hidden_at?: string | null; hidden_by?: string | null; hidden_reason?: string | null; audience?: "all" | "custom" | "private"; audience_ids?: string[]; audience_functions?: string[]; audience_clubs?: string[]; mention_ids?: string[] }
         Update: { body?: string; pinned?: boolean; hidden_at?: string | null; hidden_by?: string | null; hidden_reason?: string | null; edited_at?: string | null; mention_ids?: string[] }
         Relationships: []
       }
@@ -646,9 +656,9 @@ export type Database = {
         Relationships: []
       }
       fief_documents: {
-        Row: { id: string; owner_id: string; as_team: boolean; folder_id: string | null; name: string; description: string | null; mime_type: string; size_bytes: number; visibility: "private" | "shared"; status: "uploading" | "ready"; storage_id: string | null; upload_url: string | null; created_at: string; updated_at: string }
-        Insert: { id?: string; owner_id: string; as_team?: boolean; folder_id?: string | null; name: string; description?: string | null; mime_type?: string; size_bytes?: number; visibility?: "private" | "shared"; status?: "uploading" | "ready"; storage_id?: string | null; upload_url?: string | null }
-        Update: { folder_id?: string | null; name?: string; description?: string | null; visibility?: "private" | "shared"; status?: "uploading" | "ready"; storage_id?: string | null; upload_url?: string | null }
+        Row: { id: string; owner_id: string; as_team: boolean; folder_id: string | null; name: string; description: string | null; mime_type: string; size_bytes: number; visibility: "private" | "shared"; status: "uploading" | "ready"; storage_id: string | null; upload_url: string | null; created_at: string; updated_at: string; audience: "all" | "custom"; audience_ids: string[]; audience_functions: string[]; audience_clubs: string[] }
+        Insert: { id?: string; owner_id: string; as_team?: boolean; folder_id?: string | null; name: string; description?: string | null; mime_type?: string; size_bytes?: number; visibility?: "private" | "shared"; status?: "uploading" | "ready"; storage_id?: string | null; upload_url?: string | null; audience?: "all" | "custom"; audience_ids?: string[]; audience_functions?: string[]; audience_clubs?: string[] }
+        Update: { folder_id?: string | null; name?: string; description?: string | null; visibility?: "private" | "shared"; status?: "uploading" | "ready"; storage_id?: string | null; upload_url?: string | null; audience?: "all" | "custom"; audience_ids?: string[]; audience_functions?: string[]; audience_clubs?: string[] }
         Relationships: []
       }
       // FIEF publicités (sql/2026-11-13_fief_ads.sql) — ajout manuel.
@@ -3027,6 +3037,7 @@ export type Database = {
           default_calendar_view: string | null
           theme: string | null
           home_address: string | null
+          address_private: boolean
           license_plate: string | null
           home_coordinates: Json | null
           employment_type: Database["public"]["Enums"]["employment_type"] | null
@@ -3058,6 +3069,7 @@ export type Database = {
           default_calendar_view?: string | null
           theme?: string | null
           home_address?: string | null
+          address_private?: boolean
           license_plate?: string | null
           home_coordinates?: Json | null
           employment_type?: Database["public"]["Enums"]["employment_type"] | null
@@ -3089,6 +3101,7 @@ export type Database = {
           default_calendar_view?: string | null
           theme?: string | null
           home_address?: string | null
+          address_private?: boolean
           license_plate?: string | null
           home_coordinates?: Json | null
           employment_type?: Database["public"]["Enums"]["employment_type"] | null

@@ -32,6 +32,7 @@ import { useAvailableTechnicians, type TechnicianOption } from "@/hooks/board/us
 import { useDirectorAttendance } from "@/hooks/board/useDirectorAttendance";
 import { listAccessRequests, type AccessRequest } from "@/app/actions/account-requests";
 import { AccessRequestCard } from "@/components/board/users/AccessRequestCard";
+import { FiefApplicationsList } from "@/components/board/dashboard/FiefApplicationsList";
 import { unwrap } from "@/lib/board/actionResult";
 import { confirmMyInvoiceUpload, getInvoiceFiles, getMyInvoiceItems, getPayables, prepareMyInvoiceUpload, reviewInvoice, setPaid, notifyInvoiceBatch, notifyPaidBatch } from "@/app/actions/staff";
 import { BulkBar, SelectBox, bulkReport, runBulk, useSelection } from "@/components/board/expenses/BulkSelect";
@@ -55,6 +56,7 @@ const APP_LABELS: Record<string, string> = {
   inscription: "Inscription",
   trello: "l'Espace Team",
   weekend: "Week-end",
+  fief: "l'onglet FIEF",
 };
 
 /** Date et lieu d'un événement, avec un léger bouton « Carte » qui ouvre la carte dans une fenêtre. */
@@ -1001,6 +1003,9 @@ export function ActionPopup({
       break;
     case "demandes-acces":
       body = <AccessRequestList onChanged={onChanged} />;
+      break;
+    case "fief-demandes":
+      body = <FiefApplicationsList onChanged={onChanged} />;
       break;
     case "frais-declarer":
       body = <DeclareList statuses={["a_declarer"]} onChanged={onChanged} />;

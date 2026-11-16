@@ -43,7 +43,7 @@ function Welcome() {
           <Crest size={190} className="drop-shadow-2xl md:order-2 md:w-[260px]" />
           <div className="mt-8 text-center md:mt-0 md:text-left">
             <Wordmark size={64} />
-            <p className="mt-2 text-lg font-semibold italic text-white/90">Femmes Investies dans l&apos;Environnement du Football</p>
+            <p className="mt-2 text-lg font-semibold italic text-white/90">Femmes Investies dans l&apos;Encadrement du Football</p>
             <p className="mt-4 inline-block -skew-x-6 rounded-lg bg-[#D7262E] px-4 py-2 text-lg font-bold italic shadow-lg">
               L&apos;espace des femmes du football du Grand Est
             </p>
@@ -97,7 +97,7 @@ function MemberHome({ me }: { me: FiefMe }) {
     <div className="flex justify-center gap-8">
       <div className="w-full max-w-[680px] space-y-4">
         <StoriesRow me={me} onPublish={openComposer} />
-        <Feed me={{ id: me.userId, firstName: me.firstName }} focusPostId={focus} messageHref={(id) => href(`/messages?to=${id}`)} />
+        <Feed me={{ id: me.userId, firstName: me.firstName }} focusPostId={focus} profileHref={(id) => href(`/membre?u=${id}`)} />
       </div>
       <AdsAside />
     </div>

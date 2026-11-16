@@ -11,6 +11,13 @@ import type { AppBadges } from "@/app/api/badges/route";
 // (useLiveRefresh), recalcule les pastilles et, pour ses propres notifications, met la cloche à
 // jour instantanément. Les mails (Gmail, hors base) sont interrogés toutes les 30 s onglet visible.
 
+/** Événement qui demande le recalcul des compteurs (voir refreshBadges). */
+const BADGES_REFRESH_EVENT = "board:badges-refresh";
+/** Recalcule les pastilles des modules (après une action sur une table non suivie en direct). */
+export function refreshBadges() {
+  window.dispatchEvent(new Event(BADGES_REFRESH_EVENT));
+}
+
 export const LIVE_TABLES = [
   "events",
   "coverage_requests",
@@ -126,7 +133,11 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     const db = window.setInterval(() => visible() && void loadBadges("db"), DB_FALLBACK_MS);
     const onVisible = () => visible() && void loadBadges();
     document.addEventListener("visibilitychange", onVisible);
+    // Compteur dont la table n'est pas suivie en direct (ex. demandes FIEF) : l'écran demande un recalcul.
+    const onRefresh = () => void loadBadges("db");
+    window.addEventListener(BADGES_REFRESH_EVENT, onRefresh);
     return () => {
+      window.removeEventListener(BADGES_REFRESH_EVENT, onRefresh);
       window.clearInterval(mails);
       window.clearInterval(db);
       document.removeEventListener("visibilitychange", onVisible);

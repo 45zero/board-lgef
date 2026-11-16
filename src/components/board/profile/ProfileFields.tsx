@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Cake, Car, ExternalLink, Home, MapPin } from "lucide-react";
+import { Cake, Car, ExternalLink, Home, Lock, MapPin } from "lucide-react";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { Toggle } from "@/components/board/Toggle";
 import type { LatLng } from "@/lib/board/geo";
@@ -93,31 +93,51 @@ export function ProfileDetailsFields({
         <div className={sectionTitle}>
           <Home size={12} /> Adresse personnelle
         </div>
-        <AddressInput value={value.homeAddress} onChange={(homeAddress, homeCoordinates) => onChange({ ...value, homeAddress, homeCoordinates })} />
-        {!address ? (
-          <p className="mt-1 text-[11px] font-semibold text-bad">
-            {self ? "Renseignez votre adresse" : "Adresse manquante"} : les trajets et les kilomètres ne peuvent pas être calculés.
+        {value.addressHidden ? (
+          <p className="flex items-center gap-1.5 rounded-btn bg-subtle px-3 py-2 text-xs text-ink-3">
+            <Lock size={12} className="shrink-0" /> Adresse privée : visible seulement par la personne et son N+1.
           </p>
         ) : (
           <>
-            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-              {value.homeCoordinates ? (
-                <span className="flex items-center gap-1 text-good">
-                  <MapPin size={11} /> Position trouvée — utilisée pour les trajets et les km
-                </span>
-              ) : (
-                <span className="text-ink-4">Position recherchée sur Google Maps à l&apos;enregistrement</span>
-              )}
-              <a href={mapsSearchUrl(address)} target="_blank" rel="noreferrer" className="flex items-center gap-1 font-semibold text-link hover:underline">
-                Ouvrir dans Google Maps <ExternalLink size={10} />
-              </a>
-            </div>
-            <iframe
-              title="Carte de l'adresse"
-              src={`https://maps.google.com/maps?q=${encodeURIComponent(mapQuery)}&z=14&output=embed`}
-              className="mt-2 h-32 w-full rounded-btn border border-line"
-              loading="lazy"
-            />
+            <label className="mb-2 flex cursor-pointer items-start gap-2 text-xs text-ink-2">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--navy)]"
+                checked={value.addressPrivate}
+                onChange={(e) => onChange({ ...value, addressPrivate: e.target.checked })}
+              />
+              <span>
+                <b>Adresse privée</b> — visible seulement par {self ? "moi et mon N+1" : "la personne et son N+1"} (carte des techniciens, administration). Les
+                temps de trajet restent calculés.
+              </span>
+            </label>
+            <AddressInput value={value.homeAddress} onChange={(homeAddress, homeCoordinates) => onChange({ ...value, homeAddress, homeCoordinates })} />
+            {!address ? (
+              <p className="mt-1 text-[11px] font-semibold text-bad">
+                {self ? "Renseignez votre adresse" : "Adresse manquante"} : les trajets et les kilomètres ne peuvent pas être calculés.
+              </p>
+            ) : (
+              <>
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                  {value.homeCoordinates ? (
+                    <span className="flex items-center gap-1 text-good">
+                      <MapPin size={11} /> Position trouvée — utilisée pour les trajets et les km
+                    </span>
+                  ) : (
+                    <span className="text-ink-4">Position recherchée sur Google Maps à l&apos;enregistrement</span>
+                  )}
+                  <a href={mapsSearchUrl(address)} target="_blank" rel="noreferrer" className="flex items-center gap-1 font-semibold text-link hover:underline">
+                    Ouvrir dans Google Maps <ExternalLink size={10} />
+                  </a>
+                </div>
+                <iframe
+                  title="Carte de l'adresse"
+                  src={`https://maps.google.com/maps?q=${encodeURIComponent(mapQuery)}&z=14&output=embed`}
+                  className="mt-2 h-32 w-full rounded-btn border border-line"
+                  loading="lazy"
+                />
+              </>
+            )}
           </>
         )}
       </div>

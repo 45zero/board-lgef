@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Bell, CalendarDays, FileText, Heart, Home, LogOut, Maximize2, MessageCircle, Minus, Monitor, Moon, PlusSquare, Search, Sun, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Bell, CalendarDays, FileText, Heart, Home, LogOut, Maximize2, MessageCircle, Minus, Monitor, Moon, PlusSquare, Search, Settings, Sun, X } from "lucide-react";
 import { ChatThread } from "@/components/fief/chat";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar } from "@/components/fief/feed";
-import { useFiefUnread } from "@/components/fief/notifications";
+import { NotificationsList, useFiefUnread } from "@/components/fief/notifications";
 import { useDirectory } from "@/components/fief/directory";
 export { loadDirectory, useDirectory, type DirectoryEntry } from "@/components/fief/directory";
 import { Crest, FiefButton, PublicFrame, useFiefHref, useFiefMe, type FiefMe } from "@/components/fief/ui";
@@ -199,7 +199,7 @@ export function SearchPanel({ autoFocus = false, onNavigate }: { autoFocus?: boo
           {!peopleHits.length && !docHits.length && <p className="px-3 py-4 text-sm text-f-muted">Aucun résultat pour « {q.trim()} ».</p>}
           {peopleHits.length > 0 && <p className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-wide text-f-faint">Membres</p>}
           {peopleHits.map((p) => (
-            <Link key={p.user_id} href={href(`/messages?to=${p.user_id}`)} onClick={done} className="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-f-subtle">
+            <Link key={p.user_id} href={href(`/membre?u=${p.user_id}`)} onClick={done} className="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-f-subtle">
               <Avatar author={{ id: p.user_id, team: false, name: `${p.first_name} ${p.last_name}` }} size={36} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-bold">
@@ -207,7 +207,6 @@ export function SearchPanel({ autoFocus = false, onNavigate }: { autoFocus?: boo
                 </span>
                 {p.club_name && <span className="block truncate text-xs text-f-muted">{p.club_name}</span>}
               </span>
-              <MessageCircle size={16} className="text-f-faint" />
             </Link>
           ))}
           {docHits.length > 0 && <p className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-wide text-f-faint">Documents</p>}
@@ -280,7 +279,7 @@ function ProfileMenu({ me }: { me: FiefMe }) {
       </button>
       {open && (
         <div className="absolute right-0 z-50 mt-2 w-72 rounded-2xl border border-f-border bg-f-surface p-2 shadow-2xl">
-          <Link href={href("/profil")} onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-xl p-2.5 hover:bg-f-subtle">
+          <Link href={href("/membre")} onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-xl p-2.5 hover:bg-f-subtle">
             <Avatar author={{ id: me.userId, team: false }} size={44} />
             <span className="min-w-0">
               <span className="block truncate font-bold">
@@ -290,6 +289,9 @@ function ProfileMenu({ me }: { me: FiefMe }) {
             </span>
           </Link>
           <div className="my-1 border-t border-f-border" />
+          <Link href={href("/profil")} onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-semibold hover:bg-f-subtle">
+            <Settings size={17} /> Gérer mon profil
+          </Link>
           <Link href={href("/notifications")} onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-semibold hover:bg-f-subtle">
             <Bell size={17} /> Notifications
           </Link>
@@ -313,7 +315,45 @@ const ICON_TABS = [
   { path: "/calendrier", label: "Calendrier", icon: CalendarDays },
 ];
 
-function TopBar({ me, unreadMessages, unreadNotifs }: { me: FiefMe; unreadMessages: number; unreadNotifs: number }) {
+interface Popups {
+  chatPanel: boolean;
+  toggleChat: () => void;
+  notifOpen: boolean;
+  setNotifOpen: (v: boolean) => void;
+}
+
+/** Fenêtre de la cloche (ordinateur) : dernières notifications, sans quitter la page. */
+function NotificationsPopover({ onClose }: { onClose: () => void }) {
+  const href = useFiefHref();
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const close = (e: MouseEvent) => {
+      if (box.current && !box.current.contains(e.target as Node) && !(e.target as HTMLElement).closest("[data-notif-toggle]")) onClose();
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [onClose]);
+  return (
+    <div ref={box} className="fixed right-4 top-16 z-50 flex max-h-[calc(100dvh-5rem)] w-[380px] flex-col overflow-hidden rounded-2xl border border-f-border bg-f-surface shadow-2xl">
+      <div className="flex items-center justify-between px-4 pb-2 pt-3">
+        <p className="text-xl font-extrabold">Notifications</p>
+        <Link href={href("/notifications")} onClick={onClose} className="text-sm font-semibold text-f-link hover:underline">
+          Tout voir
+        </Link>
+      </div>
+      <div className="flex-1 overflow-y-auto px-2 pb-3">
+        <NotificationsList compact onNavigate={onClose} />
+      </div>
+    </div>
+  );
+}
+
+function TopBar({ me, unreadMessages, unreadNotifs, popups }: { me: FiefMe; unreadMessages: number; unreadNotifs: number; popups: Popups }) {
   const href = useFiefHref();
   const current = useCurrentPath();
   return (
@@ -341,14 +381,25 @@ function TopBar({ me, unreadMessages, unreadNotifs }: { me: FiefMe; unreadMessag
           })}
         </nav>
         <div className="flex items-center justify-end gap-2">
-          <Link href={href("/messages")} aria-label="Messages" className="relative flex h-10 w-10 items-center justify-center rounded-full bg-f-subtle text-f-text hover:brightness-95">
+          <button
+            onClick={popups.toggleChat}
+            aria-label="Messages"
+            aria-pressed={popups.chatPanel}
+            className={`relative flex h-10 w-10 items-center justify-center rounded-full hover:brightness-95 ${popups.chatPanel ? "bg-f-accent/15 text-f-accent" : "bg-f-subtle text-f-text"}`}
+          >
             <MessageCircle size={20} />
             <Badge n={unreadMessages} />
-          </Link>
-          <Link href={href("/notifications")} aria-label="Notifications" className="relative flex h-10 w-10 items-center justify-center rounded-full bg-f-subtle text-f-text hover:brightness-95">
+          </button>
+          <button
+            data-notif-toggle
+            onClick={() => popups.setNotifOpen(!popups.notifOpen)}
+            aria-label="Notifications"
+            aria-pressed={popups.notifOpen}
+            className={`relative flex h-10 w-10 items-center justify-center rounded-full hover:brightness-95 ${popups.notifOpen ? "bg-f-accent/15 text-f-accent" : "bg-f-subtle text-f-text"}`}
+          >
             <Bell size={20} />
             <Badge n={unreadNotifs} />
-          </Link>
+          </button>
           <ProfileMenu me={me} />
         </div>
       </div>
@@ -364,13 +415,13 @@ const NAV = [
   { path: "/notifications", label: "Notifications", icon: Bell, color: "#0F766E" },
 ];
 
-function LeftSidebar({ me, unreadMessages, unreadNotifs }: { me: FiefMe; unreadMessages: number; unreadNotifs: number }) {
+function LeftSidebar({ me, unreadMessages, unreadNotifs, popups }: { me: FiefMe; unreadMessages: number; unreadNotifs: number; popups: Popups }) {
   const href = useFiefHref();
   const current = useCurrentPath();
   const events = useUpcoming();
   return (
     <aside className="sticky top-14 hidden h-[calc(100dvh-3.5rem)] w-[300px] shrink-0 flex-col overflow-y-auto py-4 pr-2 lg:flex">
-      <Link href={href("/profil")} className={`flex items-center gap-3 rounded-lg px-2 py-2 ${current === "/profil" ? "bg-f-subtle" : "hover:bg-f-subtle"}`}>
+      <Link href={href("/membre")} className={`flex items-center gap-3 rounded-lg px-2 py-2 ${current === "/membre" ? "bg-f-subtle" : "hover:bg-f-subtle"}`}>
         <Avatar author={{ id: me.userId, team: false, name: `${me.firstName} ${me.lastName}` }} size={36} />
         <span className="truncate text-[15px] font-semibold">
           {me.firstName} {me.lastName}
@@ -379,13 +430,32 @@ function LeftSidebar({ me, unreadMessages, unreadNotifs }: { me: FiefMe; unreadM
       {NAV.map((n) => {
         const active = current === n.path;
         const count = n.path === "/messages" ? unreadMessages : n.path === "/notifications" ? unreadNotifs : 0;
-        return (
-          <Link key={n.path} href={href(n.path)} className={`flex items-center gap-3 rounded-lg px-2 py-2 ${active ? "bg-f-subtle" : "hover:bg-f-subtle"}`}>
+        const inner = (
+          <>
             <span className="flex h-9 w-9 items-center justify-center rounded-full" style={{ background: `${n.color}1f`, color: n.color }}>
               <n.icon size={20} strokeWidth={2.2} />
             </span>
-            <span className={`flex-1 text-[15px] ${active ? "font-bold" : "font-semibold"}`}>{n.label}</span>
+            <span className={`flex-1 text-left text-[15px] ${active ? "font-bold" : "font-semibold"}`}>{n.label}</span>
             {count > 0 && <span className="rounded-full bg-[#D7262E] px-1.5 text-[11px] font-bold leading-5 text-white">{count > 9 ? "9+" : count}</span>}
+          </>
+        );
+        const cls = `flex w-full items-center gap-3 rounded-lg px-2 py-2 ${active ? "bg-f-subtle" : "hover:bg-f-subtle"}`;
+        // Messages et notifications s'ouvrent en fenêtre, sans changer de page (façon Messenger).
+        if (n.path === "/messages" && current !== "/messages")
+          return (
+            <button key={n.path} onClick={popups.toggleChat} className={cls}>
+              {inner}
+            </button>
+          );
+        if (n.path === "/notifications" && current !== "/notifications")
+          return (
+            <button key={n.path} data-notif-toggle onClick={() => popups.setNotifOpen(!popups.notifOpen)} className={cls}>
+              {inner}
+            </button>
+          );
+        return (
+          <Link key={n.path} href={href(n.path)} className={cls}>
+            {inner}
           </Link>
         );
       })}
@@ -425,10 +495,23 @@ function LeftSidebar({ me, unreadMessages, unreadNotifs }: { me: FiefMe; unreadM
 }
 
 /** Chat en bas à droite (ordinateur), façon Messenger : pastille → liste des discussions → fenêtre de conversation. */
-function ChatDock({ me, convs, unread, onChanged }: { me: FiefMe; convs: ConversationLite[]; unread: number; onChanged: () => void }) {
+function ChatDock({
+  me,
+  convs,
+  unread,
+  onChanged,
+  panel,
+  setPanel,
+}: {
+  me: FiefMe;
+  convs: ConversationLite[];
+  unread: number;
+  onChanged: () => void;
+  panel: boolean;
+  setPanel: (v: boolean) => void;
+}) {
   const href = useFiefHref();
   const current = useCurrentPath();
-  const [panel, setPanel] = useState(false);
   const [active, setActive] = useState<ConversationLite | null>(null);
   if (current === "/messages") return null;
 
@@ -507,7 +590,7 @@ function ChatDock({ me, convs, unread, onChanged }: { me: FiefMe; convs: Convers
         </div>
       )}
       <button
-        onClick={() => setPanel((v) => !v)}
+        onClick={() => setPanel(!panel)}
         className="flex items-center gap-3 rounded-full border border-f-border bg-f-surface py-2.5 pl-5 pr-3 shadow-2xl transition hover:-translate-y-0.5"
       >
         <span className="relative">
@@ -572,8 +655,8 @@ function MobileBottomNav({ me, unreadMessages }: { me: FiefMe; unreadMessages: n
             </Link>
           );
         })}
-        <Link href={href("/profil")} aria-label="Profil" className="flex justify-center py-2.5">
-          <span className={`rounded-full ${current === "/profil" ? "ring-2 ring-f-text" : ""}`}>
+        <Link href={href("/membre")} aria-label="Ma page" className="flex justify-center py-2.5">
+          <span className={`rounded-full ${current === "/membre" || current === "/profil" ? "ring-2 ring-f-text" : ""}`}>
             <Avatar author={{ id: me.userId, team: false }} size={28} />
           </span>
         </Link>
@@ -588,15 +671,32 @@ export function MemberShell({ me, children }: { me: FiefMe; children: ReactNode 
   const { convs, refresh: refreshConvs } = useConversations();
   const unreadMessages = convs.filter((c) => c.unread > 0).length;
   useFiefTheme(); // applique le thème choisi (et suit le téléphone en « Auto »)
+  const [chatPanel, setChatPanel] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const closeNotifs = useCallback(() => setNotifOpen(false), []);
+  const popups: Popups = {
+    chatPanel,
+    toggleChat: () => {
+      setNotifOpen(false);
+      setChatPanel((v) => !v);
+    },
+    notifOpen,
+    setNotifOpen,
+  };
   return (
     <div className="min-h-dvh bg-f-bg pb-20 text-f-text lg:pb-0">
-      <TopBar me={me} unreadMessages={unreadMessages} unreadNotifs={unreadNotifs} />
+      <TopBar me={me} unreadMessages={unreadMessages} unreadNotifs={unreadNotifs} popups={popups} />
       <MobileHeader unreadNotifs={unreadNotifs} />
       <div className="flex gap-6 px-0 sm:px-4 lg:pl-2 lg:pr-4">
-        <LeftSidebar me={me} unreadMessages={unreadMessages} unreadNotifs={unreadNotifs} />
+        <LeftSidebar me={me} unreadMessages={unreadMessages} unreadNotifs={unreadNotifs} popups={popups} />
         <main className="min-w-0 flex-1 px-3 py-4 sm:px-0 lg:py-4">{children}</main>
       </div>
-      <ChatDock me={me} convs={convs} unread={unreadMessages} onChanged={refreshConvs} />
+      {notifOpen && (
+        <div className="hidden lg:block">
+          <NotificationsPopover onClose={closeNotifs} />
+        </div>
+      )}
+      <ChatDock me={me} convs={convs} unread={unreadMessages} onChanged={refreshConvs} panel={chatPanel} setPanel={setChatPanel} />
       <MobileBottomNav me={me} unreadMessages={unreadMessages} />
     </div>
   );
@@ -668,7 +768,7 @@ export function StoriesRow({ me, onPublish }: { me: FiefMe; onPublish: () => voi
         <span className="w-full truncate text-center text-xs">Publier</span>
       </button>
       {newest.map((p) => (
-        <Link key={p.user_id} href={href(`/messages?to=${p.user_id}`)} className="flex w-[74px] shrink-0 flex-col items-center gap-1.5" title={`Écrire à ${p.first_name}`}>
+        <Link key={p.user_id} href={href(`/membre?u=${p.user_id}`)} className="flex w-[74px] shrink-0 flex-col items-center gap-1.5" title={`Voir la page de ${p.first_name}`}>
           <Avatar author={{ id: p.user_id, team: false, name: p.first_name }} size={62} ring />
           <span className="w-full truncate text-center text-xs">{p.first_name}</span>
         </Link>
@@ -729,7 +829,7 @@ export function AdsAside() {
           <div className="my-3 border-t border-f-border" />
         </>
       )}
-      <p className="px-2 text-[11px] text-f-faint">FIEF · Femmes Investies dans l&apos;Environnement du Football · S&apos;engager • Partager • Grandir</p>
+      <p className="px-2 text-[11px] text-f-faint">FIEF · Femmes Investies dans l&apos;Encadrement du Football · S&apos;engager • Partager • Grandir</p>
     </aside>
   );
 }

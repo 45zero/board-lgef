@@ -18,10 +18,13 @@ import {
   Share2,
   Trash2,
   Upload,
+  Users,
   X,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ago, type FeedAuthor } from "@/components/fief/feed";
+import { AudiencePicker } from "@/components/fief/audience";
+import { EMPTY_SEL, selCount, selLabel, type FiefAudienceSel } from "@/lib/fief/audience";
 
 // Documents FIEF (sql/2026-11-13_fief_documents.sql) : « Documents partagés » (par dossiers) et « Mes
 // documents ». Envoi par morceaux de 4 Mo vers /api/fief/documents/chunk (relais Drive), 50 Mo max.
@@ -47,6 +50,28 @@ interface Doc {
   author: FeedAuthor;
   mine: boolean;
   created_at: string;
+  audience: "all" | "custom";
+  /** Rempli pour l'équipe FIEF seulement. */
+  audience_ids: string[];
+  audience_functions: string[];
+  audience_clubs: string[];
+}
+
+const docSel = (d: Doc): FiefAudienceSel => ({ ids: d.audience_ids ?? [], functions: d.audience_functions ?? [], clubs: d.audience_clubs ?? [] });
+const audiencePayload = (custom: boolean, sel: FiefAudienceSel) => (custom ? { audience: "custom", ...sel } : { audience: "all" });
+
+/** La personne connectée est-elle de l'équipe FIEF (seule à pouvoir partager) ? */
+function useIsFiefManager(team: boolean) {
+  const [manager, setManager] = useState(team);
+  useEffect(() => {
+    if (team) return;
+    let alive = true;
+    void Promise.resolve(createClient().rpc("fief_is_manager")).then(({ data }) => alive && setManager(data === true));
+    return () => {
+      alive = false;
+    };
+  }, [team]);
+  return manager;
 }
 
 const CHUNK = 4 * 1024 * 1024; // multiple de 256 Kio (exigence du Drive), sous la limite de 4,5 Mo des fonctions
@@ -82,7 +107,10 @@ async function api(body: unknown) {
 }
 
 /** Envoie un fichier par morceaux ; reprend où le Drive en est après une coupure. */
-async function uploadFile(file: File, opts: { folderId: string | null; shared: boolean; description: string; asTeam: boolean }, onProgress: (p: number) => void) {
+async function uploadFile(
+  file: File,
+  opts: { folderId: string | null; shared: boolean; description: string; asTeam: boolean; audience?: Record<string, unknown> },
+  onProgress: (p: number) => void) {
   const { id } = await api({ action: "start", name: file.name, mimeType: file.type || "application/octet-stream", size: file.size, ...opts });
   let offset = 0;
   let failures = 0;
@@ -127,6 +155,7 @@ export function DocumentsView({ team = false, driveUrl }: { team?: boolean; driv
   const [uploading, setUploading] = useState(false);
   const [version, setVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const canShare = useIsFiefManager(team);
 
   useEffect(() => {
     createClient()
@@ -237,7 +266,7 @@ export function DocumentsView({ team = false, driveUrl }: { team?: boolean; driv
             </div>
           )}
           {list?.map((d) => (
-            <DocRow key={d.id} doc={d} folders={folders ?? []} canManage={d.mine || team} showVisibility={tab === "mine"} onChanged={refresh} />
+            <DocRow key={d.id} doc={d} folders={folders ?? []} canManage={d.mine || team} canShare={canShare} showVisibility={tab === "mine" || canShare} onChanged={refresh} />
           ))}
         </div>
       )}
@@ -246,8 +275,9 @@ export function DocumentsView({ team = false, driveUrl }: { team?: boolean; driv
         <UploadDialog
           folders={folders ?? []}
           team={team}
+          canShare={canShare}
           defaultFolder={folderId && folderId !== "all" ? folderId : null}
-          defaultShared={team || tab === "shared"}
+          defaultShared={team || (canShare && tab === "shared")}
           onClose={() => setUploading(false)}
           onDone={refresh}
         />
@@ -300,8 +330,23 @@ function DriveLink({ driveUrl }: { driveUrl: () => Promise<string | null> }) {
   );
 }
 
-function DocRow({ doc, folders, canManage, showVisibility, onChanged }: { doc: Doc; folders: DocFolder[]; canManage: boolean; showVisibility: boolean; onChanged: () => void }) {
+function DocRow({
+  doc,
+  folders,
+  canManage,
+  canShare,
+  showVisibility,
+  onChanged,
+}: {
+  doc: Doc;
+  folders: DocFolder[];
+  canManage: boolean;
+  canShare: boolean;
+  showVisibility: boolean;
+  onChanged: () => void;
+}) {
   const [menu, setMenu] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const run = async (body: Record<string, unknown>, confirmText?: string) => {
     setMenu(false);
@@ -326,7 +371,9 @@ function DocRow({ doc, folders, canManage, showVisibility, onChanged }: { doc: D
         </div>
         {showVisibility && (
           <span className={`hidden rounded-full px-2 py-0.5 text-[11px] font-semibold sm:inline ${doc.visibility === "shared" ? "bg-f-success-bg text-f-success" : "bg-f-subtle text-f-muted"}`}>
-            {doc.visibility === "shared" ? `Partagé${doc.folder_name ? ` · ${doc.folder_name}` : ""}` : "Pour moi"}
+            {doc.visibility === "shared"
+              ? `${doc.audience === "custom" ? (canShare ? selLabel(docSel(doc)) : "Partagé avec vous") : "Toutes les membres"}${doc.folder_name ? ` · ${doc.folder_name}` : ""}`
+              : "Pour moi"}
           </span>
         )}
         {viewable(doc.mime_type) && (
@@ -344,9 +391,25 @@ function DocRow({ doc, folders, canManage, showVisibility, onChanged }: { doc: D
             </button>
             {menu && (
               <div className="absolute right-0 z-20 mt-1 w-60 overflow-hidden rounded-xl border border-f-border bg-f-surface py-1 text-sm shadow-lg">
-                {!doc.author.team && (
+                {!doc.author.team && (doc.visibility === "shared" || canShare) && (
                   <button onClick={() => void run({ action: "update", id: doc.id, shared: doc.visibility !== "shared" })} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-f-bg">
-                    <Share2 size={15} /> {doc.visibility === "shared" ? "Ne plus partager (garder pour moi)" : "Partager avec les membres"}
+                    <Share2 size={15} /> {doc.visibility === "shared" ? "Ne plus partager (garder pour moi)" : "Partager avec toutes les membres"}
+                  </button>
+                )}
+                {canShare && (
+                  <button
+                    onClick={() => {
+                      setMenu(false);
+                      setPicking(true);
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-f-bg"
+                  >
+                    <Users size={15} /> {doc.visibility === "shared" ? "Changer qui le voit…" : "Partager avec certaines personnes…"}
+                  </button>
+                )}
+                {canShare && doc.visibility === "shared" && doc.audience === "custom" && (
+                  <button onClick={() => void run({ action: "update", id: doc.id, audience: { audience: "all" } })} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-f-bg">
+                    <Share2 size={15} /> Ouvrir à toutes les membres
                   </button>
                 )}
                 <div className="px-3 py-2">
@@ -383,6 +446,16 @@ function DocRow({ doc, folders, canManage, showVisibility, onChanged }: { doc: D
         )}
       </div>
       {error && <p className="mt-2 text-sm text-f-danger">{error}</p>}
+      {picking && (
+        <AudiencePicker
+          title="Qui peut voir ce document ?"
+          initial={doc.audience === "custom" ? docSel(doc) : EMPTY_SEL}
+          onClose={(sel) => {
+            setPicking(false);
+            if (sel && selCount(sel)) void run({ action: "update", id: doc.id, shared: true, audience: audiencePayload(true, sel) });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -390,6 +463,7 @@ function DocRow({ doc, folders, canManage, showVisibility, onChanged }: { doc: D
 function UploadDialog({
   folders,
   team,
+  canShare,
   defaultFolder,
   defaultShared,
   onClose,
@@ -397,6 +471,7 @@ function UploadDialog({
 }: {
   folders: DocFolder[];
   team: boolean;
+  canShare: boolean;
   defaultFolder: string | null;
   defaultShared: boolean;
   onClose: () => void;
@@ -405,6 +480,9 @@ function UploadDialog({
   const [files, setFiles] = useState<File[]>([]);
   const [folderId, setFolderId] = useState<string | null>(defaultFolder);
   const [shared, setShared] = useState(defaultShared);
+  const [custom, setCustom] = useState(false);
+  const [sel, setSel] = useState<FiefAudienceSel>(EMPTY_SEL);
+  const [picking, setPicking] = useState(false);
   const [description, setDescription] = useState("");
   const [progress, setProgress] = useState<Record<string, number | string>>({});
   const [busy, setBusy] = useState(false);
@@ -416,7 +494,12 @@ function UploadDialog({
     let failed = false;
     for (const f of files) {
       try {
-        await uploadFile(f, { folderId, shared: team || shared, description: files.length === 1 ? description : "", asTeam: team }, (p) => setProgress((prev) => ({ ...prev, [f.name]: p })));
+        const share = canShare && (team || shared);
+        await uploadFile(
+          f,
+          { folderId, shared: share, description: files.length === 1 ? description : "", asTeam: team, ...(share ? { audience: audiencePayload(custom, sel) } : {}) },
+          (p) => setProgress((prev) => ({ ...prev, [f.name]: p }))
+        );
         setProgress((prev) => ({ ...prev, [f.name]: 1 }));
       } catch (e) {
         failed = true;
@@ -488,11 +571,12 @@ function UploadDialog({
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} maxLength={500} className="w-full rounded-xl border border-f-border px-3 py-2 text-[15px]" />
           </label>
         )}
-        {!team && (
+        {!canShare && <p className="mt-4 rounded-xl bg-f-subtle px-3 py-2.5 text-sm text-f-muted">Le document est rangé dans « Mes documents », visible de vous seule. Seule l&apos;équipe FIEF partage des documents avec les membres.</p>}
+        {canShare && !team && (
           <div className="mt-4 grid grid-cols-2 gap-2">
             {[
               { v: false, label: "Garder pour moi", hint: "Dans « Mes documents »" },
-              { v: true, label: "Partager", hint: "Visible de toutes les membres" },
+              { v: true, label: "Partager", hint: "Avec les membres choisies" },
             ].map((o) => (
               <button key={o.label} onClick={() => setShared(o.v)} className={`rounded-xl border-2 px-3 py-2.5 text-left ${shared === o.v ? "border-f-accent bg-f-subtle" : "border-f-border"}`}>
                 <span className="block text-sm font-bold">{o.label}</span>
@@ -501,9 +585,40 @@ function UploadDialog({
             ))}
           </div>
         )}
+        {canShare && (team || shared) && (
+          <div className="mt-3">
+            <span className="mb-1.5 block text-[13px] font-semibold">Qui le voit ?</span>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => setCustom(false)} className={`rounded-xl border-2 px-3 py-2 text-left text-sm font-bold ${!custom ? "border-f-accent bg-f-subtle" : "border-f-border"}`}>
+                Toutes les membres
+              </button>
+              <button
+                onClick={() => {
+                  setCustom(true);
+                  setPicking(true);
+                }}
+                className={`rounded-xl border-2 px-3 py-2 text-left text-sm font-bold ${custom ? "border-f-accent bg-f-subtle" : "border-f-border"}`}
+              >
+                Certaines personnes…
+                {custom && <span className="block truncate text-xs font-normal text-f-muted">{selLabel(sel)}</span>}
+              </button>
+            </div>
+          </div>
+        )}
+        {picking && (
+          <AudiencePicker
+            title="Qui peut voir ce document ?"
+            initial={sel}
+            onClose={(next) => {
+              setPicking(false);
+              if (next) setSel(next);
+              if (selCount(next ?? sel) === 0) setCustom(false);
+            }}
+          />
+        )}
         <button
           onClick={() => void send()}
-          disabled={busy || !files.length || tooBig.length > 0}
+          disabled={busy || !files.length || tooBig.length > 0 || (custom && !selCount(sel))}
           className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-f-accent px-4 py-3 text-[15px] font-bold text-white disabled:opacity-50"
         >
           {busy ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />} {busy ? "Envoi en cours…" : "Envoyer"}

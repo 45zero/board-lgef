@@ -6,7 +6,7 @@ export function GET(request: Request) {
   const base = onFiefHost ? "/" : "/fief";
   return Response.json(
     {
-      name: "FIEF — Femmes Investies dans l'Environnement du Football",
+      name: "FIEF — Femmes Investies dans l'Encadrement du Football",
       short_name: "FIEF",
       description: "L'espace des femmes du football du Grand Est",
       start_url: base,

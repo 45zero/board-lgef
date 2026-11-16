@@ -400,6 +400,8 @@ export function DossierPanel({
                       <th className="py-1 pr-3">Date</th>
                       <th className="py-1 pr-3">Joueurs / équipe</th>
                       <th className="py-1 pr-3">Nb remplaçants</th>
+                      <th className="py-1 pr-3">Durée match</th>
+                      <th className="py-1 pr-3">Matchs / équipe</th>
                       <th className="py-1">Pratique</th>
                     </tr>
                   </thead>
@@ -411,6 +413,8 @@ export function DossierPanel({
                         <td className="py-1.5 pr-3">{c.play_date ? new Date(c.play_date + "T12:00:00").toLocaleDateString("fr-FR") : "—"}</td>
                         <td className="py-1.5 pr-3">{c.players_per_team ?? "—"}</td>
                         <td className="py-1.5 pr-3">{c.substitutes ?? "—"}</td>
+                        <td className="py-1.5 pr-3">{c.match_minutes != null ? `${c.match_minutes} min` : "—"}</td>
+                        <td className="py-1.5 pr-3">{c.matches_per_team ?? "—"}</td>
                         <td className="py-1.5">{c.surface ?? "—"}</td>
                       </tr>
                     ))}
@@ -419,6 +423,7 @@ export function DossierPanel({
               </div>
               <Grid
                 rows={[
+                  ["Logiciel de gestion de la ligue", d.uses_league_software ? "Oui" : "Non"],
                   ["Charte des participants", yesNo(d.participant_charter)],
                   ["Messages éducatifs", d.educational_messages ?? "—"],
                   ["Feuilles de match au début", yesNo(d.match_sheets_at_start)],

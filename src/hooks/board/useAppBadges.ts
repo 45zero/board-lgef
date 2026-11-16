@@ -14,6 +14,7 @@ export function useAppBadges(): Record<string, AppBadge[]> {
   const inscription = data.inscription ?? { sent: 0, pending: 0 };
   const audiovisuel = data.audiovisuel ?? 0;
   const trello = data.trello ?? 0;
+  const fief = data.fief ?? 0;
   const badges: Record<string, AppBadge[]> = {
     mails: [{ count: mails, tone: "red", title: `${mails} mail(s) non lu(s)` }],
     calendrier: [{ count: calendrier, tone: "navy", title: `${calendrier} événement(s) aujourd'hui` }],
@@ -23,6 +24,7 @@ export function useAppBadges(): Record<string, AppBadge[]> {
     ],
     audiovisuel: [{ count: audiovisuel, tone: "red", title: `${audiovisuel} publication(s) à publier` }],
     trello: [{ count: trello, tone: "red", title: `${trello} nouvelle(s) carte(s) assignée(s)` }],
+    fief: [{ count: fief, tone: "red", title: `${fief} demande(s) d'adhésion FIEF à traiter` }],
     frais: [
       { count: data.frais?.toValidate ?? 0, tone: "red", title: `${data.frais?.toValidate ?? 0} frais / facture(s) à valider` },
       { count: data.frais?.toDeclare ?? 0, tone: "orange", title: `${data.frais?.toDeclare ?? 0} frais à déclarer / facture(s) à déposer` },

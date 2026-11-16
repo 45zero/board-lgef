@@ -12,6 +12,7 @@ import {
   fmtSize,
   MAX_FILE_BYTES,
   SURFACES,
+  softwareMissing,
   type CategoryInput,
   type ClubHit,
   type PublicFormConfig,
@@ -19,7 +20,8 @@ import {
 import { uploadPiece } from "@/components/tournois/upload";
 
 // Formulaire public de déclaration de tournoi / rassemblement (/tournoi) : 5 étapes courtes, pensé
-// pour le téléphone. Brouillon gardé dans le navigateur (sans les fichiers) pour reprendre plus tard.
+// pour le téléphone. Club, Manifestation, Catégories, Pièces, puis Informations complémentaires
+// (facultatives, obligatoires si le club utilise le logiciel de gestion de tournoi offert par la ligue). Brouillon gardé dans le navigateur (sans les fichiers) pour reprendre plus tard.
 
 type Tri = boolean | null;
 type Piece = { kind: "poster" | "rules" | "other"; file: File };
@@ -56,6 +58,7 @@ interface Draft {
   spectatorsExpected: string;
   animations: string;
   otherInfo: string;
+  usesLeagueSoftware: boolean;
 }
 
 const EMPTY: Draft = {
@@ -90,10 +93,11 @@ const EMPTY: Draft = {
   spectatorsExpected: "",
   animations: "",
   otherInfo: "",
+  usesLeagueSoftware: false,
 };
 
 const DRAFT_KEY = "lgef-tournoi-brouillon";
-const STEPS = ["Club", "Manifestation", "Catégories", "Organisation", "Pièces et envoi"];
+const STEPS = ["Club", "Manifestation", "Catégories", "Pièces", "Informations complémentaires"];
 
 const input = "w-full rounded-btn border border-line-strong bg-card px-3 py-2 text-[15px] text-ink outline-none focus:border-navy focus:ring-2 focus:ring-navy/15";
 const label = "mb-1 block text-sm font-semibold text-ink-2";
@@ -154,6 +158,15 @@ export function DeclarationForm({ config, districts }: { config: PublicFormConfi
     if (s === 2 && !checked.length) return "Cochez au moins une catégorie.";
     return null;
   };
+  const softwareError = () =>
+    d.usesLeagueSoftware
+      ? softwareMissing({
+          ...d,
+          categories: checked.map((c) => d.categories[c.slug]),
+          clubsExpected: toInt(d.clubsExpected),
+          spectatorsExpected: toInt(d.spectatorsExpected),
+        })
+      : null;
 
   const go = (to: number) => {
     if (to > step) {
@@ -180,6 +193,8 @@ export function DeclarationForm({ config, districts }: { config: PublicFormConfi
         return;
       }
     }
+    const sw = softwareError();
+    if (sw) return setError(sw);
     if (!certify) return setError("Merci de certifier l'exactitude des informations.");
     setError(null);
     setSending({ label: "Enregistrement de la déclaration…", ratio: 0 });
@@ -214,6 +229,7 @@ export function DeclarationForm({ config, districts }: { config: PublicFormConfi
         spectatorsExpected: toInt(d.spectatorsExpected),
         animations: d.animations,
         otherInfo: d.otherInfo,
+        usesLeagueSoftware: d.usesLeagueSoftware,
         files: pieces.map((p) => ({ kind: p.kind, name: p.file.name, mimeType: p.file.type || "application/octet-stream", size: p.file.size })),
         certify: true,
       });
@@ -375,8 +391,18 @@ export function DeclarationForm({ config, districts }: { config: PublicFormConfi
         />
       )}
 
-      {step === 3 && (
+      {step === 3 && <PiecesStep pieces={pieces} onChange={setPieces} />}
+
+      {step === 4 && (
         <div className="space-y-5">
+          <div className={`rounded-card border-2 p-3 ${d.usesLeagueSoftware ? "border-navy bg-sel-bg" : "border-line bg-subtle"}`}>
+            <YesNo
+              label="Utiliserez-vous le logiciel de gestion de tournoi offert par la ligue ?"
+              hint={d.usesLeagueSoftware ? "Oui : les informations ci-dessous sont obligatoires, ainsi que la durée d'un match et le nombre de matchs par équipe (étape 3)." : "Si non, cette page est facultative."}
+              value={d.usesLeagueSoftware}
+              onChange={(v) => set("usesLeagueSoftware", v === true)}
+            />
+          </div>
           <Group title="Participants">
             <Field label="Nombre de clubs attendus (environ)">
               <input type="number" inputMode="numeric" min={0} className={input} value={d.clubsExpected} onChange={(e) => set("clubsExpected", e.target.value)} />
@@ -421,12 +447,6 @@ export function DeclarationForm({ config, districts }: { config: PublicFormConfi
           <Field label="Informations utiles à communiquer">
             <textarea rows={3} className={input} value={d.otherInfo} onChange={(e) => set("otherInfo", e.target.value)} />
           </Field>
-        </div>
-      )}
-
-      {step === 4 && (
-        <div className="space-y-5">
-          <PiecesStep pieces={pieces} onChange={setPieces} />
           <Summary d={d} checked={checked.map((c) => c.label)} late={late} pieces={pieces.length} />
           <label className="flex cursor-pointer gap-3 rounded-card border border-line bg-subtle p-3 text-sm text-ink-2">
             <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--navy)]" checked={certify} onChange={(e) => setCertify(e.target.checked)} />
@@ -701,13 +721,15 @@ function CategoriesStep({
 
       {selected.length > 0 && (
         <div className="overflow-hidden rounded-card border border-line">
-          {/* Mêmes champs que la fiche papier : Nb équipes, Date (*), Joueurs / équipe, Nb remplaçants, Pratique (**) */}
+          {/* Champs de la fiche papier (Nb équipes, Date (*), Joueurs / équipe, Nb remplaçants, Pratique (**)) + durée d'un match et matchs par équipe */}
           <div className="hidden items-end gap-x-2 bg-subtle px-3 py-1 text-[10px] font-semibold uppercase leading-tight tracking-wide text-ink-4 sm:flex">
             <span className="w-16">Catégorie</span>
             <span className="w-14 text-center">Nb équipes</span>
             {multiDay && <span className="w-36">Date (*)</span>}
             <span className="w-14 text-center">Joueurs / équipe</span>
             <span className="w-14 text-center">Nb rempl.</span>
+            <span className="w-14 text-center">Durée match (min)</span>
+            <span className="w-14 text-center">Matchs / équipe</span>
             <span className="w-32">Pratique (**)</span>
           </div>
           {selected.map((c, i) => {
@@ -728,6 +750,12 @@ function CategoriesStep({
                 </Cell>
                 <Cell label="Nb rempl.">
                   <input aria-label={`${c.label} — nombre de remplaçants`} type="number" inputMode="numeric" min={0} className={`${box} w-14`} value={num(v.substitutes)} onChange={(e) => patch(c.slug, { substitutes: toInt(e.target.value) })} />
+                </Cell>
+                <Cell label="Durée match (min)">
+                  <input aria-label={`${c.label} — durée d'un match en minutes`} type="number" inputMode="numeric" min={0} className={`${box} w-14`} value={num(v.matchMinutes)} onChange={(e) => patch(c.slug, { matchMinutes: toInt(e.target.value) })} />
+                </Cell>
+                <Cell label="Matchs / éq.">
+                  <input aria-label={`${c.label} — nombre de matchs par équipe`} type="number" inputMode="numeric" min={0} className={`${box} w-14`} value={num(v.matchesPerTeam)} onChange={(e) => patch(c.slug, { matchesPerTeam: toInt(e.target.value) })} />
                 </Cell>
                 <Cell label="Pratique (**)">
                   <select aria-label={`${c.label} — pratique`} className={`${box} w-32 text-left text-sm`} value={v.surface ?? ""} onChange={(e) => patch(c.slug, { surface: e.target.value })}>

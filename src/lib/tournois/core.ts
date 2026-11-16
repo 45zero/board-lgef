@@ -189,10 +189,13 @@ export async function declarationPdf(full: FullDeclaration): Promise<Uint8Array>
       c.play_date && `le ${new Date(c.play_date + "T12:00:00").toLocaleDateString("fr-FR")}`,
       c.players_per_team != null && `${c.players_per_team} joueurs / équipe`,
       c.substitutes != null && `${c.substitutes} remplaçants`,
+      c.match_minutes != null && `matchs de ${c.match_minutes} min`,
+      c.matches_per_team != null && `${c.matches_per_team} matchs / équipe`,
       c.surface,
     ].filter(Boolean);
     text(bits.join(" · ") || "-", { x: M + 12, width: W - 2 * M - 12 });
   }
+  row("Logiciel de gestion de la ligue", d.uses_league_software ? "Oui" : "Non");
   row("Clubs attendus", d.clubs_expected?.toString());
   row("Équipes d'autres districts", yesNo(d.other_districts));
   row("Équipes d'autres pays", yesNo(d.other_countries));

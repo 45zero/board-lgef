@@ -8,7 +8,8 @@ import { ComingSoon } from "@/components/fief/ui";
 import { MemberGate } from "@/components/fief/shell";
 
 // Calendrier FIEF : les événements du board que l'équipe FIEF a rendus visibles pour la membre
-// (fief_my_events, sql/2026-11-13_fief_evenements.sql). Grille du mois + événements à venir.
+// (fief_my_events, sql/2026-11-16_fief_evolutions.sql). Grille du mois + événements à venir.
+// « Invitation » : la membre répond (participe / peut-être / ne participe pas) depuis la fiche.
 
 interface FiefEvent {
   id: string;
@@ -18,7 +19,17 @@ interface FiefEvent {
   end_date: string | null;
   location: string | null;
   online_meeting: boolean;
+  mode: "info" | "invitation";
+  my_response: Response | null;
 }
+
+type Response = "yes" | "maybe" | "no";
+const RESPONSES: { id: Response; label: string; on: string }[] = [
+  { id: "yes", label: "Je participe", on: "bg-[#16A34A] text-white" },
+  { id: "maybe", label: "Peut-être", on: "bg-[#D97706] text-white" },
+  { id: "no", label: "Je ne participe pas", on: "bg-[#B91F26] text-white" },
+];
+const RESPONSE_SHORT: Record<Response, string> = { yes: "Vous participez", maybe: "Peut-être", no: "Vous ne participez pas" };
 
 const DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -178,6 +189,11 @@ function Calendar() {
                     {time(e.start_date)}
                     {e.online_meeting ? " · En ligne" : e.location ? ` · ${e.location}` : ""}
                   </span>
+                  {e.mode === "invitation" && (
+                    <span className={`mt-0.5 inline-block rounded-full px-2 py-0.5 text-[11px] font-bold ${e.my_response ? "bg-f-subtle text-f-text" : "bg-f-danger-bg text-[#D7262E]"}`}>
+                      {e.my_response ? RESPONSE_SHORT[e.my_response] : "Invitation · à répondre"}
+                    </span>
+                  )}
                 </span>
                 <ChevronRight size={18} className="shrink-0 text-f-faint" />
               </button>
@@ -186,16 +202,46 @@ function Calendar() {
         </div>
       </div>
 
-      {openEvent && <EventSheet event={openEvent} onClose={() => setOpenEvent(null)} />}
+      {openEvent && (
+        <EventSheet
+          event={openEvent}
+          onClose={() => setOpenEvent(null)}
+          onResponded={(id, my_response) => {
+            const patch = (l: FiefEvent[]) => l.map((x) => (x.id === id ? { ...x, my_response } : x));
+            setUpcoming((u) => (u ? patch(u) : u));
+            setMonthEvents((m) => (m ? { ...m, list: patch(m.list) } : m));
+            setOpenEvent((o) => (o && o.id === id ? { ...o, my_response } : o));
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function EventSheet({ event: e, onClose }: { event: FiefEvent; onClose: () => void }) {
+function EventSheet({ event: e, onClose, onResponded }: { event: FiefEvent; onClose: () => void; onResponded: (id: string, r: Response | null) => void }) {
+  const [busy, setBusy] = useState<Response | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const respond = async (r: Response) => {
+    const next = e.my_response === r ? null : r;
+    setBusy(r);
+    setError(null);
+    try {
+      const res = await fetch("/api/fief/events", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ eventId: e.id, response: next }) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.error ?? "Réponse non enregistrée.");
+      onResponded(e.id, next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Réponse non enregistrée.");
+    }
+    setBusy(null);
+  };
   const day = new Date(e.start_date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
       <div className="max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-f-surface p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:rounded-3xl" onClick={(ev) => ev.stopPropagation()}>
+        <p className={`mb-1 text-xs font-bold uppercase tracking-wide ${e.mode === "invitation" ? "text-[#D7262E]" : "text-f-faint"}`}>
+          {e.mode === "invitation" ? "Invitation" : "Pour information"}
+        </p>
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-xl font-extrabold">{e.title}</h2>
           <button onClick={onClose} aria-label="Fermer" className="rounded-full p-1.5 text-f-muted hover:bg-f-subtle">
@@ -218,6 +264,25 @@ function EventSheet({ event: e, onClose }: { event: FiefEvent; onClose: () => vo
           )
         )}
         {e.description && <p className="mt-4 whitespace-pre-line text-[15px] text-f-text">{e.description}</p>}
+        {e.mode === "invitation" && (
+          <div className="mt-5">
+            <p className="mb-2 text-sm font-bold">Votre réponse</p>
+            <div className="grid grid-cols-3 gap-2">
+              {RESPONSES.map((r) => (
+                <button
+                  key={r.id}
+                  disabled={!!busy}
+                  onClick={() => void respond(r.id)}
+                  aria-pressed={e.my_response === r.id}
+                  className={`rounded-xl px-2 py-2.5 text-sm font-bold disabled:opacity-60 ${e.my_response === r.id ? r.on : "bg-f-subtle text-f-text hover:brightness-95"}`}
+                >
+                  {busy === r.id ? "…" : r.label}
+                </button>
+              ))}
+            </div>
+            {error && <p className="mt-2 text-sm text-f-danger">{error}</p>}
+          </div>
+        )}
         <button onClick={() => downloadIcs(e)} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-f-accent px-4 py-3 text-[15px] font-bold text-white">
           <CalendarPlus size={18} /> Ajouter à mon agenda
         </button>

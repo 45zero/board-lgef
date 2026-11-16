@@ -3,7 +3,7 @@
 import { toResult } from "@/lib/board/actionResult";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
-import { DETAILS_COLUMNS, detailsFromRow, saveProfile } from "@/lib/board/profileCore";
+import { DETAILS_COLUMNS, addressHiddenFor, detailsForViewer, saveProfile } from "@/lib/board/profileCore";
 import type { ProfileDetails } from "@/lib/board/profile";
 
 // Paramètres → Utilisateurs : rôle et spécialités de chaque compte (profiles.role +
@@ -71,7 +71,7 @@ async function listUsersImpl(): Promise<UsersList> {
       createdAt: p.created_at,
       managerId: p.expense_validator_id,
       avatarUrl: p.avatar_url,
-      ...detailsFromRow(p),
+      ...detailsForViewer(p, userId),
     })),
     specialties: (specialties ?? []) as SpecialtyOption[],
     me: { id: userId, isAdmin },
@@ -84,7 +84,7 @@ type UserInput = { firstName: string; lastName: string; role: UserRole; slugs: s
 async function updateUserImpl(id: string, input: UserInput) {
   const { userId, isAdmin } = await requireManager();
   const service = createServiceClient();
-  const { data: current } = await service.from("profiles").select("role").eq("id", id).single();
+  const { data: current } = await service.from("profiles").select("id, role, address_private, expense_validator_id").eq("id", id).single();
   if (!current) throw new Error("Compte introuvable.");
   const currentRole = current.role as UserRole;
 
@@ -95,7 +95,7 @@ async function updateUserImpl(id: string, input: UserInput) {
     }
   }
 
-  await saveProfile(service, id, { firstName: input.firstName, lastName: input.lastName, ...input.details });
+  await saveProfile(service, id, { firstName: input.firstName, lastName: input.lastName, ...input.details }, { keepAddress: addressHiddenFor(current, userId) });
   if (input.role !== currentRole) {
     const { error: roleError } = await service.from("profiles").update({ role: input.role }).eq("id", id);
     if (roleError) throw new Error(roleError.message);

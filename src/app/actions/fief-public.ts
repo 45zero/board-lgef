@@ -158,7 +158,7 @@ export async function submitFiefApplication(input: FiefApplicationInput): Promis
         firstName: r.parentName,
         subject: `${r.firstName} souhaite rejoindre FIEF`,
         paragraphs: [
-          `${r.firstName} ${r.lastName} a demandé à rejoindre FIEF, le réseau des femmes engagées dans le football du Grand Est, proposé par la Ligue du Grand Est de Football.`,
+          `${r.firstName} ${r.lastName} a demandé à rejoindre FIEF, le réseau des femmes investies dans l'encadrement du football du Grand Est (éducatrices, dirigeantes, arbitres, bénévoles…), proposé par la Ligue du Grand Est de Football.`,
           "Comme elle est mineure, votre accord est nécessaire. Sa demande sera ensuite examinée par l'équipe FIEF de la Ligue.",
           "Si vous n'êtes pas à l'origine de cette démarche ou ne souhaitez pas donner votre accord, ignorez simplement cet e-mail.",
         ],

@@ -234,7 +234,7 @@ export async function approveFiefApplication(id: string): Promise<ActionResult<{
       .eq("id", app.id);
     if (updateError) throw new Error(updateError.message);
 
-    const welcome = "Votre demande d'adhésion a été acceptée : vous faites maintenant partie du réseau des femmes engagées dans le football du Grand Est.";
+    const welcome = "Votre demande d'adhésion a été acceptée : vous faites maintenant partie du réseau des femmes investies dans l'encadrement du football du Grand Est.";
     const emailed = await sendFiefEmail({
       to: app.email,
       firstName: app.first_name,
@@ -383,6 +383,9 @@ export async function saveFiefFunction(input: { slug?: string; label: string; ac
 // ── Événements « Visible sur FIEF » (lot 2, sql/2026-11-13_fief_evenements.sql) ──────────────────────
 
 export type FiefAudience = "all" | "clubs" | "functions" | "members";
+/** « info » : simple information ; « invitation » : les membres répondent depuis leur calendrier FIEF. */
+export type FiefShareMode = "info" | "invitation";
+export type FiefResponse = "yes" | "maybe" | "no";
 
 export interface FiefShareInput {
   audience: FiefAudience;
@@ -392,7 +395,9 @@ export interface FiefShareInput {
 }
 
 export interface FiefEventShareState {
-  share: (FiefShareInput & { sharedAt: string; notifiedAt: string | null }) | null;
+  share: (FiefShareInput & { mode: FiefShareMode; sharedAt: string; notifiedAt: string | null }) | null;
+  /** Réponses des membres (invitation). */
+  responses: { userId: string; name: string; clubName: string | null; response: FiefResponse; at: string }[];
   options: {
     clubs: { clubNumber: string; clubName: string; count: number }[];
     functions: { slug: string; label: string }[];
@@ -405,11 +410,13 @@ export async function getFiefEventShare(eventId: string): Promise<ActionResult<F
   return toResult(async () => {
     await requireManager();
     const service = createServiceClient();
-    const [{ data: share }, { data: members }, { data: fns }] = await Promise.all([
+    const [{ data: share }, { data: members }, { data: fns }, { data: answers }] = await Promise.all([
       service.from("fief_event_shares").select("*").eq("event_id", eventId).maybeSingle(),
       service.from("fief_members").select("user_id, first_name, last_name, club_number, club_name").eq("status", "active").order("last_name"),
       service.from("fief_member_functions").select("slug, label").order("position"),
+      service.from("fief_event_responses").select("user_id, response, responded_at").eq("event_id", eventId).order("responded_at"),
     ]);
+    const memberById = new Map((members ?? []).map((m) => [m.user_id, m]));
     const clubs = new Map<string, { clubNumber: string; clubName: string; count: number }>();
     for (const m of members ?? []) {
       if (!m.club_number) continue;
@@ -420,6 +427,7 @@ export async function getFiefEventShare(eventId: string): Promise<ActionResult<F
     return {
       share: share
         ? {
+            mode: share.mode ?? "invitation",
             audience: share.audience,
             clubNumbers: share.club_numbers,
             functions: share.functions,
@@ -428,6 +436,10 @@ export async function getFiefEventShare(eventId: string): Promise<ActionResult<F
             notifiedAt: share.notified_at,
           }
         : null,
+      responses: (answers ?? []).map((a) => {
+        const m = memberById.get(a.user_id);
+        return { userId: a.user_id, name: m ? `${m.first_name} ${m.last_name}` : "Ancienne membre", clubName: m?.club_name ?? null, response: a.response, at: a.responded_at };
+      }),
       options: {
         clubs: [...clubs.values()].sort((a, b) => a.clubName.localeCompare(b.clubName, "fr")),
         functions: fns ?? [],
@@ -439,6 +451,7 @@ export async function getFiefEventShare(eventId: string): Promise<ActionResult<F
 
 const shareSchema = z.object({
   enabled: z.boolean(),
+  mode: z.enum(["info", "invitation"]).default("invitation"),
   audience: z.enum(["all", "clubs", "functions", "members"]),
   clubNumbers: z.array(z.string().max(20)).max(200),
   functions: z.array(z.string().max(40)).max(50),
@@ -484,6 +497,7 @@ export async function saveFiefEventShare(
     const { error } = await service.from("fief_event_shares").upsert(
       {
         event_id: eventId,
+        mode: s.mode,
         audience: s.audience,
         club_numbers: s.audience === "clubs" ? s.clubNumbers : [],
         functions: s.audience === "functions" ? s.functions : [],
@@ -504,21 +518,25 @@ export async function saveFiefEventShare(
     const place = event.event_address || event.location;
     const body = `${when}${place ? ` · ${place}` : ""}`;
     const route = `/calendrier?event=${eventId}`;
+    const invite = s.mode === "invitation";
+    const notifTitle = invite ? `Invitation : ${event.title}` : `Pour information : ${event.title}`;
     const { error: notifError } = await service
       .from("fief_notifications")
-      .insert(people.map((p) => ({ user_id: p.user_id, kind: "event" as const, title: `Nouvel événement : ${event.title}`, body, route, event_id: eventId })));
+      .insert(people.map((p) => ({ user_id: p.user_id, kind: "event" as const, title: notifTitle, body: invite ? `${body} — répondez depuis votre calendrier` : body, route, event_id: eventId })));
     if (notifError) throw new Error(`Partage enregistré mais notifications non créées : ${notifError.message}`);
 
     const ids = people.map((p) => p.user_id);
     const [pushed, emailed] = await Promise.all([
-      sendFiefPush(ids, { title: `FIEF · ${event.title}`, body, route, tag: `fief-event-${eventId}` }),
+      sendFiefPush(ids, { title: invite ? `FIEF · Invitation : ${event.title}` : `FIEF · ${event.title}`, body, route, tag: `fief-event-${eventId}` }),
       sendFiefEmails(
         people.map((p) => ({
           to: p.email,
           firstName: p.first_name,
-          subject: `Nouvel événement FIEF : ${event.title}`,
-          paragraphs: [`Vous êtes invitée à « ${event.title} ».`, `Quand : ${when}`, ...(place ? [`Où : ${place}`] : []), "Retrouvez-le dans votre calendrier FIEF."],
-          link: { href: fiefUrl(route), label: "Voir dans mon calendrier" },
+          subject: invite ? `Invitation FIEF : ${event.title}` : `Pour information — FIEF : ${event.title}`,
+          paragraphs: invite
+            ? [`Vous êtes invitée à « ${event.title} ».`, `Quand : ${when}`, ...(place ? [`Où : ${place}`] : []), "Dites-nous si vous venez : répondez depuis votre calendrier FIEF."]
+            : [`Pour information, l'équipe FIEF vous signale « ${event.title} ».`, `Quand : ${when}`, ...(place ? [`Où : ${place}`] : []), "Retrouvez-le dans votre calendrier FIEF."],
+          link: { href: fiefUrl(route), label: invite ? "Répondre à l'invitation" : "Voir dans mon calendrier" },
         }))
       ),
     ]);
@@ -533,7 +551,7 @@ export interface FiefEventRow {
   startDate: string;
   endDate: string | null;
   location: string | null;
-  share: { audience: FiefAudience; count: number; notifiedAt: string | null } | null;
+  share: { mode: FiefShareMode; audience: FiefAudience; count: number; notifiedAt: string | null; yes: number } | null;
 }
 
 /** Événements à venir du board (4 mois), avec leur état de partage FIEF — onglet FIEF → Événements. */
@@ -551,10 +569,15 @@ export async function listFiefEvents(): Promise<ActionResult<FiefEventRow[]>> {
         .lte("start_date", until.toISOString())
         .order("start_date")
         .limit(300),
-      service.from("fief_event_shares").select("event_id, audience, club_numbers, functions, member_ids, notified_at"),
+      service.from("fief_event_shares").select("event_id, mode, audience, club_numbers, functions, member_ids, notified_at"),
     ]);
     if (error) throw new Error(error.message);
     const byEvent = new Map((shares ?? []).map((s) => [s.event_id, s]));
+    const { data: yes } = byEvent.size
+      ? await service.from("fief_event_responses").select("event_id").eq("response", "yes").in("event_id", [...byEvent.keys()])
+      : { data: [] as { event_id: string }[] };
+    const yesBy = new Map<string, number>();
+    for (const r of yes ?? []) yesBy.set(r.event_id, (yesBy.get(r.event_id) ?? 0) + 1);
     return (events ?? []).map((e) => {
       const s = byEvent.get(e.id);
       return {
@@ -565,6 +588,8 @@ export async function listFiefEvents(): Promise<ActionResult<FiefEventRow[]>> {
         location: e.event_address || e.location,
         share: s
           ? {
+              mode: s.mode ?? "invitation",
+              yes: yesBy.get(e.id) ?? 0,
               audience: s.audience,
               count: s.audience === "clubs" ? s.club_numbers.length : s.audience === "functions" ? s.functions.length : s.audience === "members" ? s.member_ids.length : 0,
               notifiedAt: s.notified_at,
@@ -726,5 +751,76 @@ export async function listFiefAds(): Promise<ActionResult<FiefAdRow[]>> {
       position: a.position,
       clicks: a.clicks,
     }));
+  });
+}
+
+// ── Administratrices FIEF (ticket ddeb4fe3) ────────────────────────────────────────────────────────
+// L'équipe FIEF (Claire…) nomme des comptes du board administratrices : ils sont ajoutés à la règle
+// du module « fief » (module_access.include_user_ids), donc voient l'onglet FIEF — visible aussi dans
+// Paramètres → Modules. Les administrateurs et super users du board voient toujours l'onglet.
+
+export interface FiefAdminsState {
+  admins: { userId: string; name: string; email: string | null; role: string; locked: boolean }[];
+  people: { userId: string; name: string; email: string | null }[];
+}
+
+type BoardPerson = { user_id: string; first_name: string | null; last_name: string | null; email: string | null; role: string };
+const personName = (p: BoardPerson) => `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() || p.email || "Sans nom";
+
+async function loadFiefRule(service: ReturnType<typeof createServiceClient>) {
+  const { data } = await service.from("module_access").select("include_user_ids, exclude_user_ids").eq("module_id", "fief").maybeSingle();
+  return { include: data?.include_user_ids ?? [], exclude: data?.exclude_user_ids ?? [], exists: !!data };
+}
+
+/** Qui administre FIEF (voit l'onglet) et parmi qui en nommer d'autres (comptes du board, hors comptes FIEF). */
+export async function getFiefAdmins(): Promise<ActionResult<FiefAdminsState>> {
+  return toResult(async () => {
+    await requireManager();
+    const service = createServiceClient();
+    const [{ data: people, error }, { data: cands }] = await Promise.all([service.rpc("fief_board_people"), service.rpc("fief_manager_candidates")]);
+    if (error) throw new Error("Liste des comptes indisponible.");
+    const all = (people ?? []) as BoardPerson[];
+    const adminIds = new Set(((cands ?? []) as { user_id: string }[]).map((c) => c.user_id));
+    const elevated = (role: string) => role === "admin" || role === "super_user";
+    return {
+      admins: all
+        .filter((p) => adminIds.has(p.user_id))
+        .map((p) => ({ userId: p.user_id, name: personName(p), email: p.email, role: p.role, locked: elevated(p.role) }))
+        .sort((a, b) => Number(a.locked) - Number(b.locked) || a.name.localeCompare(b.name, "fr")),
+      people: all.filter((p) => !adminIds.has(p.user_id)).map((p) => ({ userId: p.user_id, name: personName(p), email: p.email })),
+    };
+  });
+}
+
+/** Nomme (on) ou retire (off) une administratrice FIEF. */
+export async function setFiefAdmin(userId: string, on: boolean): Promise<ActionResult<null>> {
+  return toResult(async () => {
+    const me = await requireManager();
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) throw new Error("Compte inconnu.");
+    if (!on && userId === me) throw new Error("Vous ne pouvez pas retirer votre propre accès.");
+    const service = createServiceClient();
+    const { data: people } = await service.rpc("fief_board_people");
+    const person = ((people ?? []) as BoardPerson[]).find((p) => p.user_id === userId);
+    if (!person) throw new Error("Ce compte n'est pas un compte du board.");
+    if (!on && (person.role === "admin" || person.role === "super_user")) throw new Error("Les administrateurs du board voient toujours l'onglet FIEF.");
+
+    const rule = await loadFiefRule(service);
+    const include = on ? [...new Set([...rule.include, userId])] : rule.include.filter((id) => id !== userId);
+    // Retirée alors qu'elle verrait encore l'onglet par son rôle ou sa spécialité : exclue explicitement.
+    let exclude = rule.exclude.filter((id) => id !== userId);
+    const row = { module_id: "fief", include_user_ids: include, exclude_user_ids: exclude, updated_by: me, updated_at: new Date().toISOString() };
+    const write = rule.exists
+      ? await service.from("module_access").update(row).eq("module_id", "fief")
+      : await service.from("module_access").insert({ ...row, everyone: false, hidden: false, roles: [], specialty_slugs: [] });
+    if (write.error) throw new Error(write.error.message);
+    if (!on) {
+      const { data: still } = await service.rpc("can_see_module", { uid: userId, p_module: "fief" });
+      if (still === true) {
+        exclude = [...exclude, userId];
+        const { error } = await service.from("module_access").update({ exclude_user_ids: exclude }).eq("module_id", "fief");
+        if (error) throw new Error(error.message);
+      }
+    }
+    return null;
   });
 }

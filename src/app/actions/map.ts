@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { parseLatLng, STAFF_KINDS, STAFF_SPECIALTY, type LatLng, type StaffKind, type StaffPin, type Travel } from "@/lib/board/geo";
 import { eventPosition, geocode, travelToEvent } from "@/lib/board/travel";
+import { addressHiddenFor } from "@/lib/board/profileCore";
 
 // Carte du Grand Est : positions des événements et des techniciens, trajets domicile → événement
 // (calculs et caches dans src/lib/board/travel.ts). Rien n'est réécrit en base.
@@ -48,19 +49,24 @@ async function getStaffKinds(service: ReturnType<typeof createServiceClient>) {
   return new Map([...kindByUser].map(([id, k]) => [id, k ?? "salarie"] as const));
 }
 
-/** Techniciens salariés, prestataires et bénévoles, placés à leur domicile. Vide pour les autres profils. */
+/**
+ * Techniciens salariés, prestataires et bénévoles, placés à leur domicile. Vide pour les autres profils.
+ * Adresse privée : épingle montrée seulement à la personne et à son N+1.
+ */
 export async function getStaffLocations(): Promise<StaffPin[]> {
-  const { canSeeStaff } = await getViewer();
+  const { canSeeStaff, userId } = await getViewer();
   if (!canSeeStaff) return [];
   const service = createServiceClient();
   const kindByUser = await getStaffKinds(service);
   if (kindByUser.size === 0) return [];
   const { data: profiles } = await service
     .from("profiles")
-    .select("id, first_name, last_name, email, home_address, home_coordinates")
+    .select("id, first_name, last_name, email, home_address, home_coordinates, address_private, expense_validator_id")
     .in("id", [...kindByUser.keys()]);
   const pins = await Promise.all(
-    (profiles ?? []).map(async (p) => {
+    (profiles ?? [])
+      .filter((p) => !addressHiddenFor(p, userId))
+      .map(async (p) => {
       const position = parseLatLng(p.home_coordinates) ?? (p.home_address ? await geocode(p.home_address) : null);
       return position ? { id: p.id, name: displayName(p), kind: kindByUser.get(p.id)!, position } : null;
     })

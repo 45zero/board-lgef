@@ -127,6 +127,7 @@ export async function submitTournamentDeclaration(input: DeclarationInput): Prom
         spectators_expected: r.spectatorsExpected,
         animations: nullIfEmpty(r.animations),
         other_info: nullIfEmpty(r.otherInfo),
+        uses_league_software: r.usesLeagueSoftware,
         late: daysUntil(r.startDate) < (settings?.min_notice_days ?? 60),
       })
       .select("id, ref, title, start_date")
@@ -147,6 +148,7 @@ export async function submitTournamentDeclaration(input: DeclarationInput): Prom
         surface: c.surface || null,
         format: c.format,
         match_minutes: c.matchMinutes,
+        matches_per_team: c.matchesPerTeam,
         min_play_minutes: c.minPlayMinutes,
         max_play_minutes: c.maxPlayMinutes,
       }))

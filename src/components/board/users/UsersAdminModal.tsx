@@ -430,7 +430,7 @@ export function UsersAdminModal({ onClose }: { onClose: () => void }) {
                     <span className="shrink-0 text-[10px] font-semibold text-ink-4">{ROLE_LABELS[u.role] ?? u.role}</span>
                   </div>
                   <div className="truncate text-[11px] text-ink-4">{u.email}</div>
-                  {(u.slugs.some((s) => STATUS_BADGE[s]) || (u.slugs.includes("tech-reseau") && !u.homeAddress)) && (
+                  {(u.slugs.some((s) => STATUS_BADGE[s]) || (u.slugs.includes("tech-reseau") && !u.homeAddress && !u.addressHidden)) && (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {u.slugs
                         .filter((s) => STATUS_BADGE[s])
@@ -439,7 +439,7 @@ export function UsersAdminModal({ onClose }: { onClose: () => void }) {
                             {STATUS_BADGE[s]}
                           </span>
                         ))}
-                      {u.slugs.includes("tech-reseau") && !u.homeAddress && (
+                      {u.slugs.includes("tech-reseau") && !u.homeAddress && !u.addressHidden && (
                         <span className="rounded-full bg-bad-bg px-1.5 py-0.5 text-[10px] font-semibold text-bad">Adresse manquante</span>
                       )}
                     </div>

@@ -79,6 +79,7 @@ export const categorySchema = z.object({
   surface: optText(60),
   format: z.enum(["poules", "elimination", "poules_elimination", "plateau"]).nullable().optional().default(null),
   matchMinutes: optInt(200),
+  matchesPerTeam: optInt(100),
   minPlayMinutes: optInt(1000),
   maxPlayMinutes: optInt(1000),
 });
@@ -121,11 +122,55 @@ export const declarationSchema = z
     spectatorsExpected: optInt(100000),
     animations: optText(2000),
     otherInfo: optText(3000),
+    usesLeagueSoftware: z.boolean().optional().default(false),
     files: z.array(fileMetaSchema).max(6).default([]),
     certify: z.literal(true, { message: "Merci de certifier l'exactitude des informations." }),
     website: z.string().optional().default(""), // champ piège (robots)
   })
-  .refine((d) => d.endDate >= d.startDate, { message: "La date de fin précède la date de début.", path: ["endDate"] });
+  .refine((d) => d.endDate >= d.startDate, { message: "La date de fin précède la date de début.", path: ["endDate"] })
+  .superRefine((d, ctx) => {
+    const e = d.usesLeagueSoftware ? softwareMissing(d) : null;
+    if (e) ctx.addIssue({ code: "custom", message: e, path: ["usesLeagueSoftware"] });
+  });
+
+/**
+ * Logiciel de gestion de tournoi offert par la ligue : les informations complémentaires deviennent
+ * obligatoires (ainsi que la durée d'un match et le nombre de matchs par équipe). Message du premier
+ * manque, sinon null. Partagé par le formulaire et le serveur.
+ */
+export function softwareMissing(d: {
+  categories: { teams?: number | null; playersPerTeam?: number | null; matchMinutes?: number | null; matchesPerTeam?: number | null }[];
+  clubsExpected?: number | null;
+  otherDistricts?: boolean | null;
+  otherCountries?: boolean | null;
+  participantCharter?: boolean | null;
+  matchSheetsAtStart?: boolean | null;
+  disciplineCommission?: boolean | null;
+  refreshments?: boolean | null;
+  catering?: string | null;
+  hotPoints?: boolean | null;
+  parking?: string | null;
+  firstAid?: string | null;
+  spectatorsExpected?: number | null;
+}): string | null {
+  if (d.categories.some((c) => c.teams == null || c.playersPerTeam == null || c.matchMinutes == null || c.matchesPerTeam == null))
+    return "Logiciel de la ligue : pour chaque catégorie, indiquez le nombre d'équipes, les joueurs par équipe, la durée d'un match et le nombre de matchs par équipe.";
+  const missing = [
+    d.clubsExpected == null && "nombre de clubs attendus",
+    d.otherDistricts == null && "équipes d'autres districts",
+    d.otherCountries == null && "équipes d'autres pays",
+    d.participantCharter == null && "charte des participants",
+    d.matchSheetsAtStart == null && "feuilles de match",
+    d.disciplineCommission == null && "commission de discipline",
+    d.refreshments == null && "buvette",
+    !d.catering && "pôle restauration",
+    d.hotPoints == null && "points chauds",
+    !d.parking?.trim() && "parkings",
+    !d.firstAid?.trim() && "secours",
+    d.spectatorsExpected == null && "spectateurs prévus",
+  ].filter(Boolean);
+  return missing.length ? `Logiciel de la ligue : merci de compléter ${missing.join(", ")}.` : null;
+}
 
 export type DeclarationInput = z.input<typeof declarationSchema>;
 export type CategoryInput = z.input<typeof categorySchema>;

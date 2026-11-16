@@ -21,6 +21,8 @@ export type AppBadges = {
   frais: { toDeclare: number; toValidate: number };
   /** Espace Team : cartes qui m'ont été assignées et que je n'ai pas encore ouvertes. */
   trello: number;
+  /** FIEF : demandes d'adhésion à traiter (équipe FIEF uniquement). */
+  fief: number;
 };
 
 /**
@@ -53,7 +55,7 @@ export async function GET(request: Request) {
     }
   };
 
-  const [mails, calendrier, inscription, audiovisuel, frais, trello] = await Promise.all([
+  const [mails, calendrier, inscription, audiovisuel, frais, trello, fief] = await Promise.all([
     withMails
       ? safe(async () => {
           const accounts = await prisma.connectedAccount.findMany({ where: { user_id: userId, provider: "google" } });
@@ -133,8 +135,16 @@ export async function GET(request: Request) {
           return (links ?? []).filter((l) => !done.has((l.team_cards as unknown as { list_id: string }).list_id)).length;
         }, 0)
       : undefined,
+    withDb
+      ? safe(async () => {
+          const { data: manager } = await supabase.rpc("fief_is_manager");
+          if (manager !== true) return 0;
+          const { count } = await createServiceClient().from("fief_applications").select("id", { count: "exact", head: true }).eq("status", "pending");
+          return count ?? 0;
+        }, 0)
+      : undefined,
   ]);
 
-  const body: Partial<AppBadges> = { mails, calendrier, inscription, audiovisuel, frais, trello };
+  const body: Partial<AppBadges> = { mails, calendrier, inscription, audiovisuel, frais, trello, fief };
   return NextResponse.json(body, { headers: { "Cache-Control": "private, no-store" } });
 }

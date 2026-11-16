@@ -3,11 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search, Send } from "lucide-react";
 import { Toggle } from "@/components/board/Toggle";
-import { getFiefEventShare, saveFiefEventShare, type FiefAudience, type FiefEventShareState } from "@/app/actions/fief-admin";
+import { getFiefEventShare, saveFiefEventShare, type FiefAudience, type FiefEventShareState, type FiefShareMode } from "@/app/actions/fief-admin";
 
 // « Visible sur FIEF » d'un événement (fiche événement → onglet FIEF, et onglet FIEF → Événements) :
 // public visé (toutes, clubs, fonctions, sélection) qui voit l'événement dans son calendrier FIEF
-// et reçoit la notification (FIEF, push, e-mail).
+// et reçoit la notification (FIEF, push, e-mail). « Pour information » ou « Invitation » : en invitation,
+// les membres répondent depuis leur calendrier FIEF et les réponses s'affichent ici.
+
+const RESPONSE_LABELS = { yes: "Participe", maybe: "Peut-être", no: "Ne participe pas" } as const;
+const RESPONSE_TONES = { yes: "bg-good-bg text-good", maybe: "bg-warn-bg text-warn", no: "bg-bad-bg text-bad" } as const;
 
 const AUDIENCES: { id: FiefAudience; label: string }[] = [
   { id: "all", label: "Toutes les membres FIEF" },
@@ -23,6 +27,7 @@ export function FiefEventShare({ eventId, onSaved }: { eventId: string; onSaved?
   const [loadError, setLoadError] = useState<string | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [audience, setAudience] = useState<FiefAudience>("all");
+  const [mode, setMode] = useState<FiefShareMode>("invitation");
   const [clubs, setClubs] = useState<string[]>([]);
   const [functions, setFunctions] = useState<string[]>([]);
   const [members, setMembers] = useState<string[]>([]);
@@ -40,6 +45,7 @@ export function FiefEventShare({ eventId, onSaved }: { eventId: string; onSaved?
       const s = r.data.share;
       setEnabled(!!s);
       if (s) {
+        setMode(s.mode);
         setAudience(s.audience);
         setClubs(s.clubNumbers);
         setFunctions(s.functions);
@@ -63,7 +69,7 @@ export function FiefEventShare({ eventId, onSaved }: { eventId: string; onSaved?
   const save = async () => {
     setBusy(true);
     setMsg(null);
-    const r = await saveFiefEventShare(eventId, { enabled, audience, clubNumbers: clubs, functions, memberIds: members, notify: enabled && notify });
+    const r = await saveFiefEventShare(eventId, { enabled, mode, audience, clubNumbers: clubs, functions, memberIds: members, notify: enabled && notify });
     setBusy(false);
     if (!r.ok) return setMsg({ ok: false, text: r.error });
     const d = r.data;
@@ -104,6 +110,27 @@ export function FiefEventShare({ eventId, onSaved }: { eventId: string; onSaved?
 
       {enabled && (
         <div className="space-y-3">
+          <div>
+            <p className="mb-1.5 text-sm font-semibold text-ink">Type d&apos;envoi</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(
+                [
+                  { id: "info", label: "Pour information", hint: "Les membres sont prévenues, sans réponse attendue" },
+                  { id: "invitation", label: "Invitation", hint: "Les membres répondent : participe, peut-être, ne participe pas" },
+                ] as const
+              ).map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => setMode(o.id)}
+                  className={`rounded-card border-2 px-3 py-2 text-left ${mode === o.id ? "border-navy bg-sel-bg" : "border-line bg-card hover:bg-hover"}`}
+                >
+                  <span className="block text-sm font-bold text-ink">{o.label}</span>
+                  <span className="block text-xs text-ink-3">{o.hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
           <p className="text-sm font-semibold text-ink">Qui voit l&apos;événement et reçoit la notification ?</p>
           <div className="space-y-1.5">
             {AUDIENCES.map((a) => (
@@ -195,6 +222,8 @@ export function FiefEventShare({ eventId, onSaved }: { eventId: string; onSaved?
         </div>
       )}
 
+      {state.share && mode === "invitation" && <Responses list={state.responses} />}
+
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
@@ -207,6 +236,37 @@ export function FiefEventShare({ eventId, onSaved }: { eventId: string; onSaved?
         </button>
         {msg && <span className={`text-xs font-semibold ${msg.ok ? "text-good" : "text-bad"}`}>{msg.text}</span>}
       </div>
+    </div>
+  );
+}
+
+function Responses({ list }: { list: FiefEventShareState["responses"] }) {
+  const count = (r: keyof typeof RESPONSE_LABELS) => list.filter((x) => x.response === r).length;
+  return (
+    <div className="rounded-card border border-line">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
+        <p className="mr-auto text-sm font-bold text-ink">Réponses des membres</p>
+        {(Object.keys(RESPONSE_LABELS) as (keyof typeof RESPONSE_LABELS)[]).map((r) => (
+          <span key={r} className={`rounded-full px-2 py-0.5 text-xs font-semibold ${RESPONSE_TONES[r]}`}>
+            {count(r)} {RESPONSE_LABELS[r].toLowerCase()}
+          </span>
+        ))}
+      </div>
+      {list.length === 0 ? (
+        <p className="px-3 py-3 text-xs text-ink-3">Pas encore de réponse.</p>
+      ) : (
+        <ul className="max-h-56 divide-y divide-line overflow-y-auto">
+          {list.map((r) => (
+            <li key={r.userId} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+              <span className="min-w-0 flex-1 truncate text-ink">
+                {r.name}
+                {r.clubName && <span className="text-xs text-ink-4"> · {r.clubName}</span>}
+              </span>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${RESPONSE_TONES[r.response]}`}>{RESPONSE_LABELS[r.response]}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

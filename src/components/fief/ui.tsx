@@ -73,7 +73,7 @@ export function PublicFrame({ children, wide = false }: { children: ReactNode; w
           <Crest size={44} />
           <span className="flex flex-col">
             <Wordmark size={30} />
-            <span className="text-[11px] font-medium text-white/75">Femmes Investies dans l&apos;Environnement du Football</span>
+            <span className="text-[11px] font-medium text-white/75">Femmes Investies dans l&apos;Encadrement du Football</span>
           </span>
         </Link>
         <div className="rounded-3xl bg-f-surface p-6 shadow-2xl shadow-black/30 sm:p-8">{children}</div>

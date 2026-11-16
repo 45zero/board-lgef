@@ -3,7 +3,7 @@ import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { done, fail, getFiefActor, type FiefActor } from "@/lib/fief/actor";
 import { notifyFief } from "@/lib/fief/notify";
 import { getFiefStorage } from "@/lib/fief/storage";
-import { audienceFilter, canSeePost } from "@/lib/fief/visibility";
+import { audienceMembers, canSeePost, POST_VISIBILITY_COLUMNS, selectionMembers } from "@/lib/fief/visibility";
 
 // Fil d'actualités FIEF — écritures (sql/2026-11-13_fief_social.sql) : publier, modifier, supprimer,
 // aimer, commenter, signaler. Lectures : fonctions fief_feed / fief_post_comments (côté navigateur).
@@ -17,6 +17,8 @@ const schema = z.discriminatedUnion("action", [
     asTeam: z.boolean().default(false),
     audience: z.enum(["all", "custom", "private"]).default("all"),
     audienceIds: z.array(uuid).max(500).default([]),
+    audienceFunctions: z.array(z.string().max(40)).max(50).default([]),
+    audienceClubs: z.array(z.string().max(20)).max(200).default([]),
     mentionIds: z.array(uuid).max(30).default([]),
   }),
   z.object({ action: z.literal("edit"), postId: uuid, body: z.string().max(5000), mentionIds: z.array(uuid).max(30).optional() }),
@@ -32,7 +34,7 @@ const nameOf = (a: FiefActor) => (a.member ? `${a.member.firstName} ${a.member.l
 
 /** Publication visible par la personne (masquée ou restreinte : voir src/lib/fief/visibility.ts). */
 async function visiblePost(actor: FiefActor, postId: string) {
-  const { data } = await createServiceClient().from("fief_posts").select("id, author_id, as_team, body, hidden_at, audience, audience_ids").eq("id", postId).maybeSingle();
+  const { data } = await createServiceClient().from("fief_posts").select(`id, as_team, body, ${POST_VISIBILITY_COLUMNS}`).eq("id", postId).maybeSingle();
   if (!data || !canSeePost(actor, data)) return null;
   return data;
 }
@@ -73,23 +75,36 @@ export async function POST(request: Request) {
         const { data: media } = await service.from("fief_media").select("id").in("id", input.mediaIds).eq("uploader_id", actor.userId).is("post_id", null);
         if ((media ?? []).length !== input.mediaIds.length) return fail(400, "Photo introuvable : renvoyez-la.");
       }
-      const audienceIds = input.audience === "custom" ? (await activeMembers(input.audienceIds)).filter((id) => id !== actor.userId) : [];
-      if (input.audience === "custom" && !audienceIds.length) return fail(400, "Choisissez au moins une personne.");
+      const custom = input.audience === "custom";
+      const audienceIds = custom ? (await activeMembers(input.audienceIds)).filter((id) => id !== actor.userId) : [];
+      const audienceFunctions = custom ? [...new Set(input.audienceFunctions)] : [];
+      const audienceClubs = custom ? [...new Set(input.audienceClubs)] : [];
+      if (custom && !audienceIds.length && !audienceFunctions.length && !audienceClubs.length) return fail(400, "Choisissez au moins une personne, une fonction ou un club.");
       const mentionIds = (await activeMembers(input.mentionIds)).filter((id) => id !== actor.userId);
       const { data: post, error } = await service
         .from("fief_posts")
-        .insert({ author_id: actor.userId, as_team: asTeam, body, audience: input.audience, audience_ids: audienceIds, mention_ids: mentionIds })
-        .select("id, author_id, hidden_at, audience, audience_ids")
+        .insert({
+          author_id: actor.userId,
+          as_team: asTeam,
+          body,
+          audience: input.audience,
+          audience_ids: audienceIds,
+          audience_functions: audienceFunctions,
+          audience_clubs: audienceClubs,
+          mention_ids: mentionIds,
+        })
+        .select(`id, ${POST_VISIBILITY_COLUMNS}`)
         .single();
       if (error) return fail(500, "Publication impossible.");
       await Promise.all(input.mediaIds.map((id, position) => service.from("fief_media").update({ post_id: post.id, position }).eq("id", id)));
       const who = asTeam ? "L'équipe FIEF" : nameOf(actor);
       const route = `/?post=${post.id}`;
       const preview = excerpt(body || "Nouvelles photos");
-      const mentioned = audienceFilter(post, mentionIds);
+      const mentioned = await audienceMembers(post, mentionIds);
       if (mentioned.length) await notifyFief(mentioned, { kind: "mention", title: `${who} vous a mentionnée dans une publication`, body: preview, route, tag: `fief-post-${post.id}` });
-      if (input.audience === "custom") {
-        const rest = audienceIds.filter((id) => !mentioned.includes(id));
+      if (custom) {
+        const targets = await selectionMembers({ ids: audienceIds, functions: audienceFunctions, clubs: audienceClubs });
+        const rest = targets.filter((id) => id !== actor.userId && !mentioned.includes(id));
         await notifyFief(rest, { kind: "post", title: `${who} a partagé une publication avec vous`, body: preview, route, tag: `fief-post-${post.id}` });
       } else if (asTeam && input.audience === "all") {
         const { data: members } = await service.from("fief_members").select("user_id").eq("status", "active").neq("user_id", actor.userId);
@@ -142,7 +157,7 @@ export async function POST(request: Request) {
         .select("id, created_at")
         .single();
       if (error) return fail(500, "Commentaire impossible.");
-      const mentioned = audienceFilter(post, mentionIds).filter((id) => id !== post.author_id || post.as_team);
+      const mentioned = (await audienceMembers(post, mentionIds)).filter((id) => id !== post.author_id || post.as_team);
       if (mentioned.length)
         await notifyFief(mentioned, {
           kind: "mention",

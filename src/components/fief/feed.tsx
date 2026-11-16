@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, EyeOff, Flag, Globe, Heart, ImagePlus, Loader2, Lock, MessageCircle, MoreHorizontal, Pencil, Pin, Search, Send, Trash2, Users, X } from "lucide-react";
+import { EyeOff, Flag, Globe, Heart, ImagePlus, Loader2, Lock, MessageCircle, MoreHorizontal, Pencil, Pin, Send, Trash2, Users, X } from "lucide-react";
 import { MentionTextarea, TextWithMentions, keptMentions, type Mention } from "@/components/fief/mentions";
-import { foldText, useDirectory } from "@/components/fief/directory";
+import { AudiencePicker } from "@/components/fief/audience";
+import { EMPTY_SEL, selCount, selLabel, type FiefAudienceSel } from "@/lib/fief/audience";
 import { createClient } from "@/lib/supabase/client";
 
 // Fil d'actualités FIEF (sql/2026-11-13_fief_social.sql) : publier (texte + photos), aimer, commenter,
@@ -115,12 +116,20 @@ export function Feed({
   me,
   moderation,
   focusPostId,
-  messageHref,
+  profileHref,
+  authorId,
+  hideComposer = false,
+  emptyText = "Pas encore de publication : lancez la conversation !",
 }: {
   me?: { id: string; firstName: string };
   moderation?: FeedModeration;
   focusPostId?: string | null;
-  messageHref?: (userId: string) => string;
+  /** Lien vers la page d'une membre (nom et photo des autrices). */
+  profileHref?: (userId: string) => string;
+  /** Seulement les publications de cette membre (sa page). */
+  authorId?: string;
+  hideComposer?: boolean;
+  emptyText?: string;
 }) {
   const [posts, setPosts] = useState<FeedPost[] | null>(null);
   const [more, setMore] = useState(true);
@@ -128,10 +137,10 @@ export function Feed({
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (before: string | null) => {
-    const { data, error: e } = await createClient().rpc("fief_feed", { p_before: before, p_limit: 20 });
+    const { data, error: e } = await createClient().rpc("fief_feed", { p_before: before, p_limit: 20, ...(authorId ? { p_author: authorId } : {}) });
     if (e) throw new Error("Le fil est indisponible pour le moment.");
     return (data ?? []) as FeedPost[];
-  }, []);
+  }, [authorId]);
 
   const refresh = useCallback(() => {
     load(null)
@@ -158,16 +167,16 @@ export function Feed({
 
   return (
     <div className="space-y-4">
-      <Composer me={me} canPostAsTeam={!!moderation} onPosted={refresh} />
+      {!hideComposer && <Composer me={me} canPostAsTeam={!!moderation} onPosted={refresh} />}
       {error && <p className="rounded-xl bg-f-danger-bg px-3 py-2 text-sm text-f-danger">{error}</p>}
       {posts === null && !error && (
         <div className="flex justify-center py-10 text-f-muted">
           <Loader2 className="animate-spin" />
         </div>
       )}
-      {posts?.length === 0 && <div className="rounded-2xl bg-f-surface p-8 text-center text-f-muted border border-f-border">Pas encore de publication : lancez la conversation !</div>}
+      {posts?.length === 0 && <div className="rounded-2xl bg-f-surface p-8 text-center text-f-muted border border-f-border">{emptyText}</div>}
       {posts?.map((p) => (
-        <PostCard key={p.id} post={p} moderation={moderation} startOpen={p.id === focusPostId} onChange={(patch) => update(p.id, patch)} messageHref={messageHref} />
+        <PostCard key={p.id} post={p} moderation={moderation} startOpen={p.id === focusPostId} onChange={(patch) => update(p.id, patch)} profileHref={profileHref} />
       ))}
       {more && posts && posts.length > 0 && (
         <button onClick={() => void loadMore()} disabled={loadingMore} className="w-full rounded-xl bg-f-surface py-3 text-sm font-bold text-f-text border border-f-border disabled:opacity-60">
@@ -182,7 +191,7 @@ function Composer({ me, canPostAsTeam, onPosted }: { me?: { id: string; firstNam
   const [body, setBody] = useState("");
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [audience, setAudience] = useState<"all" | "custom" | "private">("all");
-  const [audienceIds, setAudienceIds] = useState<string[]>([]);
+  const [sel, setSel] = useState<FiefAudienceSel>(EMPTY_SEL);
   const [picking, setPicking] = useState(false);
   const [photos, setPhotos] = useState<{ key: string; preview: string; id: string | null; error?: string }[]>([]);
   const [asTeam, setAsTeam] = useState(true);
@@ -223,7 +232,9 @@ function Composer({ me, canPostAsTeam, onPosted }: { me?: { id: string; firstNam
         mediaIds: photos.filter((p) => p.id).map((p) => p.id),
         asTeam: canPostAsTeam && asTeam,
         audience,
-        audienceIds: audience === "custom" ? audienceIds : [],
+        audienceIds: audience === "custom" ? sel.ids : [],
+        audienceFunctions: audience === "custom" ? sel.functions : [],
+        audienceClubs: audience === "custom" ? sel.clubs : [],
         mentionIds: keptMentions(body, mentions).map((m) => m.id),
       });
       photos.forEach((p) => URL.revokeObjectURL(p.preview));
@@ -310,12 +321,12 @@ function Composer({ me, canPostAsTeam, onPosted }: { me?: { id: string; firstNam
             className="rounded-lg bg-f-subtle px-2 py-1.5 text-sm font-semibold text-f-text outline-none"
           >
             <option value="all">Tous les membres</option>
-            <option value="custom">Certaines personnes…</option>
+            <option value="custom">Certaines personnes, fonctions ou clubs…</option>
             <option value="private">Moi uniquement</option>
           </select>
           {audience === "custom" && (
             <button type="button" onClick={() => setPicking(true)} className="text-sm font-semibold text-f-link hover:underline">
-              {audienceIds.length} personne{audienceIds.length > 1 ? "s" : ""}
+              {selLabel(sel)}
             </button>
           )}
         </div>
@@ -336,11 +347,11 @@ function Composer({ me, canPostAsTeam, onPosted }: { me?: { id: string; firstNam
       {picking && (
         <AudiencePicker
           excludeId={me?.id}
-          initial={audienceIds}
-          onClose={(ids) => {
+          initial={sel}
+          onClose={(next) => {
             setPicking(false);
-            if (ids) setAudienceIds(ids);
-            if ((ids ?? audienceIds).length === 0) setAudience("all");
+            if (next) setSel(next);
+            if (selCount(next ?? sel) === 0) setAudience("all");
           }}
         />
       )}
@@ -351,67 +362,6 @@ function Composer({ me, canPostAsTeam, onPosted }: { me?: { id: string; firstNam
 function AudienceIcon({ audience, size = 15 }: { audience: "all" | "custom" | "private"; size?: number }) {
   const Icon = audience === "all" ? Globe : audience === "custom" ? Users : Lock;
   return <Icon size={size} className="shrink-0 text-f-muted" aria-hidden />;
-}
-
-/** Choix des personnes qui verront une publication « Certaines personnes ». */
-function AudiencePicker({ excludeId, initial, onClose }: { excludeId?: string; initial: string[]; onClose: (ids: string[] | null) => void }) {
-  const people = useDirectory();
-  const [ids, setIds] = useState<string[]>(initial);
-  const [q, setQ] = useState("");
-  const shown = (people ?? []).filter(
-    (p) => p.user_id !== excludeId && (!q.trim() || foldText(`${p.first_name} ${p.last_name} ${p.club_name ?? ""}`).includes(foldText(q.trim())))
-  );
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={() => onClose(null)}>
-      <div className="flex max-h-[80dvh] w-full max-w-md flex-col overflow-hidden rounded-t-3xl bg-f-surface text-f-text sm:rounded-3xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 pb-2 pt-5">
-          <h2 className="text-lg font-extrabold">Qui peut voir cette publication ?</h2>
-          <button onClick={() => onClose(null)} aria-label="Fermer" className="rounded-full p-1.5 hover:bg-f-subtle">
-            <X size={20} />
-          </button>
-        </div>
-        <div className="px-5 pb-3">
-          <div className="relative">
-            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-f-faint" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nom ou club" className="w-full rounded-xl bg-f-subtle py-2.5 pl-10 pr-3 text-[15px] outline-none" />
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto px-2">
-          {people === null && <p className="px-3 py-4 text-sm text-f-muted">Chargement…</p>}
-          {shown.map((p) => {
-            const on = ids.includes(p.user_id);
-            return (
-              <button
-                key={p.user_id}
-                type="button"
-                onClick={() => setIds((prev) => (on ? prev.filter((x) => x !== p.user_id) : [...prev, p.user_id]))}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-f-subtle"
-              >
-                <Avatar author={{ id: p.user_id, team: false }} size={36} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">
-                    {p.first_name} {p.last_name}
-                  </span>
-                  {p.club_name && <span className="block truncate text-xs text-f-muted">{p.club_name}</span>}
-                </span>
-                <span className={`flex h-6 w-6 items-center justify-center rounded-full border-2 ${on ? "border-f-accent bg-f-accent text-white" : "border-f-border-strong"}`}>
-                  {on && <Check size={14} strokeWidth={3} />}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex items-center gap-3 border-t border-f-border px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
-          <span className="text-sm text-f-muted">
-            {ids.length} sélectionnée{ids.length > 1 ? "s" : ""}
-          </span>
-          <button onClick={() => onClose(ids)} className="ml-auto rounded-xl bg-f-accent px-4 py-2 text-sm font-bold text-white">
-            Valider
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function PhotoGrid({ media, onOpen }: { media: FeedPost["media"]; onOpen: (i: number) => void }) {
@@ -454,13 +404,13 @@ function PostCard({
   moderation,
   startOpen,
   onChange,
-  messageHref,
+  profileHref,
 }: {
   post: FeedPost;
   moderation?: FeedModeration;
   startOpen: boolean;
   onChange: (patch: Partial<FeedPost> | null) => void;
-  messageHref?: (userId: string) => string;
+  profileHref?: (userId: string) => string;
 }) {
   const [showComments, setShowComments] = useState(startOpen);
   const [menu, setMenu] = useState(false);
@@ -516,15 +466,21 @@ function PostCard({
       onChange(change.hidden !== undefined ? { hidden: change.hidden } : { pinned: change.pinned });
     });
 
-  const canMessage = !!messageHref && !post.mine && !post.author.team;
+  const canLink = !!profileHref && !post.author.team;
   return (
     <article ref={ref} className={`rounded-2xl bg-f-surface p-4 border border-f-border ${post.hidden ? "opacity-70 ring-2 ring-f-warn-border" : ""}`}>
       <header className="flex items-start gap-3">
-        <Avatar author={post.author} />
+        {canLink ? (
+          <Link href={profileHref!(post.author.id)} aria-label={`Page de ${post.author.name}`}>
+            <Avatar author={post.author} />
+          </Link>
+        ) : (
+          <Avatar author={post.author} />
+        )}
         <div className="min-w-0 flex-1">
           <p className="font-bold leading-tight">
-            {canMessage ? (
-              <Link href={messageHref!(post.author.id)} className="hover:underline" title="Envoyer un message">
+            {canLink ? (
+              <Link href={profileHref!(post.author.id)} className="hover:underline" title="Voir sa page">
                 {post.author.name}
               </Link>
             ) : (
@@ -631,7 +587,7 @@ function PostCard({
         </button>
       </footer>
 
-      {showComments && <Comments postId={post.id} moderation={moderation} onCount={(n) => onChange({ comment_count: n })} />}
+      {showComments && <Comments postId={post.id} moderation={moderation} profileHref={profileHref} onCount={(n) => onChange({ comment_count: n })} />}
       {lightbox !== null && <Lightbox media={post.media} index={lightbox} onClose={() => setLightbox(null)} />}
     </article>
   );
@@ -645,7 +601,17 @@ function MenuItem({ icon: Icon, children, onClick, danger }: { icon: typeof Pin;
   );
 }
 
-function Comments({ postId, moderation, onCount }: { postId: string; moderation?: FeedModeration; onCount: (n: number) => void }) {
+function Comments({
+  postId,
+  moderation,
+  profileHref,
+  onCount,
+}: {
+  postId: string;
+  moderation?: FeedModeration;
+  profileHref?: (userId: string) => string;
+  onCount: (n: number) => void;
+}) {
   const [list, setList] = useState<FeedComment[] | null>(null);
   const [body, setBody] = useState("");
   const [mentions, setMentions] = useState<Mention[]>([]);
@@ -712,7 +678,13 @@ function Comments({ postId, moderation, onCount }: { postId: string; moderation?
           <div className="min-w-0 flex-1">
             <div className="rounded-2xl bg-f-bg px-3 py-2">
               <p className="text-sm font-bold">
-                {c.author.name}
+                {profileHref && !c.author.team ? (
+                  <Link href={profileHref(c.author.id)} className="hover:underline">
+                    {c.author.name}
+                  </Link>
+                ) : (
+                  c.author.name
+                )}
                 {c.hidden && <span className="ml-2 text-[11px] font-semibold text-f-danger">masqué</span>}
               </p>
               <p className="whitespace-pre-line break-words text-sm">

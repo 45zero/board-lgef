@@ -34,6 +34,8 @@ export function TournoisScreen() {
   const [quick, setQuick] = useState<{ id: string; action: PanelAction } | null>(null);
   const [district, setDistrict] = useState("");
   const [q, setQ] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [copied, setCopied] = useState(false);
 
   const reloadOverview = useCallback(() => {
@@ -67,12 +69,23 @@ export function TournoisScreen() {
   const districtName = useMemo(() => new Map((overview?.districts ?? []).map((d) => [d.code, d.short_name])), [overview]);
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return (rows ?? []).filter(
-      (r) =>
-        (!district || r.districtCode === district) &&
-        (!needle || `${r.ref} ${r.clubName} ${r.title} ${r.address}`.toLowerCase().includes(needle))
-    );
-  }, [rows, district, q]);
+    // Tri par date du tournoi : à venir / en cours du plus proche au plus lointain, puis les passés (le plus récent d'abord).
+    const now = new Date().toISOString().slice(0, 10);
+    return (rows ?? [])
+      .filter(
+        (r) =>
+          (!district || r.districtCode === district) &&
+          (!from || (r.endDate || r.startDate) >= from) &&
+          (!to || r.startDate <= to) &&
+          (!needle || `${r.ref} ${r.clubName} ${r.title} ${r.address}`.toLowerCase().includes(needle))
+      )
+      .sort((a, b) => {
+        const pa = (a.endDate || a.startDate) < now;
+        const pb = (b.endDate || b.startDate) < now;
+        if (pa !== pb) return pa ? 1 : -1;
+        return pa ? b.startDate.localeCompare(a.startDate) : a.startDate.localeCompare(b.startDate);
+      });
+  }, [rows, district, q, from, to]);
 
   const publicUrl = typeof window !== "undefined" ? `${window.location.origin}/tournoi` : "/tournoi";
   const tabs: { id: Tab; label: string; icon: typeof Inbox; badge?: number }[] = [
@@ -158,6 +171,19 @@ export function TournoisScreen() {
                   </option>
                 ))}
             </select>
+            <label className="flex items-center gap-1.5 text-xs text-ink-3">
+              Du
+              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-btn border border-line bg-card px-2 py-1.5 text-sm text-ink" />
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-ink-3">
+              au
+              <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="rounded-btn border border-line bg-card px-2 py-1.5 text-sm text-ink" />
+            </label>
+            {(from || to) && (
+              <button onClick={() => { setFrom(""); setTo(""); }} className="rounded-btn px-2 py-1.5 text-xs font-semibold text-link hover:bg-hover">
+                Effacer les dates
+              </button>
+            )}
           </div>
           {!rows ? (
             <p className="p-6 text-center text-sm text-ink-3">Chargement…</p>

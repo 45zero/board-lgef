@@ -1,9 +1,10 @@
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { fail, getFiefActor } from "@/lib/fief/actor";
 import { getFiefStorage } from "@/lib/fief/storage";
+import { canSeeDocument } from "@/lib/fief/visibility";
 
 // Téléchargement d'un document FIEF (jamais de lien public vers le Drive) : sa propriétaire, toute membre
-// active si le document est partagé, l'équipe FIEF. ?inline=1 : affichage dans le navigateur (PDF, images).
+// active du public si le document est partagé, l'équipe FIEF. ?inline=1 : affichage dans le navigateur (PDF, images).
 
 export const maxDuration = 60;
 
@@ -13,9 +14,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const actor = await getFiefActor();
   if (!actor || (!actor.member && !actor.manager)) return fail(403, "Réservé aux membres FIEF.");
 
-  const { data: doc } = await createServiceClient().from("fief_documents").select("name, mime_type, owner_id, visibility, status, storage_id").eq("id", id).maybeSingle();
+  const { data: doc } = await createServiceClient().from("fief_documents").select("name, mime_type, owner_id, visibility, status, storage_id, audience, audience_ids, audience_functions, audience_clubs").eq("id", id).maybeSingle();
   if (!doc || doc.status !== "ready" || !doc.storage_id) return fail(404, "Document introuvable.");
-  if (doc.owner_id !== actor.userId && doc.visibility !== "shared" && !actor.manager) return fail(404, "Document introuvable.");
+  if (!canSeeDocument(actor, doc)) return fail(404, "Document introuvable.");
 
   const storage = await getFiefStorage();
   if (!storage) return fail(503, "Stockage indisponible.");

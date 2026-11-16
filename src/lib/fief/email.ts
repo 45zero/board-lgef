@@ -24,7 +24,7 @@ function renderFiefEmail(opts: FiefEmail): EmailMessage {
   <div style="background:${NAVY};padding:18px 24px;border-bottom:4px solid ${RED}">
     <table style="border-collapse:collapse"><tr>
       <td style="padding-right:14px"><img src="${esc(crest)}" alt="FIEF" width="44" style="display:block;width:44px;height:auto" /></td>
-      <td style="color:#fff"><div style="font-size:22px;font-weight:900;font-style:italic;letter-spacing:.02em">FIEF</div><div style="font-size:11px;opacity:.8">Femmes Investies dans l'Environnement du Football</div></td>
+      <td style="color:#fff"><div style="font-size:22px;font-weight:900;font-style:italic;letter-spacing:.02em">FIEF</div><div style="font-size:11px;opacity:.8">Femmes Investies dans l'Encadrement du Football</div></td>
     </tr></table>
   </div>
   <div style="padding:24px">
@@ -34,7 +34,7 @@ function renderFiefEmail(opts: FiefEmail): EmailMessage {
     ${opts.link ? `<div style="margin-top:14px"><a href="${esc(opts.link.href)}" style="background:${NAVY};color:#fff;display:inline-block;padding:12px 20px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">${esc(opts.link.label)}</a></div>` : ""}
   </div>
   <div style="padding:14px 24px;background:#F8FAFC;font-size:12px;color:#64748b;line-height:1.5">
-    ${esc(opts.footer ?? "FIEF — l'espace des femmes du football du Grand Est, proposé par la Ligue du Grand Est de Football.")}
+    ${esc(opts.footer ?? "FIEF — Femmes Investies dans l'Encadrement du Football, le réseau proposé par la Ligue du Grand Est de Football.")}
   </div>
 </div></div>`;
   const text = [

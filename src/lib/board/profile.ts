@@ -15,14 +15,20 @@ export interface ProfileDetails {
   licensePlate: string;
   /** « yyyy-MM-dd » ; l'équipe ne voit que le jour et le mois (anniversaire). */
   birthDate: string | null;
+  /** Adresse privée : domicile montré seulement à la personne et à son N+1 (carte, administration). */
+  addressPrivate: boolean;
+  /** Adresse masquée pour la personne qui consulte (privée, et ni la personne ni son N+1). */
+  addressHidden?: boolean;
 }
 
-export const pickDetails = ({ homeAddress, homeCoordinates, hasCompanyCar, licensePlate, birthDate }: ProfileDetails): ProfileDetails => ({
+export const pickDetails = ({ homeAddress, homeCoordinates, hasCompanyCar, licensePlate, birthDate, addressPrivate, addressHidden }: ProfileDetails): ProfileDetails => ({
   homeAddress,
   homeCoordinates,
   hasCompanyCar,
   licensePlate,
   birthDate,
+  addressPrivate,
+  addressHidden,
 });
 
 export interface MyProfile extends ProfileDetails {
@@ -36,7 +42,7 @@ export interface MyProfile extends ProfileDetails {
   managerName: string | null;
 }
 
-export type ProfileInput = { firstName: string; lastName: string } & Omit<ProfileDetails, "homeCoordinates"> & {
+export type ProfileInput = { firstName: string; lastName: string } & Omit<ProfileDetails, "homeCoordinates" | "addressHidden"> & {
     /** Position choisie dans les suggestions Google ; absente : l'adresse est géocodée à l'enregistrement. */
     homeCoordinates?: LatLng | null;
   };

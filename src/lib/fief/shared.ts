@@ -1,4 +1,4 @@
-// FIEF — Femmes Investies dans l'Environnement du Football (fief.lgef.fr).
+// FIEF — Femmes Investies dans l'Encadrement du Football (fief.lgef.fr).
 // Règles partagées client / serveur, sans dépendance : âge, mineures, adresses.
 // Base : sql/2026-11-13_fief_cloison.sql (cloison avec le board) et sql/2026-11-13_fief_membres.sql.
 

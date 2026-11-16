@@ -262,6 +262,14 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
       push({ id: "demandes-acces", app: "weekend", tone: "red", count: count ?? 0, title: "Demandes d'accès", detail: "Comptes demandés depuis le formulaire public" });
     }, undefined),
 
+    // FIEF : demandes d'adhésion à traiter (personnes qui voient l'onglet FIEF).
+    safe(async () => {
+      const { data: manager } = await service.rpc("can_see_module", { uid: userId, p_module: "fief" });
+      if (manager !== true) return;
+      const { count } = await service.from("fief_applications").select("id", { count: "exact", head: true }).eq("status", "pending");
+      push({ id: "fief-demandes", app: "fief", tone: "red", count: count ?? 0, title: "Demandes d'adhésion FIEF", detail: "À accepter ou refuser" });
+    }, undefined),
+
     // Inscriptions : invitations pas encore envoyées sur mes campagnes (toutes pour un admin).
     safe(async () => {
       let q = service.from("event_registration_campaigns").select("id, events!inner(start_date)").gte("events.start_date", from.toISOString());

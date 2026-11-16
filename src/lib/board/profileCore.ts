@@ -10,7 +10,7 @@ import { normalizePlate, type ProfileDetails, type ProfileInput } from "@/lib/bo
 
 type Service = ReturnType<typeof createServiceClient>;
 
-export const DETAILS_COLUMNS = "home_address, home_coordinates, has_company_car, license_plate, birth_date";
+export const DETAILS_COLUMNS = "home_address, home_coordinates, has_company_car, license_plate, birth_date, address_private";
 
 export function detailsFromRow(p: {
   home_address: string | null;
@@ -18,6 +18,7 @@ export function detailsFromRow(p: {
   has_company_car: boolean | null;
   license_plate: string | null;
   birth_date: string | null;
+  address_private: boolean | null;
 }): ProfileDetails {
   return {
     homeAddress: p.home_address ?? "",
@@ -25,10 +26,26 @@ export function detailsFromRow(p: {
     hasCompanyCar: !!p.has_company_car,
     licensePlate: p.license_plate ?? "",
     birthDate: p.birth_date,
+    addressPrivate: !!p.address_private,
   };
 }
 
-export async function saveProfile(service: Service, id: string, input: ProfileInput) {
+/** Domicile masqué pour `viewerId` : adresse privée, et le lecteur n'est ni la personne ni son N+1. */
+export function addressHiddenFor(p: { id: string; address_private: boolean | null; expense_validator_id: string | null }, viewerId: string) {
+  return !!p.address_private && p.id !== viewerId && p.expense_validator_id !== viewerId;
+}
+
+/** Fiche vue par `viewerId` : adresse et position retirées quand elles lui sont masquées. */
+export function detailsForViewer(p: Parameters<typeof detailsFromRow>[0] & { id: string; expense_validator_id: string | null }, viewerId: string): ProfileDetails {
+  const details = detailsFromRow(p);
+  return addressHiddenFor(p, viewerId) ? { ...details, homeAddress: "", homeCoordinates: null, addressHidden: true } : details;
+}
+
+/**
+ * `keepAddress` : l'adresse est masquée à l'auteur de la modification (adresse privée d'un tiers) ;
+ * adresse, position et réglage de confidentialité restent alors tels quels.
+ */
+export async function saveProfile(service: Service, id: string, input: ProfileInput, { keepAddress = false }: { keepAddress?: boolean } = {}) {
   const { data: current, error: readError } = await service.from("profiles").select("home_address, home_coordinates").eq("id", id).single();
   if (readError || !current) throw new Error("Compte introuvable.");
 
@@ -36,7 +53,7 @@ export async function saveProfile(service: Service, id: string, input: ProfileIn
   // Position : celle de la suggestion Google choisie ; sinon on garde l'actuelle si l'adresse n'a pas
   // changé ; sinon on géocode (null si Google ne trouve pas : l'adresse est gardée, signalée à l'écran).
   let coordinates = parseLatLng(input.homeCoordinates);
-  if (!coordinates && address) {
+  if (!keepAddress && !coordinates && address) {
     coordinates = address === (current.home_address ?? "").trim() ? parseLatLng(current.home_coordinates) : null;
     coordinates ??= await geocode(address);
   }
@@ -49,8 +66,13 @@ export async function saveProfile(service: Service, id: string, input: ProfileIn
     .update({
       first_name: input.firstName.trim() || null,
       last_name: input.lastName.trim() || null,
-      home_address: address || null,
-      home_coordinates: address && coordinates ? (coordinates as unknown as Json) : null,
+      ...(keepAddress
+        ? {}
+        : {
+            home_address: address || null,
+            home_coordinates: address && coordinates ? (coordinates as unknown as Json) : null,
+            address_private: !!input.addressPrivate,
+          }),
       has_company_car: input.hasCompanyCar,
       license_plate: plate || null,
       birth_date: birthDate,
