@@ -34,6 +34,7 @@ const PUSHED: Record<string, { icon: PushIcon; route: string }> = {
   assignment_created: EVENT,
   assignment_updated: EVENT,
   registration_response: { icon: "ic_stat_lgef", route: "/?app=inscription" },
+  tournament_message: { icon: "ic_stat_lgef", route: "/?app=tournois" },
   coverage_request: EVENT,
   coverage_request_created: EVENT,
   coverage_approved: EVENT,

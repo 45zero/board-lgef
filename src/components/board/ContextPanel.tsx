@@ -208,6 +208,7 @@ export function ContextPanel({ widgets, onClose }: { widgets: ContextPanelWidget
                     else if (n.data?.team_card_id) openCard(n.data.team_card_id);
                     else if (n.event_id) void openEvent(n.event_id);
                     else if (n.data?.transfer_id && /^[0-9a-f-]{36}$/.test(n.data.transfer_id)) window.location.assign(`/?app=transfer&openTransfer=${n.data.transfer_id}`);
+                    else if (n.data?.tournoi_id && /^[0-9a-f-]{36}$/.test(n.data.tournoi_id)) window.location.assign(`/?app=tournois&openTournoi=${n.data.tournoi_id}`);
                   }}
                   className="flex w-full gap-2 pr-5 text-left"
                 >

@@ -54,7 +54,8 @@ export function NotificationBell({ variant = "desktop" }: { variant?: "desktop" 
       // Module à ouvrir (ex. centre de publication) : même lien que dans l'e-mail ; transfert partagé : ouvert d'emblée.
       setOpen(false);
       const transfer = n.data.transfer_id && /^[0-9a-f-]{36}$/.test(n.data.transfer_id) ? `&openTransfer=${n.data.transfer_id}` : "";
-      window.location.assign(`/?app=${n.data.app}${transfer}`);
+      const tournoi = n.data.tournoi_id && /^[0-9a-f-]{36}$/.test(n.data.tournoi_id) ? `&openTournoi=${n.data.tournoi_id}` : "";
+      window.location.assign(`/?app=${n.data.app}${transfer}${tournoi}`);
     }
   };
 

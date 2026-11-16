@@ -28,6 +28,7 @@ import {
   EyeOff,
   Send,
   Sprout,
+  Trophy,
 } from "lucide-react";
 import { useAppLabel } from "@/hooks/board/useFraisFlavor";
 import { BOARD_APPS } from "@/lib/board/tokens";
@@ -58,6 +59,7 @@ const APP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   inscription: ClipboardCheck,
   cartographie: MapIcon,
   fief: Sprout,
+  tournois: Trophy,
 };
 
 

@@ -13,9 +13,45 @@
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
+// Tournois (sql/2026-11-16_tournois.sql) — ajout manuel.
+type TRow<R> = { Row: R; Insert: Partial<R>; Update: Partial<R>; Relationships: [] }
+type TournamentDistrict = { code: string; name: string; short_name: string; is_ligue: boolean; contact_name: string | null; emails: string[]; phone: string | null; address: string | null; auto_send: boolean; position: number; active: boolean }
+type TournamentClub = { club_number: string; name: string; district_code: string | null; address_line: string | null; address_extra: string | null; postal_code: string | null; city: string | null; contact_civility: string | null; contact_first_name: string | null; contact_last_name: string | null; contact_mobile: string | null; contact_email: string | null; official_email: string | null; active: boolean; imported_at: string }
+type TournamentSettings = { id: boolean; min_notice_days: number; intro_text: string | null; updated_by: string | null; updated_at: string }
+type TournamentCategory = { slug: string; label: string; kind: "rassemblement" | "tournoi"; position: number; active: boolean }
+type TournamentDeclaration = {
+  id: string; ref: string | null; status: "received" | "reviewing" | "info_requested" | "validated" | "refused" | "cancelled"
+  club_number: string | null; club_name: string; club_official_email: string | null; district_code: string | null
+  title: string; start_date: string; end_date: string; start_time: string | null; end_time: string | null; address: string; lat: number | null; lng: number | null
+  contact_first_name: string; contact_last_name: string; contact_phone: string; contact_landline: string | null; contact_email: string
+  clubs_expected: number | null; other_districts: boolean | null; other_countries: boolean | null; participant_charter: boolean | null; educational_messages: string | null; match_sheets_at_start: boolean | null; discipline_commission: boolean | null
+  refreshments: boolean | null; catering: "internal" | "external" | "none" | null; hot_points: boolean | null; parking: string | null; first_aid: string | null; spectators_expected: number | null; animations: string | null; other_info: string | null
+  submitted_at: string; late: boolean; finalized_at: string | null
+  assigned_to: string | null; district_opinion: "yes" | "no" | null; district_opinion_note: string | null; decision_note: string | null; decided_by: string | null; decided_at: string | null; calendar_event_id: string | null
+  report: Json | null; report_at: string | null; created_at: string; updated_at: string
+}
+type TournamentDeclarationCategory = { declaration_id: string; category_slug: string; teams: number | null; play_date: string | null; players_per_team: number | null; substitutes: number | null; surface: string | null; format: "poules" | "elimination" | "poules_elimination" | "plateau" | null; match_minutes: number | null; min_play_minutes: number | null; max_play_minutes: number | null }
+type TournamentFile = { id: string; declaration_id: string; message_id: string | null; kind: "poster" | "rules" | "other" | "reply"; file_name: string; mime_type: string | null; size_bytes: number | null; status: "uploading" | "ready"; upload_url: string | null; storage_key: string | null; source: "form" | "board" | "reply"; uploaded_by: string | null; created_at: string }
+type TournamentMessage = { id: string; declaration_id: string; kind: "mail" | "forward" | "auto" | "note" | "reply"; subject: string | null; body: string | null; sent_by: string | null; copy_to_sender: boolean; include_pdf: boolean; parent_message_id: string | null; from_name: string | null; from_email: string | null; read_at: string | null; created_at: string }
+type TournamentMessageRecipient = { id: string; message_id: string; email: string; name: string | null; role: "contact" | "club" | "district" | "ligue" | "sender" | "other"; field: "to" | "cc" | "bcc"; delivery: "pending" | "sent" | "failed"; error: string | null; reply_token_hash: string | null; opened_at: string | null; replied_at: string | null }
+type TournamentMessageFile = { message_id: string; file_id: string }
+type TournamentActivity = { id: number; declaration_id: string; actor: string | null; action: string; details: Json; created_at: string }
+
 export type Database = {
   public: {
     Tables: {
+      tournament_districts: TRow<TournamentDistrict>
+      tournament_clubs: TRow<TournamentClub>
+      tournament_settings: TRow<TournamentSettings>
+      tournament_categories: TRow<TournamentCategory>
+      tournament_ref_counters: TRow<{ year: number; last_value: number }>
+      tournament_declarations: TRow<TournamentDeclaration>
+      tournament_declaration_categories: TRow<TournamentDeclarationCategory>
+      tournament_files: TRow<TournamentFile>
+      tournament_messages: TRow<TournamentMessage>
+      tournament_message_recipients: TRow<TournamentMessageRecipient>
+      tournament_message_files: TRow<TournamentMessageFile>
+      tournament_activity: TRow<TournamentActivity>
       account_requests: {
         Row: {
           id: string
@@ -5825,7 +5861,7 @@ export type Database = {
       invoice_status: "submitted" | "processing" | "approved" | "rejected" | "paid"
       label_color: "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "pink" | "gray"
       note_member_role: "createur" | "destinataire" | "collaborateur"
-      notification_type: "card_assigned" | "card_commented" | "card_mentioned" | "card_due_soon" | "board_shared" | "director_assignment" | "expense_submitted" | "account_request" | "coverage_request" | "coverage_request_created" | "coverage_approved" | "coverage_denied" | "coverage_assignment" | "coverage_rejected" | "event_deleted" | "event_mentioned" | "event_commented" | "account_request_approved" | "account_request_denied" | "assignment_created" | "assignment_updated" | "expense_approved" | "expense_rejected" | "coverage_accepted" | "coverage_accepted_admin" | "director_request" | "director_approved" | "director_denied" | "director_reassigned" | "director_invitation" | "director_accepted" | "director_declined" | "event_team_added" | "event_reminder" | "hateful_comment" | "expense_to_validate" | "registration_response" | "publication_to_publish" | "support_ticket" | "support_resolved" | "direct_message"
+      notification_type: "card_assigned" | "card_commented" | "card_mentioned" | "card_due_soon" | "board_shared" | "director_assignment" | "expense_submitted" | "account_request" | "coverage_request" | "coverage_request_created" | "coverage_approved" | "coverage_denied" | "coverage_assignment" | "coverage_rejected" | "event_deleted" | "event_mentioned" | "event_commented" | "account_request_approved" | "account_request_denied" | "assignment_created" | "assignment_updated" | "expense_approved" | "expense_rejected" | "coverage_accepted" | "coverage_accepted_admin" | "director_request" | "director_approved" | "director_denied" | "director_reassigned" | "director_invitation" | "director_accepted" | "director_declined" | "event_team_added" | "event_reminder" | "hateful_comment" | "expense_to_validate" | "registration_response" | "publication_to_publish" | "support_ticket" | "support_resolved" | "direct_message" | "tournament_message"
       response_status: "accepted" | "rejected"
       sector_type: "arbitrage" | "technique" | "formation" | "communication" | "competitions"
       user_role: "user" | "technician" | "super_user" | "admin" | "organizer" | "comite_directeur_bad" | "comite_directeur"

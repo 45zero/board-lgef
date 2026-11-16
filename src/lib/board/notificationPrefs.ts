@@ -63,6 +63,7 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
   assignment_created: "calendrier",
   assignment_updated: "calendrier",
   registration_response: "calendrier",
+  tournament_message: "calendrier",
   coverage_request: "couverture",
   coverage_request_created: "couverture",
   coverage_approved: "couverture",

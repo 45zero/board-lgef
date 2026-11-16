@@ -82,6 +82,7 @@ export const BOARD_APPS: BoardApp[] = [
   { id: "drive", label: "Drive", kicker: "ARCHIVAGE AUTO" },
   { id: "transfer", label: "LGEF Transfer", kicker: "ENVOI DE FICHIERS" },
   { id: "inscription", label: "Inscription", kicker: "RSVP CLUBS" },
+  { id: "tournois", label: "Tournois", kicker: "DÉCLARATIONS" },
   { id: "cartographie", label: "Cartographie", kicker: "CLUBS DU GRAND EST" },
   { id: "fief", label: "FIEF", kicker: "RÉSEAU FÉMININ" },
   { id: "frais", label: "Frais", kicker: "NOTES DE FRAIS" },

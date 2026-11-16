@@ -27,6 +27,7 @@ import {
   Camera,
   Send,
   Sprout,
+  Trophy,
 } from "lucide-react";
 
 const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>> = {
@@ -49,6 +50,7 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string }>
   inscription: ClipboardCheck,
   cartographie: MapIcon,
   fief: Sprout,
+  tournois: Trophy,
   effectif: Wallet,
 };
 

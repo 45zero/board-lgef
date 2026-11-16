@@ -22,6 +22,7 @@ import { TeamScreen } from "./screens/TeamScreen";
 import { EffectifScreen } from "./screens/EffectifScreen";
 import { TransferScreen } from "./screens/TransferScreen";
 import { FiefScreen } from "./screens/FiefScreen";
+import { TournoisScreen } from "./screens/TournoisScreen";
 import { MobileShell } from "./mobile/MobileShell";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useBoardPreferences } from "@/hooks/board/useBoardPreferences";
@@ -37,7 +38,7 @@ export type NavLayout = "rail" | "list";
 export type Theme = "light" | "dark";
 
 /** Modules gardés en mémoire une fois ouverts (les autres n'existent pas encore). */
-const KEEP_ALIVE_APPS = ["accueil", "trello", "effectif", "mails", "calendrier", "ged", "audiovisuel", "drive", "transfer", "inscription", "cartographie", "frais", "weekend", "fief"];
+const KEEP_ALIVE_APPS = ["accueil", "trello", "effectif", "mails", "calendrier", "ged", "audiovisuel", "drive", "transfer", "inscription", "cartographie", "frais", "weekend", "fief", "tournois"];
 /** Préchargés en arrière-plan juste après l'ouverture du board : les plus consultés. */
 const PRELOAD_APPS = ["mails", "calendrier"];
 
@@ -69,6 +70,8 @@ function renderScreen(id: string, props: { punchedIn: boolean; onTogglePunch: ()
       return <WeekendScreen />;
     case "fief":
       return <FiefScreen />;
+    case "tournois":
+      return <TournoisScreen />;
     case "trello":
       return <TeamScreen />;
     default:

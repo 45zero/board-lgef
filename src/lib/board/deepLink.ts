@@ -22,6 +22,21 @@ export function clearOpenTransferParam() {
   window.history.replaceState(null, "", url.pathname + url.search + url.hash);
 }
 
+/** Dossier à ouvrir dans l'onglet Tournois (/?app=tournois&openTournoi=<id>, notifications « tournoi »). */
+export function readOpenTournoiParam(): string | null {
+  if (typeof window === "undefined") return null;
+  const id = new URL(window.location.href).searchParams.get("openTournoi");
+  return id && /^[0-9a-f-]{36}$/.test(id) ? id : null;
+}
+
+export function clearOpenTournoiParam() {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("openTournoi")) return;
+  url.searchParams.delete("openTournoi");
+  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+}
+
 export function clearAppParam() {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);

@@ -72,5 +72,5 @@ function isFiefToken(token: string) {
 
 export const config = {
   // Ni fichiers statiques, ni crons, ni pages publiques (inscription, dépôt de facture : sans session).
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/cron|inscription|facture|privacy|terms|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/cron|inscription|facture|tournoi|privacy|terms|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml)$).*)"],
 };
