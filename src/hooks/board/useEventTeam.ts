@@ -20,11 +20,12 @@ export function useEventTeam(eventId: string, createdBy: string | null) {
 
   const fetchTeam = async () => {
     const supabase = createClient();
-    const { data } = await supabase.from("event_team_members").select("*, profiles(*)").eq("event_id", eventId);
+    const { data } = await supabase.from("event_team_members").select("*, profiles(first_name, last_name, email)").eq("event_id", eventId);
     setTeam((data as TeamMember[] | null) ?? []);
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- chargement asynchrone de l'équipe à l'ouverture
     if (eventId) fetchTeam();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);

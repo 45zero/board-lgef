@@ -94,7 +94,9 @@ export async function getForecast(): Promise<Forecast> {
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
   const userId = claims?.claims?.sub;
-  const { data: p } = userId ? await supabase.from("profiles").select("home_address, home_coordinates").eq("id", userId).maybeSingle() : { data: null };
+  // Adresse lue côté serveur (clé service), pour l'utilisateur connecté seulement : ces colonnes ne
+  // sont plus lisibles avec la session (sql/2026-11-17_securite_rls.sql).
+  const { data: p } = userId ? await createServiceClient().from("profiles").select("home_address, home_coordinates").eq("id", userId).maybeSingle() : { data: null };
   const home = parseLatLng(p?.home_coordinates);
   const { current, days } = await fetchWeather(home ?? METZ);
   return { place: (home && cityOf(p?.home_address ?? null)) || (home ? "Domicile" : "Metz"), current, days };
