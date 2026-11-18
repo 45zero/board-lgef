@@ -71,7 +71,7 @@ async function actorOf(supabase: Supabase, userId: string) {
 }
 
 async function notify(supabase: Supabase, recipients: string[], n: { type: string; title: string; message: string; cardId: string; actor: string }) {
-  await Promise.all(
+  const results = await Promise.all(
     recipients.map((uid) =>
       supabase.rpc("create_notification", {
         p_user_id: uid,
@@ -83,6 +83,8 @@ async function notify(supabase: Supabase, recipients: string[], n: { type: strin
       })
     )
   );
+  // Une notification ratée ne bloque pas l'action, mais doit se voir dans les journaux.
+  for (const r of results) if (r.error) console.error(`[team.notify] ${n.type}`, r.error.message);
 }
 
 /**

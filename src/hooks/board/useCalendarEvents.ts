@@ -121,9 +121,13 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
         // Présence du comité directeur (pastille « CD »).
         supabase.from("director_attendance").select("event_id, status, director_id").in("event_id", eventIds),
       ]);
+      // Plusieurs membres CD possibles : un « confirmé » suffit ; « décliné » seulement si tous ont décliné.
+      const rank = { approved: 2, pending: 1, denied: 0 } as const;
       for (const d of directorRows ?? []) {
         if (!d.event_id || !d.director_id) continue;
-        directorByEvent.set(d.event_id, d.status === "approved" ? "approved" : d.status === "denied" ? "denied" : "pending");
+        const status = d.status === "approved" ? "approved" : d.status === "denied" ? "denied" : "pending";
+        const prev = directorByEvent.get(d.event_id);
+        if (!prev || rank[status] > rank[prev]) directorByEvent.set(d.event_id, status);
       }
       photoCovered = new Set((photoRows ?? []).map((p) => p.event_id));
       for (const p of publishedRows ?? []) {

@@ -1259,6 +1259,42 @@ export type Database = {
         }
         Relationships: []
       }
+      coverage_crew: {
+        Row: {
+          id: string
+          event_id: string
+          user_id: string
+          role: string
+          status: string
+          notes: string | null
+          assigned_by: string | null
+          created_at: string
+          responded_at: string | null
+        }
+        Insert: {
+          id?: string
+          event_id: string
+          user_id: string
+          role: string
+          status?: string
+          notes?: string | null
+          assigned_by?: string | null
+          created_at?: string
+          responded_at?: string | null
+        }
+        Update: {
+          id?: string
+          event_id?: string
+          user_id?: string
+          role?: string
+          status?: string
+          notes?: string | null
+          assigned_by?: string | null
+          created_at?: string
+          responded_at?: string | null
+        }
+        Relationships: []
+      }
       coverage_requests: {
         Row: {
           id: string
@@ -1275,6 +1311,7 @@ export type Database = {
           assigned_technician_email: string | null
           assigned_technician_phone: string | null
           coverage_symbol: string | null
+          technician_role: string | null
           comment: string | null
           attachments: Json | null
           active: boolean | null
@@ -1302,6 +1339,7 @@ export type Database = {
           assigned_technician_email?: string | null
           assigned_technician_phone?: string | null
           coverage_symbol?: string | null
+          technician_role?: string | null
           comment?: string | null
           attachments?: Json | null
           active?: boolean | null
@@ -1329,6 +1367,7 @@ export type Database = {
           assigned_technician_email?: string | null
           assigned_technician_phone?: string | null
           coverage_symbol?: string | null
+          technician_role?: string | null
           comment?: string | null
           attachments?: Json | null
           active?: boolean | null

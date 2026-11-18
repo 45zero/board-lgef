@@ -837,17 +837,17 @@ function AttendanceRow({ item, onDone }: { item: DashboardActionItem; onDone: ()
   return (
     <>
       <Row title={item.title} eventId={item.eventId} date={item.date} location={item.location}>
-        <button disabled={busy || !att.attendance} onClick={() => setDeclining(true)} className={btnKo}>
+        <button disabled={busy || !att.mine} onClick={() => setDeclining(true)} className={btnKo}>
           Absent
         </button>
-        <button disabled={busy || !att.attendance} onClick={() => respond("approved")} className={btnOk}>
+        <button disabled={busy || !att.mine} onClick={() => respond("approved")} className={btnOk}>
           <Check size={12} /> Présent
         </button>
       </Row>
       {declining && (
         <div className="border-b border-line px-4 pb-3">
           <DirectorDeclineForm
-            directors={att.directors}
+            directors={att.freeDirectors}
             selfId={user?.id ?? null}
             onDecline={(comment) => respond("denied", comment)}
             onForward={async (id, comment) => {

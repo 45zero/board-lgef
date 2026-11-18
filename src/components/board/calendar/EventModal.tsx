@@ -1,5 +1,6 @@
 "use client";
 
+import { EventCrewBar } from "@/components/board/calendar/EventCrewBar";
 import { EventWeather } from "@/components/board/calendar/DayWeather";
 import { EventTeamCards } from "@/components/board/team/TeamCardOpener";
 import { useEffect, useRef, useState } from "react";
@@ -24,8 +25,6 @@ import {
   FraisTab,
   GestionFraisTab,
   CarteTab,
-  CoverageActions,
-  DirectorAttendanceSection,
   ParticipantsField,
   RemindersField,
   AttachmentsField,
@@ -365,13 +364,6 @@ export function EventModal({
                 />
               </div>
 
-              {isEditing && (
-                <div>
-                  <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Comité directeur</div>
-                  <DirectorAttendanceSection director={m.director} eventId={event!.id} />
-                </div>
-              )}
-
               {isEditing && <EventTeamCards eventId={event!.id} />}
 
               {isEditing && (
@@ -403,26 +395,24 @@ export function EventModal({
 
         {/* Pied */}
         <div className="flex shrink-0 items-center justify-between gap-3 border-t border-line px-6 py-3">
-          <div>
+          <div className="flex min-w-0 items-start gap-4">
             {isEditing && (
               <button
                 onClick={m.handleDelete}
                 disabled={m.saving}
-                className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-red hover:underline disabled:opacity-60"
+                className="mt-1.5 flex shrink-0 items-center gap-1.5 text-xs font-semibold text-red hover:underline disabled:opacity-60"
               >
                 <Trash2 size={13} /> Supprimer
               </button>
             )}
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
             {isEditing && (
-              <CoverageActions
-                role={m.role}
-                technicians={m.technicians}
-                coverage={m.coverage}
-                eventInfo={{ id: event!.id, title: m.title, start: m.start }}
-              />
+              <>
+                <span className="mt-1 h-6 w-px shrink-0 bg-line" aria-hidden />
+                <EventCrewBar eventId={event!.id} role={m.role} technicians={m.technicians} coverage={m.coverage} director={m.director} />
+              </>
             )}
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
             <button onClick={onClose} className="rounded-btn border border-line px-4 py-2 text-sm text-ink-2">
               Annuler
             </button>

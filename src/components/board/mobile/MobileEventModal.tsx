@@ -1,5 +1,6 @@
 "use client";
 
+import { EventCrewBar } from "@/components/board/calendar/EventCrewBar";
 import { EventWeather } from "@/components/board/calendar/DayWeather";
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
@@ -23,8 +24,6 @@ import {
   FraisTab,
   GestionFraisTab,
   CarteTab,
-  CoverageActions,
-  DirectorAttendanceSection,
   ParticipantsField,
   RemindersField,
   AttachmentsField,
@@ -354,13 +353,6 @@ export function MobileEventModal({
 
             {isEditing && (
               <div>
-                <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Comité directeur</div>
-                <DirectorAttendanceSection director={m.director} eventId={event!.id} />
-              </div>
-            )}
-
-            {isEditing && (
-              <div>
                 <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Pièces jointes</div>
                 <AttachmentsField
                   eventId={event!.id}
@@ -386,14 +378,7 @@ export function MobileEventModal({
 
       <div className="flex shrink-0 flex-col gap-2 border-t border-line px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">
         {isEditing && (
-          <div className="flex justify-end">
-            <CoverageActions
-              role={m.role}
-              technicians={m.technicians}
-              coverage={m.coverage}
-              eventInfo={{ id: event!.id, title: m.title, start: m.start }}
-            />
-          </div>
+          <EventCrewBar eventId={event!.id} role={m.role} technicians={m.technicians} coverage={m.coverage} director={m.director} />
         )}
         <div className="flex items-center justify-between">
           {isEditing ? (

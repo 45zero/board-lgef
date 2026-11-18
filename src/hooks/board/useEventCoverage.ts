@@ -17,7 +17,11 @@ export interface CoverageRequest {
   technician_response: string | null;
   technician_response_notes: string | null;
   technician_response_date: string | null;
+  /** Rôle du technicien principal : photo, vidéo ou les deux (null = non précisé). */
+  technician_role: CoverageRole | null;
 }
+
+export type CoverageRole = "photo" | "video" | "both";
 
 /**
  * Demande de couverture média + désignation d'un technicien pour un
@@ -37,7 +41,7 @@ export function useEventCoverage(eventId?: string) {
     const { data } = await supabase
       .from("coverage_requests")
       .select(
-        "id, event_id, requester_id, status, details, assigned_technician_id, assigned_technician_name, assigned_technician_email, technician_response, technician_response_notes, technician_response_date"
+        "id, event_id, requester_id, status, details, assigned_technician_id, assigned_technician_name, assigned_technician_email, technician_response, technician_response_notes, technician_response_date, technician_role"
       )
       .eq("event_id", eventId)
       .order("created_at", { ascending: false })
@@ -89,7 +93,7 @@ export function useEventCoverage(eventId?: string) {
     return true;
   };
 
-  const assignTechnician = async (tech: TechnicianOption) => {
+  const assignTechnician = async (tech: TechnicianOption, role: CoverageRole | null = null) => {
     if (!eventId || !user) return false;
     const supabase = createClient();
 
@@ -102,6 +106,7 @@ export function useEventCoverage(eventId?: string) {
       assigned_technician_email: tech.email,
       technician_response: "accepted",
       status: "approved" as const,
+      ...(role && { technician_role: role }),
     };
 
     const { error } = request
@@ -130,7 +135,7 @@ export function useEventCoverage(eventId?: string) {
    * useCoverageRequests.ts dans calendrier-lgef), à la différence de
    * assignTechnician() qui valide tout de suite.
    */
-  const assignPending = async (tech: TechnicianOption) => {
+  const assignPending = async (tech: TechnicianOption, role: CoverageRole | null = null) => {
     if (!eventId || !user) return false;
     const supabase = createClient();
 
@@ -142,6 +147,7 @@ export function useEventCoverage(eventId?: string) {
       technician_response: "pending",
       status: "pending" as const,
       coverage_symbol: null,
+      ...(role && { technician_role: role }),
     };
 
     const { error } = request
@@ -195,9 +201,42 @@ export function useEventCoverage(eventId?: string) {
     return true;
   };
 
+  /** Précise le rôle du technicien principal (photo, vidéo, les deux). */
+  const setTechnicianRole = async (role: CoverageRole) => {
+    if (!request) return false;
+    setRequest({ ...request, technician_role: role });
+    const { error } = await createClient().from("coverage_requests").update({ technician_role: role }).eq("id", request.id);
+    if (error) console.error("[useEventCoverage.setTechnicianRole]", error);
+    await fetchRequest();
+    return !error;
+  };
+
+  /** Retire le technicien principal : la demande repart « à attribuer ». */
+  const unassignTechnician = async () => {
+    if (!request) return false;
+    const { error } = await createClient()
+      .from("coverage_requests")
+      .update({
+        assigned_technician_id: null,
+        technician_id: null,
+        assigned_technician_name: null,
+        assigned_technician_email: null,
+        technician_response: null,
+        technician_response_notes: null,
+        technician_role: null,
+        status: "pending",
+      })
+      .eq("id", request.id);
+    if (error) console.error("[useEventCoverage.unassignTechnician]", error);
+    await fetchRequest();
+    return !error;
+  };
+
   return {
     request,
     loading,
+    setTechnicianRole,
+    unassignTechnician,
     requestCoverage,
     assignTechnician,
     assignPending,
