@@ -48,7 +48,16 @@ export type TeamAttachment = {
   place: "card" | "event";
   /** Proposé au centre de publication (« À publier »). */
   toCenter: boolean;
+  /** Dossier déposé (« Match U15 / Mi-temps ») — étiquette Drive « folder » ; null = hors dossier. */
+  folder: string | null;
 };
+
+/** Drive limite clé + valeur d'une appProperty à 124 octets. */
+function folderTag(folder: string | null | undefined): Record<string, string> {
+  let out = (folder ?? "").trim().slice(0, 200);
+  while (new TextEncoder().encode(out).length > 100) out = out.slice(0, -1);
+  return out ? { folder: out } : {};
+}
 
 const MAX_GED_BYTES = 50 * 1024 * 1024;
 
@@ -168,6 +177,7 @@ export const listTeamCardAttachments = async (cardId: string) =>
         fromTransfer: f.appProperties.source === "transfer",
         place,
         toCenter: place === "event" ? isTeamMedia(f.mimeType) : f.appProperties.toCenter === "1",
+        folder: f.appProperties.folder || null,
       })),
     };
   });
@@ -177,7 +187,7 @@ export const listTeamCardAttachments = async (cardId: string) =>
  * envoie alors le fichier comme un fichier de l'événement (uploadEventFiles). Sinon : session
  * d'envoi vers le dossier de la carte.
  */
-export const startTeamAttachmentUpload = async (cardId: string, filename: string, mimeType: string) =>
+export const startTeamAttachmentUpload = async (cardId: string, filename: string, mimeType: string, dropFolder: string | null = null) =>
   toResult(async (): Promise<{ mode: "event"; eventId: string } | { mode: "card"; uploadUrl: string }> => {
     const { supabase, userId } = await session();
     const card = await visibleCard(supabase, cardId);
@@ -191,7 +201,7 @@ export const startTeamAttachmentUpload = async (cardId: string, filename: string
       parentId: folder.id,
       mimeType: mimeType || "application/octet-stream",
       description: describe(card, tags.name),
-      appProperties: tags.appProperties,
+      appProperties: { ...tags.appProperties, ...folderTag(dropFolder) },
     });
     return { mode: "card", uploadUrl };
   });

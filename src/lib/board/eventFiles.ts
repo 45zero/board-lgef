@@ -26,7 +26,13 @@ export interface EventFile {
   drive_web_view_link: string | null;
   /** Photo ou vidéo retirée du Drive 7 jours après sa publication sur les réseaux (voir driveCleanup.ts). */
   drive_purged_at: string | null;
+  /** Dossier déposé (« Match U15 » ou « Match U15 / Mi-temps ») ; null = hors dossier. */
+  folder: string | null;
 }
+
+/** Fichier à envoyer : un File seul, ou avec le dossier d'où il vient (voir folderPick.ts). */
+export type UploadItem = File | { file: File; folder: string | null };
+const toPicked = (items: UploadItem[]) => items.map((it) => (it instanceof File ? { file: it, folder: null } : it));
 
 function slugifyFilename(name: string) {
   const dot = name.lastIndexOf(".");
@@ -57,10 +63,10 @@ export async function listEventFiles(eventId: string): Promise<EventFile[]> {
 
 export type UploadResult = { ok: boolean; name: string; error?: string; id?: string };
 
-async function uploadEventFilesToSupabase(eventId: string, files: File[]) {
+async function uploadEventFilesToSupabase(eventId: string, items: UploadItem[]) {
   const supabase = createClient();
   const results: UploadResult[] = [];
-  for (const file of files) {
+  for (const { file, folder } of toPicked(items)) {
     const objectPath = `${eventId}/${crypto.randomUUID()}_${slugifyFilename(file.name)}`;
     const { error: uploadError } = await supabase.storage
       .from(BUCKET)
@@ -78,6 +84,7 @@ async function uploadEventFilesToSupabase(eventId: string, files: File[]) {
         content_type: file.type || null,
         size_bytes: file.size,
         storage_provider: "supabase",
+        ...(folder && { folder }),
       })
       .select("id")
       .single();
@@ -197,22 +204,23 @@ export async function putFileToDriveViaRelay(
   throw new Error("Échec de l'envoi vers Drive (fichier vide).");
 }
 
-async function uploadEventFilesToDrive(eventId: string, files: File[], onProgress?: UploadProgress, teamCardId?: string) {
+async function uploadEventFilesToDrive(eventId: string, items: UploadItem[], onProgress?: UploadProgress, teamCardId?: string) {
   const results: UploadResult[] = [];
-  const total = files.reduce((n, f) => n + f.size, 0);
+  const picked = toPicked(items);
+  const total = picked.reduce((n, f) => n + f.file.size, 0);
   let done = 0;
-  for (const file of files) {
+  for (const { file, folder } of picked) {
     onProgress?.(done, total, file.name);
     try {
       const initRes = await fetch(`/api/events/${eventId}/attachments/drive`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: file.name, mimeType: file.type, teamCardId }),
+        body: JSON.stringify({ filename: file.name, mimeType: file.type, teamCardId, folder }),
       });
       const initJson = await initRes.json();
       if (!initRes.ok || !initJson.ok) {
         if (initJson.reason === "no_drive") {
-          const fallback = await uploadEventFilesToSupabase(eventId, [file]);
+          const fallback = await uploadEventFilesToSupabase(eventId, [{ file, folder }]);
           results.push(...fallback);
           continue;
         }
@@ -233,6 +241,7 @@ async function uploadEventFilesToDrive(eventId: string, files: File[], onProgres
           filename: file.name,
           contentType: file.type,
           sizeBytes: file.size,
+          folder,
         }),
       });
       const confirmJson = await confirmRes.json();
@@ -257,7 +266,7 @@ async function uploadEventFilesToDrive(eventId: string, files: File[], onProgres
  * Repli automatique sur Supabase Storage tant qu'aucun Drive de board n'est connecté.
  */
 /** `teamCardId` : envoi depuis une carte de l'Espace Team liée à l'événement (le fichier est étiqueté pour la carte). */
-export async function uploadEventFiles(eventId: string, files: File[], onProgress?: UploadProgress, teamCardId?: string) {
+export async function uploadEventFiles(eventId: string, files: UploadItem[], onProgress?: UploadProgress, teamCardId?: string) {
   return uploadEventFilesToDrive(eventId, files, onProgress, teamCardId);
 }
 

@@ -422,7 +422,7 @@ export function TeamCardModal({
               )}
             </section>
 
-            <TeamAttachments cardId={card.id} canEdit={canEdit} pickSignal={pickSignal} reloadSignal={attachmentsReload} people={ws.people} hasEvent={!!card.event} onError={onError} />
+            <TeamAttachments cardId={card.id} cardTitle={card.title} canEdit={canEdit} pickSignal={pickSignal} reloadSignal={attachmentsReload} people={ws.people} hasEvent={!!card.event} onError={onError} />
 
             <TeamEmails cardId={card.id} canEdit={canEdit} me={me} people={ws.people} onAttachmentsAdded={reloadAttachments} onError={onError} />
 

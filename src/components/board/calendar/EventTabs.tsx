@@ -17,6 +17,7 @@ import {
   Trash2,
   Upload,
   Share2,
+  FolderPlus,
 } from "lucide-react";
 import { YoutubeIcon, FacebookIcon, InstagramIcon } from "@/components/board/publication/BrandIcons";
 import { ExpenseLinesEditor } from "@/components/board/expenses/ExpenseLinesEditor";
@@ -31,6 +32,8 @@ import { EventChat } from "@/components/board/discussions/EventChat";
 import { useEventFiles } from "@/hooks/board/useEventFiles";
 import { openEventFile, getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
 import { FileViewer } from "@/components/board/FileViewer";
+import { FolderBlock, downloadSequentially, folderSummary } from "@/components/board/FolderBlock";
+import { groupByFolder, pickedFromDrop, pickedFromInput } from "@/lib/board/folderPick";
 import { ensureFilePublication, getMediaPublication, type MediaPublication } from "@/lib/board/mediaPublications";
 import dynamic from "next/dynamic";
 import { getPublishedForFile, detachFileFromPublications } from "@/app/actions/social";
@@ -1068,6 +1071,12 @@ export function AttachmentsField({
   const { user } = useAuth();
   const hook = useEventFiles(eventId, canManage, canUpload);
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  // Dossier visé par « + » sur un dossier : les fichiers choisis y sont rangés.
+  const targetFolder = useRef<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const canAdd = canManage || canUpload;
+  const { folders, loose } = groupByFolder(hook.files, (f) => f.folder);
   // Publier un média : même compositeur que le centre de publication (réseaux, publier ou programmer).
   const [composerPub, setComposerPub] = useState<MediaPublication | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
@@ -1091,14 +1100,68 @@ export function AttachmentsField({
   };
 
   return (
-    <div className="space-y-2">
+    <div
+      onDragOver={(e) => {
+        if (!canAdd || !e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+      }}
+      onDrop={(e) => {
+        if (!canAdd || (!e.dataTransfer.items?.length && !e.dataTransfer.files.length)) return;
+        e.preventDefault();
+        setDragOver(false);
+        void pickedFromDrop(e.dataTransfer).then((picked) => picked.length && hook.addFiles(picked));
+      }}
+      className={`space-y-2 rounded-btn ${dragOver ? "bg-sel-bg outline-dashed outline-2 outline-offset-4 outline-navy/40" : ""}`}
+    >
       {hook.files.length === 0 && !hook.loading && (
         <p className="text-xs italic text-ink-4">Aucune pièce jointe pour l&rsquo;instant.</p>
       )}
+      {/* Dossiers déposés : une ligne chacun, qu'on ouvre. Les photos/vidéos qu'ils contiennent partent
+          quand même une par une dans « À publier » (déclencheur sur event_files). */}
+      {folders.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-ink-4">
+            Dossiers · {folders.length}
+            <span className="ml-1 font-normal normal-case tracking-normal">— photos et vidéos envoyées une par une au centre de publication</span>
+          </p>
+          {folders.map((g) => (
+            <FolderBlock
+              key={g.name}
+              name={g.name}
+              count={g.files.length}
+              summary={folderSummary(g.files.map((f) => f.content_type))}
+              onAdd={
+                canAdd
+                  ? () => {
+                      targetFolder.current = g.name;
+                      inputRef.current?.click();
+                    }
+                  : undefined
+              }
+              onDownloadAll={() => downloadSequentially(g.files.filter((f) => !f.drive_purged_at), (f) => openEventFile(f, true))}
+            >
+              {g.files.map((f) => (
+                <AttachmentRow
+                  key={f.id}
+                  file={f}
+                  canManage={canManage || (canUpload && f.uploaded_by === user?.id)}
+                  canPublish={canPublish}
+                  onRemove={() => askRemove(f)}
+                  onPublishClick={() => openingId !== f.id && void openComposer(f)}
+                />
+              ))}
+            </FolderBlock>
+          ))}
+        </div>
+      )}
       {/* Documents : joints à l'événement seulement. Médias : rejoignent aussi « À publier » du centre. */}
       {[
-        { title: "Documents", files: hook.files.filter((f) => !isMediaFile(f)), hint: null },
-        { title: "Médias", files: hook.files.filter(isMediaFile), hint: "envoyés au centre de publication" },
+        { title: "Documents", files: loose.filter((f) => !isMediaFile(f)), hint: null },
+        { title: "Médias", files: loose.filter(isMediaFile), hint: "envoyés au centre de publication" },
       ]
         .filter((g) => g.files.length > 0)
         .map((g) => (
@@ -1120,7 +1183,7 @@ export function AttachmentsField({
           </div>
         ))}
 
-      {(canManage || canUpload) && (
+      {canAdd && (
         <>
           <input
             ref={inputRef}
@@ -1129,17 +1192,45 @@ export function AttachmentsField({
             className="hidden"
             onChange={(e) => {
               // Envoi en tâche de fond : progression en bas à droite, on peut fermer l'événement.
-              if (e.target.files?.length) hook.addFiles(Array.from(e.target.files));
+              const folder = targetFolder.current;
+              targetFolder.current = null;
+              if (e.target.files?.length) hook.addFiles(pickedFromInput(e.target.files).map((p) => ({ ...p, folder })));
               e.target.value = "";
             }}
           />
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            className="flex items-center gap-1.5 rounded-btn border border-dashed border-line px-3 py-2 text-xs font-semibold text-ink-3 hover:bg-hover"
-          >
-            <Paperclip size={13} /> Ajouter un document, une photo ou une vidéo
-          </button>
+          <input
+            ref={(el) => {
+              folderInputRef.current = el;
+              el?.setAttribute("webkitdirectory", "");
+            }}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.length) hook.addFiles(pickedFromInput(e.target.files));
+              e.target.value = "";
+            }}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                targetFolder.current = null;
+                inputRef.current?.click();
+              }}
+              className="flex items-center gap-1.5 rounded-btn border border-dashed border-line px-3 py-2 text-xs font-semibold text-ink-3 hover:bg-hover"
+            >
+              <Paperclip size={13} /> Ajouter un document, une photo ou une vidéo
+            </button>
+            <button
+              type="button"
+              onClick={() => folderInputRef.current?.click()}
+              className="flex items-center gap-1.5 rounded-btn border border-dashed border-line px-3 py-2 text-xs font-semibold text-ink-3 hover:bg-hover"
+            >
+              <FolderPlus size={13} /> Ajouter un dossier
+            </button>
+            <span className="text-[10px] text-ink-4">ou glissez-déposez fichiers et dossiers ici</span>
+          </div>
           {hook.uploading && (
             <p className="text-[11px] text-ink-4">
               Envoi en cours en arrière-plan (voir en bas à droite) — vous pouvez fermer l&rsquo;événement et continuer à travailler.

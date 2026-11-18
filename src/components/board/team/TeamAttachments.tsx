@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Download, Eye, FolderSearch, Link2, Loader2, Paperclip, Search, Share2, Upload, X } from "lucide-react";
+import { Check, Download, Eye, FolderPlus, FolderSearch, Link2, Loader2, Paperclip, Search, Share2, Upload, X } from "lucide-react";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import {
   attachTeamFileFromGed,
@@ -15,6 +15,9 @@ import {
 } from "@/app/actions/team-attachments";
 import { unwrap } from "@/lib/board/actionResult";
 import { putFileToDriveViaRelay, uploadEventFiles } from "@/lib/board/eventFiles";
+import { groupByFolder, pickedFromDrop, pickedFromInput, type PickedFile } from "@/lib/board/folderPick";
+import { useBackgroundTasks } from "@/contexts/BackgroundTasksContext";
+import { FolderBlock, downloadSequentially, folderSummary } from "@/components/board/FolderBlock";
 import { Popover } from "./TeamUi";
 
 // Pièces jointes d'une carte. Le type de fichier décide (voir team-attachments.ts) : carte liée à un
@@ -38,6 +41,7 @@ type GedFile = { id: string; name: string; mimeType: string; size: number | null
 
 export function TeamAttachments({
   cardId,
+  cardTitle,
   canEdit,
   pickSignal,
   people,
@@ -46,6 +50,8 @@ export function TeamAttachments({
   onError,
 }: {
   cardId: string;
+  /** Titre de la carte (libellé de l'envoi en arrière-plan). */
+  cardTitle?: string;
   /** Incrémenté quand des fichiers ont été ajoutés ailleurs (pièces jointes d'un e-mail lié) : recharge la liste. */
   reloadSignal?: number;
   canEdit: boolean;
@@ -64,6 +70,11 @@ export function TeamAttachments({
   const [preview, setPreview] = useState<TeamAttachment | null>(null);
   const [sharing, setSharing] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  // Dossier visé par « + » sur un dossier : les fichiers choisis y sont rangés.
+  const targetFolder = useRef<string | null>(null);
+  const [sending, setSending] = useState(0);
+  const { runTask, completions } = useBackgroundTasks();
 
   const load = useCallback(async () => {
     try {
@@ -77,31 +88,70 @@ export function TeamAttachments({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- l'état n'est posé qu'à la réponse du serveur
     void load();
-  }, [load, reloadSignal]);
+    // `completions` : un envoi lancé depuis cette carte (même fermée puis rouverte) vient de finir.
+  }, [load, reloadSignal, completions]);
 
   useEffect(() => {
     if (pickSignal > 0) input.current?.click();
   }, [pickSignal]);
 
-  const upload = async (files: File[]) => {
-    for (const file of files) {
-      try {
-        setProgress({ name: file.name, pct: 0 });
-        const pct = (sent: number) => setProgress({ name: file.name, pct: Math.round((sent / (file.size || 1)) * 100) });
-        const start = unwrap(await startTeamAttachmentUpload(cardId, file.name, file.type));
-        if (start.mode === "event") {
-          const [result] = await uploadEventFiles(start.eventId, [file], (sent) => pct(sent), cardId);
-          if (!result?.ok) throw new Error(result?.error ?? "envoi impossible.");
-        } else {
-          const driveFile = await putFileToDriveViaRelay(CHUNK_RELAY, start.uploadUrl, file, pct);
-          if (/^(image|video)\//.test(file.type)) unwrap(await queueTeamMediaForPublication(cardId, driveFile.id));
+  /**
+   * Envoi en tâche de fond (BackgroundTasksContext) : la progression s'affiche en bas à droite, on peut
+   * fermer la carte et travailler ailleurs dans le board ; la liste se recharge à la fin.
+   */
+  const upload = (items: PickedFile[]) => {
+    if (items.length === 0) return;
+    const total = items.reduce((n, p) => n + p.file.size, 0);
+    const tops = [...new Set(items.map((p) => p.folder?.split(" / ")[0] ?? null))];
+    const n = items.length;
+    const what = tops.length === 1 && tops[0] ? `dossier « ${tops[0]} » (${n} fichier${n > 1 ? "s" : ""})` : n > 1 ? `${n} fichiers` : items[0].file.name;
+    setSending((c) => c + 1);
+    void runTask(
+      cardTitle ? `Carte « ${cardTitle} » — ${what}` : `Envoi : ${what}`,
+      async ({ setProgress: report }) => {
+        let done = 0;
+        let ok = 0;
+        const failed: string[] = [];
+        try {
+          for (const { file, folder } of items) {
+            const step = (sent: number) => report(total ? (done + sent) / total : undefined, file.name);
+            step(0);
+            try {
+              const start = unwrap(await startTeamAttachmentUpload(cardId, file.name, file.type, folder));
+              if (start.mode === "event") {
+                const [result] = await uploadEventFiles(start.eventId, [{ file, folder }], (sent) => step(sent), cardId);
+                if (!result?.ok) throw new Error(result?.error ?? "envoi impossible.");
+              } else {
+                const driveFile = await putFileToDriveViaRelay(CHUNK_RELAY, start.uploadUrl, file, step);
+                if (/^(image|video)\//.test(file.type)) unwrap(await queueTeamMediaForPublication(cardId, driveFile.id));
+              }
+              ok += 1;
+            } catch (e) {
+              failed.push(`${file.name} : ${e instanceof Error ? e.message : "envoi impossible."}`);
+            }
+            done += file.size;
+          }
+        } finally {
+          setSending((c) => c - 1);
         }
-      } catch (e) {
-        onError(`${file.name} : ${e instanceof Error ? e.message : "envoi impossible."}`);
+        if (ok === 0) throw new Error(failed.join("\n"));
+        return { ok, failed };
+      },
+      {
+        success: (r) =>
+          r.failed.length
+            ? `${r.ok} fichier(s) ajouté(s) — échec pour :\n${r.failed.join("\n")}`
+            : `${r.ok} fichier${r.ok > 1 ? "s" : ""} ajouté${r.ok > 1 ? "s" : ""} à la carte.`,
       }
-    }
-    setProgress(null);
-    await load();
+    );
+  };
+
+  const { folders, loose } = groupByFolder(state?.files ?? [], (f) => f.folder);
+  const downloadOne = (f: TeamAttachment) => {
+    const a = document.createElement("a");
+    a.href = `/api/team/cards/${cardId}/attachments/${f.id}`;
+    a.download = f.name;
+    a.click();
   };
 
   const remove = async (f: TeamAttachment) => {
@@ -115,20 +165,7 @@ export function TeamAttachments({
     await load();
   };
 
-  return (
-    <section>
-      <div className="mb-2 flex items-center gap-2">
-        <Paperclip size={16} className="text-ink-3" />
-        <h3 className="flex-1 text-sm font-extrabold text-ink">Pièces jointes</h3>
-        {state === null && <Loader2 size={13} className="animate-spin text-ink-4" />}
-      </div>
-
-      {state && !state.driveReady ? (
-        <p className="rounded-btn bg-subtle px-4 py-3 text-xs text-ink-4">Aucun Drive de board configuré : les pièces jointes y sont archivées (Paramètres du board → Drive du board).</p>
-      ) : (
-        <>
-          <ul className="space-y-2">
-            {state?.files.map((f) => (
+  const row = (f: TeamAttachment) => (
               <li key={f.id} className="group flex items-center gap-3 rounded-btn border border-line bg-card px-3 py-2.5">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-btn bg-subtle font-mono text-[10px] font-bold text-ink-3">{kind(f.mimeType, f.name)}</span>
                 <div className="min-w-0 flex-1">
@@ -161,13 +198,48 @@ export function TeamAttachments({
                   </button>
                 )}
               </li>
+  );
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center gap-2">
+        <Paperclip size={16} className="text-ink-3" />
+        <h3 className="flex-1 text-sm font-extrabold text-ink">Pièces jointes</h3>
+        {state === null && <Loader2 size={13} className="animate-spin text-ink-4" />}
+      </div>
+
+      {state && !state.driveReady ? (
+        <p className="rounded-btn bg-subtle px-4 py-3 text-xs text-ink-4">Aucun Drive de board configuré : les pièces jointes y sont archivées (Paramètres du board → Drive du board).</p>
+      ) : (
+        <>
+          <ul className="space-y-2">
+            {folders.map((g) => (
+              <li key={`folder:${g.name}`}>
+                <FolderBlock
+                  name={g.name}
+                  count={g.files.length}
+                  summary={folderSummary(g.files.map((f) => f.mimeType))}
+                  onAdd={
+                    canEdit
+                      ? () => {
+                          targetFolder.current = g.name;
+                          input.current?.click();
+                        }
+                      : undefined
+                  }
+                  onDownloadAll={() => downloadSequentially(g.files, downloadOne)}
+                >
+                  <ul className="space-y-1.5">{g.files.map(row)}</ul>
+                </FolderBlock>
+              </li>
             ))}
+            {loose.map(row)}
             {state?.files.length === 0 && !canEdit && <li className="text-xs text-ink-4">Aucune pièce jointe.</li>}
           </ul>
 
           {progress && (
             <div className="mt-2 rounded-btn border border-line px-3 py-2">
-              <p className="truncate text-[11px] text-ink-3">Envoi vers le Drive : {progress.name}</p>
+              <p className="truncate text-[11px] text-ink-3">Copie vers le Drive du board : {progress.name}</p>
               <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-track">
                 <span className="block h-full rounded-full bg-navy transition-[width]" style={{ width: `${progress.pct}%` }} />
               </span>
@@ -183,18 +255,29 @@ export function TeamAttachments({
               }}
               onDragLeave={() => setDragOver(false)}
               onDrop={(e) => {
-                if (!e.dataTransfer.files.length) return;
+                if (!e.dataTransfer.items?.length && !e.dataTransfer.files.length) return;
                 e.preventDefault();
                 setDragOver(false);
-                void upload([...e.dataTransfer.files]);
+                void pickedFromDrop(e.dataTransfer).then(upload);
               }}
               className={`relative mt-2 flex items-center justify-center gap-1.5 rounded-btn border border-dashed px-3 py-3 text-[13px] font-semibold ${
                 dragOver ? "border-navy bg-sel-bg text-ink" : "border-line-strong text-ink-3"
               }`}
             >
               <Upload size={14} />
-              <button type="button" disabled={!!progress} onClick={() => input.current?.click()} className="hover:text-ink hover:underline disabled:opacity-50">
+              <button
+                type="button"
+                onClick={() => {
+                  targetFolder.current = null;
+                  input.current?.click();
+                }}
+                className="hover:text-ink hover:underline"
+              >
                 Déposer un fichier
+              </button>
+              <span>,</span>
+              <button type="button" onClick={() => folderInput.current?.click()} className="inline-flex items-center gap-1 hover:text-ink hover:underline">
+                <FolderPlus size={13} /> un dossier
               </button>
               <span>ou</span>
               <button type="button" disabled={!!progress} onClick={() => setGedOpen(true)} className="hover:text-ink hover:underline disabled:opacity-50">
@@ -223,12 +306,31 @@ export function TeamAttachments({
                 multiple
                 hidden
                 onChange={(e) => {
-                  const files = [...(e.target.files ?? [])];
+                  const folder = targetFolder.current;
+                  targetFolder.current = null;
+                  const picked = pickedFromInput(e.target.files ?? []).map((p) => ({ ...p, folder }));
                   e.target.value = "";
-                  if (files.length) void upload(files);
+                  upload(picked);
+                }}
+              />
+              <input
+                ref={(el) => {
+                  folderInput.current = el;
+                  el?.setAttribute("webkitdirectory", "");
+                }}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  const picked = pickedFromInput(e.target.files ?? []);
+                  e.target.value = "";
+                  upload(picked);
                 }}
               />
             </div>
+          )}
+          {sending > 0 && (
+            <p className="mt-2 text-[11px] text-ink-4">Envoi en cours en arrière-plan (voir en bas à droite) — vous pouvez fermer la carte et continuer à travailler.</p>
           )}
           {canEdit && (
             <p className="mt-1.5 text-[10px] leading-snug text-ink-4">

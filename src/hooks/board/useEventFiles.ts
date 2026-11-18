@@ -10,6 +10,7 @@ import {
   publishToYoutube,
   publishToFacebook,
   type EventFile,
+  type UploadItem,
 } from "@/lib/board/eventFiles";
 import { useBackgroundTasks } from "@/contexts/BackgroundTasksContext";
 
@@ -54,13 +55,18 @@ export function useEventFiles(eventId: string | undefined, canManage: boolean, c
    * Envoi en tâche de fond (voir BackgroundTasksContext) : rend la main tout de suite, la
    * progression s'affiche en bas à droite et on peut quitter l'événement ou changer de module.
    */
-  const addFiles = (fileList: FileList | File[]) => {
+  const addFiles = (fileList: FileList | UploadItem[]) => {
     if (!eventId || !(canManage || canUpload)) return;
-    const files = Array.from(fileList);
+    const files = Array.from(fileList as ArrayLike<UploadItem>);
     if (files.length === 0) return;
+    const folders = [...new Set(files.map((f) => (f instanceof File ? null : f.folder?.split(" / ")[0] ?? null)))];
     setUploading(true);
     void runTask(
-      files.length > 1 ? `Envoi de ${files.length} fichiers` : `Envoi de ${files[0].name}`,
+      folders.length === 1 && folders[0]
+        ? `Envoi du dossier « ${folders[0]} » (${files.length} fichier${files.length > 1 ? "s" : ""})`
+        : files.length > 1
+          ? `Envoi de ${files.length} fichiers`
+          : `Envoi de ${(files[0] instanceof File ? files[0] : files[0].file).name}`,
       async ({ setProgress }) => {
         try {
           const results = await uploadEventFiles(eventId, files, (sent, total, current) =>

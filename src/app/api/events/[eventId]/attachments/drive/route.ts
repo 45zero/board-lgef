@@ -8,6 +8,13 @@ import { createResumableUploadSession } from "@/lib/google/drive";
 import { archiveSubFolder, eventArchiveFolder } from "@/lib/google/archiveFolders";
 
 const MEDIA_FOLDER_NAME = "Médias";
+
+/** Drive limite clé + valeur d'une appProperty à 124 octets. */
+function truncateBytes(s: string, max: number) {
+  let out = s;
+  while (new TextEncoder().encode(out).length > max) out = out.slice(0, -1);
+  return out;
+}
 /** Pièces jointes qui ne sont ni photo ni vidéo : rangées à part, jamais proposées à la publication. */
 const DOCUMENTS_FOLDER_NAME = "Documents";
 
@@ -33,7 +40,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
     return NextResponse.json({ ok: false, reason: "no_drive" }, { status: 200 });
   }
 
-  const { filename, mimeType, teamCardId } = (await request.json()) as { filename?: string; mimeType?: string; teamCardId?: string };
+  const { filename, mimeType, teamCardId, folder: rawFolder } = (await request.json()) as {
+    filename?: string;
+    mimeType?: string;
+    teamCardId?: string;
+    /** Dossier déposé (« Match U15 / Mi-temps ») : recréé sous Médias / Documents dans le Drive du board. */
+    folder?: string | null;
+  };
+  const folder = typeof rawFolder === "string" ? rawFolder.trim().slice(0, 200) : "";
   if (!filename) {
     return NextResponse.json({ ok: false, error: "Nom de fichier manquant" }, { status: 400 });
   }
@@ -59,7 +73,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
     const cache = new Map();
     const eventFolder = await eventArchiveFolder(account, { title: eventTitle, start: eventDateObj }, cache);
     const isMedia = /^(image|video)\//.test(mimeType ?? "");
-    const mediaFolder = await archiveSubFolder(account, eventFolder, isMedia ? MEDIA_FOLDER_NAME : DOCUMENTS_FOLDER_NAME, cache);
+    let mediaFolder = await archiveSubFolder(account, eventFolder, isMedia ? MEDIA_FOLDER_NAME : DOCUMENTS_FOLDER_NAME, cache);
+    for (const part of folder.split(" / ").map((p) => p.trim()).filter(Boolean)) {
+      mediaFolder = await archiveSubFolder(account, mediaFolder, part, cache);
+    }
 
     const description = [
       `Événement : ${eventTitle}`,
@@ -74,7 +91,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
       mimeType: mimeType || "application/octet-stream",
       description,
       appProperties: teamCardId
-        ? { teamCardId, uploadedById: user.id, uploadedByName: uploaderName.slice(0, 100), source: "upload" }
+        ? { teamCardId, uploadedById: user.id, uploadedByName: uploaderName.slice(0, 100), source: "upload", ...(folder && { folder: truncateBytes(folder, 100) }) }
         : undefined,
     });
 

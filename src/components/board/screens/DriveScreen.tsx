@@ -19,6 +19,8 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { listEventFiles, openEventFile, getEventFileViewUrl, type EventFile } from "@/lib/board/eventFiles";
 import { FileViewer } from "@/components/board/FileViewer";
+import { FolderBlock, downloadSequentially, folderSummary } from "@/components/board/FolderBlock";
+import { groupByFolder } from "@/lib/board/folderPick";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
 import { getArchivedReceipts, type ArchivedReceipt } from "@/app/actions/expenses";
 
@@ -182,6 +184,8 @@ export function DriveScreen() {
   }, []);
 
   const groupsByYear = useMemo(() => groupByYearMonth(events), [events]);
+  // Dossiers déposés dans l'événement (event_files.folder) : une ligne chacun, comme dans la fiche.
+  const fileGroups = useMemo(() => groupByFolder(files, (f) => f.folder), [files]);
 
   const visibleEvents = useMemo(() => {
     let list = events;
@@ -300,10 +304,30 @@ export function DriveScreen() {
                   <div className="p-4 text-sm text-ink-4">Aucun document.</div>
                 ) : (
                   <>
-                    {files.length > 0 && (
+                    {fileGroups.folders.length > 0 && (
+                      <>
+                        <SectionTitle>Dossiers</SectionTitle>
+                        <div className="space-y-1.5 px-4 py-2">
+                          {fileGroups.folders.map((g) => (
+                            <FolderBlock
+                              key={g.name}
+                              name={g.name}
+                              count={g.files.length}
+                              summary={folderSummary(g.files.map((f) => f.content_type))}
+                              onDownloadAll={() => downloadSequentially(g.files.filter((f) => !f.drive_purged_at), (f) => openEventFile(f, true))}
+                            >
+                              {g.files.map((f) => (
+                                <FileRow key={f.id} file={f} />
+                              ))}
+                            </FolderBlock>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {fileGroups.loose.length > 0 && (
                       <>
                         <SectionTitle>Médias</SectionTitle>
-                        {files.map((f) => (
+                        {fileGroups.loose.map((f) => (
                           <FileRow key={f.id} file={f} />
                         ))}
                       </>

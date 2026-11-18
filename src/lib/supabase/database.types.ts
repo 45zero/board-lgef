@@ -1820,6 +1820,7 @@ export type Database = {
           drive_file_id: string | null
           drive_web_view_link: string | null
           drive_purged_at: string | null
+          folder: string | null
         }
         Insert: {
           id?: string
@@ -1835,6 +1836,7 @@ export type Database = {
           drive_file_id?: string | null
           drive_web_view_link?: string | null
           drive_purged_at?: string | null
+          folder?: string | null
         }
         Update: {
           id?: string
@@ -1850,6 +1852,7 @@ export type Database = {
           drive_file_id?: string | null
           drive_web_view_link?: string | null
           drive_purged_at?: string | null
+          folder?: string | null
         }
         Relationships: []
       }

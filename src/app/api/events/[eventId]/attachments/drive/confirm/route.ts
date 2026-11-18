@@ -13,12 +13,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
     return NextResponse.json({ ok: false, error: "Non authentifié" }, { status: 401 });
   }
 
-  const { fileId, webViewLink, filename, contentType, sizeBytes } = (await request.json()) as {
+  const { fileId, webViewLink, filename, contentType, sizeBytes, folder } = (await request.json()) as {
     fileId?: string;
     webViewLink?: string;
     filename?: string;
     contentType?: string;
     sizeBytes?: number;
+    folder?: string | null;
   };
   if (!fileId || !filename) {
     return NextResponse.json({ ok: false, error: "Données manquantes" }, { status: 400 });
@@ -34,6 +35,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ eve
       storage_provider: "drive",
       drive_file_id: fileId,
       drive_web_view_link: webViewLink ?? null,
+      ...(typeof folder === "string" && folder.trim() && { folder: folder.trim().slice(0, 200) }),
     })
     .select("id")
     .single();
