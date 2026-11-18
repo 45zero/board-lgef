@@ -43,6 +43,7 @@ import { Avatar, DueChip, EventChip, LeaveBeforeEventContext, Popover } from "./
 import { TeamAttachments } from "./TeamAttachments";
 import { TeamTransfers } from "./TeamTransfers";
 import { TeamEmails } from "./TeamEmails";
+import { MentionText, MentionTextarea, mentionIdsIn } from "./MentionField";
 
 const ago = (iso: string) => {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -123,9 +124,24 @@ export function TeamCardModal({
     [onError, onRefresh]
   );
 
-  const patch = (p: TeamCardPatch, local: Partial<TeamCard>) => {
+  const patch = (p: TeamCardPatch, local: Partial<TeamCard>, mentionIds: string[] = []) => {
     onLocalPatch(card.id, local);
-    void run(async () => unwrap(await updateTeamCard(card.id, p)));
+    void run(async () => unwrap(await updateTeamCard(card.id, p, mentionIds)));
+  };
+
+  const memberIds = useMemo(() => card.members.map((m) => m.userId), [card.members]);
+  /** Membres de la carte : affichage immédiat, puis serveur (ajout notifié par le déclencheur, retrait prévenu). */
+  const saveMembers = (ids: string[]) => {
+    const now = new Date().toISOString();
+    onLocalPatch(card.id, {
+      members: ids.map((id) => card.members.find((m) => m.userId === id) ?? { userId: id, assignedBy: me, assignedAt: now, seenAt: id === me ? now : null }),
+    });
+    void run(async () => unwrap(await setTeamCardMembers(card.id, ids)));
+  };
+  const removeMember = (id: string) => {
+    const name = peopleById.get(id)?.name ?? "cette personne";
+    const ask = id === me ? "Quitter cette carte ? Vous ne la verrez plus si vous n'êtes pas propriétaire du tableau." : `Retirer ${name} de la carte ? ${name} sera prévenu(e).`;
+    if (window.confirm(ask)) saveMembers(memberIds.filter((x) => x !== id));
   };
 
   const loadComments = useCallback(async () => {
@@ -224,7 +240,19 @@ export function TeamCardModal({
                 <p className={sectionTitle}>Membres</p>
                 <div className="flex items-center gap-1.5">
                   {card.members.map((m) => (
-                    <Avatar key={m.userId} person={peopleById.get(m.userId)} size={30} />
+                    <span key={m.userId} className="group/member relative">
+                      <Avatar person={peopleById.get(m.userId)} size={30} />
+                      {canEdit && (
+                        <button
+                          onClick={() => removeMember(m.userId)}
+                          title={m.userId === me ? "Quitter la carte" : `Retirer ${peopleById.get(m.userId)?.name ?? ""}`}
+                          aria-label={m.userId === me ? "Quitter la carte" : `Retirer ${peopleById.get(m.userId)?.name ?? "ce membre"} de la carte`}
+                          className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-ink text-white shadow ring-2 ring-card hover:bg-bad group-hover/member:flex focus:flex"
+                        >
+                          <X size={10} strokeWidth={3} />
+                        </button>
+                      )}
+                    </span>
                   ))}
                   {canEdit && (
                     <button onClick={() => setPop("members")} aria-label="Assigner" className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-subtle text-ink-3 hover:bg-chip-bg">
@@ -325,7 +353,9 @@ export function TeamCardModal({
                       >
                         {item.done && <Check size={11} strokeWidth={3} />}
                       </button>
-                      <span className={`flex-1 text-[13px] ${item.done ? "text-ink-4 line-through" : "text-ink-2"}`}>{item.content}</span>
+                      <span className={`flex-1 text-[13px] ${item.done ? "text-ink-4 line-through" : "text-ink-2"}`}>
+                        <MentionText text={item.content} people={ws.people} />
+                      </span>
                       {canEdit && (
                         <button
                           onClick={() => {
@@ -349,17 +379,30 @@ export function TeamCardModal({
                       const content = newItem.trim();
                       if (!content) return;
                       setNewItem("");
-                      void run(async () => unwrap(await addTeamChecklistItem(card.id, content, card.checklist.length)));
+                      const ids = mentionIdsIn(content, ws.people);
+                      void run(async () => unwrap(await addTeamChecklistItem(card.id, content, card.checklist.length, ids)));
                     }}
                   >
-                    <input
-                      autoFocus={addingItem}
-                      value={newItem}
-                      onChange={(e) => setNewItem(e.target.value)}
-                      placeholder="Ajouter un élément…"
-                      className="min-w-0 flex-1 rounded-btn border border-line px-2.5 py-1.5 text-[13px] outline-none focus:border-line-strong"
-                    />
-                    <button className="rounded-btn bg-navy px-3 text-xs font-bold text-white disabled:opacity-40" disabled={!newItem.trim()}>
+                    <div className="min-w-0 flex-1">
+                      <MentionTextarea
+                        autoFocus={addingItem}
+                        rows={1}
+                        value={newItem}
+                        onValueChange={(v) => setNewItem(v.replace(/\n/g, " "))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            e.currentTarget.form?.requestSubmit();
+                          }
+                        }}
+                        people={ws.people}
+                        memberIds={memberIds}
+                        meId={me}
+                        placeholder="Ajouter un élément… (@ pour identifier quelqu'un)"
+                        className="block w-full resize-none rounded-btn border border-line px-2.5 py-1.5 text-[13px] outline-none focus:border-line-strong"
+                      />
+                    </div>
+                    <button className="h-[32px] shrink-0 rounded-btn bg-navy px-3 text-xs font-bold text-white disabled:opacity-40" disabled={!newItem.trim()}>
                       Ajouter
                     </button>
                   </form>
@@ -380,19 +423,22 @@ export function TeamCardModal({
               </div>
               {editingDesc ? (
                 <div>
-                  <textarea
+                  <MentionTextarea
                     autoFocus
                     value={desc}
-                    onChange={(e) => setDesc(e.target.value)}
+                    onValueChange={setDesc}
                     rows={6}
-                    placeholder="Contexte, consignes, liens…"
+                    people={ws.people}
+                    memberIds={memberIds}
+                    meId={me}
+                    placeholder="Contexte, consignes, liens… (@ pour identifier quelqu'un)"
                     className="w-full rounded-btn border border-line-strong bg-card px-3 py-2.5 text-[13px] leading-relaxed text-ink-2 outline-none"
                   />
                   <div className="mt-1.5 flex gap-2">
                     <button
                       onClick={() => {
                         setEditingDesc(false);
-                        if (desc !== card.description) patch({ description: desc }, { description: desc });
+                        if (desc !== card.description) patch({ description: desc }, { description: desc }, mentionIdsIn(desc, ws.people));
                       }}
                       className="rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white"
                     >
@@ -410,7 +456,9 @@ export function TeamCardModal({
                   </div>
                 </div>
               ) : card.description ? (
-                <p className="whitespace-pre-wrap rounded-btn bg-subtle px-4 py-3 text-[13px] leading-relaxed text-ink-2">{card.description}</p>
+                <p className="whitespace-pre-wrap rounded-btn bg-subtle px-4 py-3 text-[13px] leading-relaxed text-ink-2">
+                  <MentionText text={card.description} people={ws.people} />
+                </p>
               ) : (
                 <button
                   disabled={!canEdit}
@@ -455,22 +503,26 @@ export function TeamCardModal({
                   if (!content) return;
                   setComment("");
                   setComments((prev) => [{ id: `tmp-${Date.now()}`, userId: me, content, createdAt: new Date().toISOString() }, ...(prev ?? [])]);
+                  const ids = mentionIdsIn(content, ws.people);
                   void run(async () => {
-                    unwrap(await addTeamCardComment(card.id, content));
+                    unwrap(await addTeamCardComment(card.id, content, ids));
                     await loadComments();
                   });
                 }}
               >
                 <Avatar person={peopleById.get(me)} size={30} />
                 <div className="flex-1">
-                  <textarea
+                  <MentionTextarea
                     value={comment}
-                    onChange={(e) => setComment(e.target.value)}
+                    onValueChange={setComment}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) e.currentTarget.form?.requestSubmit();
                     }}
                     rows={comment ? 3 : 1}
-                    placeholder="Écrire un commentaire…"
+                    people={ws.people}
+                    memberIds={memberIds}
+                    meId={me}
+                    placeholder="Écrire un commentaire… (@ pour identifier quelqu'un)"
                     className="w-full resize-none rounded-btn border border-line px-3 py-2 text-[13px] outline-none focus:border-line-strong"
                   />
                   {comment.trim() && (
@@ -499,7 +551,9 @@ export function TeamCardModal({
                             </button>
                           )}
                         </p>
-                        <p className="mt-0.5 whitespace-pre-wrap rounded-btn border border-line bg-card px-3 py-2 text-[13px] text-ink-2">{c.content}</p>
+                        <p className="mt-0.5 whitespace-pre-wrap rounded-btn border border-line bg-card px-3 py-2 text-[13px] text-ink-2">
+                          <MentionText text={c.content} people={ws.people} />
+                        </p>
                       </div>
                     </li>
                   );
@@ -518,13 +572,7 @@ export function TeamCardModal({
                     <button onClick={() => setPop(pop === "members" ? null : "members")} className={sideBtn}>
                       <User size={14} /> Membres
                     </button>
-                    <MembersPopover open={pop === "members"} onClose={closePop} card={card} ws={ws} onSave={(ids) => {
-                      const now = new Date().toISOString();
-                      onLocalPatch(card.id, {
-                        members: ids.map((id) => card.members.find((m) => m.userId === id) ?? { userId: id, assignedBy: me, assignedAt: now, seenAt: id === me ? now : null }),
-                      });
-                      void run(async () => unwrap(await setTeamCardMembers(card.id, ids)));
-                    }} />
+                    <MembersPopover open={pop === "members"} onClose={closePop} card={card} ws={ws} onSave={saveMembers} />
                   </div>
                   <div className="relative">
                     <button onClick={() => setPop(pop === "labels" ? null : "labels")} className={sideBtn}>

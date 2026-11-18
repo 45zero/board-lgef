@@ -19,6 +19,7 @@ const PUSHED: Record<string, { icon: PushIcon; route: string }> = {
   publication_to_publish: { icon: "ic_stat_publication", route: "/?app=audiovisuel" },
   card_assigned: TEAM,
   card_mentioned: TEAM,
+  card_unassigned: TEAM,
   card_commented: TEAM,
   card_due_soon: TEAM,
   board_shared: TEAM,

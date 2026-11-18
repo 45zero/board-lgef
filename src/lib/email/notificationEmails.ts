@@ -64,6 +64,7 @@ function openLink(n: EmailNotification): { label: string; url: string } {
       return { label: "Voir les inscriptions", url: `${site}/?app=inscription` };
     case "card_assigned":
     case "card_mentioned":
+    case "card_unassigned":
     case "card_commented":
     case "card_due_soon":
     case "board_shared":

@@ -55,6 +55,7 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
   card_assigned: "team",
   card_commented: "team",
   card_mentioned: "team",
+  card_unassigned: "team",
   card_due_soon: "team",
   board_shared: "team",
   publication_to_publish: "publication",

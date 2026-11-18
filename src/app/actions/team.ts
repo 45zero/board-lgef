@@ -49,6 +49,85 @@ const toLabels = (raw: Json): TeamLabel[] =>
       )
     : [];
 
+/* ---------- Notifications et mentions ---------- */
+
+type Supabase = Awaited<ReturnType<typeof createClient>>;
+
+/** Où la personne a été identifiée — complète « … vous a identifié dans … de la carte « X » ». */
+const MENTION_PLACE = {
+  comment: "un commentaire",
+  checklist: "la checklist",
+  description: "la description",
+} as const;
+type MentionPlace = keyof typeof MENTION_PLACE;
+
+const excerpt = (text: string, max = 160) => {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+};
+
+async function actorOf(supabase: Supabase, userId: string) {
+  return personName(check(await supabase.from("profiles").select("first_name, last_name, email").eq("id", userId).single()));
+}
+
+async function notify(supabase: Supabase, recipients: string[], n: { type: string; title: string; message: string; cardId: string; actor: string }) {
+  await Promise.all(
+    recipients.map((uid) =>
+      supabase.rpc("create_notification", {
+        p_user_id: uid,
+        p_type: n.type,
+        p_title: n.title,
+        p_message: n.message,
+        p_actor_name: n.actor,
+        p_data: { team_card_id: n.cardId },
+      })
+    )
+  );
+}
+
+/**
+ * Personnes identifiées (« @Prénom Nom ») : ids envoyés par le navigateur, gardés seulement si le nom
+ * figure bien dans le texte — et pas déjà dans l'ancien texte (description modifiée : seules les
+ * nouvelles mentions sont prévenues). Jamais soi-même.
+ */
+async function newMentions(ids: string[], text: string, userId: string, previous = "") {
+  const wanted = [...new Set(ids)].filter((id) => id !== userId);
+  if (!wanted.length) return [];
+  const rows = check(await createServiceClient().from("profiles").select("id, first_name, last_name, email").in("id", wanted));
+  return rows
+    .map((p) => ({ id: p.id, name: personName(p) }))
+    .filter((p) => text.includes(`@${p.name}`) && !previous.includes(`@${p.name}`));
+}
+
+/**
+ * Prévient les personnes identifiées. Celles qui ne sont pas membres de la carte y sont ajoutées
+ * (sinon elles ne pourraient pas l'ouvrir), sans la notification « vous a assigné » en plus
+ * (team_add_members_quietly, sql/2026-11-18_team_mentions.sql). Renvoie les ids prévenus.
+ */
+async function notifyMentions(supabase: Supabase, cardId: string, userId: string, place: MentionPlace, text: string, ids: string[], previous = "") {
+  const mentioned = await newMentions(ids, text, userId, previous);
+  if (!mentioned.length) return [];
+  const [card, members, actor] = await Promise.all([
+    supabase.from("team_cards").select("title").eq("id", cardId).single().then(check),
+    supabase.from("team_card_members").select("user_id").eq("card_id", cardId).then(check),
+    actorOf(supabase, userId),
+  ]);
+  const outside = mentioned.map((m) => m.id).filter((id) => !members.some((m) => m.user_id === id));
+  if (outside.length) {
+    // Sans droit de modifier la carte, l'ajout est refusé : la personne est quand même prévenue.
+    const { error } = await supabase.rpc("team_add_members_quietly", { p_card: cardId, p_users: outside });
+    if (error) console.error("[team.notifyMentions] ajout des personnes identifiées", error.message);
+  }
+  await notify(supabase, mentioned.map((m) => m.id), {
+    type: "card_mentioned",
+    title: `${actor} vous a identifié dans ${MENTION_PLACE[place]} de la carte « ${card.title} »`,
+    message: excerpt(text),
+    cardId,
+    actor,
+  });
+  return mentioned.map((m) => m.id);
+}
+
 /* ---------- Lecture ---------- */
 
 async function createDefaultBoard(supabase: Awaited<ReturnType<typeof createClient>>, userId: string, title: string, position = 0) {
@@ -231,9 +310,14 @@ export type TeamCardPatch = {
   archived?: boolean;
 };
 
-export const updateTeamCard = async (cardId: string, patch: TeamCardPatch) =>
+/** `mentionIds` : personnes identifiées dans la nouvelle description (seules les nouvelles sont prévenues). */
+export const updateTeamCard = async (cardId: string, patch: TeamCardPatch, mentionIds: string[] = []) =>
   toResult(async () => {
-    const { supabase } = await session();
+    const { supabase, userId } = await session();
+    const previousDescription =
+      patch.description !== undefined && mentionIds.length
+        ? (await supabase.from("team_cards").select("description").eq("id", cardId).single()).data?.description ?? ""
+        : "";
     check(
       await supabase
         .from("team_cards")
@@ -248,6 +332,9 @@ export const updateTeamCard = async (cardId: string, patch: TeamCardPatch) =>
         })
         .eq("id", cardId)
     );
+    if (patch.description !== undefined && mentionIds.length) {
+      await notifyMentions(supabase, cardId, userId, "description", patch.description, mentionIds, previousDescription);
+    }
     // Titre ou événement changé : le dossier des pièces jointes suit (s'il existe).
     if (patch.title !== undefined || patch.eventId !== undefined) {
       const card = check(await supabase.from("team_cards").select("id, title, created_at, event_id").eq("id", cardId).single());
@@ -313,14 +400,30 @@ export const deleteTeamCard = async (cardId: string) =>
     if (!deleted.length) throw new Error("Seuls le créateur et le propriétaire du tableau peuvent supprimer cette carte.");
   });
 
-/** Assigne exactement ces personnes (ajouts notifiés ; ajoutés aussi aux participants de l'événement lié). */
+/**
+ * Assigne exactement ces personnes. Ajouts notifiés par le déclencheur (et ajoutés aux participants
+ * de l'événement lié) ; une personne retirée par quelqu'un d'autre est prévenue.
+ */
 export const setTeamCardMembers = async (cardId: string, userIds: string[]) =>
   toResult(async () => {
     const { supabase, userId } = await session();
     const current = check(await supabase.from("team_card_members").select("user_id").eq("card_id", cardId)).map((m) => m.user_id);
     const toAdd = userIds.filter((id) => !current.includes(id));
     const toRemove = current.filter((id) => !userIds.includes(id));
-    if (toRemove.length) check(await supabase.from("team_card_members").delete().eq("card_id", cardId).in("user_id", toRemove));
+    if (toRemove.length) {
+      check(await supabase.from("team_card_members").delete().eq("card_id", cardId).in("user_id", toRemove));
+      const removedByOther = toRemove.filter((id) => id !== userId);
+      if (removedByOther.length) {
+        const [card, actor] = await Promise.all([supabase.from("team_cards").select("title").eq("id", cardId).single().then(check), actorOf(supabase, userId)]);
+        await notify(supabase, removedByOther, {
+          type: "card_unassigned",
+          title: `${actor} vous a retiré de la carte « ${card.title} »`,
+          message: "Vous n'êtes plus membre de cette carte.",
+          cardId,
+          actor,
+        });
+      }
+    }
     if (toAdd.length) {
       check(
         await supabase
@@ -346,10 +449,12 @@ export const markTeamCardSeen = async (cardId: string) =>
 
 /* ---------- Checklist ---------- */
 
-export const addTeamChecklistItem = async (cardId: string, content: string, position: number) =>
+/** `mentionIds` : personnes identifiées dans l'élément (« @Prénom Nom ») — prévenues. */
+export const addTeamChecklistItem = async (cardId: string, content: string, position: number, mentionIds: string[] = []) =>
   toResult(async () => {
-    const { supabase } = await session();
+    const { supabase, userId } = await session();
     check(await supabase.from("team_checklist_items").insert({ card_id: cardId, content: content.trim(), position }));
+    if (mentionIds.length) await notifyMentions(supabase, cardId, userId, "checklist", content.trim(), mentionIds);
   });
 
 export const updateTeamChecklistItem = async (itemId: string, patch: { done?: boolean; content?: string }) =>
@@ -380,30 +485,26 @@ export const listTeamCardComments = async (cardId: string) =>
     return rows.map((r) => ({ id: r.id, userId: r.user_id, content: r.content, createdAt: r.created_at }));
   });
 
-/** Commentaire : prévient le créateur et les assignés (sauf l'auteur). */
-export const addTeamCardComment = async (cardId: string, content: string) =>
+/**
+ * Commentaire. Les personnes identifiées reçoivent « … vous a identifié dans un commentaire de la
+ * carte « X » » ; le créateur et les autres membres, « … a commenté la carte « X » » (jamais l'auteur,
+ * jamais deux notifications pour la même personne).
+ */
+export const addTeamCardComment = async (cardId: string, content: string, mentionIds: string[] = []) =>
   toResult(async () => {
     const { supabase, userId } = await session();
-    check(await supabase.from("team_card_comments").insert({ card_id: cardId, user_id: userId, content: content.trim() }));
-    const [card, members, author] = await Promise.all([
+    const text = content.trim();
+    check(await supabase.from("team_card_comments").insert({ card_id: cardId, user_id: userId, content: text }));
+    const mentioned = await notifyMentions(supabase, cardId, userId, "comment", text, mentionIds);
+    const [card, members, actor] = await Promise.all([
       supabase.from("team_cards").select("title, created_by").eq("id", cardId).single().then(check),
       supabase.from("team_card_members").select("user_id").eq("card_id", cardId).then(check),
-      supabase.from("profiles").select("first_name, last_name, email").eq("id", userId).single().then(check),
+      actorOf(supabase, userId),
     ]);
-    const actor = personName(author);
-    const recipients = [...new Set([card.created_by, ...members.map((m) => m.user_id)])].filter((id): id is string => !!id && id !== userId);
-    await Promise.all(
-      recipients.map((uid) =>
-        supabase.rpc("create_notification", {
-          p_user_id: uid,
-          p_type: "card_commented",
-          p_title: "Nouveau commentaire",
-          p_message: `${actor} a commenté « ${card.title} » : ${content.trim().slice(0, 120)}`,
-          p_actor_name: actor,
-          p_data: { team_card_id: cardId },
-        })
-      )
+    const others = [...new Set([card.created_by, ...members.map((m) => m.user_id)])].filter(
+      (id): id is string => !!id && id !== userId && !mentioned.includes(id)
     );
+    await notify(supabase, others, { type: "card_commented", title: `${actor} a commenté la carte « ${card.title} »`, message: excerpt(text), cardId, actor });
   });
 
 export const deleteTeamCardComment = async (commentId: string) =>
