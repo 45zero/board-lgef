@@ -1,7 +1,7 @@
 "use client";
 
 import { notifyEventAssignment } from "@/app/actions/event-notifications";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +13,7 @@ import { useEventComments } from "@/hooks/board/useEventComments";
 import { useEventExpenses } from "@/hooks/board/useEventExpenses";
 import { useEventActions, type EventFormPayload } from "@/hooks/board/useEventActions";
 import { useUserRole } from "@/hooks/board/useUserRole";
+import { useCreatableOrgs } from "@/hooks/board/useCreatableOrgs";
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 import { useAvailableTechnicians } from "@/hooks/board/useAvailableTechnicians";
 import { useEventCoverage } from "@/hooks/board/useEventCoverage";
@@ -90,6 +91,20 @@ export function useEventModalState({
   const d = event ? null : draft ?? null;
 
   const [org, setOrg] = useState<OrgKey>(event?.org ?? d?.org ?? "navy");
+  // Services proposés : ceux où la personne peut créer (Perso + ses pôles ; tous pour un admin).
+  // En modification, le service actuel reste toujours affiché.
+  const creatableOrgs = useCreatableOrgs();
+  const currentOrg = event?.org;
+  const orgOptions = useMemo(
+    () => (creatableOrgs && currentOrg && !creatableOrgs.includes(currentOrg) ? [currentOrg, ...creatableOrgs] : creatableOrgs),
+    [creatableOrgs, currentOrg]
+  );
+  // Nouvel événement : le service par défaut (ou dicté) n'est pas permis → premier service permis.
+  useEffect(() => {
+    if (isEditing || !orgOptions || orgOptions.includes(org)) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- corrige le défaut une fois les droits chargés
+    setOrg(orgOptions.find((k) => k !== "perso") ?? orgOptions[0]);
+  }, [isEditing, orgOptions, org]);
   const [title, setTitle] = useState(event?.title ?? d?.title ?? "");
   const [location, setLocation] = useState(event?.location ?? d?.location ?? "");
   const [onlineMeeting, setOnlineMeeting] = useState(event?.onlineMeeting ?? d?.onlineMeeting ?? false);
@@ -353,6 +368,7 @@ export function useEventModalState({
     draft: d,
     org,
     setOrg,
+    orgOptions,
     title,
     setTitle,
     location,

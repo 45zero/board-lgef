@@ -7,7 +7,7 @@ import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
 import { X, Trash2, MapPin, ChevronDown, Camera, Video, ClipboardCheck, FileText, MessageSquare, Users, Receipt, Wallet, Map as MapIcon, Sprout } from "lucide-react";
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
-import { CALENDAR_ORG_KEYS, type CalendarEvent } from "@/lib/board/calendar";
+import { type CalendarEvent } from "@/lib/board/calendar";
 import { useEventModalState } from "@/hooks/board/useEventModalState";
 import { PersonName } from "@/components/board/calendar/PersonName";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
@@ -180,7 +180,7 @@ export function MobileEventModal({
               </button>
               {orgPickerOpen && (
                 <div className="absolute left-0 top-full z-10 mt-1 w-full rounded-btn border border-line bg-card p-1 shadow-card">
-                  {CALENDAR_ORG_KEYS.map((key) => (
+                  {(m.orgOptions ?? [m.org]).map((key) => (
                     <button
                       key={key}
                       onClick={() => {
