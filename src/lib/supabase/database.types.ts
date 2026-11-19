@@ -52,6 +52,24 @@ export type Database = {
       tournament_message_recipients: TRow<TournamentMessageRecipient>
       tournament_message_files: TRow<TournamentMessageFile>
       tournament_activity: TRow<TournamentActivity>
+      org_services: {
+        Row: { key: string; label: string; manager_id: string | null; sort: number; updated_by: string | null; updated_at: string }
+        Insert: { key: string; label: string; manager_id?: string | null; sort?: number; updated_by?: string | null; updated_at?: string }
+        Update: { label?: string; manager_id?: string | null; sort?: number; updated_by?: string | null; updated_at?: string }
+        Relationships: []
+      }
+      approval_actions: {
+        Row: { key: string; label: string; description: string | null; sort: number }
+        Insert: { key: string; label: string; description?: string | null; sort?: number }
+        Update: { label?: string; description?: string | null; sort?: number }
+        Relationships: []
+      }
+      approval_delegations: {
+        Row: { id: string; delegator_id: string; delegate_id: string; action: string; service_key: string | null; starts_on: string | null; ends_on: string | null; note: string | null; created_by: string | null; created_at: string }
+        Insert: { id?: string; delegator_id: string; delegate_id: string; action: string; service_key?: string | null; starts_on?: string | null; ends_on?: string | null; note?: string | null; created_by?: string | null }
+        Update: { delegate_id?: string; action?: string; service_key?: string | null; starts_on?: string | null; ends_on?: string | null; note?: string | null }
+        Relationships: []
+      }
       account_requests: {
         Row: {
           id: string
@@ -67,6 +85,8 @@ export type Database = {
           updated_at: string
           reviewed_by: string | null
           reviewed_at: string | null
+          service_key: string | null
+          escalated_at: string | null
         }
         Insert: {
           id?: string
@@ -82,6 +102,8 @@ export type Database = {
           updated_at?: string
           reviewed_by?: string | null
           reviewed_at?: string | null
+          service_key?: string | null
+          escalated_at?: string | null
         }
         Update: {
           id?: string
@@ -97,6 +119,8 @@ export type Database = {
           updated_at?: string
           reviewed_by?: string | null
           reviewed_at?: string | null
+          service_key?: string | null
+          escalated_at?: string | null
         }
         Relationships: []
       }
@@ -3092,6 +3116,7 @@ export type Database = {
           hate_alert_push: boolean
           notification_prefs: Json
           expense_validator_id: string | null
+          home_service: string | null
           daily_digest_email: boolean
           daily_digest_sent_on: string | null
           calendar_prefs: Json
@@ -3124,6 +3149,7 @@ export type Database = {
           hate_alert_push?: boolean
           notification_prefs?: Json
           expense_validator_id?: string | null
+          home_service?: string | null
           daily_digest_email?: boolean
           daily_digest_sent_on?: string | null
           calendar_prefs?: Json
@@ -3156,6 +3182,7 @@ export type Database = {
           hate_alert_push?: boolean
           notification_prefs?: Json
           expense_validator_id?: string | null
+          home_service?: string | null
           daily_digest_email?: boolean
           daily_digest_sent_on?: string | null
           calendar_prefs?: Json
@@ -5541,6 +5568,10 @@ export type Database = {
       }
     }
     Views: {
+      profile_managers: {
+        Row: { user_id: string; manager_id: string | null; home_service: string | null; manager_override: string | null }
+        Relationships: []
+      }
       allowed_event_types_for_user: {
         Row: {
           user_id: string | null
@@ -5916,7 +5947,7 @@ export type Database = {
       invoice_status: "submitted" | "processing" | "approved" | "rejected" | "paid"
       label_color: "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "pink" | "gray"
       note_member_role: "createur" | "destinataire" | "collaborateur"
-      notification_type: "card_assigned" | "card_commented" | "card_mentioned" | "card_due_soon" | "board_shared" | "director_assignment" | "expense_submitted" | "account_request" | "coverage_request" | "coverage_request_created" | "coverage_approved" | "coverage_denied" | "coverage_assignment" | "coverage_rejected" | "event_deleted" | "event_mentioned" | "event_commented" | "account_request_approved" | "account_request_denied" | "assignment_created" | "assignment_updated" | "expense_approved" | "expense_rejected" | "coverage_accepted" | "coverage_accepted_admin" | "director_request" | "director_approved" | "director_denied" | "director_reassigned" | "director_invitation" | "director_accepted" | "director_declined" | "event_team_added" | "event_reminder" | "hateful_comment" | "expense_to_validate" | "registration_response" | "publication_to_publish" | "support_ticket" | "support_resolved" | "direct_message" | "tournament_message"
+      notification_type: "card_assigned" | "card_commented" | "card_mentioned" | "card_due_soon" | "board_shared" | "director_assignment" | "expense_submitted" | "account_request" | "coverage_request" | "coverage_request_created" | "coverage_approved" | "coverage_denied" | "coverage_assignment" | "coverage_rejected" | "event_deleted" | "event_mentioned" | "event_commented" | "account_request_approved" | "account_request_denied" | "assignment_created" | "assignment_updated" | "expense_approved" | "expense_rejected" | "coverage_accepted" | "coverage_accepted_admin" | "director_request" | "director_approved" | "director_denied" | "director_reassigned" | "director_invitation" | "director_accepted" | "director_declined" | "event_team_added" | "event_reminder" | "hateful_comment" | "expense_to_validate" | "registration_response" | "publication_to_publish" | "support_ticket" | "support_resolved" | "direct_message" | "tournament_message" | "card_unassigned" | "delegation"
       response_status: "accepted" | "rejected"
       sector_type: "arbitrage" | "technique" | "formation" | "communication" | "competitions"
       user_role: "user" | "technician" | "super_user" | "admin" | "organizer" | "comite_directeur_bad" | "comite_directeur"

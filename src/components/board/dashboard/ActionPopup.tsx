@@ -362,7 +362,7 @@ function PublishRow({ item, onDone }: { item: DashboardActionItem; onDone: () =>
   );
 }
 
-/** Demandes d'accès en attente : accepter (au besoin dans Couverture match) ou refuser. */
+/** Demandes de compte en attente que je peux traiter : affecter et accepter, transmettre ou refuser. */
 function AccessRequestList({ onChanged }: { onChanged: () => void }) {
   const [requests, setRequests] = useState<AccessRequest[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -1068,7 +1068,7 @@ export function ActionPopup({
           </button>
         </div>
         <div className="flex-1 overflow-y-auto">{body}</div>
-        {onNavigate && (
+        {onNavigate && action.id !== "demandes-acces" && (
           <div className="flex shrink-0 justify-end border-t border-line px-5 py-3">
             <button
               onClick={() => {

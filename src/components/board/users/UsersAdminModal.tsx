@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, ChevronLeft, Search, X } from "lucide-react";
-import { listUsers, setUserManager, updateUser, type AdminUser, type SpecialtyOption, type UserRole, type UsersList } from "@/app/actions/users-admin";
+import { listUsers, setUserManager, setUserService, updateUser, type AdminUser, type SpecialtyOption, type UserRole, type UsersList } from "@/app/actions/users-admin";
+import { listServices, type OrgService } from "@/app/actions/organisation";
 import { unwrap } from "@/lib/board/actionResult";
 import { listAccessRequests, type AccessRequest } from "@/app/actions/account-requests";
 import { AccessRequestCard } from "@/components/board/users/AccessRequestCard";
@@ -98,6 +99,7 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 function UserEditor({
   user,
   users,
+  services,
   specialties,
   me,
   onSaved,
@@ -106,6 +108,8 @@ function UserEditor({
   user: AdminUser;
   /** Tous les comptes : choix du N+1. */
   users: AdminUser[];
+  /** Services (rattachement, responsable = N+1 par défaut). */
+  services: OrgService[];
   specialties: SpecialtyOption[];
   me: { id: string; isAdmin: boolean };
   onSaved: () => void;
@@ -123,6 +127,29 @@ function UserEditor({
   };
   const [managerId, setManagerId] = useState<string>(user.managerId ?? "");
   const [managerState, setManagerState] = useState<"idle" | "saving" | "saved">("idle");
+  const [homeService, setHomeService] = useState<string>(user.homeService ?? "");
+  // Le service s'enregistre dès qu'il est choisi, comme le N+1.
+  const changeService = async (next: string) => {
+    const previous = homeService;
+    setHomeService(next);
+    setManagerState("saving");
+    setError(null);
+    try {
+      unwrap(await setUserService(user.id, next || null));
+      setManagerState("saved");
+      onSaved();
+    } catch (e) {
+      setHomeService(previous);
+      setManagerState("idle");
+      setError(errorMessage(e));
+    }
+  };
+  const byId = new Map(users.map((u) => [u.id, u]));
+  const serviceManagerId = services.find((s) => s.key === homeService)?.managerId ?? null;
+  const serviceManager = serviceManagerId && serviceManagerId !== user.id ? byId.get(serviceManagerId) : undefined;
+  // N+1 et N+2 tels qu'ils s'appliquent (même règle qu'en base : individuel, sinon responsable du service).
+  const n1 = managerId ? byId.get(managerId) : serviceManager;
+  const n2 = n1?.effectiveManagerId && n1.effectiveManagerId !== user.id ? byId.get(n1.effectiveManagerId) : undefined;
   // Le N+1 s'enregistre dès qu'il est choisi (pas besoin du bouton « Enregistrer »).
   const changeManager = async (next: string) => {
     const previous = managerId;
@@ -240,9 +267,18 @@ function UserEditor({
       </div>
 
       <div>
+        <div className={sectionTitle}>Service de rattachement</div>
+        <select value={homeService} disabled={managerState === "saving"} onChange={(e) => void changeService(e.target.value)} className={`${input} mb-3 disabled:opacity-60`}>
+          <option value="">Aucun service</option>
+          {services.map((s) => (
+            <option key={s.key} value={s.key}>
+              {s.label}
+            </option>
+          ))}
+        </select>
         <div className={sectionTitle}>N+1 (responsable)</div>
         <select value={managerId} disabled={managerState === "saving"} onChange={(e) => void changeManager(e.target.value)} className={`${input} disabled:opacity-60`}>
-          <option value="">Aucun</option>
+          <option value="">{serviceManager ? `Responsable du service — ${fullName(serviceManager)}` : homeService ? "Responsable du service (pas encore désigné)" : "Aucun"}</option>
           {users
             .filter((u) => u.id !== user.id)
             .map((u) => (
@@ -252,8 +288,21 @@ function UserEditor({
             ))}
         </select>
         <p className="mt-1 text-[11px] text-ink-4">
-          {managerState === "saving" ? "Enregistrement…" : managerState === "saved" ? "✓ N+1 enregistré. " : "Enregistré dès qu'il est choisi. "}
-          Valide ses frais (et bientôt ses pointages et factures) ; voit ses interventions et leur coût dans Effectif.
+          {managerState === "saving" ? "Enregistrement…" : managerState === "saved" ? "✓ Enregistré. " : "Enregistré dès qu'il est choisi. "}
+          {n1 ? (
+            <>
+              N+1 : <strong>{fullName(n1)}</strong>
+              {n2 && (
+                <>
+                  {" "}
+                  · N+2 : <strong>{fullName(n2)}</strong>
+                </>
+              )}
+              . Ils valident ses frais, factures et pointages et voient ses coûts dans Effectif (délégations : Paramètres → Organisation).
+            </>
+          ) : (
+            "Aucun N+1 : seuls les administrateurs valident ses frais."
+          )}
         </p>
       </div>
 
@@ -330,6 +379,7 @@ function UserEditor({
 /** Paramètres → Utilisateurs : demandes d'accès, rôle, statut, N+1, adresse, véhicule, réseau photo et pôles de chaque compte. */
 export function UsersAdminModal({ onClose }: { onClose: () => void }) {
   const [data, setData] = useState<UsersList | null>(null);
+  const [services, setServices] = useState<OrgService[]>([]);
   const [requests, setRequests] = useState<AccessRequest[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -339,10 +389,11 @@ export function UsersAdminModal({ onClose }: { onClose: () => void }) {
 
   const load = useCallback(
     () =>
-      Promise.all([listUsers(), listAccessRequests()])
-        .then(([users, reqs]) => {
+      Promise.all([listUsers(), listAccessRequests(), listServices()])
+        .then(([users, reqs, svc]) => {
           setData(unwrap(users));
           setRequests(unwrap(reqs));
+          setServices(unwrap(svc));
         })
         .catch((e) => setError(errorMessage(e))),
     []
@@ -368,7 +419,7 @@ export function UsersAdminModal({ onClose }: { onClose: () => void }) {
             <h3 className="mt-1 text-base font-extrabold">Utilisateurs</h3>
             {data && (
               <div className="mt-0.5 text-xs text-white/80">
-                {data.users.length} comptes{requests.length > 0 && ` · ${requests.length} demande${requests.length > 1 ? "s" : ""} d'accès`}
+                {data.users.length} comptes{requests.length > 0 && ` · ${requests.length} demande${requests.length > 1 ? "s" : ""} de compte`}
               </div>
             )}
           </div>
@@ -453,6 +504,7 @@ export function UsersAdminModal({ onClose }: { onClose: () => void }) {
                   key={selected.id}
                   user={selected}
                   users={data.users}
+                  services={services}
                   specialties={data.specialties}
                   me={data.me}
                   onSaved={() => void load()}

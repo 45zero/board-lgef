@@ -6,15 +6,19 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { isTransactionalEmailConfigured, sendTransactionalBatch } from "@/lib/email/transactional";
 import { button, emailLayout, esc } from "@/lib/email/notificationEmails";
+import { canApproveForService, firstApproversForService, teamOf } from "@/lib/board/hierarchy";
+import { reviewableServices } from "@/lib/board/accessRequestsCore";
+import { buildPoles } from "@/lib/board/poles";
+import { ACCESS_KIND_IDS, STATUS_SLUG, accessKindLabel, type AccessStatus, type GrantableRole } from "@/lib/board/accessRequests";
 
-// Demandes d'accès au board (table account_requests, partagée avec calendrier-lgef — même logique
-// que son Edge Function approve-account-request). Formulaire public /demande-acces ; validation par
-// un administrateur (Accueil → Mes actions, Paramètres → Utilisateurs ou Week-end → Couverture match),
-// qui crée le compte, lui donne au besoin un N+1, l'ajoute au réseau Couverture match (photographe / vidéaste) et
-// envoie par e-mail un lien pour choisir son mot de passe (/mot-de-passe).
-
-export type AccessKind = "salarie" | "arbitre" | "photographe" | "videaste" | "partenaire" | "media" | "autre";
-export type PaymentMode = "reseau" | "prestataire" | "benevole";
+// Demandes de compte (table account_requests, partagée avec calendrier-lgef). Formulaire public
+// /demande-acces, ouvert à tous : la personne dit qui elle est et, si elle le sait, le service concerné.
+// La demande va au responsable de ce service et à ses délégataires « comptes » (hierarchy.ts), sinon
+// aux administrateurs ; le N+2 et les administrateurs peuvent aussi la traiter. À l'acceptation : compte
+// créé, service de rattachement, rôle, pôles, statut, Couverture match au besoin, N+1 éventuel, puis
+// e-mail pour choisir le mot de passe (/mot-de-passe). Un responsable qui n'est pas administrateur
+// n'affecte qu'aux services dont il a la charge, ne donne pas de rôle élevé et ne touche pas à un
+// compte qui existe déjà. Sans réponse sous 7 jours, le N+2 est relancé (escalateAccessRequests).
 
 export interface AccessRequest {
   id: string;
@@ -25,10 +29,9 @@ export interface AccessRequest {
   organization: string | null;
   kind: string | null;
   reason: string | null;
+  serviceKey: string | null;
   createdAt: string;
 }
-
-const PAYMENT_SLUG: Record<PaymentMode, string> = { reseau: "tech-reseau", prestataire: "tech-prestataire", benevole: "tech-benevole" };
 
 const requestSchema = z.object({
   firstName: z.string().trim().min(1, "Prénom obligatoire.").max(80),
@@ -36,11 +39,18 @@ const requestSchema = z.object({
   email: z.string().trim().toLowerCase().email("Adresse e-mail invalide."),
   phone: z.string().trim().max(30).optional().default(""),
   organization: z.string().trim().max(120).optional().default(""),
-  kind: z.enum(["salarie", "arbitre", "photographe", "videaste", "partenaire", "media", "autre"]),
+  kind: z.enum(ACCESS_KIND_IDS),
+  serviceKey: z.string().trim().max(40).optional().default(""),
   reason: z.string().trim().min(10, "Expliquez en quelques mots pourquoi vous souhaitez un accès.").max(2000),
 });
 
-/** Formulaire public : enregistre la demande et prévient les administrateurs. */
+/** Services proposés dans le formulaire public (clé, libellé) — sans les responsables. */
+export async function listPublicServices(): Promise<{ key: string; label: string }[]> {
+  const { data } = await createServiceClient().from("org_services").select("key, label").order("sort");
+  return data ?? [];
+}
+
+/** Formulaire public : enregistre la demande et prévient le responsable du service (ou les administrateurs). */
 export async function submitAccessRequest(input: z.input<typeof requestSchema>): Promise<{ ok: true } | { ok: false; error: string }> {
   const parsed = requestSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Formulaire incomplet." };
@@ -50,6 +60,12 @@ export async function submitAccessRequest(input: z.input<typeof requestSchema>):
   const { data: pending } = await service.from("account_requests").select("id").eq("email", r.email).eq("status", "pending").limit(1);
   if (pending?.length) return { ok: false, error: "Une demande est déjà en cours pour cette adresse. Vous recevrez un e-mail dès qu'elle sera traitée." };
 
+  let serviceKey: string | null = null;
+  if (r.serviceKey) {
+    const { data: known } = await service.from("org_services").select("key").eq("key", r.serviceKey).maybeSingle();
+    serviceKey = known?.key ?? null;
+  }
+
   const { error } = await service.from("account_requests").insert({
     first_name: r.firstName,
     last_name: r.lastName,
@@ -57,6 +73,7 @@ export async function submitAccessRequest(input: z.input<typeof requestSchema>):
     phone: r.phone || null,
     organization: r.organization || null,
     role_requested: r.kind,
+    service_key: serviceKey,
     reason: r.reason,
     status: "pending",
   });
@@ -65,50 +82,57 @@ export async function submitAccessRequest(input: z.input<typeof requestSchema>):
     return { ok: false, error: "La demande n'a pas pu être enregistrée. Réessayez plus tard." };
   }
 
-  const { data: admins } = await service.from("profiles").select("id").in("role", ["admin", "super_user"]);
-  if (admins?.length) {
+  const recipients = serviceKey ? await firstApproversForService(service, "comptes", serviceKey).catch(() => []) : await adminIds();
+  const serviceLabel = serviceKey ? ` · ${await serviceLabelOf(serviceKey)}` : "";
+  if (recipients.length) {
     await service.from("notifications").insert(
-      admins.map((a) => ({
-        user_id: a.id,
+      recipients.map((id) => ({
+        user_id: id,
         type: "account_request" as const,
-        title: "Demande d'accès",
-        message: `${r.firstName} ${r.lastName} (${KIND_LABELS[r.kind]}) demande un accès au board — Accueil → Mes actions.`,
-        data: { app: "weekend" },
+        title: "Demande de compte",
+        message: `${r.firstName} ${r.lastName} (${accessKindLabel(r.kind).toLowerCase()}${serviceLabel}) demande un accès au board — Accueil → Mes actions.`,
+        data: { kind: "account_request" },
       }))
     );
   }
   return { ok: true };
 }
 
-const KIND_LABELS: Record<AccessKind, string> = {
-  salarie: "salarié",
-  arbitre: "arbitre",
-  photographe: "photographe",
-  videaste: "vidéaste",
-  partenaire: "partenaire",
-  media: "média",
-  autre: "autre",
-};
+async function adminIds() {
+  const { data } = await createServiceClient().from("profiles").select("id").in("role", ["admin", "super_user"]);
+  return (data ?? []).map((a) => a.id);
+}
 
-async function requireAdmin() {
+async function serviceLabelOf(key: string) {
+  const { data } = await createServiceClient().from("org_services").select("label").eq("key", key).maybeSingle();
+  return data?.label ?? key;
+}
+
+async function reviewer() {
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();
   const userId = data?.claims?.sub;
   if (!userId) throw new Error("Non authentifié");
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", userId).single();
-  if (profile?.role !== "admin" && profile?.role !== "super_user") throw new Error("Réservé aux administrateurs.");
-  return userId;
+  const service = createServiceClient();
+  const { data: profile } = await service.from("profiles").select("role").eq("id", userId).single();
+  return { userId, service, isAdmin: profile?.role === "admin" || profile?.role === "super_user" };
 }
 
+/** Demandes en attente que je peux traiter (toutes pour un administrateur). */
 async function listAccessRequestsImpl(): Promise<AccessRequest[]> {
-  await requireAdmin();
-  const { data, error } = await createServiceClient()
+  const { userId, service, isAdmin } = await reviewer();
+  const { data, error } = await service
     .from("account_requests")
-    .select("id, first_name, last_name, email, phone, organization, role_requested, reason, created_at")
+    .select("id, first_name, last_name, email, phone, organization, role_requested, reason, service_key, created_at")
     .eq("status", "pending")
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((r) => ({
+  let rows = data ?? [];
+  if (!isAdmin) {
+    const mine = await reviewableServices(service, userId);
+    rows = rows.filter((r) => r.service_key && mine.has(r.service_key));
+  }
+  return rows.map((r) => ({
     id: r.id,
     firstName: r.first_name,
     lastName: r.last_name,
@@ -117,6 +141,7 @@ async function listAccessRequestsImpl(): Promise<AccessRequest[]> {
     organization: r.organization,
     kind: r.role_requested,
     reason: r.reason,
+    serviceKey: r.service_key,
     createdAt: r.created_at,
   }));
 }
@@ -147,52 +172,88 @@ async function sendMail(
   return sent > 0;
 }
 
+export type ApprovalInput = {
+  /** Service de rattachement : son responsable devient le N+1 par défaut. */
+  serviceKey: string | null;
+  role: GrantableRole;
+  /** Pôles ouverts (clés de buildPoles) : accès aux événements de ces types. */
+  poles: string[];
+  status: AccessStatus | null;
+  photo: boolean;
+  video: boolean;
+  /** N+1 choisi pour cette personne ; null : le responsable de son service. */
+  managerId: string | null;
+};
+
 /**
- * Accepte une demande : crée le compte (ou retrouve celui qui existe déjà — l'authentification est
- * partagée avec les autres outils LGEF), l'ajoute au réseau Couverture match (photographe et/ou
- * vidéaste) avec son mode de paiement et envoie le lien pour choisir son mot de passe.
- * `network: null` : accès simple, hors Couverture match.
+ * Accepte une demande : crée le compte (ou, pour un administrateur, retrouve celui qui existe déjà —
+ * l'authentification est partagée avec les autres outils LGEF), l'affecte (service, rôle, pôles,
+ * statut, Couverture match, N+1) et envoie le lien pour choisir son mot de passe.
  */
-async function approveAccessRequestImpl(
-  requestId: string,
-  network: { photo: boolean; video: boolean; payment: PaymentMode } | null,
-  managerId: string | null
-): Promise<{ emailed: boolean; existingAccount: boolean }> {
-  if (network && !network.photo && !network.video) network = null;
-  const reviewerId = await requireAdmin();
-  const service = createServiceClient();
+async function approveAccessRequestImpl(requestId: string, input: ApprovalInput): Promise<{ emailed: boolean; existingAccount: boolean }> {
+  const { userId: reviewerId, service, isAdmin } = await reviewer();
   const { data: req, error: reqError } = await service.from("account_requests").select("*").eq("id", requestId).eq("status", "pending").single();
   if (reqError || !req) throw new Error("Demande introuvable ou déjà traitée.");
+
+  // Droits d'un responsable non administrateur : la demande et l'affectation dans son périmètre.
+  if (!isAdmin) {
+    if (!req.service_key || !(await canApproveForService(service, "comptes", reviewerId, req.service_key))) {
+      throw new Error("Cette demande ne relève pas d'un service dont vous avez la charge.");
+    }
+    if (!input.serviceKey || !(await canApproveForService(service, "comptes", reviewerId, input.serviceKey))) {
+      throw new Error("Vous ne pouvez rattacher la personne qu'à un service dont vous avez la charge.");
+    }
+    if (input.role === "comite_directeur") throw new Error("Seul un administrateur donne le rôle Comité directeur.");
+    const mine = await reviewableServices(service, reviewerId);
+    if (input.poles.some((k) => !mine.has(k))) throw new Error("Vous ne pouvez ouvrir que les pôles des services dont vous avez la charge.");
+    if (input.managerId) {
+      // Le N+1 choisi doit être dans le périmètre : soi-même ou quelqu'un de son équipe.
+      const team = await teamOf(service, null, reviewerId);
+      if (input.managerId !== reviewerId && !team.includes(input.managerId)) throw new Error("Le N+1 choisi doit être vous ou quelqu'un de votre équipe.");
+    }
+  }
+  if (!["user", "technician", "organizer", "comite_directeur"].includes(input.role)) throw new Error("Rôle invalide.");
 
   const meta = { data: { first_name: req.first_name, last_name: req.last_name } };
   let type: "invite" | "recovery" = "invite";
   let { data: link, error: linkError } = await service.auth.admin.generateLink({ type: "invite", email: req.email, options: meta });
   if (linkError) {
-    // Adresse déjà inscrite (autre outil LGEF) : lien de réinitialisation à la place.
+    // Adresse déjà inscrite (autre outil LGEF) : réservé aux administrateurs, qui voient le compte entier.
+    if (!isAdmin) throw new Error("Cette adresse a déjà un compte LGEF : un administrateur doit traiter la demande.");
     type = "recovery";
     ({ data: link, error: linkError } = await service.auth.admin.generateLink({ type: "recovery", email: req.email }));
   }
   if (linkError || !link?.user) throw new Error(linkError?.message ?? "Création du compte impossible.");
   const userId = link.user.id;
 
-  // Un compte existant garde son rôle ; un nouveau compte est un simple utilisateur.
+  // Un compte existant garde son rôle ; un nouveau compte reçoit le rôle choisi.
   const { data: existing } = await service.from("profiles").select("id").eq("id", userId).maybeSingle();
+  const profile = {
+    first_name: req.first_name,
+    last_name: req.last_name,
+    home_service: input.serviceKey,
+    ...(input.managerId && input.managerId !== userId ? { expense_validator_id: input.managerId } : {}),
+  };
   const { error: profileError } = existing
-    ? await service.from("profiles").update({ first_name: req.first_name, last_name: req.last_name }).eq("id", userId)
-    : await service.from("profiles").insert({ id: userId, role: "user", first_name: req.first_name, last_name: req.last_name, email: req.email });
+    ? await service.from("profiles").update(profile).eq("id", userId)
+    : await service.from("profiles").insert({ id: userId, email: req.email, role: input.role, ...profile });
   if (profileError) throw new Error(`Compte créé mais profil non enregistré : ${profileError.message}`);
 
-  if (managerId && managerId !== userId) {
-    const { error } = await service.from("profiles").update({ expense_validator_id: managerId }).eq("id", userId);
-    if (error) throw new Error(`Compte créé mais N+1 non enregistré : ${error.message}`);
-  }
-
-  if (network) {
-    const slugs = [...(network.photo ? ["tech-photo"] : []), ...(network.video ? ["tech-video"] : []), PAYMENT_SLUG[network.payment]];
-    const { data: specs } = await service.from("specialties").select("id, slug").in("slug", slugs);
-    if ((specs ?? []).length < slugs.length) throw new Error("Spécialités Couverture match introuvables.");
-    const { error } = await service.from("profile_specialties").upsert((specs ?? []).map((s) => ({ user_id: userId, specialty_id: s.id })));
-    if (error) throw new Error(error.message);
+  // Spécialités : pôles (les deux spécialités org-/tech- de chaque pôle), statut, Couverture match.
+  const { data: catalog } = await service.from("specialties").select("id, slug, label, domain");
+  const poleSlugs = buildPoles(catalog ?? [])
+    .filter((p) => input.poles.includes(p.key))
+    .flatMap((p) => p.slugs);
+  const slugs = [
+    ...poleSlugs,
+    ...(input.status ? [STATUS_SLUG[input.status]] : []),
+    ...(input.photo ? ["tech-photo"] : []),
+    ...(input.video ? ["tech-video"] : []),
+  ];
+  const specs = (catalog ?? []).filter((c) => slugs.includes(c.slug));
+  if (specs.length) {
+    const { error } = await service.from("profile_specialties").upsert(specs.map((s) => ({ user_id: userId, specialty_id: s.id })));
+    if (error) throw new Error(`Compte créé mais accès non enregistrés : ${error.message}`);
   }
 
   const { error: updateError } = await service
@@ -208,9 +269,9 @@ async function approveAccessRequestImpl(
     req.first_name,
     "Votre accès au board LGEF",
     [
-      network?.photo
+      input.photo
         ? "Votre demande d'accès est acceptée : vous faites maintenant partie du réseau Couverture match de la Ligue Grand Est. Les matchs à photographier vous seront proposés dans le module Week-end ; le premier qui clique « Je prends » obtient le match."
-        : network
+        : input.video
           ? "Votre demande d'accès est acceptée : vous faites maintenant partie du réseau Couverture match de la Ligue Grand Est. Les captations vidéo vous seront proposées depuis le calendrier du board."
           : "Votre demande d'accès au board de la Ligue Grand Est est acceptée.",
       `Votre identifiant : ${req.email}. Choisissez votre mot de passe avec le lien ci-dessous (lien à usage unique).`,
@@ -220,19 +281,29 @@ async function approveAccessRequestImpl(
   return { emailed, existingAccount: type === "recovery" };
 }
 
-/** Comptes du board pouvant être choisis comme N+1 à l'acceptation d'une demande. */
+/** Comptes du board pouvant être choisis comme N+1 à l'acceptation : tous (admin), soi et son équipe sinon. */
 async function listManagerOptionsImpl(): Promise<{ id: string; name: string }[]> {
-  await requireAdmin();
-  const { data, error } = await createServiceClient().from("profiles").select("id, first_name, last_name").order("last_name").order("first_name");
+  const { userId, service, isAdmin } = await reviewer();
+  const { data, error } = await service.from("profiles").select("id, first_name, last_name").order("last_name").order("first_name");
   if (error) throw new Error(error.message);
+  let allowed: Set<string> | null = null;
+  if (!isAdmin) {
+    allowed = new Set([userId, ...(await teamOf(service, null, userId))]);
+  }
   return (data ?? [])
+    .filter((p) => !allowed || allowed.has(p.id))
     .map((p) => ({ id: p.id, name: `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() }))
     .filter((p) => p.name);
 }
 
 async function rejectAccessRequestImpl(requestId: string) {
-  const reviewerId = await requireAdmin();
-  const service = createServiceClient();
+  const { userId: reviewerId, service, isAdmin } = await reviewer();
+  if (!isAdmin) {
+    const { data: r } = await service.from("account_requests").select("service_key").eq("id", requestId).single();
+    if (!r?.service_key || !(await canApproveForService(service, "comptes", reviewerId, r.service_key))) {
+      throw new Error("Cette demande ne relève pas d'un service dont vous avez la charge.");
+    }
+  }
   const { data: req } = await service
     .from("account_requests")
     .update({ status: "rejected", reviewed_by: reviewerId, reviewed_at: new Date().toISOString() })
@@ -246,16 +317,60 @@ async function rejectAccessRequestImpl(requestId: string) {
   ]);
 }
 
+/** Change le service d'une demande (mauvais service choisi par le demandeur) et prévient le nouveau responsable. */
+async function forwardAccessRequestImpl(requestId: string, serviceKey: string | null) {
+  const { userId: reviewerId, service, isAdmin } = await reviewer();
+  const { data: r } = await service.from("account_requests").select("first_name, last_name, role_requested, service_key").eq("id", requestId).eq("status", "pending").single();
+  if (!r) throw new Error("Demande introuvable ou déjà traitée.");
+  if (!isAdmin && (!r.service_key || !(await canApproveForService(service, "comptes", reviewerId, r.service_key)))) {
+    throw new Error("Cette demande ne relève pas d'un service dont vous avez la charge.");
+  }
+  const { error } = await service.from("account_requests").update({ service_key: serviceKey, escalated_at: null }).eq("id", requestId);
+  if (error) throw new Error(error.message);
+  const recipients = (serviceKey ? await firstApproversForService(service, "comptes", serviceKey) : await adminIds()).filter((id) => id !== reviewerId);
+  if (recipients.length) {
+    const target = serviceKey ? ` au service ${await serviceLabelOf(serviceKey)}` : " aux administrateurs";
+    await service.from("notifications").insert(
+      recipients.map((id) => ({
+        user_id: id,
+        type: "account_request" as const,
+        title: "Demande de compte transmise",
+        message: `${r.first_name} ${r.last_name} (${accessKindLabel(r.role_requested).toLowerCase()}) — demande transmise${target}. Accueil → Mes actions.`,
+        data: { kind: "account_request" },
+      }))
+    );
+  }
+}
+
+/** Ce que je peux faire sur les demandes : tout (admin) ou les services dont j'ai la charge, et la liste des services. */
+async function getAccessReviewScopeImpl(): Promise<{ isAdmin: boolean; reviewable: string[]; services: { key: string; label: string; managerId: string | null; managerName: string | null }[] }> {
+  const { userId, service, isAdmin } = await reviewer();
+  const [{ data: services }, reviewable] = await Promise.all([
+    service.from("org_services").select("key, label, manager_id").order("sort"),
+    isAdmin ? Promise.resolve(null) : reviewableServices(service, userId),
+  ]);
+  const managerIds = [...new Set((services ?? []).map((s) => s.manager_id).filter((id): id is string => !!id))];
+  const { data: managers } = managerIds.length ? await service.from("profiles").select("id, first_name, last_name").in("id", managerIds) : { data: [] };
+  const nameOf = new Map((managers ?? []).map((m) => [m.id, `${m.first_name ?? ""} ${m.last_name ?? ""}`.trim()]));
+  return {
+    isAdmin,
+    reviewable: reviewable ? [...reviewable] : (services ?? []).map((s) => s.key),
+    services: (services ?? []).map((s) => ({ key: s.key, label: s.label, managerId: s.manager_id, managerName: s.manager_id ? (nameOf.get(s.manager_id) ?? null) : null })),
+  };
+}
+
 /* ---------- Actions exportées : erreurs renvoyées, pas levées (voir actionResult.ts) ---------- */
 
 export async function listAccessRequests() {
   return toResult(() => listAccessRequestsImpl());
 }
 
-export async function approveAccessRequest(requestId: string,
-  network: { photo: boolean; video: boolean; payment: PaymentMode } | null,
-  managerId: string | null = null) {
-  return toResult(() => approveAccessRequestImpl(requestId, network, managerId));
+export async function approveAccessRequest(requestId: string, input: ApprovalInput) {
+  return toResult(() => approveAccessRequestImpl(requestId, input));
+}
+
+export async function forwardAccessRequest(requestId: string, serviceKey: string | null) {
+  return toResult(() => forwardAccessRequestImpl(requestId, serviceKey));
 }
 
 export async function listManagerOptions() {
@@ -264,4 +379,8 @@ export async function listManagerOptions() {
 
 export async function rejectAccessRequest(requestId: string) {
   return toResult(() => rejectAccessRequestImpl(requestId));
+}
+
+export async function getAccessReviewScope() {
+  return toResult(() => getAccessReviewScopeImpl());
 }

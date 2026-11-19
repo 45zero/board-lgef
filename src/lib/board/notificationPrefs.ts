@@ -18,6 +18,7 @@ export type NotificationCategory =
   | "frais_a_valider"
   | "frais_decision"
   | "frais_refus"
+  | "validations"
   | "admin";
 
 export type Channel = "email" | "push";
@@ -45,7 +46,8 @@ export const NOTIFICATION_CATEGORIES: { key: NotificationCategory; title: string
   { key: "frais_a_valider", title: "Frais et factures à valider", subtitle: "Si vous validez pour votre équipe ou la GED", defaults: { email: true, push: true } },
   { key: "frais_decision", title: "Frais et factures validés, payés", subtitle: "Bonnes nouvelles, rien à faire", defaults: { email: true, push: false } },
   { key: "frais_refus", title: "Frais et factures refusés", subtitle: "À corriger et renvoyer", defaults: { email: true, push: false } },
-  { key: "admin", title: "Administration", subtitle: "Demandes d'accès, signalements", defaults: { email: true, push: false }, adminOnly: true },
+  { key: "validations", title: "Demandes de compte et délégations", subtitle: "Si vous êtes responsable d'un service, N+1 ou délégataire", defaults: { email: true, push: false } },
+  { key: "admin", title: "Administration", subtitle: "Signalements", defaults: { email: true, push: false }, adminOnly: true },
 ];
 
 const TYPE_CATEGORY: Record<string, NotificationCategory> = {
@@ -84,7 +86,8 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
   expense_submitted: "frais_a_valider",
   expense_approved: "frais_decision",
   expense_rejected: "frais_refus",
-  account_request: "admin",
+  account_request: "validations",
+  delegation: "validations",
   account_request_approved: "admin",
   account_request_denied: "admin",
   support_ticket: "admin",

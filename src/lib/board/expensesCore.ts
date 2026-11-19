@@ -1,4 +1,5 @@
 import "server-only";
+import { managerChain, teamOf } from "@/lib/board/hierarchy";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { DbEventType } from "@/lib/board/calendar";
 import { getSolicitations } from "@/lib/board/solicitation";
@@ -43,10 +44,9 @@ export async function isPrestataire(service: Service, userId: string): Promise<b
 /** Mois d'une ligne hors événement : sa date de dépense, à défaut sa date de saisie. */
 export const lineMonth = (l: { expense_date: string | null; created_at: string }) => (l.expense_date ?? l.created_at).slice(0, 7);
 
-/** Déclarations en attente des personnes dont `userId` est le N+1. */
+/** Déclarations en attente des personnes dont `userId` valide les frais (N+1, N+2…, délégation). */
 export async function countPendingForValidator(service: Service, userId: string): Promise<number> {
-  const { data: reports } = await service.from("profiles").select("id").eq("expense_validator_id", userId);
-  const ids = (reports ?? []).map((r) => r.id);
+  const ids = await teamOf(service, "frais", userId);
   if (ids.length === 0) return 0;
   const { data } = await service
     .from("expense_submissions")
@@ -177,3 +177,42 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
   return [...eventItems, ...lineItems].sort((a, b) => b.start.localeCompare(a.start));
 }
 
+
+/** Jours sans validation avant de relancer le N+2. */
+export const EXPENSE_ESCALATE_AFTER_DAYS = 7;
+
+/**
+ * Relance au N+2 les notes de frais en attente depuis EXPENSE_ESCALATE_AFTER_DAYS jours (déclarées
+ * il y a entre 7 et 8 jours : appelé une fois par jour par le cron daily-digest, chaque note n'est
+ * relancée qu'une fois). Un seul message par N+2. Sans N+2 : rien (les administrateurs voient tout).
+ */
+export async function escalateExpenses(service: Service): Promise<number> {
+  const day = 86_400_000;
+  const to = new Date(Date.now() - EXPENSE_ESCALATE_AFTER_DAYS * day).toISOString();
+  const from = new Date(Date.now() - (EXPENSE_ESCALATE_AFTER_DAYS + 1) * day).toISOString();
+  const { data: subs } = await service.from("expense_submissions").select("user_id, total_amount").eq("status", "pending").gte("submitted_at", from).lt("submitted_at", to);
+  if (!subs?.length) return 0;
+  const byN2 = new Map<string, { people: Set<string>; count: number; total: number }>();
+  for (const userId of new Set(subs.map((s) => s.user_id))) {
+    const n2 = (await managerChain(service, userId))[1];
+    if (!n2) continue;
+    const mine = subs.filter((s) => s.user_id === userId);
+    const entry = byN2.get(n2) ?? { people: new Set<string>(), count: 0, total: 0 };
+    entry.people.add(userId);
+    entry.count += mine.length;
+    entry.total += mine.reduce((n, s) => n + Number(s.total_amount ?? 0), 0);
+    byN2.set(n2, entry);
+  }
+  if (!byN2.size) return 0;
+  const { error } = await service.from("notifications").insert(
+    [...byN2.entries()].map(([n2, e]) => ({
+      user_id: n2,
+      type: "expense_to_validate" as const,
+      title: "Frais en attente dans votre équipe",
+      message: `${e.count} note${e.count > 1 ? "s" : ""} de frais (${e.total.toFixed(2)} €) attend${e.count > 1 ? "ent" : ""} depuis ${EXPENSE_ESCALATE_AFTER_DAYS} jours la validation de leur N+1. Vous pouvez les valider dans Frais.`,
+      data: { kind: "expense_to_validate", escalated: true, count: e.count },
+    }))
+  );
+  if (error) throw new Error(error.message);
+  return byN2.size;
+}

@@ -1,5 +1,6 @@
 "use server";
 
+import { managerOf as managerOfUser } from "@/lib/board/hierarchy";
 import { toResult } from "@/lib/board/actionResult";
 import { ruleMatches } from "@/lib/board/modules";
 import { createClient } from "@/lib/supabase/server";
@@ -477,10 +478,9 @@ async function releaseMissionImpl(missionId: string) {
   });
 }
 
-/** N+1 d'une personne (profiles.expense_validator_id). */
+/** N+1 d'une personne (individuel, sinon responsable de son service — hierarchy.ts). */
 async function managerOf(userId: string) {
-  const { data } = await createServiceClient().from("profiles").select("expense_validator_id").eq("id", userId).single();
-  return data?.expense_validator_id ?? null;
+  return managerOfUser(createServiceClient(), userId);
 }
 
 /* ---------- Couverture match ---------- */

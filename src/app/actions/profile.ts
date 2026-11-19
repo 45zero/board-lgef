@@ -1,5 +1,6 @@
 "use server";
 
+import { managerOf } from "@/lib/board/hierarchy";
 import { toResult } from "@/lib/board/actionResult";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
@@ -35,8 +36,9 @@ export async function getMyProfile() {
       service.from("profile_specialties").select("specialties(slug)").eq("user_id", userId),
     ]);
     if (error || !p) throw new Error("Profil introuvable.");
-    const { data: manager } = p.expense_validator_id
-      ? await service.from("profiles").select("first_name, last_name, email").eq("id", p.expense_validator_id).maybeSingle()
+    const managerId = await managerOf(service, userId);
+    const { data: manager } = managerId
+      ? await service.from("profiles").select("first_name, last_name, email").eq("id", managerId).maybeSingle()
       : { data: null };
     const slugs = ((links ?? []) as unknown as { specialties: { slug: string } | null }[]).map((l) => l.specialties?.slug);
     const status = slugs.map((s) => (s ? STATUS_LABELS[s] : undefined)).find(Boolean) ?? null;

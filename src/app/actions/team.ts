@@ -1,5 +1,6 @@
 "use server";
 
+import { managerMap } from "@/lib/board/hierarchy";
 import { toResult } from "@/lib/board/actionResult";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
@@ -146,13 +147,14 @@ async function getTeamWorkspaceImpl(): Promise<TeamWorkspace> {
   const { supabase, userId } = await session();
   const service = createServiceClient();
 
-  const [{ data: me }, { data: profiles }] = await Promise.all([
+  const [{ data: me }, { data: profiles }, managers] = await Promise.all([
     service.from("profiles").select("role").eq("id", userId).single(),
-    service.from("profiles").select("id, first_name, last_name, email, avatar_url, expense_validator_id").order("first_name"),
+    service.from("profiles").select("id, first_name, last_name, email, avatar_url").order("first_name"),
+    managerMap(service),
   ]);
   const people: TeamPerson[] = (profiles ?? []).map((p) => {
     const name = personName(p);
-    return { id: p.id, name, initials: initialsOf(name), email: p.email, avatarUrl: p.avatar_url, managerId: p.expense_validator_id };
+    return { id: p.id, name, initials: initialsOf(name), email: p.email, avatarUrl: p.avatar_url, managerId: managers.get(p.id) ?? null };
   });
 
   // Premier passage : un espace personnel prêt à l'emploi.

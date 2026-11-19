@@ -1,5 +1,6 @@
 "use server";
 
+import { managerMap, teamOf } from "@/lib/board/hierarchy";
 import { toResult } from "@/lib/board/actionResult";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
@@ -24,7 +25,7 @@ import { COMPTA_SLUG } from "@/lib/board/fraisFlavor";
 import { userWants } from "@/lib/board/notificationPrefs";
 import type { InvoiceRequestItem } from "@/app/actions/invoice-public";
 
-// Effectif (sql/2026-10-03_staff_costs.sql) : mes N-1 (profiles.expense_validator_id = moi), tout le
+// Effectif (sql/2026-10-03_staff_costs.sql) : mes N-1 directs et indirects (hiérarchie.ts), tout le
 // monde pour un administrateur. Le coût d'une personne = son forfait par intervention (staff_rates) —
 // ou, pour le réseau, ses kilomètres aller-retour × KM_RATE —, ou le montant ajusté sur l'événement
 // (event_cost_adjustments), pour chaque événement où elle est
@@ -43,15 +44,15 @@ async function viewer() {
   const userId = data?.claims?.sub;
   if (!userId) throw new Error("Non authentifié");
   const service = createServiceClient();
-  const [{ data: me }, { data: reports }, { data: compta }] = await Promise.all([
+  const [{ data: me }, reports, { data: compta }] = await Promise.all([
     service.from("profiles").select("role").eq("id", userId).single(),
-    service.from("profiles").select("id").eq("expense_validator_id", userId),
+    teamOf(service, "pointages", userId),
     service.from("profile_specialties").select("user_id, specialties!inner(slug)").eq("user_id", userId).eq("specialties.slug", COMPTA_SLUG),
   ]);
   const isAdmin = me?.role === "admin" || me?.role === "super_user";
   // Compta (GED) : voit et valide les factures de tous les prestataires, comme un administrateur.
   const isCompta = (compta ?? []).length > 0;
-  const reportIds = (reports ?? []).map((r) => r.id).filter((id) => id !== userId);
+  const reportIds = reports.filter((id) => id !== userId);
   return { userId, service, isAdmin, isCompta, reportIds };
 }
 type Viewer = Awaited<ReturnType<typeof viewer>>;
@@ -68,7 +69,8 @@ async function loadPeople(service: Service, ids: string[] | null): Promise<Staff
   const { data: profiles, error } = await q;
   if (error) throw new Error(error.message);
   const allIds = (profiles ?? []).map((p) => p.id);
-  const managerIds = [...new Set((profiles ?? []).map((p) => p.expense_validator_id).filter((id): id is string => !!id))];
+  const managerOfId = await managerMap(service, allIds);
+  const managerIds = [...new Set([...managerOfId.values()].filter((id): id is string => !!id))];
   const [{ data: links }, { data: rates }, { data: managers }] = await Promise.all([
     service.from("profile_specialties").select("user_id, specialties!inner(slug)").in("specialties.slug", STAFF_STATUSES).in("user_id", allIds),
     service.from("staff_rates").select("user_id, amount_eur").in("user_id", allIds),
@@ -82,8 +84,8 @@ async function loadPeople(service: Service, ids: string[] | null): Promise<Staff
     name: personName(p),
     email: p.email,
     status: statusBy.get(p.id) ?? null,
-    managerId: p.expense_validator_id,
-    managerName: p.expense_validator_id ? (managerBy.get(p.expense_validator_id) ?? null) : null,
+    managerId: managerOfId.get(p.id) ?? null,
+    managerName: managerBy.get(managerOfId.get(p.id) ?? "") ?? null,
     rate: rateBy.has(p.id) ? rateBy.get(p.id)! : null,
   }));
 }

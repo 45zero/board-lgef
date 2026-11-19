@@ -1,4 +1,5 @@
 import "server-only";
+import { countReviewableAccessRequests } from "@/lib/board/accessRequestsCore";
 import { todaysBirthdays } from "@/lib/board/birthdays";
 import { publicationThumbs } from "@/lib/board/publicationThumbs";
 import { myOpenCards } from "@/lib/board/myCards";
@@ -255,11 +256,11 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
       push({ id: "commentaires", app: "audiovisuel", tone: "orange", count: flagged ?? 0, title: "Commentaires à vérifier", detail: "Signalés par la modération automatique" });
     }, undefined),
 
-    // Demandes d'accès au board (formulaire /demande-acces) : à accepter ou refuser (administrateurs).
+    // Demandes de compte (formulaire /demande-acces) : à affecter, accepter ou refuser — administrateurs,
+    // responsables du service demandé, leur N+1 et leurs délégataires « comptes » (accessRequestsCore.ts).
     safe(async () => {
-      if (!isAdmin) return;
-      const { count } = await service.from("account_requests").select("id", { count: "exact", head: true }).eq("status", "pending");
-      push({ id: "demandes-acces", app: "weekend", tone: "red", count: count ?? 0, title: "Demandes d'accès", detail: "Comptes demandés depuis le formulaire public" });
+      const count = await countReviewableAccessRequests(service, userId, isAdmin);
+      push({ id: "demandes-acces", app: "accueil", tone: "red", count, title: "Demandes de compte", detail: "À affecter et accepter, ou à transmettre" });
     }, undefined),
 
     // FIEF : demandes d'adhésion à traiter (personnes qui voient l'onglet FIEF).

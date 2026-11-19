@@ -53,6 +53,7 @@ const PUSHED: Record<string, { icon: PushIcon; route: string }> = {
   director_accepted: EVENT,
   director_declined: EVENT,
   account_request: { icon: "ic_stat_lgef", route: "/" },
+  delegation: { icon: "ic_stat_lgef", route: "/" },
   support_ticket: { icon: "ic_stat_lgef", route: "/" },
   support_resolved: { icon: "ic_stat_lgef", route: "/" },
 };

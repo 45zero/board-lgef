@@ -4,6 +4,8 @@ import { buildDashboard } from "@/lib/board/dashboardCore";
 import { hasContent, parisHour, parisToday, renderDailyDigest } from "@/lib/board/dailyDigest";
 import { isTransactionalEmailConfigured, sendTransactionalBatch, type EmailMessage } from "@/lib/email/transactional";
 import { announceBirthdays } from "@/lib/board/birthdays";
+import { escalateAccessRequests } from "@/lib/board/accessRequestsCore";
+import { escalateExpenses } from "@/lib/board/expensesCore";
 
 export const maxDuration = 60;
 
@@ -15,7 +17,8 @@ const SEND_HOUR = 7;
  * voir sql/2026-09-28_cron_daily_digest.sql) avec le secret CRON_SECRET. À 7 h (Paris), envoie à
  * chaque abonné (profiles.daily_digest_email) son tableau de bord du jour, une seule fois par jour,
  * et seulement s'il y a quelque chose (action ou événement). `?force=1` : envoi immédiat (test).
- * Annonce aussi les anniversaires du jour à tout le personnel (une fois par anniversaire).
+ * Annonce aussi les anniversaires du jour à tout le personnel (une fois par anniversaire) et relance
+ * au N+2 les demandes de compte et notes de frais sans réponse depuis 7 jours.
  */
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -32,6 +35,13 @@ export async function GET(request: Request) {
     console.error("[cron/daily-digest] anniversaires", e);
     return { celebrants: 0, sent: 0, errors: [String(e)] };
   });
+  // Relances au N+2 (demandes de compte, frais) : une fois par jour, jamais sur un envoi forcé.
+  const escalated = force
+    ? null
+    : {
+        accessRequests: await escalateAccessRequests(service).catch((e) => (console.error("[cron/daily-digest] relance comptes", e), -1)),
+        expenses: await escalateExpenses(service).catch((e) => (console.error("[cron/daily-digest] relance frais", e), -1)),
+      };
   const { data: subscribers } = await service
     .from("profiles")
     .select("id, email, daily_digest_sent_on")
@@ -77,5 +87,5 @@ export async function GET(request: Request) {
     if (emptyIds.length) await service.from("profiles").update({ daily_digest_sent_on: today }).in("id", emptyIds);
   }
 
-  return NextResponse.json({ subscribers: due.length, sent: result.sent, empty, errors: result.errors, birthdays });
+  return NextResponse.json({ subscribers: due.length, sent: result.sent, empty, errors: result.errors, birthdays, escalated });
 }

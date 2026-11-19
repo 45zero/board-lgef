@@ -30,13 +30,13 @@ export function detailsFromRow(p: {
   };
 }
 
-/** Domicile masqué pour `viewerId` : adresse privée, et le lecteur n'est ni la personne ni son N+1. */
-export function addressHiddenFor(p: { id: string; address_private: boolean | null; expense_validator_id: string | null }, viewerId: string) {
-  return !!p.address_private && p.id !== viewerId && p.expense_validator_id !== viewerId;
+/** Domicile masqué pour `viewerId` : adresse privée, et le lecteur n'est ni la personne ni son N+1 (calculé, voir hierarchy.ts). */
+export function addressHiddenFor(p: { id: string; address_private: boolean | null; manager_id: string | null }, viewerId: string) {
+  return !!p.address_private && p.id !== viewerId && p.manager_id !== viewerId;
 }
 
 /** Fiche vue par `viewerId` : adresse et position retirées quand elles lui sont masquées. */
-export function detailsForViewer(p: Parameters<typeof detailsFromRow>[0] & { id: string; expense_validator_id: string | null }, viewerId: string): ProfileDetails {
+export function detailsForViewer(p: Parameters<typeof detailsFromRow>[0] & { id: string; manager_id: string | null }, viewerId: string): ProfileDetails {
   const details = detailsFromRow(p);
   return addressHiddenFor(p, viewerId) ? { ...details, homeAddress: "", homeCoordinates: null, addressHidden: true } : details;
 }

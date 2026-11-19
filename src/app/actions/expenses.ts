@@ -1,5 +1,6 @@
 "use server";
 
+import { canApprove, firstApprovers, teamOf } from "@/lib/board/hierarchy";
 import { COMPTA_SLUG } from "@/lib/board/fraisFlavor";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
@@ -239,11 +240,14 @@ export async function declareExpenses(target: ExpenseTarget, noExpense = false, 
 
     // `silent` : déclaration en lot, le N+1 reçoit un seul message à la fin (notifyExpenseBatch).
     if (!noExpense && !opts.silent) {
-      const { data: me } = await service.from("profiles").select("first_name, last_name, email, expense_validator_id").eq("id", userId).single();
-      if (me?.expense_validator_id) {
+      const [{ data: me }, approvers] = await Promise.all([
+        service.from("profiles").select("first_name, last_name, email").eq("id", userId).single(),
+        firstApprovers(service, "frais", userId),
+      ]);
+      if (me && approvers.length) {
         await notify(
           service,
-          [me.expense_validator_id],
+          approvers,
           "Frais à valider",
           `${personName(me)} a déclaré ${payload.total_amount.toFixed(2)} € pour ${await targetTitle(service, target)}.`,
           { kind: "expense_to_validate", event_id: payload.event_id, period_month: payload.period_month, expense_id: payload.expense_id },
@@ -275,8 +279,7 @@ export async function getMyValidatorScope(): Promise<{
   unpaid: number;
 }> {
   const { userId, isAdmin, seesAll, canManageValidators, service } = await currentUser();
-  const { data: reports } = await service.from("profiles").select("id").eq("expense_validator_id", userId);
-  const ids = (reports ?? []).map((r) => r.id);
+  const ids = await teamOf(service, "frais", userId);
   const [{ data: links }, pending, pendingAll, toValidate, due, { count: invoicesAll }] = await Promise.all([
     ids.length
       ? service.from("profile_specialties").select("user_id, specialties!inner(slug)").eq("specialties.slug", "tech-prestataire").in("user_id", ids)
@@ -312,8 +315,7 @@ export async function getSubmissionsToReview(
   const { userId, seesAll, service } = await currentUser();
   let userIds: string[] | null = null;
   if (scope === "mine" || !seesAll) {
-    const { data: reports } = await service.from("profiles").select("id").eq("expense_validator_id", userId);
-    userIds = (reports ?? []).map((r) => r.id);
+    userIds = await teamOf(service, "frais", userId);
     if (userIds.length === 0) return [];
   }
 
@@ -391,8 +393,7 @@ export async function reviewSubmission(
       .single();
     if (!sub) throw new Error("Déclaration introuvable.");
     if (!seesAll) {
-      const { data: owner } = await service.from("profiles").select("expense_validator_id").eq("id", sub.user_id).single();
-      if (owner?.expense_validator_id !== userId) throw new Error("Vous n'êtes pas le responsable de cette personne.");
+      if (!(await canApprove(service, "frais", userId, sub.user_id))) throw new Error("Vous n'êtes ni le N+1 de cette personne, ni au-dessus d'elle, ni délégataire pour ses frais.");
     }
 
     const { error } = await service
@@ -499,8 +500,9 @@ export async function notifyExpenseBatch(
     if (!batch.targets.length) return;
     const eventIds = batch.targets.flatMap((t) => ("eventId" in t ? [t.eventId] : []));
     const lineIds = batch.targets.flatMap((t) => ("lineId" in t ? [t.lineId] : []));
-    const [{ data: me }, byEvent, byLine] = await Promise.all([
-      service.from("profiles").select("first_name, last_name, email, expense_validator_id").eq("id", userId).single(),
+    const [{ data: me }, approvers, byEvent, byLine] = await Promise.all([
+      service.from("profiles").select("first_name, last_name, email").eq("id", userId).single(),
+      firstApprovers(service, "frais", userId),
       eventIds.length
         ? service.from("expense_submissions").select("event_id, expense_id, period_month, total_amount").eq("user_id", userId).eq("status", "pending").in("event_id", eventIds)
         : Promise.resolve({ data: [] }),
@@ -515,13 +517,13 @@ export async function notifyExpenseBatch(
         : Promise.resolve({ data: [] }),
     ]);
     const rows = [...(byEvent.data ?? []), ...(byLine.data ?? [])];
-    if (!me?.expense_validator_id || !rows.length) return;
+    if (!me || !approvers.length || !rows.length) return;
     const titles = await titlesOf(service, rows);
     const total = rows.reduce((n, r) => n + Number(r.total_amount ?? 0), 0);
     const one = rows.length === 1;
     await notify(
       service,
-      [me.expense_validator_id],
+      approvers,
       "Frais à valider",
       one
         ? `${personName(me)} a déclaré ${total.toFixed(2)} € pour ${titles[0]}.`
@@ -777,8 +779,7 @@ export async function getArchivedReceipts(): Promise<ArchivedReceipt[]> {
   const { userId, canManageValidators, service } = await currentUser();
   let userIds: string[] | null = null;
   if (!canManageValidators) {
-    const { data: reports } = await service.from("profiles").select("id").eq("expense_validator_id", userId);
-    userIds = [userId, ...(reports ?? []).map((r) => r.id)];
+    userIds = [userId, ...(await teamOf(service, "frais", userId))];
   }
 
   const since = new Date(Date.now() - 730 * 86_400_000).toISOString();

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Sparkles, X, PanelLeft, LayoutGrid, LogOut, Users, Lock, UserRound, Mail, Bell } from "lucide-react";
+import { Sparkles, X, PanelLeft, LayoutGrid, LogOut, Users, Lock, UserRound, Mail, Bell, Network } from "lucide-react";
 import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 import { useUserRole } from "@/hooks/board/useUserRole";
@@ -24,6 +24,7 @@ import { useVisibleModules } from "@/hooks/board/useVisibleModules";
 import { listAccessRequests } from "@/app/actions/account-requests";
 import { unwrap } from "@/lib/board/actionResult";
 import { UsersAdminModal } from "@/components/board/users/UsersAdminModal";
+import { OrganisationModal } from "@/components/board/users/OrganisationModal";
 import { ModuleAccessModal } from "@/components/board/modules/ModuleAccessModal";
 import { MyProfileModal } from "@/components/board/profile/MyProfileModal";
 
@@ -363,7 +364,7 @@ function UsersSection() {
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-bold text-ink">Gérer les utilisateurs</span>
-          <span className="block text-xs text-ink-4">Rôle, statut, N+1, adresse, véhicule, pôles, demandes d&rsquo;accès</span>
+          <span className="block text-xs text-ink-4">Rôle, service, N+1, statut, adresse, véhicule, pôles, demandes de compte</span>
         </span>
         {pending > 0 && <span className="shrink-0 rounded-full bg-red px-1.5 text-[10px] font-bold text-white">{pending}</span>}
       </button>
@@ -381,6 +382,30 @@ function UsersSection() {
       </button>
       {open && <UsersAdminModal onClose={() => setOpen(false)} />}
       {accessOpen && <ModuleAccessModal onClose={() => setAccessOpen(false)} />}
+    </div>
+  );
+}
+
+/** Organisation : responsables de service, N+1 / N+2 et délégations — tout le monde (modification : administrateurs). */
+function OrganisationSection() {
+  const role = useUserRole();
+  const [open, setOpen] = useState(false);
+  const canManage = role.isAdmin || role.isSuperUser;
+  return (
+    <div className="mt-5">
+      <div className="mb-2 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Organisation</div>
+      <button onClick={() => setOpen(true)} className="flex w-full items-center gap-3 rounded-btn border border-line p-3 text-left hover:bg-hover">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-btn bg-subtle text-ink-2">
+          <Network size={15} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold text-ink">{canManage ? "Services, N+1 et délégations" : "Organisation et délégations"}</span>
+          <span className="block text-xs text-ink-4">
+            {canManage ? "Responsable de chaque service, à qui il rend compte, délégations" : "Qui est responsable de quoi, déléguer mes validations"}
+          </span>
+        </span>
+      </button>
+      {open && <OrganisationModal onClose={() => setOpen(false)} />}
     </div>
   );
 }
@@ -729,6 +754,8 @@ export function BoardSettingsModal({
             ))}
           </div>
         </div>
+
+        <OrganisationSection />
 
         <UsersSection />
 

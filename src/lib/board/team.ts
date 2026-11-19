@@ -22,7 +22,7 @@ export type TeamPerson = {
   initials: string;
   email: string | null;
   avatarUrl: string | null;
-  /** N+1 (profiles.expense_validator_id). */
+  /** N+1 calculé (individuel, sinon responsable du service — hierarchy.ts). */
   managerId: string | null;
 };
 

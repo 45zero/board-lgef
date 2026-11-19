@@ -1,4 +1,5 @@
 import "server-only";
+import { managerMap, teamOf } from "@/lib/board/hierarchy";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import { loadEngagements } from "@/lib/board/staffCore";
 import { isEmptyDeclaration, personName } from "@/lib/board/expensesCore";
@@ -28,8 +29,8 @@ export async function myMissingInvoices(service: Service, userId: string): Promi
 export type InvoiceToValidate = { id: string; userId: string; personName: string; eventId: string | null; title: string; date: string; amount: number | null };
 
 /**
- * Factures en attente que `userId` doit valider : celles de ses prestataires (il est leur N+1) et,
- * pour la compta, celles des prestataires sans N+1 (même règle que invoiceValidatorIds).
+ * Factures en attente que `userId` doit valider : celles de ses prestataires (N+1, N+2… ou délégation
+ * « factures ») et, pour la compta, celles des prestataires sans N+1 (même règle que invoiceValidatorIds).
  */
 export async function invoicesToValidate(service: Service, userId: string, compta: boolean): Promise<InvoiceToValidate[]> {
   const { data: invs } = await service
@@ -42,16 +43,18 @@ export async function invoicesToValidate(service: Service, userId: string, compt
   if (!rows.length) return [];
   const userIds = [...new Set(rows.map((r) => r.user_id!))];
   const eventIds = [...new Set(rows.map((r) => r.event_id).filter((id): id is string => !!id))];
-  const [{ data: people }, { data: events }] = await Promise.all([
-    service.from("profiles").select("id, first_name, last_name, email, expense_validator_id").in("id", userIds),
+  const [{ data: people }, { data: events }, team, managers] = await Promise.all([
+    service.from("profiles").select("id, first_name, last_name, email").in("id", userIds),
     eventIds.length ? service.from("events").select("id, title, start_date").in("id", eventIds) : Promise.resolve({ data: [] as { id: string; title: string; start_date: string }[] }),
+    teamOf(service, "factures", userId).then((ids) => new Set(ids)),
+    managerMap(service, userIds),
   ]);
   const personBy = new Map((people ?? []).map((p) => [p.id, p]));
   const eventBy = new Map((events ?? []).map((e) => [e.id, e]));
   return rows
     .filter((r) => {
-      const validator = personBy.get(r.user_id!)?.expense_validator_id;
-      return validator === userId || (compta && (!validator || validator === r.user_id));
+      const validator = managers.get(r.user_id!);
+      return team.has(r.user_id!) || (compta && !validator);
     })
     .map((r) => {
       const ev = r.event_id ? eventBy.get(r.event_id) : null;

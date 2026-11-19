@@ -1,4 +1,5 @@
 import "server-only";
+import { firstApprovers } from "@/lib/board/hierarchy";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { COMPTA_SLUG } from "@/lib/board/fraisFlavor";
 import { quietAValider } from "@/lib/board/notificationPrefs";
@@ -85,11 +86,11 @@ export async function recordInvoiceDeposit(
   await notifyDeposit(service, userId, event?.title ?? "l'événement", eventId, amountTtc, notifyIds);
 }
 
-/** Valideurs d'une facture : le N+1 du prestataire, sinon la compta (spécialité COMPTA_SLUG). */
+/** Valideurs d'une facture : le N+1 du prestataire et ses délégataires « factures », sinon la compta (spécialité COMPTA_SLUG). */
 export async function invoiceValidatorIds(userId: string): Promise<string[]> {
   const service = createServiceClient();
-  const { data: me } = await service.from("profiles").select("expense_validator_id").eq("id", userId).single();
-  if (me?.expense_validator_id && me.expense_validator_id !== userId) return [me.expense_validator_id];
+  const approvers = await firstApprovers(service, "factures", userId);
+  if (approvers.length) return approvers;
   const { data: compta } = await service.from("profile_specialties").select("user_id, specialties!inner(slug)").eq("specialties.slug", COMPTA_SLUG);
   return (compta ?? []).map((c) => c.user_id).filter((id) => id !== userId);
 }

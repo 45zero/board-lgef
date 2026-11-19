@@ -1,5 +1,6 @@
 "use server";
 
+import { managerMap } from "@/lib/board/hierarchy";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { parseLatLng, STAFF_KINDS, STAFF_SPECIALTY, type LatLng, type StaffKind, type StaffPin, type Travel } from "@/lib/board/geo";
@@ -61,11 +62,12 @@ export async function getStaffLocations(): Promise<StaffPin[]> {
   if (kindByUser.size === 0) return [];
   const { data: profiles } = await service
     .from("profiles")
-    .select("id, first_name, last_name, email, home_address, home_coordinates, address_private, expense_validator_id")
+    .select("id, first_name, last_name, email, home_address, home_coordinates, address_private")
     .in("id", [...kindByUser.keys()]);
+  const managers = await managerMap(service, [...kindByUser.keys()]);
   const pins = await Promise.all(
     (profiles ?? [])
-      .filter((p) => !addressHiddenFor(p, userId))
+      .filter((p) => !addressHiddenFor({ ...p, manager_id: managers.get(p.id) ?? null }, userId))
       .map(async (p) => {
       const position = parseLatLng(p.home_coordinates) ?? (p.home_address ? await geocode(p.home_address) : null);
       return position ? { id: p.id, name: displayName(p), kind: kindByUser.get(p.id)!, position } : null;

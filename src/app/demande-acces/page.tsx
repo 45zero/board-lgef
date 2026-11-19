@@ -1,25 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { submitAccessRequest, type AccessKind } from "@/app/actions/account-requests";
+import { listPublicServices, submitAccessRequest } from "@/app/actions/account-requests";
+import { ACCESS_KINDS, type AccessKind } from "@/lib/board/accessRequests";
 
 const field = "w-full rounded-btn border border-line bg-card px-3 py-2.5 text-sm text-ink outline-none focus:border-line-strong";
 const label = "mb-1 block text-xs font-semibold text-ink-2";
 
-const KINDS: { id: AccessKind; label: string }[] = [
-  { id: "salarie", label: "Salarié" },
-  { id: "arbitre", label: "Arbitre" },
-  { id: "photographe", label: "Photographe" },
-  { id: "videaste", label: "Vidéaste" },
-  { id: "partenaire", label: "Partenaire" },
-  { id: "media", label: "Média" },
-  { id: "autre", label: "Autre" },
-];
-
-/** Demande d'accès publique (photographes, vidéastes… extérieurs à la Ligue) — validée par un administrateur. */
+/**
+ * Demande de compte publique, ouverte à tous : la personne dit qui elle est et, si elle le sait, le
+ * service concerné. Transmise au responsable de ce service (ou aux administrateurs), qui l'affecte.
+ */
 export default function AccessRequestPage() {
-  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "", organization: "", kind: "photographe" as AccessKind, reason: "" });
+  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "", organization: "", kind: "" as AccessKind | "", serviceKey: "", reason: "" });
+  const [services, setServices] = useState<{ key: string; label: string }[]>([]);
+  useEffect(() => {
+    listPublicServices().then(setServices).catch(() => setServices([]));
+  }, []);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
@@ -28,8 +26,12 @@ export default function AccessRequestPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (!form.kind) {
+      setError("Dites-nous qui vous êtes.");
+      return;
+    }
     setSubmitting(true);
-    const res = await submitAccessRequest(form).catch(() => ({ ok: false as const, error: "La demande n'a pas pu être envoyée. Réessayez plus tard." }));
+    const res = await submitAccessRequest({ ...form, kind: form.kind }).catch(() => ({ ok: false as const, error: "La demande n'a pas pu être envoyée. Réessayez plus tard." }));
     setSubmitting(false);
     if (res.ok) setDone(true);
     else setError(res.error);
@@ -43,7 +45,7 @@ export default function AccessRequestPage() {
           <>
             <h1 className="mt-2 text-xl font-extrabold text-ink">Demande envoyée</h1>
             <p className="mt-2 text-sm text-ink-3">
-              Merci {form.firstName}. Votre demande sera examinée par la Ligue ; vous recevrez un e-mail à <strong>{form.email}</strong> avec le lien
+              Merci {form.firstName}. Votre demande sera examinée par {services.find((s) => s.key === form.serviceKey) ? `le service ${services.find((s) => s.key === form.serviceKey)!.label}` : "la Ligue"} ; vous recevrez un e-mail à <strong>{form.email}</strong> avec le lien
               pour choisir votre mot de passe dès qu&apos;elle sera acceptée.
             </p>
             <Link href="/login" className="mt-6 inline-block text-sm font-semibold text-link hover:underline">
@@ -53,7 +55,7 @@ export default function AccessRequestPage() {
         ) : (
           <form onSubmit={handleSubmit}>
             <h1 className="mt-2 text-xl font-extrabold text-ink">Demander un accès</h1>
-            <p className="mt-1 text-sm text-ink-3">Salariés, arbitres, photographes, vidéastes, partenaires, médias… Votre demande est examinée par la Ligue Grand Est de Football.</p>
+            <p className="mt-1 text-sm text-ink-3">Salariés, bénévoles, élus, arbitres, éducateurs, clubs, photographes, partenaires… Dites-nous qui vous êtes : la Ligue Grand Est de Football vous donnera les bons accès.</p>
 
             <div className="mt-6 space-y-3">
               <div className="grid grid-cols-2 gap-3">
@@ -77,7 +79,7 @@ export default function AccessRequestPage() {
               <div>
                 <span className={label}>Vous êtes</span>
                 <div className="flex flex-wrap gap-2">
-                  {KINDS.map((k) => (
+                  {ACCESS_KINDS.map((k) => (
                     <button
                       key={k.id}
                       type="button"
@@ -89,6 +91,19 @@ export default function AccessRequestPage() {
                   ))}
                 </div>
               </div>
+              {services.length > 0 && (
+                <div>
+                  <label htmlFor="service" className={label}>Service concerné</label>
+                  <select id="service" value={form.serviceKey} onChange={(e) => set("serviceKey", e.target.value)} className={field}>
+                    <option value="">Je ne sais pas</option>
+                    {services.map((s) => (
+                      <option key={s.key} value={s.key}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label htmlFor="organization" className={label}>Club ou structure (facultatif)</label>
                 <input id="organization" value={form.organization} onChange={(e) => set("organization", e.target.value)} className={field} />
@@ -102,7 +117,7 @@ export default function AccessRequestPage() {
                   value={form.reason}
                   onChange={(e) => set("reason", e.target.value)}
                   className={field}
-                  placeholder="Ex. : photographe dans le Bas-Rhin, je couvre déjà des matchs pour la Ligue…"
+                  placeholder="Ex. : arbitre de district dans la Marne, je dois accéder au calendrier des désignations…"
                 />
               </div>
             </div>
