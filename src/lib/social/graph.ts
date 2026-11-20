@@ -56,9 +56,27 @@ function summaryCount(edge: unknown): number {
 
 /* ---------- Publication ---------- */
 
-/** Vidéo native sur une page Facebook — `fileUrl` doit être accessible publiquement (lien signé du board). Renvoie l'id de la VIDÉO (pas du post). */
-export async function publishFacebookVideo(pageId: string, accessToken: string, { fileUrl, description }: { fileUrl: string; description: string }) {
-  const body = await graphFetch(`/${pageId}/videos`, { file_url: fileUrl, description, published: "true", access_token: accessToken }, "POST");
+/**
+ * Vidéo native sur une page Facebook — `fileUrl` doit être accessible publiquement (lien signé du board).
+ * `thumb` : image de couverture (JPEG), envoyée en multipart — Facebook ne la prend pas par URL.
+ * Si Facebook refuse la couverture, la vidéo part sans elle. Renvoie l'id de la VIDÉO (pas du post).
+ */
+export async function publishFacebookVideo(
+  pageId: string,
+  accessToken: string,
+  { fileUrl, description, thumb }: { fileUrl: string; description: string; thumb?: Blob | null }
+) {
+  const params = { file_url: fileUrl, description, published: "true", access_token: accessToken };
+  if (thumb) {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(params)) form.set(key, value);
+    form.set("thumb", thumb, "cover.jpg");
+    const res = await fetch(`${GRAPH_API_BASE}/${pageId}/videos`, { method: "POST", body: form, cache: "no-store" });
+    const json = (await res.json().catch(() => ({}))) as GraphErrorBody & Record<string, unknown>;
+    if (res.ok && !json.error && json.id) return { videoId: String(json.id) };
+    // Erreur liée à la couverture ou passagère : nouvel essai sans couverture plutôt qu'un échec.
+  }
+  const body = await graphFetch(`/${pageId}/videos`, params, "POST");
   return { videoId: String(body.id) };
 }
 
@@ -173,14 +191,14 @@ function userTagsParam(usernames: string[] | undefined): Record<string, string> 
 export async function createInstagramContainers(
   igUserId: string,
   accessToken: string,
-  { items, caption, userTags }: { items: { url: string; kind: "image" | "video" }[]; caption: string; userTags?: string[] }
+  { items, caption, userTags }: { items: { url: string; kind: "image" | "video"; coverUrl?: string }[]; caption: string; userTags?: string[] }
 ): Promise<InstagramPending> {
   const since = new Date().toISOString();
   if (items.length === 1) {
     const [item] = items;
     const params: Record<string, string> =
       item.kind === "video"
-        ? { media_type: "REELS", video_url: item.url, caption, access_token: accessToken }
+        ? { media_type: "REELS", video_url: item.url, caption, access_token: accessToken, ...(item.coverUrl ? { cover_url: item.coverUrl } : {}) }
         : { image_url: item.url, caption, access_token: accessToken, ...userTagsParam(userTags) };
     const container = await graphFetch(`/${igUserId}/media`, params, "POST");
     return { stage: "container", containers: [String(container.id)], caption, since };

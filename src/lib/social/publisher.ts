@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/supabase/database.types";
 import { signMediaStreamToken } from "@/lib/board/mediaStreamToken";
 import { getSocialAccountById } from "@/lib/social/accounts";
-import { signedJpegUrl, signedTextCardUrl } from "@/lib/social/mediaUrls";
+import { signedCoverUrl, signedJpegUrl, signedTextCardUrl } from "@/lib/social/mediaUrls";
 import {
   publishFacebookVideo,
   publishFacebookPhoto,
@@ -79,6 +79,25 @@ type EventFileRow = {
 const INSTAGRAM_BUDGET_MS = 30_000;
 
 type MediaItem = { url: string; kind: "image" | "video"; contentType: string | null };
+
+/** Temps maximal accordé à l'extraction de la couverture d'une vidéo avant de publier sans elle. */
+const COVER_BUDGET_MS = 25_000;
+
+/**
+ * Couverture d'une vidéo (JPEG extrait par /api/media/cover, image ni noire ni unie) : sans elle,
+ * Instagram et Facebook affichent la première image, noire dès que la vidéo commence par un fondu.
+ * Vérifiée ici avant d'être donnée à Meta : en cas d'échec la vidéo part sans couverture, jamais bloquée.
+ */
+async function fetchVideoCover(videoUrl: string): Promise<{ url: string; blob: Blob } | null> {
+  const url = signedCoverUrl(videoUrl);
+  try {
+    const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(COVER_BUDGET_MS) });
+    if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("image/")) return null;
+    return { url, blob: await res.blob() };
+  } catch {
+    return null;
+  }
+}
 
 function isJpeg(contentType: string | null) {
   return /^image\/(jpe?g|pjpeg)$/i.test(contentType ?? "");
@@ -207,6 +226,14 @@ export async function publishPublicationToSocial(
   const items = await resolveMediaItems(client, pub);
   const kind: PublicationKind = pub.kind ?? kindFromContentTypes(items.map((i) => i.contentType));
   const at = new Date().toISOString();
+  const startedAt = Date.now();
+  // Une couverture par vidéo, préparée une fois pour Instagram et Facebook (en parallèle).
+  const covers = new Map<string, Promise<{ url: string; blob: Blob } | null>>();
+  const coverOf = (url: string) => {
+    if (!covers.has(url)) covers.set(url, fetchVideoCover(url));
+    return covers.get(url)!;
+  };
+  if (targets.length > 0) for (const i of items) if (i.kind === "video") void coverOf(i.url);
 
   const settled = await Promise.all(
     targets.map(async ({ key, caption }): Promise<{ key: SocialTargetKey; entry?: SocialPublishTarget; error?: string; warning?: string; pending?: boolean }> => {
@@ -219,13 +246,21 @@ export async function publishPublicationToSocial(
           if (items.length === 0 && !caption.trim()) throw new Error("Le texte de la publication est vide.");
           // Post texte : Instagram exige un média — on publie un visuel généré à partir du texte.
           // Sinon, Instagram n'accepte que le JPEG : les autres images (PNG, WebP…) passent par la conversion.
-          const igItems =
+          const igItems: (MediaItem & { coverUrl?: string })[] =
             items.length === 0
               ? [{ url: signedTextCardUrl(caption), kind: "image" as const, contentType: "image/jpeg" }]
               : items.slice(0, 10).map((i) => (i.kind === "image" && !isJpeg(i.contentType) ? { ...i, url: signedJpegUrl(i.url) } : i));
+          // Reel seul : couverture explicite (les vidéos d'un carrousel n'en acceptent pas).
+          if (igItems.length === 1 && igItems[0].kind === "video") {
+            const cover = await coverOf(igItems[0].url);
+            if (cover) igItems[0] = { ...igItems[0], coverUrl: cover.url };
+          }
           const publishIg = async (userTags?: string[]) => {
             const pending = await createInstagramContainers(account.externalId, account.accessToken, { items: igItems, caption, userTags });
-            return advanceInstagramPublish(account.externalId, account.accessToken, pending, INSTAGRAM_BUDGET_MS);
+            // Le temps pris par la couverture est retiré de l'attente (fonction limitée à 60 s) ; le
+            // Reel pas encore traité est mis en ligne plus tard (finishPendingInstagram).
+            const budget = Math.max(5_000, INSTAGRAM_BUDGET_MS - (Date.now() - startedAt));
+            return advanceInstagramPublish(account.externalId, account.accessToken, pending, budget);
           };
 
           let warning: string | undefined;
@@ -272,7 +307,8 @@ export async function publishPublicationToSocial(
           const failed: string[] = [];
           for (const [n, v] of videos.entries()) {
             try {
-              videoIds.push((await publishFacebookVideo(account.externalId, account.accessToken, { fileUrl: v.url, description: message })).videoId);
+              const thumb = (await coverOf(v.url))?.blob;
+              videoIds.push((await publishFacebookVideo(account.externalId, account.accessToken, { fileUrl: v.url, description: message, thumb })).videoId);
             } catch (e) {
               failed.push(`vidéo ${n + 1} : ${e instanceof Error ? e.message : "échec"}`);
             }
@@ -294,7 +330,8 @@ export async function publishPublicationToSocial(
           };
         }
         if (items[0].kind === "video") {
-          const { videoId } = await publishFacebookVideo(account.externalId, account.accessToken, { fileUrl: items[0].url, description: await fbMessage(caption) });
+          const thumb = (await coverOf(items[0].url))?.blob;
+          const { videoId } = await publishFacebookVideo(account.externalId, account.accessToken, { fileUrl: items[0].url, description: await fbMessage(caption), thumb });
           return { key, entry: { published: true, at, by, videoId, mediaType: "video" } };
         }
         const { postId } = await publishFacebookPhoto(account.externalId, account.accessToken, { url: items[0].url, caption: await fbMessage(caption) });
