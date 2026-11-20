@@ -1,11 +1,14 @@
 "use client";
 
 import { LoadMoreMails } from "@/components/board/mail/LoadMoreMails";
-import { useLiveRefresh } from "@/components/board/live/LiveProvider";
+import { refreshBadges, useLive, useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useEffect, useRef, useState } from "react";
 import { DirectoryEmailInput } from "@/components/board/directory/DirectoryEmailInput";
 import { readCache, writeCache } from "@/lib/board/localCache";
-import { mergeFirstPage, getCachedMail, loadMail, loadMailList, prefetchMails } from "@/lib/board/mailClient";
+import { mergeFirstPage, getCachedMail, loadMail, loadBoxesList, hasMorePages, prefetchMails, type BoxMail, type BoxPages } from "@/lib/board/mailClient";
+import { useAccountScope } from "@/hooks/board/useAccountScope";
+import { BoxDefaultMenu, BoxTag, UnreadBubble, boxName, boxTone } from "@/components/board/mail/MailBoxes";
+import { readOpenMailAccountParam, clearOpenMailAccountParam } from "@/lib/board/deepLink";
 import {
   Mail,
   Menu,
@@ -25,13 +28,14 @@ import {
   FileEdit,
   Tag,
   Search,
-  SlidersHorizontal,
   Kanban,
+  CheckCheck,
+  SlidersHorizontal,
 } from "lucide-react";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import {
-  listMyMessages,
   getMyMessage,
+  markAllMyInboxRead,
   sendMyMessage,
   replyToMyMessage,
   forwardMyMessage,
@@ -53,10 +57,9 @@ import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { SenderAvatar, parseSenderName } from "@/components/board/mail/SenderAvatar";
 
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
-type MessageListItem = Awaited<ReturnType<typeof listMyMessages>>["messages"][number];
 type MessageDetail = Awaited<ReturnType<typeof getMyMessage>>;
 type LabelItem = Awaited<ReturnType<typeof listMyLabels>>[number];
-type DraftListItem = Awaited<ReturnType<typeof listMyDrafts>>["drafts"][number];
+type DraftListItem = Awaited<ReturnType<typeof listMyDrafts>>["drafts"][number] & { accountId: string };
 
 const SYSTEM_FOLDERS = [
   { id: "INBOX", name: "Boîte de réception", labelIds: ["INBOX"], icon: InboxIcon },
@@ -75,40 +78,49 @@ function base64UrlToBlob(base64url: string, mimeType: string) {
   return new Blob([bytes], { type: mimeType });
 }
 
+const folderLabelIds = (folder: string) => {
+  const systemFolder = SYSTEM_FOLDERS.find((f) => f.id === folder);
+  return systemFolder ? [...systemFolder.labelIds] : [folder];
+};
+
 // Caches partagés au niveau du module (survivent au démontage de l'écran) ; les listes sont aussi
 // gardées dans le navigateur pour un affichage instantané à la prochaine ouverture (voir localCache).
-const messagesCache = new Map<string, MessageListItem[]>();
+const messagesCache = new Map<string, BoxMail[]>();
 
 export function MailsScreen() {
   const [accounts, setAccounts] = useState<Account[] | null>(() => readCache<Account[]>("mail:accounts") ?? null);
-  const [activeAccountId, setActiveAccountId] = useState<string | null>(() => readCache<Account[]>("mail:accounts")?.[0]?.id ?? null);
+  // Boîte affichée : « Toutes les boîtes » ou un compte (clic droit : par défaut, voir useAccountScope).
+  const box = useAccountScope("mailBox", accounts);
+  const { scope, accountIds } = box;
+  const activeAccountId = scope === "all" ? null : scope;
+  const unreadByAccount = useLive().badges?.mailsByAccount;
   const [folder, setFolder] = useState<string>("INBOX");
-  const [labels, setLabels] = useState<LabelItem[]>(() => {
-    const first = readCache<Account[]>("mail:accounts")?.[0]?.id;
-    return (first && readCache<LabelItem[]>(`mail:labels:${first}`)) || [];
-  });
+  const [labels, setLabels] = useState<LabelItem[]>([]);
   const [newLabelName, setNewLabelName] = useState("");
   const [addingLabel, setAddingLabel] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [activeQuery, setActiveQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const [messages, setMessages] = useState<MessageListItem[]>([]);
-  // Pages suivantes du dossier (Gmail renvoie 25 mails à la fois) : chargées en arrivant en bas de la liste.
-  const [nextPage, setNextPage] = useState<string | null>(null);
+  const [messages, setMessages] = useState<BoxMail[]>([]);
+  // Pages suivantes du dossier, par boîte (Gmail renvoie 25 mails à la fois) : chargées en arrivant en bas de la liste.
+  const [nextPages, setNextPages] = useState<BoxPages | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const listKey = useRef("");
   const [drafts, setDrafts] = useState<DraftListItem[]>([]);
   const [selected, setSelected] = useState<MessageDetail | null>(null);
+  // Boîte du mail ouvert (en « Toutes les boîtes », chaque mail garde la sienne pour répondre, archiver…).
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [selectedLoading, setSelectedLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [composing, setComposing] = useState(false);
   const [replying, setReplying] = useState(false);
-  const [forwarding, setForwarding] = useState<MessageDetail | null>(null);
+  const [forwarding, setForwarding] = useState<{ accountId: string; message: MessageDetail } | null>(null);
   const [linkingToCard, setLinkingToCard] = useState(false);
   const [linkedCard, setLinkedCard] = useState<{ id: string; title: string } | null>(null);
+  const [markingAll, setMarkingAll] = useState(false);
   const { open: openTeamCard } = useOpenTeamCard();
-  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState<{ id: string; accountId: string } | null>(null);
   const [banner, setBanner] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     const params = new URLSearchParams(window.location.search);
@@ -128,55 +140,77 @@ export function MailsScreen() {
     window.history.replaceState({}, "", clean ? `?${clean}` : window.location.pathname);
   }, []);
 
+  // Notification d'un nouveau mail : la boîte qui l'a reçu s'ouvre.
+  const { setScope } = box;
+  useEffect(() => {
+    const id = readOpenMailAccountParam();
+    if (!id) return;
+    clearOpenMailAccountParam();
+    setScope(id);
+  }, [setScope]);
+
   useEffect(() => {
     getMyConnectedAccounts().then((accs) => {
       setAccounts(accs);
       writeCache("mail:accounts", accs);
-      setActiveAccountId((current) => (current && accs.some((a) => a.id === current) ? current : (accs[0]?.id ?? null)));
     });
   }, []);
 
+  // Libellés : propres à un compte, affichés seulement quand une seule boîte est ouverte.
   useEffect(() => {
-    if (!activeAccountId) return;
+    if (!activeAccountId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- « Toutes les boîtes » : pas de libellés
+      setLabels([]);
+      return;
+    }
+    setLabels(readCache<LabelItem[]>(`mail:labels:${activeAccountId}`) ?? []);
     listMyLabels(activeAccountId).then((l) => {
       setLabels(l);
       writeCache(`mail:labels:${activeAccountId}`, l);
     });
   }, [activeAccountId]);
 
+  // Libellé d'une autre boîte ouvert puis passage à « Toutes » : retour à la boîte de réception.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- dossier invalide pour la nouvelle boîte
+    if (scope === "all" && !SYSTEM_FOLDERS.some((f) => f.id === folder)) setFolder("INBOX");
+  }, [scope, folder]);
+
+  const idsKey = accountIds.join(",");
 
   const refresh = () => {
-    if (!activeAccountId) return;
+    if (!accountIds.length) return;
     setSelected(null);
     if (folder === "DRAFTS") {
       setLoading(true);
-      listMyDrafts(activeAccountId)
-        .then((res) => setDrafts(res.drafts))
+      Promise.all(accountIds.map((id) => listMyDrafts(id).then((r) => r.drafts.map((d) => ({ ...d, accountId: id }))).catch(() => [] as DraftListItem[])))
+        .then((lists) => setDrafts(lists.flat()))
         .finally(() => setLoading(false));
       return;
     }
-    const cacheKey = `${activeAccountId}:${folder}:${activeQuery.trim()}`;
+    const cacheKey = `${scope}:${folder}:${activeQuery.trim()}`;
     // Mémoire (dossier déjà visité) puis cache du navigateur (dernière ouverture de l'appli) : affichage instantané, revalidé juste après.
-    const cached = messagesCache.get(cacheKey) ?? (activeQuery.trim() ? undefined : readCache<MessageListItem[]>(`mail:list:${cacheKey}`));
-    if (cached) {
-      setMessages(cached);
+    const cached = messagesCache.get(cacheKey) ?? (activeQuery.trim() ? undefined : readCache<BoxMail[]>(`mail:list:${cacheKey}`));
+    // Ancien cache (avant « Toutes les boîtes ») : mails sans boîte, ignorés.
+    const usable = cached?.every((m) => m.accountId) ? cached : undefined;
+    if (usable) {
+      setMessages(usable);
       setLoading(false);
     } else {
       setLoading(true);
     }
-    const systemFolder = SYSTEM_FOLDERS.find((f) => f.id === folder);
-    const labelIds: string[] = systemFolder ? [...systemFolder.labelIds] : [folder];
     listKey.current = cacheKey;
-    setNextPage(null);
-    loadMailList(activeAccountId, { labelIds, query: activeQuery.trim() || undefined })
+    setNextPages(null);
+    loadBoxesList(accountIds, { labelIds: folderLabelIds(folder), query: activeQuery.trim() || undefined })
       .then((res) => {
         if (listKey.current !== cacheKey) return;
-        setNextPage(res.nextPageToken);
+        setNextPages(res.pages);
         messagesCache.set(cacheKey, res.messages);
         if (!activeQuery.trim()) writeCache(`mail:list:${cacheKey}`, res.messages);
         setMessages(res.messages);
-        prefetchMails(activeAccountId, res.messages.map((m) => m.id));
+        for (const id of accountIds) prefetchMails(id, res.messages.filter((m) => m.accountId === id).map((m) => m.id), accountIds.length > 1 ? 8 : 15);
       })
+      .catch(() => undefined)
       .finally(() => setLoading(false));
   };
 
@@ -184,22 +218,22 @@ export function MailsScreen() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-dep-change needs a loading flag reset before the request resolves
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeAccountId, folder, activeQuery]);
+  }, [scope, idsKey, folder, activeQuery]);
 
   // En direct : nouveau mail (compteur Gmail vérifié toutes les 30 s) → la liste se met à jour
   // sans fermer le mail ouvert ni afficher de chargement.
   useLiveRefresh(["mails"], () => {
-    if (!activeAccountId || folder === "DRAFTS" || activeQuery.trim()) return;
-    const cacheKey = `${activeAccountId}:${folder}:`;
-    const systemFolder = SYSTEM_FOLDERS.find((f) => f.id === folder);
-    loadMailList(activeAccountId, { labelIds: systemFolder ? [...systemFolder.labelIds] : [folder] })
+    if (!accountIds.length || folder === "DRAFTS" || activeQuery.trim()) return;
+    const cacheKey = `${scope}:${folder}:`;
+    loadBoxesList(accountIds, { labelIds: folderLabelIds(folder) })
       .then((res) => {
+        if (listKey.current !== cacheKey) return;
         messagesCache.set(cacheKey, res.messages);
         writeCache(`mail:list:${cacheKey}`, res.messages);
         // Pages déjà chargées plus bas : gardées sous la nouvelle première page.
         const merged = mergeFirstPage(messages, res.messages);
         setMessages(merged ?? res.messages);
-        if (!merged) setNextPage(res.nextPageToken);
+        if (!merged) setNextPages(res.pages);
       })
       .catch(() => undefined);
   });
@@ -211,26 +245,30 @@ export function MailsScreen() {
   };
 
   const loadMore = () => {
-    if (!activeAccountId || !nextPage || loadingMore || folder === "DRAFTS") return;
+    if (!hasMorePages(nextPages) || loadingMore || folder === "DRAFTS") return;
     const key = listKey.current;
-    const systemFolder = SYSTEM_FOLDERS.find((f) => f.id === folder);
     setLoadingMore(true);
-    loadMailList(activeAccountId, { labelIds: systemFolder ? [...systemFolder.labelIds] : [folder], query: activeQuery.trim() || undefined, pageToken: nextPage })
+    loadBoxesList(accountIds, { labelIds: folderLabelIds(folder), query: activeQuery.trim() || undefined }, nextPages ?? undefined)
       .then((res) => {
         if (listKey.current !== key) return;
         setMessages((prev) => {
-          const seen = new Set(prev.map((m) => m.id));
-          return [...prev, ...res.messages.filter((m) => !seen.has(m.id))];
+          const seen = new Set(prev.map((m) => `${m.accountId}:${m.id}`));
+          const fresh = res.messages.filter((m) => !seen.has(`${m.accountId}:${m.id}`));
+          if (accountIds.length < 2) return [...prev, ...fresh];
+          const t = (m: BoxMail) => new Date(m.date).getTime() || 0;
+          return [...prev, ...fresh].sort((a, b) => t(b) - t(a));
         });
-        setNextPage(res.nextPageToken);
+        setNextPages(res.pages);
       })
       .catch(() => undefined)
       .finally(() => setLoadingMore(false));
   };
 
-  const openMessage = async (id: string) => {
-    if (!activeAccountId) return;
-    const cached = getCachedMail(activeAccountId, id);
+  const accountOf = (id: string) => messages.find((m) => m.id === id)?.accountId ?? selectedAccountId ?? activeAccountId;
+
+  const openMessage = async (id: string, accountId: string) => {
+    setSelectedAccountId(accountId);
+    const cached = getCachedMail(accountId, id);
     if (cached) {
       // Déjà préchargé : ouverture instantanée.
       setSelected(cached);
@@ -238,7 +276,7 @@ export function MailsScreen() {
       return;
     }
     // Ouverture immédiate avec ce que la liste connaît déjà (expéditeur, objet, aperçu), corps ensuite.
-    const item = messages.find((m) => m.id === id);
+    const item = messages.find((m) => m.id === id && m.accountId === accountId);
     if (item) {
       setSelected({
         id: item.id,
@@ -258,40 +296,43 @@ export function MailsScreen() {
       setSelectedLoading(true);
     }
     try {
-      const detail = await loadMail(activeAccountId, id);
+      const detail = await loadMail(accountId, id);
       setSelected((current) => (current && current.id !== id ? current : detail));
     } finally {
       setSelectedLoading(false);
     }
   };
 
-  const openDraft = (id: string) => {
-    setEditingDraftId(id);
+  const openDraft = (id: string, accountId: string) => {
+    setEditingDraft({ id, accountId });
     setComposing(true);
   };
 
   const handleTrash = async (id: string) => {
-    if (!activeAccountId) return;
-    await trashMyMessage(activeAccountId, id);
+    const accountId = accountOf(id);
+    if (!accountId) return;
+    await trashMyMessage(accountId, id);
     setSelected((s) => (s?.id === id ? null : s));
     refresh();
   };
 
   const handleArchive = async (id: string) => {
-    if (!activeAccountId) return;
-    await archiveMyMessage(activeAccountId, id);
+    const accountId = accountOf(id);
+    if (!accountId) return;
+    await archiveMyMessage(accountId, id);
     setSelected((s) => (s?.id === id ? null : s));
     refresh();
   };
 
   const handleForward = async (id: string) => {
-    if (!activeAccountId) return;
-    setForwarding(await loadMail(activeAccountId, id));
+    const accountId = accountOf(id);
+    if (!accountId) return;
+    setForwarding({ accountId, message: await loadMail(accountId, id) });
   };
 
   const handleDownload = async (messageId: string, attachmentId: string, filename: string, mimeType: string) => {
-    if (!activeAccountId) return;
-    const { data } = await getMyAttachment(activeAccountId, messageId, attachmentId);
+    if (!selectedAccountId) return;
+    const { data } = await getMyAttachment(selectedAccountId, messageId, attachmentId);
     const blob = base64UrlToBlob(data, mimeType);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -303,8 +344,8 @@ export function MailsScreen() {
 
   /** Ouvre l'aperçu natif du navigateur (image/PDF) plutôt que de forcer un téléchargement. */
   const handlePreview = async (messageId: string, attachmentId: string, mimeType: string) => {
-    if (!activeAccountId) return;
-    const { data } = await getMyAttachment(activeAccountId, messageId, attachmentId);
+    if (!selectedAccountId) return;
+    const { data } = await getMyAttachment(selectedAccountId, messageId, attachmentId);
     const blob = base64UrlToBlob(data, mimeType);
     const url = URL.createObjectURL(blob);
     window.open(url, "_blank", "noopener,noreferrer");
@@ -326,6 +367,25 @@ export function MailsScreen() {
     if (folder === labelId) setFolder("INBOX");
   };
 
+  /** « Tout marquer comme lu » : boîte(s) affichée(s), compteur remis à zéro tout de suite. */
+  const handleMarkAllRead = async () => {
+    if (!accountIds.length || markingAll || !accounts) return;
+    const where = scope === "all" ? "de toutes les boîtes" : `de ${boxName(accounts.find((a) => a.id === scope)!)}`;
+    if (!window.confirm(`Marquer comme lus tous les mails non lus de la boîte de réception ${where} ?`)) return;
+    setMarkingAll(true);
+    try {
+      const n = await markAllMyInboxRead(accountIds);
+      setMessages((prev) => prev.map((m) => (m.labelIds.includes("INBOX") || folder === "INBOX" ? { ...m, unread: false } : m)));
+      for (const key of [...messagesCache.keys()]) messagesCache.delete(key);
+      setBanner(n ? `✓ ${n} mail${n > 1 ? "s" : ""} marqué${n > 1 ? "s" : ""} comme lu${n > 1 ? "s" : ""}.` : "Aucun mail non lu.");
+      refreshBadges("mails");
+    } catch (e) {
+      setBanner(e instanceof Error ? e.message : "Impossible de tout marquer comme lu.");
+    } finally {
+      setMarkingAll(false);
+    }
+  };
+
   if (accounts === null) {
     return (
       <div className="flex h-full items-center justify-center rounded-panel border border-line bg-card/60 font-mono text-xs uppercase tracking-[0.1em] text-ink-4">
@@ -337,6 +397,15 @@ export function MailsScreen() {
   if (accounts.length === 0) {
     return <ConnectAccountEmptyState />;
   }
+
+  const multiple = accounts.length > 1;
+  const totalUnread = accounts.reduce((n, a) => n + (unreadByAccount?.[a.id] ?? 0), 0);
+  const composeAccountId = editingDraft?.accountId ?? activeAccountId ?? accounts[0].id;
+  const boxButton = (active: boolean) =>
+    `relative flex items-center gap-2 rounded-btn px-3 py-2 text-left text-sm ${menuOpen ? "w-full" : "h-9 w-9 justify-center px-0"} ${
+      active ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"
+    }`;
+  const boxHint = multiple ? " · clic droit : boîte par défaut" : "";
 
   return (
     <div className="flex h-full flex-col gap-2">
@@ -363,6 +432,11 @@ export function MailsScreen() {
       )}
 
       <div className="flex items-center justify-end gap-2">
+        {multiple && (
+          <span className="mr-auto truncate text-sm font-bold text-ink">
+            {scope === "all" ? "Toutes les boîtes" : boxName(accounts.find((a) => a.id === scope) ?? accounts[0])}
+          </span>
+        )}
         <div className="flex min-w-[220px] items-center gap-2 rounded-btn border border-line bg-card px-3 py-2">
           <Search size={14} className="shrink-0 text-ink-4" />
           <input
@@ -379,6 +453,14 @@ export function MailsScreen() {
           )}
         </div>
         <button
+          onClick={() => void handleMarkAllRead()}
+          disabled={markingAll}
+          className="flex h-9 items-center gap-1.5 rounded-btn border border-line px-2.5 text-xs font-semibold text-ink-2 hover:bg-hover disabled:opacity-60"
+          title={`Marquer comme lus tous les mails non lus de la boîte de réception${scope === "all" && multiple ? " (toutes les boîtes)" : ""}`}
+        >
+          <CheckCheck size={15} /> {markingAll ? "En cours…" : "Tout marquer comme lu"}
+        </button>
+        <button
           className="flex h-9 w-9 items-center justify-center rounded-btn border border-line text-ink-3 hover:bg-hover"
           aria-label="Filtres"
           title="Filtres (à venir)"
@@ -394,7 +476,7 @@ export function MailsScreen() {
         </button>
         <button
           onClick={() => {
-            setEditingDraftId(null);
+            setEditingDraft(null);
             setComposing(true);
           }}
           className="flex h-9 w-9 items-center justify-center rounded-btn bg-navy text-white hover:bg-navy-600"
@@ -408,12 +490,12 @@ export function MailsScreen() {
       <div className="flex flex-1 gap-3 overflow-hidden">
         <aside
           className={`hidden shrink-0 flex-col gap-1 overflow-y-auto rounded-panel border border-line bg-card p-2 transition-all duration-300 ease-in-out md:flex ${
-            menuOpen ? "w-52" : "w-12 items-center"
+            menuOpen ? "w-56" : "w-12 items-center"
           }`}
         >
           <button
             onClick={() => setMenuOpen((o) => !o)}
-            className="flex h-9 w-9 items-center justify-center self-start rounded-btn text-ink-3 hover:bg-hover"
+            className="flex h-9 w-9 shrink-0 items-center justify-center self-start rounded-btn text-ink-3 hover:bg-hover"
             aria-label="Déplier le menu"
           >
             <Menu size={17} />
@@ -424,7 +506,7 @@ export function MailsScreen() {
               key={f.id}
               onClick={() => setFolder(f.id)}
               title={f.name}
-              className={`flex items-center gap-2 rounded-btn px-3 py-2 text-left text-sm font-semibold ${
+              className={`flex shrink-0 items-center gap-2 rounded-btn px-3 py-2 text-left text-sm font-semibold ${
                 menuOpen ? "w-full" : "h-9 w-9 justify-center px-0"
               } ${folder === f.id ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"}`}
             >
@@ -432,7 +514,7 @@ export function MailsScreen() {
             </button>
           ))}
 
-          {menuOpen && (
+          {menuOpen && activeAccountId && (
             <>
               <div className="mt-2 flex items-center justify-between px-3 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
                 Libellés
@@ -476,25 +558,54 @@ export function MailsScreen() {
             </>
           )}
 
-          <div className={`my-1 h-px bg-line ${menuOpen ? "w-full" : "w-6"}`} />
+          <div className={`my-1 h-px shrink-0 bg-line ${menuOpen ? "w-full" : "w-6"}`} />
 
-          {accounts.map((acc) => (
-            <button
-              key={acc.id}
-              onClick={() => setActiveAccountId(acc.id)}
-              title={acc.label || acc.email}
-              className={`flex items-center gap-2 rounded-btn px-3 py-2 text-left text-sm ${
-                menuOpen ? "w-full" : "h-9 w-9 justify-center px-0"
-              } ${activeAccountId === acc.id ? "bg-navy text-white" : "text-ink-2 hover:bg-hover"}`}
-            >
-              <Mail size={16} className="shrink-0" />
-              {menuOpen && <span className="truncate">{acc.label || acc.email}</span>}
-            </button>
-          ))}
+          {menuOpen && multiple && (
+            <div className="px-3 pb-0.5 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Boîtes</div>
+          )}
+          <BoxDefaultMenu accounts={accounts} defaultScope={box.defaultScope} onSetDefault={box.setDefault} className="contents">
+            {(onContextMenu) => (
+              <>
+                {multiple && (
+                  <button
+                    onClick={() => box.setScope("all")}
+                    onContextMenu={onContextMenu}
+                    title={`Toutes les boîtes${boxHint}`}
+                    className={`${boxButton(scope === "all")} shrink-0 font-semibold`}
+                  >
+                    <InboxIcon size={16} className="shrink-0" />
+                    {menuOpen && <span className="flex-1 truncate">Toutes les boîtes</span>}
+                    <UnreadBubble
+                      count={totalUnread}
+                      className={menuOpen ? (scope === "all" ? "!bg-white !text-navy" : "") : "absolute -right-1 -top-1 !px-1 !text-[9px] !leading-[14px]"}
+                    />
+                  </button>
+                )}
+                {accounts.map((acc) => (
+                  <button
+                    key={acc.id}
+                    onClick={() => box.setScope(acc.id)}
+                    onContextMenu={multiple ? onContextMenu : undefined}
+                    title={`${acc.label || acc.email}${boxHint}`}
+                    className={`${boxButton(scope === acc.id)} shrink-0`}
+                  >
+                    <Mail size={16} className="shrink-0" style={multiple && scope !== acc.id ? { color: boxTone(accounts, acc.id) } : undefined} />
+                    {menuOpen && <span className="flex-1 truncate">{acc.label || acc.email}</span>}
+                    {multiple && (
+                      <UnreadBubble
+                        count={unreadByAccount?.[acc.id]}
+                        className={menuOpen ? (scope === acc.id ? "!bg-white !text-navy" : "") : "absolute -right-1 -top-1 !px-1 !text-[9px] !leading-[14px]"}
+                      />
+                    )}
+                  </button>
+                ))}
+              </>
+            )}
+          </BoxDefaultMenu>
           <a
             href="/api/oauth/google/start"
             title="Ajouter un compte"
-            className={`flex items-center gap-2 rounded-btn px-3 py-2 text-sm font-semibold text-ink-3 hover:bg-hover ${
+            className={`flex shrink-0 items-center gap-2 rounded-btn px-3 py-2 text-sm font-semibold text-ink-3 hover:bg-hover ${
               menuOpen ? "w-full" : "h-9 w-9 justify-center px-0"
             }`}
           >
@@ -516,11 +627,14 @@ export function MailsScreen() {
             folder === "DRAFTS" &&
             drafts.map((d) => (
               <button
-                key={d.id}
-                onClick={() => openDraft(d.id)}
+                key={`${d.accountId}:${d.id}`}
+                onClick={() => openDraft(d.id, d.accountId)}
                 className="block w-full border-b border-line px-4 py-3 text-left hover:bg-hover"
               >
-                <div className="truncate text-sm font-medium text-ink-2">{d.to || "(destinataire vide)"}</div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-medium text-ink-2">{d.to || "(destinataire vide)"}</span>
+                  {scope === "all" && multiple && <BoxTag accounts={accounts} accountId={d.accountId} />}
+                </div>
                 <div className="truncate text-sm text-ink-2">{d.subject}</div>
                 <div className="truncate text-xs text-ink-4">{d.snippet}</div>
               </button>
@@ -533,19 +647,22 @@ export function MailsScreen() {
             folder !== "DRAFTS" &&
             messages.map((m) => (
               <div
-                key={m.id}
+                key={`${m.accountId}:${m.id}`}
                 className={`group flex items-center gap-1 border-b border-line pr-1.5 hover:bg-hover ${
                   selected?.id === m.id ? "bg-sel-bg" : ""
                 }`}
               >
-                <button onClick={() => openMessage(m.id)} className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left">
+                <button onClick={() => openMessage(m.id, m.accountId)} className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left">
                   <SenderAvatar name={m.from} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className={`truncate text-sm ${m.unread ? "font-bold text-ink" : "font-medium text-ink-2"}`}>
                         {parseSenderName(m.from)}
                       </span>
-                      {m.hasAttachments && <Paperclip size={12} className="shrink-0 text-ink-4" />}
+                      <span className="flex shrink-0 items-center gap-1">
+                        {m.hasAttachments && <Paperclip size={12} className="shrink-0 text-ink-4" />}
+                        {scope === "all" && multiple && <BoxTag accounts={accounts} accountId={m.accountId} />}
+                      </span>
                     </div>
                     <div className="truncate text-sm text-ink-2">{m.subject}</div>
                     <div className="truncate text-xs text-ink-4">{m.snippet}</div>
@@ -579,7 +696,7 @@ export function MailsScreen() {
                 </div>
               </div>
             ))}
-          {!loading && folder !== "DRAFTS" && nextPage && <LoadMoreMails loading={loadingMore} onLoad={loadMore} />}
+          {!loading && folder !== "DRAFTS" && hasMorePages(nextPages) && <LoadMoreMails loading={loadingMore} onLoad={loadMore} />}
         </div>
 
         <div className="overflow-y-auto rounded-panel border border-line bg-card p-6">
@@ -603,15 +720,25 @@ export function MailsScreen() {
                       {selected.cc ? ` · Cc : ${selected.cc}` : ""}
                     </div>
                   )}
+                  {multiple && selectedAccountId && (
+                    <div className="mt-1">
+                      <BoxTag accounts={accounts} accountId={selectedAccountId} />
+                    </div>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   <button onClick={() => setReplying(true)} className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-2 hover:bg-hover" title="Répondre" aria-label="Répondre">
                     <Reply size={15} />
                   </button>
-                  <button onClick={() => setForwarding(selected)} className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-2 hover:bg-hover" title="Transférer" aria-label="Transférer">
+                  <button
+                    onClick={() => selectedAccountId && setForwarding({ accountId: selectedAccountId, message: selected })}
+                    className="flex h-8 w-8 items-center justify-center rounded-btn border border-line text-ink-2 hover:bg-hover"
+                    title="Transférer"
+                    aria-label="Transférer"
+                  >
                     <Forward size={15} />
                   </button>
-                  {activeAccountId && (
+                  {selectedAccountId && (
                     <div className="relative">
                       <button
                         onClick={() => setLinkingToCard((v) => !v)}
@@ -624,7 +751,7 @@ export function MailsScreen() {
                       <LinkEmailToCardPopover
                         open={linkingToCard}
                         onClose={() => setLinkingToCard(false)}
-                        accountId={activeAccountId}
+                        accountId={selectedAccountId}
                         messageId={selected.id}
                         hasAttachments={selected.attachments.length > 0}
                         onDone={(message, card) => {
@@ -689,30 +816,31 @@ export function MailsScreen() {
         </div>
       </div>
 
-      {composing && activeAccountId && (
+      {composing && (
         <ComposeModal
-          accountId={activeAccountId}
-          draftId={editingDraftId}
+          accounts={accounts}
+          accountId={composeAccountId}
+          draftId={editingDraft?.id ?? null}
           onClose={() => {
             setComposing(false);
-            setEditingDraftId(null);
+            setEditingDraft(null);
             refresh();
           }}
         />
       )}
 
-      {replying && activeAccountId && selected && (
+      {replying && selectedAccountId && selected && (
         <ReplyModal
-          accountId={activeAccountId}
+          accountId={selectedAccountId}
           message={selected}
           onClose={() => setReplying(false)}
         />
       )}
 
-      {forwarding && activeAccountId && (
+      {forwarding && (
         <ForwardModal
-          accountId={activeAccountId}
-          message={forwarding}
+          accountId={forwarding.accountId}
+          message={forwarding.message}
           onClose={() => setForwarding(null)}
         />
       )}
@@ -721,14 +849,18 @@ export function MailsScreen() {
 }
 
 function ComposeModal({
-  accountId,
+  accounts,
+  accountId: initialAccountId,
   draftId,
   onClose,
 }: {
+  accounts: Account[];
   accountId: string;
   draftId: string | null;
   onClose: () => void;
 }) {
+  // Plusieurs boîtes : choix de l'adresse d'envoi (celle du brouillon reste fixe).
+  const [accountId, setAccountId] = useState(initialAccountId);
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [bcc, setBcc] = useState("");
@@ -790,6 +922,23 @@ function ComposeModal({
           </button>
         </div>
         <div className="space-y-3">
+          {accounts.length > 1 && (
+            <label className="flex items-center gap-2 text-sm text-ink-3">
+              <span className="shrink-0">De</span>
+              <select
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                disabled={!!currentDraftId}
+                className="w-full rounded-btn border border-line bg-card px-3 py-2 text-sm font-semibold text-ink-2 outline-none disabled:opacity-70"
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.email}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <DirectoryEmailInput
             placeholder="À"
             value={to}

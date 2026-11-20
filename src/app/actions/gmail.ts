@@ -12,6 +12,7 @@ import {
   trashMessage,
   untrashMessage,
   modifyMessageLabels,
+  markAllInboxRead,
   listLabels,
   createLabel,
   deleteLabel,
@@ -98,6 +99,14 @@ export async function modifyMyMessageLabels(
   const userId = await requireUserId();
   const account = await getOwnedGoogleAccount(accountId, userId);
   await modifyMessageLabels(account, messageId, changes);
+}
+
+/** Tout marquer comme lu dans la boîte de réception des comptes donnés (un compte ou « Toutes les boîtes »). */
+export async function markAllMyInboxRead(accountIds: string[]) {
+  const userId = await requireUserId();
+  const accounts = await Promise.all(accountIds.map((id) => getOwnedGoogleAccount(id, userId)));
+  const counts = await Promise.all(accounts.map((a) => markAllInboxRead(a)));
+  return counts.reduce((n, c) => n + c, 0);
 }
 
 export async function listMyLabels(accountId: string) {

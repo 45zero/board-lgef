@@ -7,6 +7,8 @@ import { fr } from "date-fns/locale";
 import { CALENDAR_ORG_KEYS } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
 import type { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
+import type { AccountScope } from "@/hooks/board/useCalendarDefaults";
+import { BoxDefaultMenu, boxName, boxTone } from "@/components/board/mail/MailBoxes";
 
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
 
@@ -25,8 +27,10 @@ export function CalendarSidebar({
   onCreateEvent,
   onVoiceEvent,
   accounts,
-  googleAccountId,
-  onGoogleAccountChange,
+  googleScope,
+  onGoogleScopeChange,
+  googleDefaultScope,
+  onGoogleDefaultChange,
 }: {
   anchorDate: Date;
   onSelectDay: (d: Date) => void;
@@ -41,8 +45,11 @@ export function CalendarSidebar({
   onCreateEvent: () => void;
   onVoiceEvent: () => void;
   accounts: Account[] | null;
-  googleAccountId: string | null;
-  onGoogleAccountChange: (id: string) => void;
+  /** Agendas Google affichés : « all » ou un compte ; clic droit = réglage par défaut. */
+  googleScope: AccountScope;
+  onGoogleScopeChange: (scope: AccountScope) => void;
+  googleDefaultScope: AccountScope;
+  onGoogleDefaultChange: (scope: AccountScope) => void;
 }) {
   const [miniMonth, setMiniMonth] = useState(anchorDate);
 
@@ -57,7 +64,7 @@ export function CalendarSidebar({
   if (collapsed) return null;
 
   return (
-    <aside className="hidden w-[240px] shrink-0 flex-col gap-4 overflow-hidden rounded-panel border border-line bg-card p-3 transition-all duration-300 ease-in-out lg:flex">
+    <aside className="hidden w-[240px] shrink-0 flex-col gap-4 overflow-y-auto overscroll-contain rounded-panel border border-line bg-card p-3 transition-all duration-300 ease-in-out lg:flex [&>*]:shrink-0">
       <div className="flex items-center justify-between">
         <button
           onClick={onCreateEvent}
@@ -177,20 +184,51 @@ export function CalendarSidebar({
             </div>
           </div>
 
-          {accounts && accounts.length > 0 && (
+          {accounts && accounts.length === 1 && (
             <div>
               <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Compte Google</div>
-              <select
-                value={googleAccountId ?? ""}
-                onChange={(e) => onGoogleAccountChange(e.target.value)}
-                className="w-full rounded-btn border border-line bg-card px-2 py-1.5 text-xs font-semibold text-ink-2"
+              <div className="truncate px-1.5 text-xs font-semibold text-ink-2" title={accounts[0].email}>
+                {boxName(accounts[0])}
+              </div>
+            </div>
+          )}
+          {/* Plusieurs comptes : tous les agendas Google ensemble ou un seul ; clic droit = par défaut. */}
+          {accounts && accounts.length > 1 && (
+            <div>
+              <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Agendas Google</div>
+              <BoxDefaultMenu
+                accounts={accounts}
+                defaultScope={googleDefaultScope}
+                onSetDefault={onGoogleDefaultChange}
+                title="Agendas Google affichés par défaut"
+                allLabel="Tous les agendas"
+                className="relative flex flex-col gap-1"
               >
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.label || a.email}
-                  </option>
-                ))}
-              </select>
+                {(onContextMenu) => (
+                  <>
+                    {[{ id: "all", label: "Tous les agendas", color: null as string | null, email: "Tous les comptes Google" }, ...accounts.map((a) => ({ id: a.id, label: boxName(a), color: boxTone(accounts, a.id), email: a.email }))].map((o) => {
+                      const active = googleScope === o.id;
+                      return (
+                        <button
+                          key={o.id}
+                          onClick={() => onGoogleScopeChange(o.id)}
+                          onContextMenu={onContextMenu}
+                          title={`${o.email} · clic droit : affichage par défaut`}
+                          className={`flex items-center gap-2 rounded-btn px-1.5 py-1 text-left text-xs ${
+                            active ? "bg-navy font-semibold text-white" : "text-ink-2 hover:bg-hover"
+                          }`}
+                        >
+                          <span
+                            className="h-3 w-3 shrink-0 rounded-full border"
+                            style={{ background: active ? (o.color ?? "#fff") : "transparent", borderColor: active ? "#fff" : (o.color ?? "currentColor") }}
+                          />
+                          <span className="truncate">{o.label}</span>
+                        </button>
+                      );
+                    })}
+                  </>
+                )}
+              </BoxDefaultMenu>
             </div>
           )}
 

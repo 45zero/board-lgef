@@ -11,12 +11,23 @@ import { useAuth } from "@/contexts/AuthContext";
  * dans le navigateur pour un affichage immédiat. Le clic simple n'agit que sur la session.
  */
 export type CalendarView = "day" | "week" | "month" | "map";
-export type CalendarDefaults = { view: CalendarView; mine: boolean; video: boolean; photo: boolean };
+/** Boîte ou agenda Google affiché : « all » (toutes) ou l'id d'un compte connecté. */
+export type AccountScope = "all" | string;
+export type CalendarDefaults = {
+  view: CalendarView;
+  mine: boolean;
+  video: boolean;
+  photo: boolean;
+  /** Comptes Google (même réglage du compte, clic droit) : Mails, tableau de bord, agendas Google du calendrier. */
+  mailBox: AccountScope;
+  dashMailBox: AccountScope;
+  googleCalendars: AccountScope;
+};
 
 const KEY = "lgef-board:calendar-defaults";
 const LEGACY_COVERAGE = "lgef-board:calendar-coverage-defaults";
 const LEGACY_MINE = "lgef-board:calendar-mine-only";
-const FALLBACK: CalendarDefaults = { view: "month", mine: false, video: false, photo: false };
+const FALLBACK: CalendarDefaults = { view: "month", mine: false, video: false, photo: false, mailBox: "all", dashMailBox: "all", googleCalendars: "all" };
 
 function readLocal(): CalendarDefaults {
   try {

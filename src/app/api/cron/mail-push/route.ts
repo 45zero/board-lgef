@@ -43,6 +43,10 @@ export async function GET(request: Request) {
   const push = (userId: string, title: string, body: string, data: Record<string, string>) =>
     sendPush({ userId, title, body, type: "mail", channel: "mail", icon: "ic_stat_gmail", native: true, data: { ...data, large_icon: "gmail" } });
 
+  // Plusieurs boîtes connectées : chaque notification dit quelle adresse a reçu le mail.
+  const boxesPerUser = new Map<string, number>();
+  for (const a of accounts) boxesPerUser.set(a.user_id, (boxesPerUser.get(a.user_id) ?? 0) + 1);
+
   let pushed = 0;
   const errors: string[] = [];
   for (const account of accounts) {
@@ -61,16 +65,19 @@ export async function GET(request: Request) {
       const fresh: NewInboxMail[] = await listNewPrimaryInbox(account, Number(state.last_internal_date));
       if (!fresh.length) continue;
 
-      const data = { route: "/?app=mails", account_id: account.id };
+      const data = { route: `/?app=mails&mailAccount=${account.id}`, account_id: account.id, account_email: account.email };
+      // « Pour adresse » en tête du texte (visible sur le Mac comme sur le téléphone, notification repliée).
+      const box = (boxesPerUser.get(account.user_id) ?? 0) > 1 ? account.email : null;
       if (fresh.length <= MAX_SINGLE) {
         for (const m of fresh) {
           // Objet, puis le début du mail (quelques lignes visibles en dépliant la notification).
-          const body = [m.subject, m.snippet.slice(0, 280)].filter(Boolean).join("\n");
+          const body = [box ? `Pour ${box} · ${m.subject}` : m.subject, m.snippet.slice(0, 280)].filter(Boolean).join("\n");
           if (await push(account.user_id, senderName(m.from), body, { ...data, message_id: m.id })) pushed++;
         }
       } else {
         const senders = [...new Set(fresh.map((m) => senderName(m.from)))].slice(0, 4).join(", ");
-        if (await push(account.user_id, `${fresh.length} nouveaux mails`, senders, data)) pushed++;
+        const title = box ? `${fresh.length} nouveaux mails pour ${box}` : `${fresh.length} nouveaux mails`;
+        if (await push(account.user_id, title, senders, data)) pushed++;
       }
       await prisma.$executeRaw`
         update public.mail_push_state

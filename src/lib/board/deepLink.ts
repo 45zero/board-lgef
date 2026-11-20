@@ -44,3 +44,18 @@ export function clearAppParam() {
   url.searchParams.delete("app");
   window.history.replaceState(null, "", url.pathname + url.search + url.hash);
 }
+
+/** Boîte à ouvrir dans Mails (/?app=mails&mailAccount=<id>, notification d'un nouveau mail). */
+export function readOpenMailAccountParam(): string | null {
+  if (typeof window === "undefined") return null;
+  const id = new URL(window.location.href).searchParams.get("mailAccount");
+  return id && /^[0-9a-f-]{36}$/.test(id) ? id : null;
+}
+
+export function clearOpenMailAccountParam() {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("mailAccount")) return;
+  url.searchParams.delete("mailAccount");
+  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+}

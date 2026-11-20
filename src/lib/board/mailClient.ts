@@ -17,12 +17,50 @@ export async function loadMailList(accountId: string, opts: { labelIds?: string[
   return body as MailList;
 }
 
+/** Mail d'une liste, avec le compte auquel il appartient (indispensable en « Toutes les boîtes »). */
+export type BoxMail = MailList["messages"][number] & { accountId: string };
+/** Page suivante de chaque compte (null : plus rien à charger pour ce compte). */
+export type BoxPages = Record<string, string | null>;
+
+const mailTime = (m: { date: string }) => {
+  const t = new Date(m.date).getTime();
+  return Number.isNaN(t) ? 0 : t;
+};
+
+/**
+ * Liste d'un dossier sur une ou plusieurs boîtes, fusionnée du plus récent au plus ancien.
+ * `pages` : suite de la liste (seuls les comptes qui ont encore une page sont interrogés). Un compte
+ * en erreur est ignoré tant qu'un autre répond.
+ */
+export async function loadBoxesList(
+  accountIds: string[],
+  opts: { labelIds?: string[]; query?: string } = {},
+  pages?: BoxPages
+): Promise<{ messages: BoxMail[]; pages: BoxPages }> {
+  const targets = pages ? accountIds.filter((id) => pages[id]) : accountIds;
+  const results = await Promise.allSettled(
+    targets.map((id) => loadMailList(id, { ...opts, pageToken: pages?.[id] ?? undefined }).then((r) => ({ id, r })))
+  );
+  const ok = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+  if (!ok.length && results.length) throw (results[0] as PromiseRejectedResult).reason;
+  const nextPages: BoxPages = { ...(pages ?? {}) };
+  for (const id of targets) nextPages[id] = null;
+  for (const { id, r } of ok) nextPages[id] = r.nextPageToken;
+  const messages = ok.flatMap(({ id, r }) => r.messages.map((m) => ({ ...m, accountId: id })));
+  messages.sort((a, b) => mailTime(b) - mailTime(a));
+  return { messages, pages: nextPages };
+}
+
+export const hasMorePages = (pages: BoxPages | null) => !!pages && Object.values(pages).some(Boolean);
+
 /**
  * Mise à jour en direct de la première page sans perdre les pages déjà chargées plus bas : la nouvelle
  * première page, puis les mails qui suivaient son dernier élément. `null` : liste à remplacer.
  */
 export function mergeFirstPage<T extends { id: string }>(prev: T[], first: T[]): T[] | null {
   if (prev.length <= first.length || first.length === 0) return null;
+  // Plusieurs boîtes : la première page de chacune ne s'enchaîne pas proprement avec la suite.
+  if (new Set(first.map((m) => (m as { accountId?: string }).accountId)).size > 1) return null;
   const k = prev.findIndex((m) => m.id === first[first.length - 1].id);
   return k === -1 ? null : [...first, ...prev.slice(k + 1)];
 }

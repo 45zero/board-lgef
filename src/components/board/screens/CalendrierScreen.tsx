@@ -28,6 +28,7 @@ import { useCalendarEvents } from "@/hooks/board/useCalendarEvents";
 import { useSolicitedFilter } from "@/hooks/board/useSolicitedFilter";
 import { passesCoverageFilters, useCoverageFilters } from "@/hooks/board/useCoverageFilters";
 import { useCalendarDefaults, type CalendarView } from "@/hooks/board/useCalendarDefaults";
+import { useAccountScope } from "@/hooks/board/useAccountScope";
 import { DefaultMenu } from "@/components/board/calendar/DefaultMenu";
 import { DayWeatherBadge, useForecast } from "@/components/board/calendar/DayWeather";
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
@@ -56,7 +57,8 @@ const DAY_HEADER_H = 56;
 const WEEK_OPTS = { weekStartsOn: 1 as const, locale: fr };
 
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
-type GoogleEventItem = Awaited<ReturnType<typeof listMyEvents>>[number];
+/** Événement Google, avec le compte d'où il vient (plusieurs agendas Google affichés ensemble). */
+type GoogleEventItem = Awaited<ReturnType<typeof listMyEvents>>[number] & { accountId: string };
 type ViewMode = CalendarView;
 
 function hourFloat(iso: string) {
@@ -112,7 +114,10 @@ export function CalendrierScreen() {
   const { events, refetch } = useCalendarEvents(rangeStart, rangeEnd);
 
   const [accounts, setAccounts] = useState<Account[] | null>(null);
-  const [googleAccountId, setGoogleAccountId] = useState<string | null>(null);
+  // Agendas Google affichés : tous les comptes ou un seul (clic droit : réglage par défaut).
+  const googleBox = useAccountScope("googleCalendars", accounts);
+  const googleAccountIds = googleBox.accountIds;
+  const googleIdsKey = googleAccountIds.join(",");
   const [googleCalendarId] = useState("primary");
   const [googleEvents, setGoogleEvents] = useState<GoogleEventItem[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -160,46 +165,49 @@ export function CalendrierScreen() {
   };
 
   const refetchGoogleEvents = () => {
-    if (!googleAccountId) return;
-    listMyEvents(googleAccountId, {
-      calendarId: googleCalendarId,
-      timeMin: rangeStart.toISOString(),
-      timeMax: rangeEnd.toISOString(),
-    })
-      .then(async (items) => {
-        // Copies Google des événements du board : masquées (déjà affichées en vrai) ou, si
-        // l'événement a disparu, supprimées de Google. Seul ce qui a été créé dans Google reste.
-        const sorted = await reconcileGoogleMirrors(
-          googleAccountId,
-          items.map((e) => ({ googleEventId: e.id, calendarId: e.calendarId, boardEventId: e.boardEventId }))
-        ).catch(() => null);
-        const drop = new Set([...(sorted?.hidden ?? []), ...(sorted?.removed ?? [])]);
-        setGoogleEvents(items.filter((e) => !drop.has(e.id)));
-      })
-      .catch(() => setGoogleEvents([]));
+    if (!googleAccountIds.length) return;
+    const ids = googleAccountIds;
+    Promise.all(
+      ids.map((accountId) =>
+        listMyEvents(accountId, {
+          calendarId: googleCalendarId,
+          timeMin: rangeStart.toISOString(),
+          timeMax: rangeEnd.toISOString(),
+        })
+          .then(async (items) => {
+            // Copies Google des événements du board : masquées (déjà affichées en vrai) ou, si
+            // l'événement a disparu, supprimées de Google. Seul ce qui a été créé dans Google reste.
+            const sorted = await reconcileGoogleMirrors(
+              accountId,
+              items.map((e) => ({ googleEventId: e.id, calendarId: e.calendarId, boardEventId: e.boardEventId }))
+            ).catch(() => null);
+            const drop = new Set([...(sorted?.hidden ?? []), ...(sorted?.removed ?? [])]);
+            return items.filter((e) => !drop.has(e.id)).map((e) => ({ ...e, accountId }));
+          })
+          .catch(() => [] as GoogleEventItem[])
+      )
+    ).then((lists) => setGoogleEvents(lists.flat()));
   };
 
   useEffect(() => {
     getMyConnectedAccounts().then((accs) => {
       setAccounts(accs);
-      if (accs.length > 0) setGoogleAccountId(accs[0].id);
     });
   }, []);
 
   useEffect(() => {
-    if (!googleAccountId) return;
-    listMyCalendars(googleAccountId).catch(() => []);
-  }, [googleAccountId]);
+    for (const id of googleIdsKey ? googleIdsKey.split(",") : []) listMyCalendars(id).catch(() => []);
+  }, [googleIdsKey]);
 
   useEffect(() => {
-    if (!googleAccountId) {
+    if (!googleIdsKey) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- reset on disconnect, no async fetch involved
       setGoogleEvents([]);
       return;
     }
     refetchGoogleEvents();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [googleAccountId, googleCalendarId, rangeStart, rangeEnd]);
+  }, [googleIdsKey, googleCalendarId, rangeStart, rangeEnd]);
 
   const visibleEvents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -358,8 +366,10 @@ export function CalendrierScreen() {
         }}
         onVoiceEvent={() => setVoiceOpen(true)}
         accounts={accounts}
-        googleAccountId={googleAccountId}
-        onGoogleAccountChange={setGoogleAccountId}
+        googleScope={googleBox.scope}
+        onGoogleScopeChange={googleBox.setScope}
+        googleDefaultScope={googleBox.defaultScope}
+        onGoogleDefaultChange={googleBox.setDefault}
       />
 
       <div className="flex h-full min-w-0 flex-1 flex-col gap-3 pt-2">
@@ -958,9 +968,9 @@ export function CalendrierScreen() {
         />
       )}
 
-      {editingGoogle && googleAccountId && (
+      {editingGoogle && (editingGoogle !== "new" || googleAccountIds.length > 0) && (
         <GoogleEventModal
-          accountId={googleAccountId}
+          accountId={editingGoogle === "new" ? googleAccountIds[0] : editingGoogle.accountId}
           calendarId={googleCalendarId}
           event={editingGoogle === "new" ? null : editingGoogle}
           onClose={() => {

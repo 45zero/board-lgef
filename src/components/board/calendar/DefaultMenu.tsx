@@ -13,14 +13,20 @@ export function DefaultMenu({
   title,
   options,
   footnote = "Le clic simple change l'affichage pour cette session seulement.",
+  atCursor = false,
+  className = "relative",
   children,
 }: {
   title: string;
   options: DefaultOption[];
   footnote?: string;
+  /** Menu posé au curseur (position fixe) : pas coupé par une colonne qui défile (volets latéraux). */
+  atCursor?: boolean;
+  className?: string;
   children: (onContextMenu: (e: React.MouseEvent) => void) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -35,13 +41,18 @@ export function DefaultMenu({
   }, [open]);
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className={className}>
       {children((e) => {
         e.preventDefault();
+        // 256 px de large, ~200 de haut : gardé dans la fenêtre.
+        setAt({ x: Math.max(8, Math.min(e.clientX, window.innerWidth - 264)), y: Math.max(8, Math.min(e.clientY, window.innerHeight - 220)) });
         setOpen(true);
       })}
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1.5 w-64 rounded-card border border-line bg-card p-1.5 shadow-card">
+        <div
+          className={`${atCursor && at ? "fixed z-[80]" : "absolute right-0 top-full z-30 mt-1.5"} w-64 rounded-card border border-line bg-card p-1.5 text-left shadow-card`}
+          style={atCursor && at ? { left: at.x, top: at.y } : undefined}
+        >
           <p className="px-2 pb-1 pt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-4">{title}</p>
           {options.map((o) => (
             <button

@@ -11,6 +11,8 @@ import { myMissingInvoices } from "@/lib/board/gedCore";
 export type AppBadges = {
   /** Mails non lus (boîtes de réception de tous les comptes connectés). */
   mails: number;
+  /** Mails non lus par compte connecté (id du compte → nombre) : pastilles des boîtes quand il y en a plusieurs. */
+  mailsByAccount: Record<string, number>;
   /** Événements du jour. */
   calendrier: number;
   /** Inscriptions des événements à venir : invitations envoyées / pas encore envoyées. */
@@ -60,8 +62,11 @@ export async function GET(request: Request) {
       ? safe(async () => {
           const accounts = await prisma.connectedAccount.findMany({ where: { user_id: userId, provider: "google" } });
           const counts = await Promise.all(accounts.map((a) => getInboxUnreadCount(a).catch(() => 0)));
-          return counts.reduce((n, c) => n + c, 0);
-        }, 0)
+          return {
+            total: counts.reduce((n, c) => n + c, 0),
+            byAccount: Object.fromEntries(accounts.map((a, i) => [a.id, counts[i]])) as Record<string, number>,
+          };
+        }, { total: 0, byAccount: {} as Record<string, number> })
       : undefined,
     withDb
       ? safe(async () => {
@@ -145,6 +150,6 @@ export async function GET(request: Request) {
       : undefined,
   ]);
 
-  const body: Partial<AppBadges> = { mails, calendrier, inscription, audiovisuel, frais, trello, fief };
+  const body: Partial<AppBadges> = { mails: mails?.total, mailsByAccount: mails?.byAccount, calendrier, inscription, audiovisuel, frais, trello, fief };
   return NextResponse.json(body, { headers: { "Cache-Control": "private, no-store" } });
 }

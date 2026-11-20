@@ -14,8 +14,8 @@ import type { AppBadges } from "@/app/api/badges/route";
 /** Événement qui demande le recalcul des compteurs (voir refreshBadges). */
 const BADGES_REFRESH_EVENT = "board:badges-refresh";
 /** Recalcule les pastilles des modules (après une action sur une table non suivie en direct). */
-export function refreshBadges() {
-  window.dispatchEvent(new Event(BADGES_REFRESH_EVENT));
+export function refreshBadges(scope: "db" | "mails" = "db") {
+  window.dispatchEvent(new CustomEvent(BADGES_REFRESH_EVENT, { detail: scope }));
 }
 
 export const LIVE_TABLES = [
@@ -134,7 +134,8 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     const onVisible = () => visible() && void loadBadges();
     document.addEventListener("visibilitychange", onVisible);
     // Compteur dont la table n'est pas suivie en direct (ex. demandes FIEF) : l'écran demande un recalcul.
-    const onRefresh = () => void loadBadges("db");
+    // Mails : après « Tout marquer comme lu », pastilles remises à jour sans attendre les 30 s.
+    const onRefresh = (e: Event) => void loadBadges((e as CustomEvent<"db" | "mails">).detail === "mails" ? "mails" : "db");
     window.addEventListener(BADGES_REFRESH_EVENT, onRefresh);
     return () => {
       window.removeEventListener(BADGES_REFRESH_EVENT, onRefresh);

@@ -252,6 +252,26 @@ export async function getInboxUnreadCount(account: ConnectedAccount): Promise<nu
   return count;
 }
 
+/**
+ * « Tout marquer comme lu » : tous les mails non lus de la boîte de réception (tous onglets, pour que
+ * le compteur retombe vraiment à zéro), par lots de 500. Plafond de sécurité : 10 000 mails par appel.
+ * Renvoie le nombre de mails marqués.
+ */
+export async function markAllInboxRead(account: ConnectedAccount): Promise<number> {
+  const gmail = await gmailClient(account);
+  let marked = 0;
+  // Pas de pageToken : chaque lot marqué sort de la requête « is:unread », on relit la tête.
+  for (let round = 0; round < 20; round++) {
+    const { data } = await gmail.users.messages.list({ userId: "me", q: "in:inbox is:unread", maxResults: 500, fields: "messages/id" });
+    const ids = (data.messages ?? []).map((m) => m.id ?? "").filter(Boolean);
+    if (!ids.length) break;
+    await gmail.users.messages.batchModify({ userId: "me", requestBody: { ids, removeLabelIds: ["UNREAD"] } });
+    marked += ids.length;
+    if (ids.length < 500) break;
+  }
+  return marked;
+}
+
 export async function listLabels(account: ConnectedAccount): Promise<LabelItem[]> {
   const gmail = await gmailClient(account);
   const { data } = await gmail.users.labels.list({ userId: "me" });

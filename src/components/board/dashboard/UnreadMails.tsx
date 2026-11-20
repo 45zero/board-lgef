@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Archive, ChevronRight, Forward, Mail, Paperclip, Reply, Send, Trash2, X } from "lucide-react";
+import { Archive, CheckCheck, ChevronRight, Forward, Mail, Paperclip, Reply, Send, Trash2, X } from "lucide-react";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
-import { archiveMyMessage, forwardMyMessage, modifyMyMessageLabels, replyToMyMessage, trashMyMessage } from "@/app/actions/gmail";
+import { archiveMyMessage, forwardMyMessage, markAllMyInboxRead, modifyMyMessageLabels, replyToMyMessage, trashMyMessage } from "@/app/actions/gmail";
 import { loadMail, loadMailList, forgetMail, type MailDetail, type MailList } from "@/lib/board/mailClient";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { EmailBody } from "@/components/board/mail/EmailBody";
 import { SenderAvatar, parseSenderName } from "@/components/board/mail/SenderAvatar";
-import { useLive } from "@/components/board/live/LiveProvider";
+import { refreshBadges, useLive } from "@/components/board/live/LiveProvider";
+import { useAccountScope } from "@/hooks/board/useAccountScope";
+import { BoxChips, BoxTag, boxName } from "@/components/board/mail/MailBoxes";
 
 // Accueil — « Mes mails non lus » : les derniers mails non lus de la boîte de réception (comptes
 // Google connectés), lus et répondus dans une popup sans quitter le tableau de bord.
@@ -215,15 +217,29 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
   const [noAccount, setNoAccount] = useState(false);
   const [error, setError] = useState(false);
   const [open, setOpen] = useState<{ item: Item; mode: Mode } | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>(() => (readCache<Account[]>("mail:accounts") ?? []).filter((a) => a.provider === "google"));
+  const [markingAll, setMarkingAll] = useState(false);
+  // Plusieurs boîtes : « Toutes » ou une adresse (clic droit sur les pastilles : par défaut).
+  const box = useAccountScope("dashMailBox", accounts);
+  const multiple = accounts.length > 1;
   // Total exact (onglet Principal), le même que le rail / dock ; la liste n'en charge que 15.
-  const total = useLive().badges?.mails;
+  const badges = useLive().badges;
+  const byAccount = badges?.mailsByAccount;
+  const total = box.scope === "all" || !byAccount ? badges?.mails : (byAccount[box.scope] ?? 0);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const accounts = (readCache<Account[]>("mail:accounts") ?? (await getMyConnectedAccounts())).filter((a) => a.provider === "google");
+        const cachedAccounts = readCache<Account[]>("mail:accounts");
+        const accounts = (cachedAccounts ?? (await getMyConnectedAccounts())).filter((a) => a.provider === "google");
         if (cancelled) return;
+        setAccounts(accounts);
+        // Compte connecté depuis : liste des comptes relue au passage suivant.
+        if (cachedAccounts) void getMyConnectedAccounts().then((fresh) => {
+          writeCache("mail:accounts", fresh);
+          if (!cancelled && fresh.length !== cachedAccounts.length) setAccounts(fresh.filter((a) => a.provider === "google"));
+        }).catch(() => undefined);
         if (!accounts.length) {
           setNoAccount(true);
           setItems([]);
@@ -278,23 +294,70 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
     }
   };
 
-  const shown = (items ?? []).slice(0, MAX);
-  const more = Math.max((total ?? items?.length ?? 0) - shown.length, 0);
+  const inScope = (items ?? []).filter((m) => box.scope === "all" || m.accountId === box.scope);
+  const shown = inScope.slice(0, MAX);
+  const more = Math.max((total ?? inScope.length) - shown.length, 0);
+
+  /** « Tout marquer comme lu » : boîte(s) affichée(s) ; liste et compteurs remis à zéro tout de suite. */
+  const markAllRead = async () => {
+    if (markingAll || !box.accountIds.length) return;
+    const current = accounts.find((a) => a.id === box.scope);
+    const where = current && multiple ? ` de ${boxName(current)}` : multiple ? " de toutes les boîtes" : "";
+    if (!window.confirm(`Marquer comme lus tous les mails non lus de la boîte de réception${where} ?`)) return;
+    setMarkingAll(true);
+    try {
+      await markAllMyInboxRead(box.accountIds);
+      setItems((prev) => {
+        const next = (prev ?? []).filter((m) => !box.accountIds.includes(m.accountId));
+        writeCache("dashboard:unread", next);
+        return next;
+      });
+      refreshBadges("mails");
+    } catch {
+      window.alert("Impossible de tout marquer comme lu pour le moment.");
+    } finally {
+      setMarkingAll(false);
+    }
+  };
 
   return (
     <>
-      <div className="mb-2 flex items-baseline justify-between gap-2">
-        <h2 className="flex items-center gap-1.5 text-sm font-extrabold text-ink md:text-base">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="flex shrink-0 items-center gap-1.5 text-sm font-extrabold text-ink md:text-base">
           Mes mails non lus
-          {(total ?? items?.length ?? 0) > 0 && (
-            <span className="rounded-full bg-red px-1.5 text-[10px] font-bold text-white">{(total ?? items!.length) > 99 ? "99+" : (total ?? items!.length)}</span>
+          {(total ?? inScope.length) > 0 && (
+            <span className="rounded-full bg-red px-1.5 text-[10px] font-bold text-white">{(total ?? inScope.length) > 99 ? "99+" : (total ?? inScope.length)}</span>
           )}
         </h2>
-        {onOpenMails && (
-          <button onClick={onOpenMails} className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-link hover:underline md:text-xs">
-            Mails <ChevronRight size={12} />
-          </button>
-        )}
+        <div className="flex min-w-0 items-center gap-1.5">
+          {/* Plusieurs boîtes : pastilles en petit à côté de « Mails », non lus sur chacune. */}
+          {multiple && (
+            <BoxChips
+              accounts={accounts}
+              scope={box.scope}
+              onScope={box.setScope}
+              defaultScope={box.defaultScope}
+              onSetDefault={box.setDefault}
+              unread={byAccount}
+            />
+          )}
+          {(total ?? inScope.length) > 0 && (
+            <button
+              onClick={() => void markAllRead()}
+              disabled={markingAll}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-btn text-ink-3 hover:bg-hover hover:text-ink disabled:opacity-50"
+              title={multiple && box.scope === "all" ? "Tout marquer comme lu (toutes les boîtes)" : "Tout marquer comme lu"}
+              aria-label="Tout marquer comme lu"
+            >
+              <CheckCheck size={14} />
+            </button>
+          )}
+          {onOpenMails && (
+            <button onClick={onOpenMails} className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-link hover:underline md:text-xs">
+              Mails <ChevronRight size={12} />
+            </button>
+          )}
+        </div>
       </div>
 
       {items === null ? (
@@ -326,7 +389,10 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
                   <span className="truncate text-[13px] font-bold text-ink">{parseSenderName(m.from)}</span>
                   <span className="shrink-0 font-mono text-[10px] text-ink-4 md:group-hover:invisible">{shortDate(m.date)}</span>
                 </span>
-                <span className="block truncate text-[12px] font-semibold text-ink-2">{m.subject}</span>
+                <span className="flex items-center gap-1.5">
+                  <span className="block min-w-0 flex-1 truncate text-[12px] font-semibold text-ink-2">{m.subject}</span>
+                  {multiple && box.scope === "all" && <BoxTag accounts={accounts} accountId={m.accountId} />}
+                </span>
                 <span className="block truncate text-[11px] text-ink-4">{m.snippet}</span>
               </span>
               {/* Survol (ordinateur) : comme dans Mails — archiver, supprimer, transférer. */}
