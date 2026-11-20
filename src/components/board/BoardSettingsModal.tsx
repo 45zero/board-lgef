@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Sparkles, X, PanelLeft, LayoutGrid, LogOut, Users, Lock, UserRound, Mail, Bell, Network } from "lucide-react";
 import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/board/useBoardPreferences";
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
@@ -32,6 +33,16 @@ import { MyProfileModal } from "@/components/board/profile/MyProfileModal";
  * Notifications sur cet ordinateur (Web Push) : propre au navigateur, pas au compte. Sur Mac, marche
  * dans Safari, dans le board ajouté au Dock et dans Chrome/Edge. Masquée dans l'appli mobile.
  */
+
+/**
+ * Fenêtre ouverte depuis le panneau : rendue dans la coque (data-theme, thème clair / sombre gardé)
+ * et non dans le panneau, dont le défilement l'enfermait sous Safari et dans l'appli du Dock (fenêtre
+ * coupée, fond gris limité au panneau).
+ */
+function InShell({ children }: { children: ReactNode }) {
+  return createPortal(children, document.querySelector("[data-theme]") ?? document.body);
+}
+
 function ComputerPushRow() {
   // Fenêtre ouverte au clic, jamais rendue côté serveur : le navigateur est lisible dès le premier rendu.
   const [native] = useState(isNativeApp);
@@ -380,8 +391,8 @@ function UsersSection() {
           <span className="block text-xs text-ink-4">Qui voit chaque module : pôles, réseaux, rôles, exceptions</span>
         </span>
       </button>
-      {open && <UsersAdminModal onClose={() => setOpen(false)} />}
-      {accessOpen && <ModuleAccessModal onClose={() => setAccessOpen(false)} />}
+      {open && <InShell><UsersAdminModal onClose={() => setOpen(false)} /></InShell>}
+      {accessOpen && <InShell><ModuleAccessModal onClose={() => setAccessOpen(false)} /></InShell>}
     </div>
   );
 }
@@ -405,7 +416,7 @@ function OrganisationSection() {
           </span>
         </span>
       </button>
-      {open && <OrganisationModal onClose={() => setOpen(false)} />}
+      {open && <InShell><OrganisationModal onClose={() => setOpen(false)} /></InShell>}
     </div>
   );
 }
@@ -425,7 +436,7 @@ function MyProfileSection() {
           <span className="block text-xs text-ink-4">Photo, nom, adresse, véhicule de service, mot de passe</span>
         </span>
       </button>
-      {open && <MyProfileModal onClose={() => setOpen(false)} />}
+      {open && <InShell><MyProfileModal onClose={() => setOpen(false)} /></InShell>}
     </div>
   );
 }
