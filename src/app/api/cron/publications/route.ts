@@ -11,8 +11,8 @@ import {
 import { FACEBOOK_REGIONS, describeFailures, type SocialPublishResult, type SocialTargetKey } from "@/lib/social/targets";
 import type { PublicationTargets } from "@/lib/board/mediaPublications";
 
-// Une publication Instagram vidéo attend le traitement du Reel côté Meta (~50s max).
-export const maxDuration = 60;
+// Couverture vidéo + envoi Facebook + attente du Reel Instagram : 60 s ne suffisent pas (20/11).
+export const maxDuration = 300;
 
 /**
  * Envoi des publications programmées arrivées à échéance — appelé toutes les 5 minutes par

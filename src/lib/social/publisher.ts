@@ -75,7 +75,7 @@ type EventFileRow = {
   drive_file_id: string | null;
 };
 
-/** Attente maximale du traitement Instagram dans la requête de publication (maxDuration : 60 s). */
+/** Attente maximale du traitement Instagram dans la requête de publication (au-delà : finishPendingInstagram). */
 const INSTAGRAM_BUDGET_MS = 30_000;
 
 type MediaItem = { url: string; kind: "image" | "video"; contentType: string | null };
@@ -235,8 +235,31 @@ export async function publishPublicationToSocial(
   };
   if (targets.length > 0) for (const i of items) if (i.kind === "video") void coverOf(i.url);
 
+  // Chaque réseau réussi est enregistré aussitôt (écritures à la suite, pas en parallèle) : si la
+  // fonction est coupée avant la fin, ce qui est déjà en ligne reste noté et un nouvel essai ne le
+  // republie pas (doublons Facebook du 20/11).
+  let saving: Promise<void> = Promise.resolve();
+  let saveFailed = false;
+  const saveNow = (key: SocialTargetKey, entry: SocialPublishTarget) =>
+    (saving = saving.then(() =>
+      savePublishInfo(client, pub, (current) => withNetworkEntry(current, key, entry)).then(
+        () => {},
+        () => {
+          saveFailed = true;
+        }
+      )
+    ));
+
   const settled = await Promise.all(
     targets.map(async ({ key, caption }): Promise<{ key: SocialTargetKey; entry?: SocialPublishTarget; error?: string; warning?: string; pending?: boolean }> => {
+      const result = await publishTarget(key, caption);
+      if (result.entry) await saveNow(key, result.entry);
+      return result;
+    })
+  );
+
+  async function publishTarget(key: SocialTargetKey, caption: string): Promise<{ key: SocialTargetKey; entry?: SocialPublishTarget; error?: string; warning?: string; pending?: boolean }> {
+    {
       const target = SOCIAL_TARGETS.find((t) => t.key === key);
       const account = target ? getSocialAccountById(target.accountId) : null;
       if (!target || !account) return { key, error: "Compte non configuré (SOCIAL_ACCOUNTS_JSON)." };
@@ -257,7 +280,7 @@ export async function publishPublicationToSocial(
           }
           const publishIg = async (userTags?: string[]) => {
             const pending = await createInstagramContainers(account.externalId, account.accessToken, { items: igItems, caption, userTags });
-            // Le temps pris par la couverture est retiré de l'attente (fonction limitée à 60 s) ; le
+            // Le temps pris par la couverture est retiré de l'attente (réponse rapide) ; le
             // Reel pas encore traité est mis en ligne plus tard (finishPendingInstagram).
             const budget = Math.max(5_000, INSTAGRAM_BUDGET_MS - (Date.now() - startedAt));
             return advanceInstagramPublish(account.externalId, account.accessToken, pending, budget);
@@ -339,13 +362,14 @@ export async function publishPublicationToSocial(
       } catch (e) {
         return { key, error: e instanceof Error ? e.message : "Erreur inattendue." };
       }
-    })
-  );
+    }
+  }
 
   if (kind !== pub.kind) await client.from("media_publications").update({ kind }).eq("id", pub.id);
 
-  const successes = settled.filter((s) => s.entry);
-  if (successes.length > 0) {
+  // Une écriture immédiate a échoué (base indisponible…) : dernier essai groupé, erreur remontée.
+  if (saveFailed) {
+    const successes = settled.filter((s) => s.entry);
     await savePublishInfo(client, pub, (current) => successes.reduce((acc, s) => withNetworkEntry(acc, s.key, s.entry!), current));
   }
   return settled.map((s) => ({ key: s.key, ok: !!s.entry, error: s.error, warning: s.warning, pending: s.pending }));
