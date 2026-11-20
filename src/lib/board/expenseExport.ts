@@ -11,7 +11,9 @@ import { CATEGORY_META, EXPENSE_CATEGORIES, monthLabel } from "@/lib/board/expen
 const NAVY = { r: 0.07, g: 0.18, b: 0.35 };
 const CATEGORY_COLUMNS = EXPENSE_CATEGORIES.map((c) => ({
   key: CATEGORY_META[c].column,
-  label: c === "transport" ? "Transport" : c === "car_rental" ? "Location" : CATEGORY_META[c].label,
+  label: c === "transport" ? "Transport" : c === "car_rental" ? "Location" : c === "mileage" ? "Ind. km" : CATEGORY_META[c].label,
+  /** Largeur relative dans le PDF. */
+  unit: c === "car_rental" || c === "meal" ? 7 : 6,
 }));
 
 const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("fr-FR") : "");
@@ -104,7 +106,8 @@ export async function exportExpensesPdf(data: ExpenseExport, signaturePng: strin
 
   // Tableau.
   const headers = ["Date", "Événement / détail", ...CATEGORY_COLUMNS.map((c) => c.label), "KM", "Total", "Statut"];
-  const units = [7, 26, 7, 7, 6, 6, 7, 6, 6, 6, 4, 7, 8];
+  // Une largeur par colonne : Date, Événement, chaque catégorie, KM, Total, Statut.
+  const units = [7, 24, ...CATEGORY_COLUMNS.map((c) => c.unit), 4, 7, 8];
   const usable = W - margin * 2;
   const widths = units.map((u) => (u / units.reduce((a, b) => a + b, 0)) * usable);
   const fit = (text: string, max: number, f: typeof font, size: number) => {

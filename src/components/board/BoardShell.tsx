@@ -29,6 +29,7 @@ import { useBoardPreferences } from "@/hooks/board/useBoardPreferences";
 import { BOARD_APPS } from "@/lib/board/tokens";
 import { BackgroundTasksPanel } from "./BackgroundTasksPanel";
 import { InstallNotificationsPrompt } from "./InstallNotificationsPrompt";
+import { ProfileCompletionPrompt } from "./ProfileCompletionPrompt";
 import { ModuleAccessModal } from "./modules/ModuleAccessModal";
 import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
 import { useUserRole } from "@/hooks/board/useUserRole";
@@ -125,6 +126,7 @@ export function BoardShell() {
         <DiscussionsBubble mobile />
         <BackgroundTasksPanel mobile />
         <InstallNotificationsPrompt mobile />
+        <ProfileCompletionPrompt />
       </>
     );
 
@@ -194,6 +196,7 @@ export function BoardShell() {
 
       <BackgroundTasksPanel />
       <InstallNotificationsPrompt />
+      <ProfileCompletionPrompt />
 
       {accessOpen && <ModuleAccessModal initialModuleId={app} onClose={() => setAccessOpen(false)} />}
 

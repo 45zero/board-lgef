@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Receipt, ShieldCheck, X, ChevronRight, Download, Settings, Check, Camera, Paperclip, FileText, Briefcase, Banknote } from "lucide-react";
+import { Receipt, ShieldCheck, X, ChevronRight, Download, Settings, Check, Camera, Paperclip, FileText, Briefcase, Banknote, Car } from "lucide-react";
 import { useFraisFlavor } from "@/hooks/board/useFraisFlavor";
 import { takeFraisTab, type FraisTab } from "@/lib/board/fraisTab";
 import { FRAIS_FLAVORS } from "@/lib/board/fraisFlavor";
@@ -1045,6 +1045,17 @@ export function FraisScreen({ mobile }: { mobile?: { onBack: () => void } } = {}
             </button>
             <button type="button" onClick={() => fileRef.current?.click()} className={headerBtn} aria-label="Joindre un justificatif">
               <Paperclip size={17} />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTab("mine");
+                importRef.current?.addTrip();
+              }}
+              className={headerBtn}
+              aria-label="Trajet en voiture (indemnités kilométriques)"
+            >
+              <Car size={17} />
             </button>
             <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={pickFiles} />
             <input ref={fileRef} type="file" accept={RECEIPT_ACCEPT} multiple hidden onChange={pickFiles} />

@@ -53,6 +53,33 @@ export function useEventActions() {
 
   const updateEvent = async (id: string, payload: EventFormPayload) => {
     const supabase = createClient();
+    // Qui peut modifier (sql/2026-11-20_events_edition_restreinte.sql) : admin, créateur, organisateur, pôle,
+    // coordination médias. Les autres (vidéaste assigné, membre d'équipe…) enregistrent la fiche pour leurs
+    // rappels et présences : on renvoie « ok » pour que ceux-ci soient enregistrés, sans toucher à l'événement.
+    // Fonction absente (SQL pas encore appliqué) ou erreur : comportement d'avant.
+    const { data: canEdit, error: rightsError } = await supabase.rpc("can_edit_event" as never, { p_event: id } as never);
+    if (!rightsError && canEdit === false) {
+      const { data: cur } = await supabase
+        .from("events")
+        .select("title, event_type, location, online_meeting, registration_enabled, organizer_message, start_date, end_date")
+        .eq("id", id)
+        .maybeSingle();
+      const sameTime = (a: string | null | undefined, b: string) => !!a && new Date(a).getTime() === new Date(b).getTime();
+      const changed =
+        !!cur &&
+        (cur.title !== payload.title ||
+          cur.event_type !== payload.eventType ||
+          (cur.location ?? "") !== (payload.location || "") ||
+          !!cur.online_meeting !== payload.onlineMeeting ||
+          !!cur.registration_enabled !== payload.registrationEnabled ||
+          (cur.organizer_message ?? "") !== (payload.message || "") ||
+          !sameTime(cur.start_date, payload.startISO) ||
+          !sameTime(cur.end_date, payload.endISO));
+      if (changed) {
+        alert("Vos rappels et présences sont enregistrés. Les autres changements n'ont pas été pris en compte : seuls l'organisateur, les personnes du pôle et la coordination médias peuvent modifier cet événement.");
+      }
+      return true;
+    }
     const { error } = await supabase
       .from("events")
       .update({

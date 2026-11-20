@@ -217,7 +217,8 @@ export function EffectifScreen() {
                         </td>
                         {scope === "all" && <td className="px-3 py-2.5 text-xs text-ink-3">{p.managerName ?? <span className="text-bad">Aucun</span>}</td>}
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                          {p.status === "tech-reseau" ? (
+                          {/* Indemnités kilométriques (mileage.ts) : Réseau, salariés, et toute personne sans statut qui a des km ce mois-ci. */}
+                          {p.status === "tech-reseau" || p.status === "tech-salarie" || (!p.status && p.rate === null && monthKm(byPerson.get(p.id) ?? [], month) > 0) ? (
                             <span className="text-xs text-ink-3">
                               {KM_RATE.toLocaleString("fr-FR")} €/km
                               {monthKm(byPerson.get(p.id) ?? [], month) > 0 && <span className="text-ink-4"> · {formatKm(monthKm(byPerson.get(p.id) ?? [], month))}</span>}

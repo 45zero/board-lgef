@@ -165,6 +165,9 @@ export function useEventModalState({
   const comments = useEventComments(event?.id ?? "");
   const expenses = useEventExpenses(event?.id ?? "");
   const role = useUserRole();
+  // Demande de couverture médiatique : organisateurs, administrateurs et coordination médias (statut
+  // Salarié). Pas le comité directeur seul (un membre du comité avec la coordination médias, oui).
+  const canRequestCoverage = role.isOrganizer || role.canAssignCoverage;
   const { technicians } = useAvailableTechnicians();
   const coverage = useEventCoverage(event?.id);
   const notifPrefs = useNotificationPreferences();
@@ -359,7 +362,7 @@ export function useEventModalState({
         if (valid.length < rows.length) window.alert(NO_DEPARTURE);
       }
 
-      if (wantsCoverage && user) {
+      if (wantsCoverage && user && canRequestCoverage) {
         // useEventCoverage est lié à event?.id (indéfini à la création) — on ne peut
         // pas le réutiliser ici, donc écriture directe avec le nouvel id.
         const supabase = createClient();
@@ -457,6 +460,7 @@ export function useEventModalState({
     removePendingReminder,
     wantsCoverage,
     setWantsCoverage,
+    canRequestCoverage,
     coverageDetails,
     setCoverageDetails,
     coverageTechnicianId,

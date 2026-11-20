@@ -1725,6 +1725,7 @@ export type Database = {
           user_id: string
           toll_fees: number | null
           meal_fees: number | null
+          mileage_fees: number | null
           other_fees: number | null
           other_fees_description: string | null
           created_at: string
@@ -1753,6 +1754,7 @@ export type Database = {
           user_id: string
           toll_fees?: number | null
           meal_fees?: number | null
+          mileage_fees?: number | null
           other_fees?: number | null
           other_fees_description?: string | null
           created_at?: string
@@ -1781,6 +1783,7 @@ export type Database = {
           user_id?: string
           toll_fees?: number | null
           meal_fees?: number | null
+          mileage_fees?: number | null
           other_fees?: number | null
           other_fees_description?: string | null
           created_at?: string

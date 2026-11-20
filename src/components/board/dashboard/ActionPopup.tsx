@@ -952,7 +952,7 @@ function AssignRow({ item, technicians, onDone }: { item: DashboardActionItem; t
           onChange={(e) => setTechId(e.target.value)}
           className="min-w-0 flex-1 rounded-btn border border-line bg-card px-2 py-1.5 text-sm outline-none"
         >
-          <option value="">Choisir un technicien…</option>
+          <option value="">Choisir un membre TeamMedias…</option>
           {sorted.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}
@@ -960,7 +960,7 @@ function AssignRow({ item, technicians, onDone }: { item: DashboardActionItem; t
             </option>
           ))}
         </select>
-        <button disabled={busy || !tech} onClick={() => assign(false)} title="Le technicien reçoit la mission et doit l'accepter" className={btnGhost}>
+        <button disabled={busy || !tech} onClick={() => assign(false)} title="La personne reçoit la mission et doit l'accepter" className={btnGhost}>
           Proposer
         </button>
         <button disabled={busy || !tech} onClick={() => assign(true)} title="Mission validée immédiatement" className={btnOk}>
@@ -987,7 +987,7 @@ function AssignList({ items, onDone }: { items: DashboardActionItem[]; onDone: (
             onClick={() => setMapOpen((o) => !o)}
             className="flex items-center gap-1.5 rounded-btn border border-line px-2.5 py-1.5 text-xs font-semibold text-link hover:bg-hover"
           >
-            <MapIcon size={13} /> {mapOpen ? "Masquer la carte" : "Carte des demandes et des techniciens"}
+            <MapIcon size={13} /> {mapOpen ? "Masquer la carte" : "Carte des demandes et de la TeamMedias"}
           </button>
           {mapOpen && <StaffEventsMap events={mapEvents} onOpenEvent={(id) => void open(id)} className="mt-2 h-[340px]" />}
         </div>

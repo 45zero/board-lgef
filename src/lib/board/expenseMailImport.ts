@@ -167,7 +167,9 @@ async function importAttachment(
     const fallbackDate = (mailDate ?? new Date().toISOString()).slice(0, 10);
     const lines: NewExpenseLine[] = scan.expenses.map((e) => ({
       eventId: rank ? rank(e).suggestedEventId : null,
-      category: e.category,
+      // Une facture reçue par e-mail n'est pas un trajet en voiture personnelle : les indemnités
+      // kilométriques se saisissent dans le board (montant recalculé, droit vérifié).
+      category: e.category === "mileage" ? "other" : e.category,
       amount: Math.round(e.amount * 100) / 100,
       date: e.date ?? fallbackDate,
       merchant: e.merchant,

@@ -36,12 +36,12 @@ export const ACCESS_KIND_IDS = ACCESS_KINDS.map((k) => k.id) as [AccessKind, ...
 
 const LABEL: Record<string, string> = Object.fromEntries(ACCESS_KINDS.map((k) => [k.id, k.label]));
 // Anciennes demandes (calendrier-lgef) : technician, organizer, comité_directeur, user.
-const LEGACY: Record<string, string> = { technician: "Technicien", organizer: "Organisateur", comité_directeur: "Comité directeur", user: "Utilisateur" };
+const LEGACY: Record<string, string> = { technician: "TeamMedias", organizer: "Organisateur", comité_directeur: "Comité directeur", user: "Utilisateur" };
 export const accessKindLabel = (kind: string | null) => (kind ? (LABEL[kind] ?? LEGACY[kind] ?? kind) : "—");
 
 export const STATUS_LABELS: Record<AccessStatus, string> = {
-  salarie: "Salarié — personnel de la Ligue",
-  reseau: "Réseau — remboursement de frais",
+  salarie: "Salarié — personnel de la Ligue, coordination médias",
+  reseau: "Réseau — frais de déplacement",
   prestataire: "Prestataire — sur facture",
   benevole: "Bénévole — ni frais ni facture",
 };
@@ -49,7 +49,7 @@ export const STATUS_SLUG: Record<AccessStatus, string> = { salarie: "tech-salari
 
 export const ROLE_LABELS: Record<GrantableRole, string> = {
   user: "Utilisateur",
-  technician: "Technicien",
+  technician: "TeamMedias",
   organizer: "Organisateur",
   comite_directeur: "Comité directeur",
 };

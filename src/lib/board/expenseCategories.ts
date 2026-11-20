@@ -2,11 +2,12 @@
 // (schéma partagé avec l'appli calendrier). Une ligne saisie ici n'a qu'une catégorie ; les
 // anciennes lignes peuvent en cumuler plusieurs.
 
-export const EXPENSE_CATEGORIES = ["transport", "fuel", "toll", "parking", "car_rental", "hotel", "meal", "other"] as const;
+export const EXPENSE_CATEGORIES = ["transport", "mileage", "fuel", "toll", "parking", "car_rental", "hotel", "meal", "other"] as const;
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 
 export type ExpenseAmountColumn =
   | "transport_fees"
+  | "mileage_fees"
   | "fuel_fees"
   | "toll_fees"
   | "parking_fees"
@@ -17,6 +18,8 @@ export type ExpenseAmountColumn =
 
 export const CATEGORY_META: Record<ExpenseCategory, { label: string; column: ExpenseAmountColumn }> = {
   transport: { label: "Transport (train, avion…)", column: "transport_fees" },
+  // Montant = kilomètres aller-retour (distance_km) × KM_RATE, recalculé côté serveur (expenseLines.ts).
+  mileage: { label: "Indemnités kilométriques", column: "mileage_fees" },
   fuel: { label: "Carburant", column: "fuel_fees" },
   toll: { label: "Péage", column: "toll_fees" },
   parking: { label: "Parking", column: "parking_fees" },

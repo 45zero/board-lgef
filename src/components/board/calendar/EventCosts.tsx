@@ -25,7 +25,7 @@ export function EventCosts({ eventId, empty = null }: { eventId: string; /** Aff
     void load();
   }, [load]);
 
-  const shown = (lines ?? []).filter((l) => l.amount > 0 || l.status === "tech-prestataire" || l.status === "tech-reseau");
+  const shown = (lines ?? []).filter((l) => l.amount > 0 || l.km !== null || l.status === "tech-prestataire" || l.status === "tech-reseau");
   if (!loaded) return null;
   if (!shown.length) return <>{empty}</>;
   const t = costTotals(shown);

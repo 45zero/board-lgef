@@ -107,7 +107,7 @@ export function ProfileDetailsFields({
                 onChange={(e) => onChange({ ...value, addressPrivate: e.target.checked })}
               />
               <span>
-                <b>Adresse privée</b> — visible seulement par {self ? "moi et mon N+1" : "la personne et son N+1"} (carte des techniciens, administration). Les
+                <b>Adresse privée</b> — visible seulement par {self ? "moi et mon N+1" : "la personne et son N+1"} (carte TeamMedias, administration). Les
                 temps de trajet restent calculés.
               </span>
             </label>
@@ -151,7 +151,7 @@ export function ProfileDetailsFields({
             <div className="min-w-0">
               <div className="text-sm font-semibold text-ink-2">Véhicule de service</div>
               <div className="text-xs text-ink-4">
-                {value.hasCompanyCar ? "Véhicule de la Ligue : pas d'indemnités kilométriques" : "Véhicule personnel : km remboursés à 0,45 €/km (réseau)"}
+                {value.hasCompanyCar ? "Véhicule de la Ligue : pas d'indemnités kilométriques" : "Véhicule personnel : km remboursés à 0,45 €/km (sauf bénévoles et prestataires)"}
               </div>
             </div>
             <Toggle on={value.hasCompanyCar} onClick={() => onChange({ ...value, hasCompanyCar: !value.hasCompanyCar })} />

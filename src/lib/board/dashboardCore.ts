@@ -243,7 +243,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
             return { id: c.id, eventId: c.event_id, title: ev.title, date: ev.start_date, location: ev.location, eventType: ev.event_type, detail: c.details ?? undefined };
           })
           .sort((a, b) => a.date.localeCompare(b.date));
-        push({ id: "captation-attribuer", app: "calendrier", tone: "orange", count: Math.max(0, (toAssignCount ?? assignItems.length) - refusedIds.size), items: assignItems, title: "Demandes de captation à traiter", detail: "À valider et attribuer à un technicien" });
+        push({ id: "captation-attribuer", app: "calendrier", tone: "orange", count: Math.max(0, (toAssignCount ?? assignItems.length) - refusedIds.size), items: assignItems, title: "Demandes de captation à traiter", detail: "À valider et attribuer à un membre TeamMedias" });
       }
     }, undefined),
 

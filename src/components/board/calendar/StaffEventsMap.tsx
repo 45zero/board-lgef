@@ -364,7 +364,7 @@ export function StaffEventsMap({
           <Loader2 size={11} className="animate-spin" /> Calcul des trajets…
         </div>
       )}
-      {!travelLoading && nearest.length === 0 && <div className="px-3 py-1.5 text-[11px] text-ink-4">Aucun technicien à afficher.</div>}
+      {!travelLoading && nearest.length === 0 && <div className="px-3 py-1.5 text-[11px] text-ink-4">Aucun membre TeamMedias à afficher.</div>}
       {nearest.map(staffRow)}
     </>
   );
@@ -375,7 +375,7 @@ export function StaffEventsMap({
     .filter((g) => g.people.length > 0);
   const staffGroups =
     staffByKind.length === 0 ? (
-      <div className="px-3 py-1.5 text-[11px] text-ink-4">Aucun technicien à afficher.</div>
+      <div className="px-3 py-1.5 text-[11px] text-ink-4">Aucun membre TeamMedias à afficher.</div>
     ) : (
       staffByKind.map((g) => (
         <div key={g.kind}>
@@ -546,7 +546,7 @@ export function StaffEventsMap({
           {staff.length > 0 && (
             <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-panel border border-line bg-card">
               <div className="border-b border-line px-3 py-2">
-                <div className="text-xs font-bold text-ink">{selectedEvent ? "Au plus près" : "Techniciens"}</div>
+                <div className="text-xs font-bold text-ink">{selectedEvent ? "Au plus près" : "TeamMedias"}</div>
                 <div className="truncate text-[10.5px] text-ink-4">
                   {selectedEvent ? `de ${selectedEvent.title} · aller simple en voiture` : "Sélectionnez un événement pour classer par temps de trajet"}
                 </div>

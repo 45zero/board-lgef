@@ -61,6 +61,8 @@ export type ExpenseLine = {
   other_fees: number | null;
   other_fees_description: string | null;
   transport_fees: number | null;
+  /** Indemnités kilométriques (sql/2026-11-20_frais_kilometriques.sql) ; absente tant que la colonne n'existe pas. */
+  mileage_fees?: number | null;
   parking_fees: number | null;
   fuel_fees: number | null;
   hotel_fees: number | null;

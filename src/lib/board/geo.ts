@@ -15,10 +15,10 @@ export const STAFF_SPECIALTY: Record<string, StaffKind> = {
 export const STAFF_KINDS: StaffKind[] = ["salarie", "reseau", "prestataire", "benevole"];
 
 export const STAFF_STYLES: Record<StaffKind, { label: string; letter: string; color: string }> = {
-  salarie: { label: "Technicien salarié", letter: "S", color: "#111827" },
-  reseau: { label: "Réseau (frais)", letter: "R", color: "#7C3AED" },
-  prestataire: { label: "Technicien prestataire", letter: "P", color: "#DB2777" },
-  benevole: { label: "Bénévole", letter: "B", color: "#0891B2" },
+  salarie: { label: "TeamMedias salarié", letter: "S", color: "#111827" },
+  reseau: { label: "TeamMedias réseau (frais)", letter: "R", color: "#7C3AED" },
+  prestataire: { label: "TeamMedias prestataire", letter: "P", color: "#DB2777" },
+  benevole: { label: "TeamMedias bénévole", letter: "B", color: "#0891B2" },
 };
 
 export type StaffPin = { id: string; name: string; kind: StaffKind; position: LatLng };

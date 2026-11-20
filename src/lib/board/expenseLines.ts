@@ -2,6 +2,7 @@ import "server-only";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { ReceiptToArchive } from "@/lib/board/expenseArchive";
 import { CATEGORY_META, EXPENSE_CATEGORIES, type ExpenseAmountColumn, type ExpenseCategory } from "@/lib/board/expenseCategories";
+import { MILEAGE_BLOCK_LABELS, mileageAmount, mileageBlock } from "@/lib/board/mileage";
 
 // Création des lignes de frais d'une personne, commune à la saisie dans le board
 // (actions/expenses.ts → addExpenseLines) et à l'import des factures reçues par e-mail
@@ -36,6 +37,17 @@ export async function insertExpenseLines(
 ): Promise<{ ids: string[]; toArchive: ReceiptToArchive[] }> {
   const prefix = receiptPrefix(userId);
   const ids: string[] = [];
+  // Indemnités kilométriques : droit vérifié ici, montant toujours recalculé (kilomètres × KM_RATE).
+  if (input.some((l) => l.category === "mileage")) {
+    const block = await mileageBlock(service, userId);
+    if (block) throw new Error(MILEAGE_BLOCK_LABELS[block]);
+  }
+  input = input.map((l) => {
+    if (l.category !== "mileage") return l;
+    const km = Math.round(Number(l.distanceKm ?? 0) * 10) / 10;
+    if (!(km > 0) || km > 5000) throw new Error("Indemnités kilométriques : indiquez les kilomètres parcourus (aller-retour).");
+    return { ...l, distanceKm: km, amount: mileageAmount(km), currency: null };
+  });
   // Tout est contrôlé avant la première insertion : une ligne refusée n'en laisse pas d'autres
   // enregistrées à moitié (et un nouvel essai ne crée pas de doublon).
   for (const line of input) {

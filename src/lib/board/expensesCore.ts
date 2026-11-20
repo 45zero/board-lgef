@@ -84,9 +84,7 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
       .eq("user_id", userId),
     service
       .from("event_expenses")
-      .select(
-        "id, event_id, total_amount, expense_date, created_at, currency, exchange_rate, merchant_name, description, other_fees_description, transport_fees, fuel_fees, toll_fees, parking_fees, car_rental_fees, hotel_fees, meal_fees, other_fees"
-      )
+      .select("*") // toutes les colonnes montant, indemnités kilométriques comprises (lineLabel)
       .eq("user_id", userId)
       .gte("created_at", since),
     isPrestataire(service, userId),

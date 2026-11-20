@@ -40,6 +40,12 @@ export interface MyProfile extends ProfileDetails {
   /** Statut (Salarié, Réseau…) et N+1 : affichés, réglés par un administrateur. */
   status: string | null;
   managerName: string | null;
+  /**
+   * À compléter (fenêtre au lancement, Mon profil) : `needsManager` — salarié (organisateur ou
+   * coordination médias) sans N+1 ; `needsAddress` — droit aux indemnités kilométriques sans adresse.
+   */
+  needsManager?: boolean;
+  needsAddress?: boolean;
 }
 
 export type ProfileInput = { firstName: string; lastName: string } & Omit<ProfileDetails, "homeCoordinates" | "addressHidden"> & {

@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, Paperclip, Sparkles, Trash2, X, Loader2, FileText, ArrowRightLeft, AlertCircle } from "lucide-react";
+import { Camera, Paperclip, Sparkles, Trash2, X, Loader2, FileText, ArrowRightLeft, AlertCircle, Car } from "lucide-react";
 import { addExpenseLines, convertExpenseLine, deleteExpenseLine, getMyExpenseLines, type ExpenseLine, type NewExpenseLine } from "@/app/actions/expenses";
 import { scanReceipt, type ScannedExpense } from "@/app/actions/expense-scan";
+import { getMileageSuggestion, type MileageSuggestion } from "@/app/actions/mileage";
+import { KM_RATE } from "@/lib/board/staff";
 import { CATEGORY_META, EXPENSE_CATEGORIES, lineParts, targetKey, type ExpenseCategory, type ExpenseTarget } from "@/lib/board/expenseCategories";
 import { uploadReceipt, RECEIPT_ACCEPT } from "@/lib/board/receiptUpload";
 import { DeclarationBar, formatEuros, formatMoney, needsConversion } from "@/components/board/expenses/ExpenseStatus";
@@ -106,6 +108,9 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
   const [lines, setLines] = useState<ExpenseLine[] | null>(null);
   const [category, setCategory] = useState<ExpenseCategory>("meal");
   const [amount, setAmount] = useState("");
+  /** Indemnités kilométriques : kilomètres aller-retour (le montant en découle, recalculé côté serveur). */
+  const [km, setKm] = useState("");
+  const [mileage, setMileage] = useState<MileageSuggestion | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [merchant, setMerchant] = useState("");
   const [description, setDescription] = useState("");
@@ -130,9 +135,22 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
   useEffect(() => {
     void load();
   }, [load]);
+  // Ligne kilométrique proposée sur un événement (domicile → lieu, aller-retour), recalculée quand les lignes changent.
+  const lineCount = lines?.length ?? -1;
+  useEffect(() => {
+    if (!eventId || locked) return;
+    let cancelled = false;
+    getMileageSuggestion(eventId)
+      .then((m) => !cancelled && setMileage(m))
+      .catch(() => !cancelled && setMileage(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, locked, lineCount]);
 
   const reset = () => {
     setAmount("");
+    setKm("");
     setMerchant("");
     setDescription("");
     setCurrency("EUR");
@@ -144,6 +162,7 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
   const prefill = (e: ScannedExpense) => {
     setCategory(e.category);
     setAmount(String(e.amount));
+    setKm(e.distanceKm ? String(e.distanceKm) : "");
     if (e.date) setDate(e.date);
     setMerchant(e.merchant ?? "");
     setDescription(e.description ?? "");
@@ -194,17 +213,40 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
   };
 
   const files = () => attachments.map((a) => ({ url: a.url, type: a.type }));
+  const kmValue = parseFloat(km.replace(",", "."));
+  const isMileage = category === "mileage";
   const current = (): NewExpenseLine => ({
     eventId,
     category,
-    amount: parseFloat(amount.replace(",", ".")),
+    amount: isMileage ? Math.round(kmValue * KM_RATE * 100) / 100 : parseFloat(amount.replace(",", ".")),
     date: date || null,
     merchant: merchant || null,
     description: description || null,
-    distanceKm: null,
+    distanceKm: isMileage ? kmValue : null,
     attachments: files(),
-    currency,
+    currency: isMileage ? "EUR" : currency,
   });
+  /** Ajoute la ligne kilométrique proposée, telle quelle. */
+  const addSuggested = (m: Extract<MileageSuggestion, { status: "ok" }>) =>
+    save([
+      {
+        eventId,
+        category: "mileage",
+        amount: m.amount,
+        date: m.date,
+        merchant: null,
+        description: `Domicile → ${m.to} (aller-retour)`,
+        distanceKm: m.km,
+        attachments: [],
+        currency: "EUR",
+      },
+    ]);
+  /** Saisie à la main des kilomètres (trajet différent, lieu inconnu). */
+  const editMileage = (prefillKm?: number, prefillDate?: string | null) => {
+    setCategory("mileage");
+    setKm(prefillKm ? String(prefillKm) : "");
+    if (prefillDate) setDate(prefillDate);
+  };
 
   const remove = async (id: string) => {
     if (!confirm("Supprimer cette ligne de frais ?")) return;
@@ -218,6 +260,7 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
   const total = (lines ?? []).filter((l) => !needsConversion(l)).reduce((n, l) => n + Number(l.total_amount ?? 0), 0);
   const toConvert = (lines ?? []).filter(needsConversion).length;
   const amountValue = parseFloat(amount.replace(",", "."));
+  const canAdd = isMileage ? kmValue > 0 : amountValue > 0;
   const busy = status !== "idle";
 
   return (
@@ -270,6 +313,49 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
         )
       )}
 
+      {!locked && eventId && mileage && mileage.status !== "unavailable" && mileage.status !== "already" && (
+        <div className="flex items-start gap-3 rounded-panel border border-line bg-subtle p-3">
+          <Car size={16} className="mt-0.5 shrink-0 text-link" />
+          <div className="min-w-0 flex-1 text-sm">
+            <div className="font-bold text-ink">Indemnités kilométriques</div>
+            {mileage.status === "ok" && (
+              <>
+                <div className="text-xs text-ink-3">
+                  Domicile → {mileage.to} · {mileage.km.toLocaleString("fr-FR")} km aller-retour × {mileage.rate.toLocaleString("fr-FR")} € ={" "}
+                  <strong className="text-ink">{formatEuros(mileage.amount)}</strong>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button disabled={busy} onClick={() => addSuggested(mileage)} className="rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+                    Ajouter {formatEuros(mileage.amount)}
+                  </button>
+                  <button disabled={busy} onClick={() => editMileage(mileage.km, mileage.date)} className="rounded-btn border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover">
+                    Autre distance
+                  </button>
+                </div>
+              </>
+            )}
+            {mileage.status === "no_route" && (
+              <div className="text-xs text-ink-3">
+                Trajet non calculable (lieu inconnu ou en ligne) : indiquez vos kilomètres aller-retour, remboursés {mileage.rate.toLocaleString("fr-FR")} €/km.{" "}
+                <button onClick={() => editMileage(undefined, mileage.date)} className="font-semibold text-link hover:underline">
+                  Saisir les kilomètres
+                </button>
+              </div>
+            )}
+            {mileage.status === "no_address" && (
+              <div className="text-xs text-ink-3">
+                Renseignez l&apos;adresse de votre domicile dans Mon profil pour calculer le trajet ({mileage.rate.toLocaleString("fr-FR")} €/km), ou{" "}
+                <button onClick={() => editMileage()} className="font-semibold text-link hover:underline">
+                  saisissez vos kilomètres
+                </button>
+                .
+              </div>
+            )}
+            {mileage.status === "blocked" && <div className="text-xs text-ink-3">{mileage.message}</div>}
+          </div>
+        </div>
+      )}
+
       {!locked && eventId && (
         <div className="space-y-2.5 rounded-panel border border-line p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -315,6 +401,14 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
                 </option>
               ))}
             </select>
+            {isMileage ? (
+              <div className="min-w-0">
+                <input inputMode="decimal" value={km} onChange={(e) => setKm(e.target.value)} placeholder="Km aller-retour" className={`${input} w-full`} />
+                <div className="mt-0.5 text-[10px] text-ink-4">
+                  {kmValue > 0 ? `${formatEuros(Math.round(kmValue * KM_RATE * 100) / 100)} (${KM_RATE.toLocaleString("fr-FR")} €/km)` : `${KM_RATE.toLocaleString("fr-FR")} €/km`}
+                </div>
+              </div>
+            ) : (
             <div className="relative min-w-0">
               <input
                 inputMode="decimal"
@@ -334,17 +428,18 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
                 </button>
               )}
             </div>
+            )}
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={input} />
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="Fournisseur (enseigne, hôtel…)" className={input} />
-            <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Précision (trajet, repas…)" className={input} />
+            <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder={isMileage ? "Véhicule (facultatif)" : "Fournisseur (enseigne, hôtel…)"} className={input} />
+            <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={isMileage ? "Trajet (ex. Metz → Reims, aller-retour)" : "Précision (trajet, repas…)"} className={input} />
           </div>
           {error && <p className="text-xs text-bad">{error}</p>}
           <div className="flex flex-wrap justify-end gap-2">
             {extra.length > 0 && (
               <button
-                disabled={busy || !(amountValue > 0)}
+                disabled={busy || !canAdd}
                 onClick={() =>
                   save([
                     current(),
@@ -367,7 +462,7 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
               </button>
             )}
             <button
-              disabled={busy || !(amountValue > 0)}
+              disabled={busy || !canAdd}
               onClick={() => save([current()])}
               className="rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
             >

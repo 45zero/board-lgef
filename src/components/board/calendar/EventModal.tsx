@@ -361,7 +361,9 @@ export function EventModal({
                     <span className="flex items-center gap-1.5 text-sm font-bold" style={{ color: COVERAGE_ACCENT.ink }}>
                       <Camera size={14} /> Couverture médiatique
                     </span>
-                    {!isEditing ? (
+                    {!m.canRequestCoverage && !m.coverage.request ? (
+                      <span className="text-[11px] text-ink-3">Demande réservée aux organisateurs et à la coordination médias</span>
+                    ) : !isEditing ? (
                       <Toggle
                         on={m.wantsCoverage}
                         onClick={() => {
@@ -396,10 +398,10 @@ export function EventModal({
                         <select
                           value={m.coverageTechnicianId}
                           onChange={(e) => m.setCoverageTechnicianId(e.target.value)}
-                          title="Assigner directement un technicien (optionnel)"
+                          title="Assigner directement un membre TeamMedias (optionnel)"
                           className="h-fit min-w-[200px] flex-1 rounded-btn border border-line bg-card px-3 py-2 text-sm outline-none"
                         >
-                          <option value="">Technicien : laisser en attente — le réseau salarié assignera</option>
+                          <option value="">TeamMedias : laisser en attente — la coordination médias assignera</option>
                           {m.technicians.map((t) => (
                             <option key={t.id} value={t.id}>
                               {t.name}

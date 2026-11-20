@@ -20,7 +20,7 @@ const normalize = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLo
 
 const ROLE_LABELS: Record<UserRole, string> = {
   user: "Utilisateur",
-  technician: "Technicien",
+  technician: "TeamMedias",
   organizer: "Organisateur",
   comite_directeur: "Comité directeur",
   comite_directeur_bad: "Comité directeur (BAD)",
@@ -29,12 +29,12 @@ const ROLE_LABELS: Record<UserRole, string> = {
 };
 const ROLE_ORDER: UserRole[] = ["user", "technician", "organizer", "comite_directeur", "super_user", "admin"];
 
-/** Statut (exclusif) : comment la personne est rémunérée. */
+/** Statut (exclusif) : comment la personne est rémunérée. « Salarié » donne aussi la coordination médias (captations, photos, week-end). */
 const STATUS_OPTIONS: { slug: string | null; label: string; hint: string }[] = [
-  { slug: null, label: "Aucun", hint: "Pas de statut technique" },
-  { slug: "tech-salarie", label: "Salarié", hint: "Personnel de la Ligue" },
-  { slug: "tech-reseau", label: "Réseau", hint: "Remboursement de frais" },
-  { slug: "tech-prestataire", label: "Prestataire", hint: "Sur facture" },
+  { slug: null, label: "Hors TeamMedias", hint: "Salarié d'un service, comité directeur" },
+  { slug: "tech-salarie", label: "Salarié", hint: "Personnel de la Ligue · coordination médias" },
+  { slug: "tech-reseau", label: "Réseau", hint: "Frais de déplacement" },
+  { slug: "tech-prestataire", label: "Prestataire", hint: "Facture" },
   { slug: "tech-benevole", label: "Bénévole", hint: "Ni frais ni facture" },
 ];
 const STATUS_SLUGS = STATUS_OPTIONS.map((o) => o.slug).filter((s): s is string => !!s);
@@ -55,7 +55,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "Tous" },
   { id: "requests", label: "Demandes" },
   { id: "coverage", label: "Couverture match" },
-  { id: "technician", label: "Techniciens" },
+  { id: "technician", label: "TeamMedias" },
   { id: "organizer", label: "Organisateurs" },
   { id: "comite", label: "Comité directeur" },
   { id: "admin", label: "Admins" },

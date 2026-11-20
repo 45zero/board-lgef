@@ -2,6 +2,7 @@ import "server-only";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import { KM_RATE, type Engagement, type EngagementRole, type StaffInvoice } from "@/lib/board/staff";
 import { travelToEvent } from "@/lib/board/travel";
+import { mileageBlocks } from "@/lib/board/mileage";
 
 // Interventions (Effectif) indépendantes de la session : utilisées par les actions serveur
 // (src/app/actions/staff.ts, droits vérifiés là-bas) ET par le tableau de bord (factures à déposer).
@@ -102,7 +103,8 @@ export async function loadEngagements(service: Service, userIds: string[] | null
 }
 
 /**
- * Réseau : kilomètres aller-retour domicile → événement de chaque intervention (clé « user|event »).
+ * Kilomètres aller-retour domicile → événement de chaque intervention (clé « user|event ») pour qui a droit
+ * aux indemnités kilométriques (salariés, comité directeur, Réseau — voir mileage.ts).
  * Trajet déjà calculé pour les frais (travel_distances), sinon calculé (Google, mis en cache) ;
  * absent quand le domicile ou le lieu est inconnu.
  */
@@ -110,13 +112,11 @@ async function mileage(service: Service, list: { userId: string; eventId: string
   const out = new Map<string, number>();
   const userIds = [...new Set(list.map((e) => e.userId))];
   if (!userIds.length) return out;
-  const { data: links } = await service.from("profile_specialties").select("user_id, specialties!inner(slug)").eq("specialties.slug", "tech-reseau").in("user_id", userIds);
-  const reseau = new Set((links ?? []).map((l) => l.user_id));
-  // Véhicule de service (profil) : pas d'indemnités kilométriques, comme dans l'ancien calendrier.
-  const { data: companyCars } = reseau.size
-    ? await service.from("profiles").select("id").in("id", [...reseau]).eq("has_company_car", true)
-    : { data: [] };
-  const serviceCar = new Set((companyCars ?? []).map((p) => p.id));
+  // Droit aux indemnités (mileage.ts) : salariés, comité directeur, Réseau ; pas les prestataires ni les
+  // bénévoles (aucun kilomètre : forfait ou rien) ; véhicule de fonction : 0 km remboursé.
+  const blocks = await mileageBlocks(service, userIds);
+  const serviceCar = new Set([...blocks].filter(([, b]) => b === "company_car").map(([id]) => id));
+  const reseau = new Set(userIds.filter((id) => !blocks.has(id) || blocks.get(id) === "company_car"));
   const byEvent = new Map<string, string[]>();
   for (const e of list) {
     if (!reseau.has(e.userId)) continue;

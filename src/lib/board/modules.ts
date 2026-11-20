@@ -47,7 +47,7 @@ export function ruleMatches(rule: ModuleRule, p: Pick<DirectoryPerson, "id" | "r
 
 export const ROLE_CHOICES: { id: string; label: string }[] = [
   { id: "organizer", label: "Organisateurs" },
-  { id: "technician", label: "Techniciens" },
+  { id: "technician", label: "TeamMedias" },
   { id: "comite_directeur", label: "Comité directeur" },
   { id: "user", label: "Utilisateurs" },
 ];
@@ -56,7 +56,7 @@ export const GROUP_CHOICES: { slug: string; label: string; group: "Couverture ma
   { slug: "tech-photo", label: "Photographes", group: "Couverture match" },
   { slug: "tech-video", label: "Vidéastes", group: "Couverture match" },
   { slug: "tech-salarie", label: "Salariés", group: "Statut" },
-  { slug: "tech-reseau", label: "Réseau (frais)", group: "Statut" },
+  { slug: "tech-reseau", label: "Réseau (frais de déplacement)", group: "Statut" },
   { slug: "tech-prestataire", label: "Prestataires", group: "Statut" },
   { slug: "tech-benevole", label: "Bénévoles", group: "Statut" },
 ];

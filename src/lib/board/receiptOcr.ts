@@ -21,7 +21,7 @@ Pour chaque dépense :
 - date : date de la dépense au format AAAA-MM-JJ, ou null si illisible. Si l'année manque, déduis-la de la date du jour fournie (la dépense est passée ou très récente) ;
 - merchant : l'enseigne ou le fournisseur (ex. « Total Energies », « SNCF », « Ibis Metz Centre »), ou null ;
 - description : quelques mots utiles au valideur (ex. « Repas midi, 2 couverts », « Aller Metz → Reims ») ;
-- category : transport (train, avion, bus, taxi, VTC, transports en commun), fuel (carburant, recharge électrique), toll (péage), parking, car_rental (location de véhicule), hotel (hébergement), meal (restaurant, repas, boissons), other (tout le reste) ;
+- category : transport (train, avion, bus, taxi, VTC, transports en commun), mileage (indemnités kilométriques d'un trajet en voiture personnelle, seulement si un nombre de kilomètres figure sur le document), fuel (carburant, recharge électrique), toll (péage), parking, car_rental (location de véhicule), hotel (hébergement), meal (restaurant, repas, boissons), other (tout le reste) ;
 - amount : le montant TTC payé, dans la devise du document, nombre positif (ex. 23.5) — ne le convertis jamais. Ne rends jamais une dépense sans montant lisible ;
 - currency : la devise de ce montant en code ISO 4217 (EUR, USD, GBP, CHF…) ; EUR si le document est en euros ou si la devise n'est pas indiquée ;
 - distanceKm : kilomètres parcourus s'ils figurent sur le document (indemnités kilométriques), sinon null ;

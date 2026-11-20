@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useImperativeHandle, useRef, useState } from "react";
-import { Upload, Loader2, X, Search, Sparkles, CalendarDays, Check, FileText, AlertCircle } from "lucide-react";
+import { Upload, Loader2, X, Search, Sparkles, CalendarDays, Check, FileText, AlertCircle, Car } from "lucide-react";
 import { addExpenseLines } from "@/app/actions/expenses";
 import { scanReceipt, searchEventsForExpense, type EventCandidate } from "@/app/actions/expense-scan";
+import { getMileageSuggestion } from "@/app/actions/mileage";
+import { KM_RATE } from "@/lib/board/staff";
 import { CATEGORY_META, EXPENSE_CATEGORIES, type ExpenseCategory } from "@/lib/board/expenseCategories";
 import { uploadReceipt } from "@/lib/board/receiptUpload";
 import { ReceiptButtons } from "@/components/board/expenses/ExpenseLinesEditor";
@@ -24,6 +26,8 @@ type Draft = {
   merchant: string;
   description: string;
   distanceKm: number | null;
+  /** Indemnités kilométriques : kilomètres aller-retour saisis (le montant en découle). */
+  kmText?: string;
   event: EventCandidate | null;
   /** Événement retenu automatiquement par le rapprochement. */
   auto: boolean;
@@ -142,7 +146,7 @@ const emptyDraft = (fileName: string): Draft => ({
  * de l'événement correspondant (ou laissée hors événement), puis ajoutée après vérification.
  */
 /** Ajout de justificatifs depuis l'extérieur (boutons Photo / Joindre de l'en-tête mobile). */
-export type ExpenseImportHandle = { addFiles: (files: File[]) => void };
+export type ExpenseImportHandle = { addFiles: (files: File[]) => void; addTrip: () => void };
 
 export function ExpenseImport({
   onAdded,
@@ -187,6 +191,7 @@ export function ExpenseImport({
           merchant: e.merchant ?? "",
           description: e.description ?? "",
           distanceKm: e.distanceKm,
+          kmText: e.distanceKm ? String(e.distanceKm) : "",
           event,
           auto: !!event,
           candidates: e.candidates,
@@ -210,9 +215,29 @@ export function ExpenseImport({
     queue.current = queue.current.then(() => Promise.all([worker(), worker(), worker()]).then(() => undefined));
   };
 
-  useImperativeHandle(ref, () => ({ addFiles }));
+  /** Trajet en voiture personnelle (indemnités kilométriques) : pas de justificatif. */
+  const addTrip = () => {
+    setError(null);
+    setDrafts((prev) => [
+      ...prev,
+      { ...emptyDraft("Trajet en voiture"), state: "ready", category: "mileage", date: new Date().toISOString().slice(0, 10), kmText: "" },
+    ]);
+  };
 
-  const valid = (d: Draft) => d.state === "ready" && parseFloat(d.amount.replace(",", ".")) > 0;
+  useImperativeHandle(ref, () => ({ addFiles, addTrip }));
+
+  const kmOf = (d: Draft) => parseFloat((d.kmText ?? "").replace(",", "."));
+  const valid = (d: Draft) => d.state === "ready" && (d.category === "mileage" ? kmOf(d) > 0 : parseFloat(d.amount.replace(",", ".")) > 0);
+
+  /** Trajet rattaché à un événement : kilomètres domicile → lieu (aller-retour) proposés s'ils sont vides. */
+  const pickEvent = (d: Draft, event: EventCandidate | null) => {
+    patch(d.id, { event, auto: false });
+    if (!event || d.category !== "mileage" || kmOf(d) > 0) return;
+    void getMileageSuggestion(event.id).then((m) => {
+      if (m.status === "ok") patch(d.id, { kmText: String(m.km), description: d.description || `Domicile → ${m.to} (aller-retour)`, date: m.date ?? d.date });
+      else if (m.status === "blocked") patch(d.id, { error: m.message });
+    });
+  };
 
   const save = async (list: Draft[]) => {
     if (!list.length) return;
@@ -223,13 +248,14 @@ export function ExpenseImport({
       list.map((d) => ({
         eventId: d.event?.id ?? null,
         category: d.category,
-        amount: parseFloat(d.amount.replace(",", ".")),
+        // Indemnités kilométriques : montant recalculé côté serveur (kilomètres × KM_RATE).
+        amount: d.category === "mileage" ? Math.round(kmOf(d) * KM_RATE * 100) / 100 : parseFloat(d.amount.replace(",", ".")),
         date: d.date || null,
         merchant: d.merchant || null,
         description: d.description || null,
-        distanceKm: d.distanceKm,
+        distanceKm: d.category === "mileage" ? kmOf(d) : d.distanceKm,
         attachments: d.fileUrl ? [{ url: d.fileUrl, type: d.fileType }] : [],
-        currency: d.currency,
+        currency: d.category === "mileage" ? "EUR" : d.currency,
       }))
     );
     if (res.error) {
@@ -275,6 +301,14 @@ export function ExpenseImport({
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <ReceiptButtons onFiles={addFiles} />
+          <button
+            type="button"
+            onClick={addTrip}
+            title={`Trajet en voiture personnelle, remboursé ${KM_RATE.toLocaleString("fr-FR")} €/km (aller-retour)`}
+            className="flex items-center gap-1.5 rounded-btn border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover"
+          >
+            <Car size={14} /> Trajet km
+          </button>
         </div>
       </div>
       )}
@@ -344,6 +378,22 @@ export function ExpenseImport({
                         </option>
                       ))}
                     </select>
+                    {d.category === "mileage" ? (
+                      <div className="min-w-0">
+                        <input
+                          inputMode="decimal"
+                          value={d.kmText ?? ""}
+                          onChange={(e) => patch(d.id, { kmText: e.target.value })}
+                          placeholder="Km aller-retour"
+                          className={`${input} w-full`}
+                        />
+                        <div className="mt-0.5 text-[10px] text-ink-4">
+                          {kmOf(d) > 0
+                            ? `${(Math.round(kmOf(d) * KM_RATE * 100) / 100).toLocaleString("fr-FR", { style: "currency", currency: "EUR" })} (${KM_RATE.toLocaleString("fr-FR")} €/km)`
+                            : `${KM_RATE.toLocaleString("fr-FR")} €/km`}
+                        </div>
+                      </div>
+                    ) : (
                     <div className="relative min-w-0">
                       <input
                         inputMode="decimal"
@@ -363,6 +413,7 @@ export function ExpenseImport({
                         </button>
                       )}
                     </div>
+                    )}
                     <input type="date" value={d.date} onChange={(e) => patch(d.id, { date: e.target.value })} className={input} />
                     <input
                       value={d.merchant}
@@ -372,7 +423,7 @@ export function ExpenseImport({
                     />
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <EventPicker draft={d} onChange={(event) => patch(d.id, { event, auto: false })} />
+                    <EventPicker draft={d} onChange={(event) => pickEvent(d, event)} />
                     <button disabled={!valid(d)} onClick={() => save([d])} className="rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
                       Ajouter
                     </button>

@@ -302,7 +302,11 @@ export function MobileEventModal({
                     <span className="flex items-center gap-1.5 text-sm font-bold text-ink">
                       <Camera size={14} /> Média
                     </span>
-                    <Toggle on={m.wantsCoverage} onClick={() => m.setWantsCoverage(!m.wantsCoverage)} />
+                    {m.canRequestCoverage ? (
+                      <Toggle on={m.wantsCoverage} onClick={() => m.setWantsCoverage(!m.wantsCoverage)} />
+                    ) : (
+                      <span className="text-[11px] text-ink-4">Réservé aux organisateurs</span>
+                    )}
                   </div>
                 </div>
 
@@ -326,7 +330,7 @@ export function MobileEventModal({
             {!isEditing && m.wantsCoverage && m.role.canAssignCoverage && (
               <div>
                 <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
-                  Assigner directement un technicien (optionnel)
+                  Assigner directement un membre TeamMedias (optionnel)
                 </label>
                 <select
                   value={m.coverageTechnicianId}

@@ -732,7 +732,7 @@ const ROLE_LABELS: Record<string, string> = {
   admin: "Administrateur",
   organizer: "Organisateur",
   comite_directeur: "Comité directeur",
-  technician: "Technicien",
+  technician: "TeamMedias",
   user: "Utilisateur",
 };
 

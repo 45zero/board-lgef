@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, Check, KeyRound, X } from "lucide-react";
-import { createAvatarUpload, getMyProfile, setMyAvatar, updateMyProfile } from "@/app/actions/profile";
+import { AlertCircle, Camera, Check, KeyRound, X } from "lucide-react";
+import { createAvatarUpload, getManagerChoices, getMyProfile, setMyAvatar, setMyManager, updateMyProfile } from "@/app/actions/profile";
 import { unwrap } from "@/lib/board/actionResult";
 import { PROFILE_UPDATED_EVENT, pickDetails, type MyProfile, type ProfileDetails } from "@/lib/board/profile";
 import { createClient } from "@/lib/supabase/client";
@@ -74,6 +74,57 @@ function PasswordSection({ email }: { email: string }) {
   );
 }
 
+type ManagerChoices = { services: { key: string; label: string; managerId: string | null; managerName: string | null }[]; people: { id: string; name: string }[] };
+
+/** Mon N+1, à choisir tant qu'aucun n'est réglé : service de rattachement et/ou personne. */
+function ManagerPicker({
+  value,
+  onChange,
+}: {
+  value: { serviceKey: string; managerId: string };
+  onChange: (v: { serviceKey: string; managerId: string }) => void;
+}) {
+  const [choices, setChoices] = useState<ManagerChoices | null>(null);
+  useEffect(() => {
+    getManagerChoices()
+      .then((r) => setChoices(unwrap(r)))
+      .catch(() => setChoices({ services: [], people: [] }));
+  }, []);
+  const svc = choices?.services.find((s) => s.key === value.serviceKey);
+  return (
+    <div className="space-y-2 rounded-btn border-2 border-warn bg-warn-bg p-3">
+      <div className="flex items-center gap-1.5 text-sm font-bold text-ink">
+        <AlertCircle size={14} className="text-warn" /> Veuillez renseigner votre N+1
+      </div>
+      <p className="text-[11px] text-ink-3">Il valide vos frais, factures et pointages. Les administrateurs sont prévenus et peuvent corriger ce choix.</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div>
+          <div className={sectionTitle}>Mon service</div>
+          <select value={value.serviceKey} onChange={(e) => onChange({ ...value, serviceKey: e.target.value })} className={input}>
+            <option value="">— Choisir —</option>
+            {(choices?.services ?? []).map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <div className={sectionTitle}>Mon N+1</div>
+          <select value={value.managerId} onChange={(e) => onChange({ ...value, managerId: e.target.value })} className={input}>
+            <option value="">{svc?.managerName ? `Responsable du service — ${svc.managerName}` : "— Choisir —"}</option>
+            {(choices?.people ?? []).map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProfileForm({ profile, onClose }: { profile: MyProfile; onClose: () => void }) {
   const [firstName, setFirstName] = useState(profile.firstName);
   const [lastName, setLastName] = useState(profile.lastName);
@@ -83,6 +134,9 @@ function ProfileForm({ profile, onClose }: { profile: MyProfile; onClose: () => 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [needsManager, setNeedsManager] = useState(!!profile.needsManager);
+  const [managerName, setManagerName] = useState(profile.managerName);
+  const [manager, setManager] = useState({ serviceKey: "", managerId: "" });
   const fileRef = useRef<HTMLInputElement>(null);
 
   const initials = [firstName[0], lastName[0]].filter(Boolean).join("").toUpperCase() || profile.email.slice(0, 2).toUpperCase();
@@ -123,9 +177,15 @@ function ProfileForm({ profile, onClose }: { profile: MyProfile; onClose: () => 
     setSaved(false);
     try {
       unwrap(await updateMyProfile({ firstName, lastName, ...details }));
+      // N+1 choisi (seulement s'il n'était pas encore réglé) : service et/ou personne.
+      if (needsManager && (manager.serviceKey || manager.managerId)) {
+        unwrap(await setMyManager({ serviceKey: manager.serviceKey || null, managerId: manager.managerId || null }));
+      }
       // Relu : position trouvée (ou non) par Google pour une adresse tapée à la main.
       const fresh = unwrap(await getMyProfile());
       setDetails(pickDetails(fresh));
+      setNeedsManager(!!fresh.needsManager);
+      setManagerName(fresh.managerName);
       setSaved(true);
       notifyProfileUpdated();
     } catch (e) {
@@ -197,10 +257,21 @@ function ProfileForm({ profile, onClose }: { profile: MyProfile; onClose: () => 
             Statut : <b className="text-ink-2">{profile.status ?? "—"}</b>
           </span>
           <span>
-            N+1 : <b className="text-ink-2">{profile.managerName ?? "—"}</b>
+            N+1 : <b className="text-ink-2">{managerName ?? "—"}</b>
           </span>
-          <span className="w-full text-[11px] text-ink-4">Réglés par un administrateur (Paramètres → Gérer les utilisateurs).</span>
+          <span className="w-full text-[11px] text-ink-4">
+            {needsManager ? "Choisissez votre N+1 ci-dessous ; ensuite, seul un administrateur le change." : "Réglés par un administrateur (Paramètres → Gérer les utilisateurs)."}
+          </span>
         </div>
+
+        {needsManager && <ManagerPicker value={manager} onChange={setManager} />}
+
+        {profile.needsAddress && !details.homeAddress.trim() && !details.hasCompanyCar && (
+          <p className="flex items-start gap-1.5 rounded-btn border-2 border-warn bg-warn-bg px-3 py-2 text-xs text-ink-2">
+            <AlertCircle size={13} className="mt-0.5 shrink-0 text-warn" />
+            Indiquez l&apos;adresse de votre domicile et si vous avez un véhicule de fonction : vos indemnités kilométriques (0,45 €/km aller-retour) seront calculées automatiquement dans vos frais.
+          </p>
+        )}
 
         <ProfileDetailsFields value={details} onChange={setDetails} self />
 
