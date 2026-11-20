@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { format, parseISO } from "date-fns";
+import { saveMyPresence } from "@/app/actions/event-presence";
 import { Camera, Check, Minus, Users, Video } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEventPresence } from "@/hooks/board/useEventPresence";
@@ -243,5 +245,108 @@ export function MyPresenceBar({
       <span className="min-w-0 flex-1 font-semibold">{text}</span>
       <span className="shrink-0 font-semibold text-link underline-offset-2 hover:underline">{action} →</span>
     </button>
+  );
+}
+
+/**
+ * Événement d'une seule journée, personne sollicitée : son créneau de présence (« je viens de 11h à
+ * 13h »), à côté du créneau demandé par l'organisateur. Vide = présente sur tout l'événement.
+ */
+export function MySingleDaySlot({ eventId, startISO }: { eventId: string; startISO: string }) {
+  const { user } = useAuth();
+  const { rows, requests, reload } = useEventPresence(eventId);
+  const day = format(parseISO(startISO), "yyyy-MM-dd");
+  const mine = rows?.find((r) => r.user_id === user?.id && r.day === day);
+  const current: Slot = { start: mine?.start_time?.slice(0, 5) ?? "", end: mine?.end_time?.slice(0, 5) ?? "" };
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Slot>(current);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!rows || !user) return null;
+
+  const asked = PRESENCE_KINDS.filter((k) => requests?.[k][day] && slotLabel(requests[k][day]))
+    .map((k) => `${PRESENCE_KIND_LABEL[k].toLowerCase()} ${slotLabel(requests![k][day])}`)
+    .join(", ");
+  const save = async (slot: Slot | null) => {
+    setBusy(true);
+    setError(null);
+    const res = await saveMyPresence(eventId, slot ? [{ day, start: slot.start || null, end: slot.end || null }] : []);
+    setBusy(false);
+    if (res.error) return setError(res.error);
+    setEditing(false);
+    void reload();
+  };
+  const invalid = !!draft.start && !!draft.end && draft.end <= draft.start;
+  const input = `w-[5.5rem] rounded border bg-card px-1 py-0.5 font-mono text-[11px] outline-none focus:border-link ${invalid ? "border-red" : "border-line"}`;
+
+  return (
+    <div className={`rounded-btn border-l-4 px-3 py-2 text-xs ${mine ? "border-l-navy bg-sel-bg text-navy" : "border-l-line-strong bg-subtle text-ink-2"}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Check size={14} className="shrink-0" />
+        <span className="min-w-0 flex-1 font-semibold">
+          {mine && slotLabel(current) ? `Vous venez ${slotLabel(current)}` : "Vous êtes présent sur tout l'événement"}
+          {asked && <span className="ml-1.5 font-normal opacity-75">· demandé : {asked}</span>}
+        </span>
+        {!editing && (
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(current);
+              setEditing(true);
+            }}
+            className="shrink-0 font-semibold text-link underline-offset-2 hover:underline"
+          >
+            Préciser mon créneau →
+          </button>
+        )}
+      </div>
+      {editing && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-3">
+          de
+          <input type="time" value={draft.start} onChange={(e) => setDraft({ ...draft, start: e.target.value })} aria-label="Mon arrivée" className={input} />
+          à
+          <input type="time" value={draft.end} onChange={(e) => setDraft({ ...draft, end: e.target.value })} aria-label="Mon départ" className={input} />
+          <button
+            type="button"
+            disabled={busy || invalid || (!draft.start && !draft.end)}
+            onClick={() => void save(draft)}
+            className="rounded-btn bg-navy px-2.5 py-1 font-bold text-white disabled:opacity-40"
+          >
+            Enregistrer
+          </button>
+          <button type="button" disabled={busy} onClick={() => void save(null)} className="rounded-btn px-1.5 py-1 font-semibold text-ink-3 hover:text-ink">
+            Tout l&rsquo;événement
+          </button>
+          <button type="button" disabled={busy} onClick={() => setEditing(false)} className="rounded-btn px-1.5 py-1 text-ink-4 hover:text-ink">
+            Annuler
+          </button>
+          {invalid && <span className="w-full text-[10px] text-red">L&rsquo;heure de départ doit être après l&rsquo;arrivée.</span>}
+        </div>
+      )}
+      {error && <p className="mt-1 text-[10px] text-red">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * Bandeau de la fiche, à côté de la météo : ma présence quand elle ne couvre pas tout l'événement
+ * (« Présence 13h–15h » sur un 13h–19h ; plusieurs jours : « Présence mar. 2 13h–15h, mer. 3 »).
+ */
+export function MyPresenceBadge({ eventId, multiDay }: { eventId: string | null | undefined; multiDay: boolean }) {
+  const { user } = useAuth();
+  const { rows } = useEventPresence(eventId);
+  const mine = (rows ?? []).filter((r) => r.user_id === user?.id);
+  const parts = mine
+    .map((r) => {
+      const hours = slotLabel({ start: r.start_time?.slice(0, 5) ?? "", end: r.end_time?.slice(0, 5) ?? "" });
+      return multiDay ? [dayLabel(r.day, "EEE d"), hours].filter(Boolean).join(" ") : hours;
+    })
+    .filter(Boolean);
+  if (!parts.length) return null;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[11px] font-bold text-white" title="Votre présence sur cet événement">
+      <Check size={11} className="shrink-0" />
+      Présence {parts.join(", ")}
+    </span>
   );
 }

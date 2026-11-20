@@ -44,7 +44,8 @@ export async function saveMyPresence(eventId: string, days: PresenceDay[]): Prom
       if (error) throw new Error(error.message);
     }
 
-    // Personne non sollicitée qui vient (ou ne vient plus) : l'organisateur est prévenu, si quelque chose a changé.
+    // Jours / heures changés : l'organisateur est prévenu (personne sollicitée qui précise son créneau,
+    // ou personne venue d'elle-même qui vient ou ne vient plus).
     const key = (rows: { day: string; start: string | null; end: string | null }[]) =>
       rows
         .map((r) => `${r.day}|${r.start ?? ""}|${r.end ?? ""}`)
@@ -58,7 +59,8 @@ export async function saveMyPresence(eventId: string, days: PresenceDay[]): Prom
     if (key(prev) !== key(clean)) {
       const service = createServiceClient();
       const solicited = await getSolicitations(service, userId, { includePendingDirector: true, includeProposedCoverage: true });
-      if (!solicited.has(eventId)) await notifyOrganizer(service, eventId, userId, clean);
+      // Sollicitée ou non, l'organisateur est prévenu ; le texte dit s'il s'agit d'un créneau précisé.
+      await notifyOrganizer(service, eventId, userId, clean, solicited.has(eventId));
     }
     return { error: null };
   } catch (e) {
@@ -66,7 +68,7 @@ export async function saveMyPresence(eventId: string, days: PresenceDay[]): Prom
   }
 }
 
-async function notifyOrganizer(service: ReturnType<typeof createServiceClient>, eventId: string, userId: string, days: PresenceDay[]) {
+async function notifyOrganizer(service: ReturnType<typeof createServiceClient>, eventId: string, userId: string, days: PresenceDay[], solicited: boolean) {
   try {
     const [{ data: event }, { data: me }] = await Promise.all([
       service.from("events").select("title, created_by").eq("id", eventId).maybeSingle(),
@@ -77,8 +79,12 @@ async function notifyOrganizer(service: ReturnType<typeof createServiceClient>, 
     const { error } = await service.from("notifications").insert({
       user_id: event.created_by,
       type: "event_team_added",
-      title: days.length ? `${who} viendra à « ${event.title} »` : `${who} ne viendra finalement pas à « ${event.title} »`,
-      message: days.length ? `Présent ${describe(days)}.` : "Ses jours de présence ont été retirés.",
+      title: solicited
+        ? `${who} a précisé sa présence — « ${event.title} »`
+        : days.length
+          ? `${who} viendra à « ${event.title} »`
+          : `${who} ne viendra finalement pas à « ${event.title} »`,
+      message: days.length ? `Présent ${describe(days)}.` : solicited ? "Présent sur tout l'événement." : "Ses jours de présence ont été retirés.",
       event_id: eventId,
       actor_name: who,
       data: { event_id: eventId, presence: true },

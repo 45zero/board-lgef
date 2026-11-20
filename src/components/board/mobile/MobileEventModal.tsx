@@ -2,6 +2,8 @@
 
 import { EventCrewBar } from "@/components/board/calendar/EventCrewBar";
 import { EventWeather } from "@/components/board/calendar/DayWeather";
+import { isMultiDayEvent } from "@/lib/board/calendar";
+import { MyPresenceBadge } from "@/components/board/calendar/EventPlanningTab";
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -112,6 +114,7 @@ export function MobileEventModal({
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-white/80">
           {format(m.start, "EEEE d MMMM", { locale: fr })} — de {m.startTime} à {m.endTime}
           <EventWeather eventId={event?.id} />
+          {event && <MyPresenceBadge eventId={event.id} multiDay={isMultiDayEvent(event)} />}
         </div>
         {isEditing && event?.createdAt && (
           <div className="mt-1 text-[11px] text-white/60">

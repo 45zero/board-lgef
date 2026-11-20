@@ -109,6 +109,18 @@ function bannerTitle(ev: CalendarEvent) {
   return lines.join("\n");
 }
 
+/** Info-bulle d'un bloc horaire : créneau souhaité (vidéo / photo / CD) et le mien, ce jour-là. */
+function slotLines(ev: CalendarEvent, day: string): string[] {
+  const KIND: Record<string, string> = { video: "vidéo", photo: "photo", cd: "CD" };
+  const range = (h: { start: string; end: string }) => `${shortHour(h.start || "…")}–${shortHour(h.end || "…")}`;
+  const lines: string[] = [];
+  const wanted = Object.entries(ev.wanted?.[day] ?? {}).filter(([, h]) => h && (h.start || h.end));
+  if (wanted.length) lines.push(`Sollicité : ${wanted.map(([k, h]) => `${KIND[k]} ${range(h!)}`).join(", ")}`);
+  const mine = ev.myDays?.[day];
+  if (mine && (mine.start || mine.end)) lines.push(`Vous venez : ${range(mine)}`);
+  return lines;
+}
+
 /**
  * Dans le bandeau d'un événement de plusieurs jours : mes jours de présence restent pleins (soulignés,
  * avec mes heures), les autres jours sont estompés — sans créer d'autre événement.
@@ -871,7 +883,7 @@ export function CalendrierScreen() {
                             <button
                               key={ev.id}
                               onClick={() => setEditingInternal(ev)}
-                              title={`${format(parseISO(ev.start), "HH:mm")}–${format(parseISO(ev.end), "HH:mm")} · ${ev.title}`}
+                              title={[`${format(parseISO(ev.start), "HH:mm")}–${format(parseISO(ev.end), "HH:mm")} · ${ev.title}`, ...slotLines(ev, isoDay(day))].join("\n")}
                               className={`absolute z-[1] overflow-hidden rounded-chip border-l-[3px] text-left shadow-sm transition-shadow hover:z-[5] hover:shadow-card ${
                                 tight ? "px-1 py-0.5" : "px-1.5 py-1"
                               } ${ev.awaitingMyAnswer ? "ring-2 ring-red" : "ring-1 ring-card"}`}
@@ -890,6 +902,28 @@ export function CalendrierScreen() {
                               >
                                 {ev.title}
                               </div>
+                              {/* Sollicité sur une partie seulement (9h–17h, vous 11h–13h) : mon créneau en pointillés dans le bloc. */}
+                              {(() => {
+                                const mine = ev.myDays?.[isoDay(day)];
+                                if (!mine?.start || !mine?.end) return null;
+                                const s = parseISO(ev.start);
+                                const h = (t: string) => Number(t.slice(0, 2)) + Number(t.slice(3, 5)) / 60;
+                                const startH = s.getHours() + s.getMinutes() / 60;
+                                const y = Math.max(0, (h(mine.start) - startH) * PX_PER_HOUR);
+                                const hh = Math.max(12, Math.min(height - y, (h(mine.end) - h(mine.start)) * PX_PER_HOUR));
+                                if (y >= height - 6) return null;
+                                return (
+                                  <span
+                                    aria-hidden
+                                    className="pointer-events-none absolute inset-x-0.5 -z-10 flex items-end justify-end rounded-sm border border-dashed px-1"
+                                    style={{ top: y, height: hh, borderColor: color.base, background: `color-mix(in srgb, ${color.base} 14%, transparent)` }}
+                                  >
+                                    <span className="font-mono text-[8.5px] font-bold leading-[11px]">
+                                      Vous {shortHour(mine.start)}–{shortHour(mine.end)}
+                                    </span>
+                                  </span>
+                                );
+                              })()}
                               {!tight && (
                                 <div className="mt-0.5 flex items-center gap-1">
                                   <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
