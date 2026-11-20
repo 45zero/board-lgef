@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { mapEventRow, type CalendarEvent, type EventRow, type CoverageRequestRow, type PublishedMedia } from "@/lib/board/calendar";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { getMySolicitedEventIds } from "@/app/actions/solicitation";
+import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 
 /** Profil de visibilité, lu une fois par session (il ne change pas d'un changement de semaine à l'autre). */
 type Access = { seeAll: boolean; solicitedOnly: boolean };
@@ -189,28 +190,27 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
     fetchEvents();
   }, [fetchEvents]);
 
-  // Live : la grille (couleurs/icônes de couverture, statuts) se met à jour
-  // sans rechargement dès qu'un événement ou une demande de couverture change,
-  // même quand aucun modal n'est ouvert.
-  useEffect(() => {
-    if (!user) return;
-    const supabase = createClient();
-    const channel = supabase
-      .channel(`calendar-events-live-${crypto.randomUUID()}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "events" }, () => fetchEvents())
-      .on("postgres_changes", { event: "*", schema: "public", table: "coverage_requests" }, () => fetchEvents())
-      .on("postgres_changes", { event: "*", schema: "public", table: "director_attendance" }, () => fetchEvents())
-      .on("postgres_changes", { event: "*", schema: "public", table: "photo_missions" }, () => fetchEvents())
-      // Participants / assignations : l'icône « où je suis sollicité » suit sans rechargement.
-      .on("postgres_changes", { event: "*", schema: "public", table: "event_team_members" }, () => fetchEvents())
-      .on("postgres_changes", { event: "*", schema: "public", table: "event_assignments" }, () => fetchEvents())
-      .on("postgres_changes", { event: "*", schema: "public", table: "event_presence_days" }, () => fetchEvents())
-      .on("postgres_changes", { event: "*", schema: "public", table: "event_presence_requests" }, () => fetchEvents())
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, fetchEvents]);
+  // En direct, sur le canal commun du board (LiveProvider) : tout changement d'un événement, d'une équipe,
+  // d'une captation, d'une présence ou d'une publication (vidéos / photos publiées affichées sur
+  // l'événement — oubliées par l'ancien canal propre au calendrier) recharge la période affichée. Au
+  // retour après une veille, une coupure réseau ou une absence (« resume »), tout est rattrapé.
+  useLiveRefresh(
+    [
+      "events",
+      "coverage_requests",
+      "director_attendance",
+      "event_assignments",
+      "event_team_members",
+      "photo_missions",
+      "match_details",
+      "media_publications",
+      "event_presence_days",
+      "event_presence_requests",
+      "resume",
+    ],
+    () => void fetchEvents(),
+    800
+  );
 
   return { events, loading, refetch: fetchEvents };
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { DiscussionsBubble } from "@/components/board/discussions/DiscussionsBubble";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import { TopBar } from "./TopBar";
 import { AppRail } from "./AppRail";
@@ -24,12 +24,14 @@ import { TransferScreen } from "./screens/TransferScreen";
 import { FiefScreen } from "./screens/FiefScreen";
 import { TournoisScreen } from "./screens/TournoisScreen";
 import { MobileShell } from "./mobile/MobileShell";
+import { useLive } from "./live/LiveProvider";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useBoardPreferences } from "@/hooks/board/useBoardPreferences";
 import { BOARD_APPS } from "@/lib/board/tokens";
 import { BackgroundTasksPanel } from "./BackgroundTasksPanel";
 import { InstallNotificationsPrompt } from "./InstallNotificationsPrompt";
 import { ProfileCompletionPrompt } from "./ProfileCompletionPrompt";
+import { VersionWatcher } from "./VersionWatcher";
 import { ModuleAccessModal } from "./modules/ModuleAccessModal";
 import { canShowModule, useVisibleModules } from "@/hooks/board/useVisibleModules";
 import { useUserRole } from "@/hooks/board/useUserRole";
@@ -42,6 +44,12 @@ export type Theme = "light" | "dark";
 const KEEP_ALIVE_APPS = ["accueil", "trello", "effectif", "mails", "calendrier", "ged", "audiovisuel", "drive", "transfer", "inscription", "cartographie", "frais", "weekend", "fief", "tournois"];
 /** Préchargés en arrière-plan juste après l'ouverture du board : les plus consultés. */
 const PRELOAD_APPS = ["mails", "calendrier"];
+/**
+ * Modules restés montés sans mise à jour en direct (Google Drive, Transfert, FIEF…) : après un retour
+ * d'absence ou une reconnexion, ils sont rechargés à leur prochain affichage (remontés, données
+ * fraîches). Les autres se mettent à jour eux-mêmes (useLiveRefresh) et gardent leur état.
+ */
+const RELOAD_ON_RETURN_APPS = ["drive", "ged", "cartographie", "tournois", "transfer", "fief"];
 
 function renderScreen(id: string, props: { punchedIn: boolean; onTogglePunch: () => void; onNavigate: (app: string) => void }) {
   switch (id) {
@@ -86,6 +94,11 @@ export function BoardShell() {
   // Module masqué (règle d'accès modifiée pendant qu'il était ouvert) : retour à l'accueil.
   const visible = useVisibleModules();
   const app = canShowModule(visible, selectedApp) ? selectedApp : "accueil";
+  // Retour après une absence : les modules sans direct, masqués, sont à recharger ; celui affiché l'est tout de suite.
+  const appRef = useRef(app);
+  useEffect(() => {
+    appRef.current = app;
+  });
   const role = useUserRole();
   const canManageAccess = role.isAdmin || role.isSuperUser;
   const [accessOpen, setAccessOpen] = useState(false);
@@ -93,10 +106,30 @@ export function BoardShell() {
 
   // Module ouvert → monté pour de bon ; les modules les plus consultés sont préchargés dès que le
   // navigateur est libre, pour qu'ils s'affichent sans attente au premier clic.
+  // Génération par module : la changer remonte le module (rechargement complet de ses données).
+  const [generation, setGeneration] = useState<Record<string, number>>({});
+  const [staleApps, setStaleApps] = useState<Set<string>>(() => new Set());
+  const { resumes } = useLive();
   const selectApp = (id: string) => {
     setMounted((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    if (staleApps.has(id)) {
+      setStaleApps((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setGeneration((g) => ({ ...g, [id]: (g[id] ?? 0) + 1 }));
+    }
     setApp(id);
   };
+  useEffect(() => {
+    if (resumes === 0) return;
+    const active = appRef.current;
+    queueMicrotask(() => {
+      setStaleApps(new Set(RELOAD_ON_RETURN_APPS.filter((id) => id !== active)));
+      if (RELOAD_ON_RETURN_APPS.includes(active)) setGeneration((g) => ({ ...g, [active]: (g[active] ?? 0) + 1 }));
+    });
+  }, [resumes]);
   useEffect(() => {
     const preload = () => setMounted((prev) => new Set([...prev, ...PRELOAD_APPS]));
     const w = window as Window & { requestIdleCallback?: (cb: () => void) => number };
@@ -127,6 +160,7 @@ export function BoardShell() {
         <BackgroundTasksPanel mobile />
         <InstallNotificationsPrompt mobile />
         <ProfileCompletionPrompt />
+        <VersionWatcher />
       </>
     );
 
@@ -151,7 +185,7 @@ export function BoardShell() {
               instantané, avec leurs données et leur position de défilement, comme une appli native. */}
           <main className="relative flex-1 overflow-hidden rounded-panel">
             {KEEP_ALIVE_APPS.filter((id) => mounted.has(id) && canShowModule(visible, id)).map((id) => (
-              <div key={id} className={app === id ? "h-full overflow-y-auto" : "hidden"}>
+              <div key={`${id}:${generation[id] ?? 0}`} className={app === id ? "h-full overflow-y-auto" : "hidden"}>
                 {renderScreen(id, { punchedIn, onTogglePunch: () => setPunchedIn((p) => !p), onNavigate: selectApp })}
               </div>
             ))}
@@ -197,6 +231,7 @@ export function BoardShell() {
       <BackgroundTasksPanel />
       <InstallNotificationsPrompt />
       <ProfileCompletionPrompt />
+      <VersionWatcher />
 
       {accessOpen && <ModuleAccessModal initialModuleId={app} onClose={() => setAccessOpen(false)} />}
 

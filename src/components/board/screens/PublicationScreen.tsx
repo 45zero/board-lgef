@@ -4,6 +4,7 @@ import { InstagramMentionField } from "@/components/board/publication/InstagramM
 import { CaptionAssistant, localPreviewImages } from "@/components/board/publication/CaptionAssistant";
 import { PublicationSettings } from "@/components/board/publication/PublicationSettings";
 import { useCanPublish } from "@/hooks/board/useCanPublish";
+import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
@@ -2257,6 +2258,10 @@ export function PublicationScreen() {
       setRefreshingStats(false);
     }
   };
+
+  // En direct : une publication ajoutée, programmée, publiée ou modérée ailleurs (autre poste, robot de
+  // publication) met la liste à jour sans recharger l'écran ; au retour après une absence aussi.
+  useLiveRefresh(["media_publications", "comment_moderation", "resume"], () => void refetch(true), 800);
 
   // Une tâche de fond vient de se terminer (publication, nouvelle publication…) : on recharge la liste.
   useEffect(() => {

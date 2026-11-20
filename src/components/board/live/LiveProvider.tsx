@@ -42,7 +42,12 @@ export const LIVE_TABLES = [
   "event_presence_days",
   "event_presence_requests",
 ] as const;
-export type LiveTable = (typeof LIVE_TABLES)[number] | "notifications" | "mails";
+/**
+ * « resume » : retour après une absence (onglet ou appli caché ≥ 1 min, réveil de l'ordinateur, réseau
+ * revenu, canal reconnecté) et passage de sécurité toutes les 10 min. Tous les écrans abonnés sont
+ * alors rechargés : ce qui a changé pendant l'absence n'est jamais manqué.
+ */
+export type LiveTable = (typeof LIVE_TABLES)[number] | "notifications" | "mails" | "resume";
 
 export type BoardNotification = {
   id: string;
@@ -67,12 +72,18 @@ type LiveContextValue = {
   markAllRead: () => Promise<void>;
   /** Supprime des notifications (is_deleted) : toutes si `ids` est absent. */
   removeNotifications: (ids?: string[]) => Promise<void>;
+  /** Nombre de retours après absence / reconnexions (pas les passages de sécurité) : les modules sans direct s'y fient. */
+  resumes: number;
 };
 
 const LiveContext = createContext<LiveContextValue | null>(null);
 
 const MAILS_EVERY_MS = 30_000;
 const DB_FALLBACK_MS = 120_000;
+/** Absence au-delà de laquelle, au retour, tout est rechargé (1 min : un aller-retour rapide dans une autre appli ne recharge rien). */
+const RESUME_AFTER_MS = 60_000;
+/** Passage de sécurité, onglet visible : rattrape un message temps réel perdu. */
+const SAFETY_EVERY_MS = 10 * 60_000;
 const NOTIF_FIELDS = "id, type, title, message, read, created_at, event_id, actor_name, data";
 
 export function LiveProvider({ children }: { children: React.ReactNode }) {
@@ -82,10 +93,17 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
   const [badges, setBadges] = useState<Partial<AppBadges> | null>(() => readCache<AppBadges>("badges") ?? null);
   const [notifications, setNotifications] = useState<BoardNotification[]>([]);
   const [unread, setUnread] = useState(0);
+  const [resumes, setResumes] = useState(0);
 
   const emit = useCallback((table: LiveTable) => {
     for (const l of listeners.current) if (!l.tables || l.tables.has(table)) l.fn();
   }, []);
+
+  /** Tout recharger : chaque table suivie, les notifications, les mails et « resume ». */
+  const emitAll = useCallback(() => {
+    for (const t of [...LIVE_TABLES, "notifications", "mails", "resume"] as LiveTable[]) emit(t);
+    setResumes((n) => n + 1);
+  }, [emit]);
 
   const subscribe = useCallback((tables: LiveTable[] | null, fn: () => void) => {
     const l: Listener = { tables: tables ? new Set(tables) : null, fn };
@@ -232,21 +250,63 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     channel.on("postgres_changes", { event: "UPDATE", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` }, () => {
       void loadNotifications();
     });
+    let connectedOnce = false;
     channel.subscribe((status) => {
       // (Re)connexion après une veille ou une coupure réseau : on rattrape ce qui a pu être manqué.
       if (status === "SUBSCRIBED") {
         void loadNotifications();
         scheduleDbBadges();
+        // Reconnexion (pas la première connexion) : des changements ont pu passer sans nous.
+        if (connectedOnce) emitAll();
+        connectedOnce = true;
       }
     });
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [userId, emit, scheduleDbBadges, loadNotifications]);
+  }, [userId, emit, emitAll, scheduleDbBadges, loadNotifications]);
+
+  /* ---------- Retour après une absence ---------- */
+
+  useEffect(() => {
+    if (!userId) return;
+    let hiddenAt: number | null = document.visibilityState === "hidden" ? Date.now() : null;
+    const resume = () => {
+      emitAll();
+      scheduleDbBadges();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (hiddenAt !== null && Date.now() - hiddenAt >= RESUME_AFTER_MS) resume();
+      hiddenAt = null;
+    };
+    // Appli du Dock / fenêtre au premier plan sans changement de visibilité (macOS) : même règle.
+    let blurredAt: number | null = null;
+    const onBlur = () => (blurredAt = Date.now());
+    const onFocus = () => {
+      if (blurredAt !== null && Date.now() - blurredAt >= RESUME_AFTER_MS && document.visibilityState === "visible") resume();
+      blurredAt = null;
+    };
+    const safety = window.setInterval(() => document.visibilityState === "visible" && emit("resume"), SAFETY_EVERY_MS);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", resume);
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(safety);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", resume);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [userId, emit, emitAll, scheduleDbBadges]);
 
   const value = useMemo(
-    () => ({ subscribe, badges, notifications, unread, markRead, markAllRead, removeNotifications }),
-    [subscribe, badges, notifications, unread, markRead, markAllRead, removeNotifications]
+    () => ({ subscribe, badges, notifications, unread, markRead, markAllRead, removeNotifications, resumes }),
+    [subscribe, badges, notifications, unread, markRead, markAllRead, removeNotifications, resumes]
   );
   return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>;
 }

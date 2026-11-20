@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Version du build (commit Vercel) : l'appli restée ouverte la compare à /api/version (VersionWatcher).
+  env: { NEXT_PUBLIC_BUILD_ID: process.env.VERCEL_GIT_COMMIT_SHA ?? "dev" },
   // FFmpeg (habillage des vidéos) : binaire natif, chargé tel quel par Node et embarqué dans la
   // fonction de la route (le paquet de la plateforme n'est pas « requis », il faut l'inclure).
   // Comptes iCloud : IMAP / SMTP / analyse des mails, chargés par Node tels quels (sockets, flux).
@@ -8,6 +10,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/media/video-habillage": ["./node_modules/@ffmpeg-installer/linux-x64/**/*"],
     "/api/media/habillage-animation": ["./node_modules/@ffmpeg-installer/linux-x64/**/*"],
+    "/api/media/cover": ["./node_modules/@ffmpeg-installer/linux-x64/**/*"],
   },
   // Liens de l'ancienne appli calendrier-lgef (push et e-mails de ses messages, encore envoyés tant
   // qu'elle est utilisée) : ils ouvrent la discussion de l'événement dans la bulle au lieu d'une 404.
