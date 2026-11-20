@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { MapPopup } from "@/components/board/calendar/MapPopup";
 import { useEffect, useState } from "react";
-import { X, Check, ChevronRight, CalendarDays, MapPin, Map as MapIcon, Loader2, Send, FileText, Search } from "lucide-react";
+import { X, Check, ChevronRight, ChevronDown, CalendarDays, MapPin, Map as MapIcon, Loader2, Send, FileText, Search, Eye, Paperclip } from "lucide-react";
 import { Composer } from "@/components/board/screens/PublicationScreen";
 import { getMediaPublication, type MediaPublication } from "@/lib/board/mediaPublications";
 import { createClient } from "@/lib/supabase/client";
@@ -175,20 +175,29 @@ function ValidateRow({
     if (res.error) return setError(res.error);
     onDone();
   };
+  const files = sub.lines.reduce((n, l) => n + l.attachments.length, 0);
   return (
-    <div className={`border-b border-line px-4 py-3 last:border-b-0 ${selected ? "bg-sel-bg" : ""}`}>
+    <div className={`border-b border-line py-2.5 pl-9 pr-4 last:border-b-0 ${selected ? "bg-sel-bg" : ""}`}>
       <div className="flex flex-wrap items-center gap-2">
         <SelectBox checked={selected} onChange={onToggle} label={`Sélectionner ${sub.person.name} · ${sub.event.title}`} />
-        <button onClick={onDetails} className="min-w-0 flex-1 text-left">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm font-bold text-ink">
-              {sub.person.name} · {formatEuros(sub.total)}
-            </span>
+            <span className="truncate text-sm font-semibold text-ink">{sub.event.title}</span>
             {sub.event.id && <EventArrow eventId={sub.event.id} className="h-6 w-6" />}
           </div>
           <div className="truncate text-[11px] text-ink-4">
-            {sub.event.title} · {fmt(sub.event.start)} — voir le détail
+            <span className="font-bold text-ink-2">{formatEuros(sub.total)}</span> · {fmt(sub.event.start)}
+            {sub.submittedAt && <> · envoyée le {new Date(sub.submittedAt).toLocaleDateString("fr-FR")}</>}
           </div>
+        </div>
+        <button onClick={onDetails} className={btnGhost} title="Voir les lignes et les justificatifs">
+          <Eye size={12} /> Détail
+          {files > 0 && (
+            <span className="ml-0.5 inline-flex items-center gap-0.5 text-ink-4">
+              <Paperclip size={11} />
+              {files}
+            </span>
+          )}
         </button>
         {!refusing && (
           <>
@@ -471,8 +480,26 @@ function ValidateList({ onChanged }: { onChanged: () => void }) {
   const [subs, setSubs] = useState<SubmissionToReview[] | null>(null);
   const [details, setDetails] = useState<SubmissionToReview | null>(null);
   const [query, setQuery] = useState("");
-  const shown = (subs ?? []).filter((s) => matchesName(query, `${s.person.name} ${s.event.title}`));
+  // Dossiers repliés (par défaut tous ouverts) ; replier ne décoche rien.
+  const [closed, setClosed] = useState<Set<string>>(() => new Set());
+  const shown = (subs ?? [])
+    .filter((s) => matchesName(query, `${s.person.name} ${s.event.title}`))
+    .sort((a, b) => (b.submittedAt ?? b.event.start).localeCompare(a.submittedAt ?? a.event.start));
   const sel = useSelection(shown.map((s) => s.submissionId));
+  // Un dossier par déclarant, le plus récent envoi en tête.
+  const groups: { person: SubmissionToReview["person"]; subs: SubmissionToReview[] }[] = [];
+  for (const s of shown) {
+    const g = groups.find((x) => x.person.id === s.person.id);
+    if (g) g.subs.push(s);
+    else groups.push({ person: s.person, subs: [s] });
+  }
+  const toggleGroup = (id: string) =>
+    setClosed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   useEffect(() => {
     getSubmissionsToReview("pending", "mine")
       .then(setSubs)
@@ -507,16 +534,41 @@ function ValidateList({ onChanged }: { onChanged: () => void }) {
         }}
       />
       {shown.length === 0 && <p className="p-4 text-sm text-ink-3">Aucun résultat pour « {query} ».</p>}
-      {shown.map((s) => (
-        <ValidateRow
-          key={s.submissionId}
-          sub={s}
-          selected={sel.selected.has(s.submissionId)}
-          onToggle={() => sel.toggle(s.submissionId)}
-          onDetails={() => setDetails(s)}
-          onDone={() => remove(s.submissionId)}
-        />
-      ))}
+      {groups.map((g) => {
+        const ids = g.subs.map((s) => s.submissionId);
+        const picked = ids.filter((id) => sel.selected.has(id)).length;
+        const open = !closed.has(g.person.id);
+        return (
+          <div key={g.person.id} className="border-b border-line last:border-b-0">
+            <div className="flex items-center gap-2 bg-hover/60 px-4 py-2">
+              <SelectBox
+                checked={picked === ids.length}
+                partial={picked > 0}
+                onChange={() => sel.toggleMany(ids)}
+                label={`Sélectionner toutes les notes de ${g.person.name}`}
+              />
+              <button onClick={() => toggleGroup(g.person.id)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left" aria-expanded={open}>
+                <ChevronDown size={14} className={`shrink-0 text-ink-4 transition-transform ${open ? "" : "-rotate-90"}`} />
+                <span className="truncate text-sm font-bold text-ink">{g.person.name}</span>
+                <span className="shrink-0 text-[11px] text-ink-4">
+                  {g.subs.length} note{g.subs.length > 1 ? "s" : ""} · {formatEuros(g.subs.reduce((n, s) => n + s.total, 0))}
+                </span>
+              </button>
+            </div>
+            {open &&
+              g.subs.map((s) => (
+                <ValidateRow
+                  key={s.submissionId}
+                  sub={s}
+                  selected={sel.selected.has(s.submissionId)}
+                  onToggle={() => sel.toggle(s.submissionId)}
+                  onDetails={() => setDetails(s)}
+                  onDone={() => remove(s.submissionId)}
+                />
+              ))}
+          </div>
+        );
+      })}
       {details && (
         <ReviewModal
           sub={details}

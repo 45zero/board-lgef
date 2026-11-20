@@ -1,9 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import { ChevronDown, ChevronLeft, Settings } from "lucide-react";
 import { NotificationBell } from "@/components/board/live/NotificationBell";
 import { SupportButton } from "@/components/board/support/SupportButton";
+import { MyProfileModal } from "@/components/board/profile/MyProfileModal";
+import { useCurrentProfile } from "@/hooks/board/useCurrentProfile";
 
 /** `onLogoClick` : sur la page Mails, le logo ouvre le menu comptes / dossiers (d'où le chevron). */
 export function MobileHeader({
@@ -29,7 +32,10 @@ export function MobileHeader({
   /** Boutons propres à l'écran, placés avant la roue crantée (ex. Photo / Joindre dans Frais). */
   actions?: React.ReactNode;
 }) {
+  const { initials, avatarUrl } = useCurrentProfile();
+  const [profileOpen, setProfileOpen] = useState(false);
   return (
+    <>
     <div
       className="flex items-center justify-between px-4 pb-4 pt-[calc(env(safe-area-inset-top)+12px)] text-white"
       style={{ background: "linear-gradient(160deg, var(--navy) 0%, var(--navy-500) 100%)" }}
@@ -65,10 +71,17 @@ export function MobileHeader({
         </button>
         <SupportButton app={app} variant="mobile" />
         <NotificationBell variant="mobile" />
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-red text-xs font-bold text-white">
-          GV
-        </div>
+        <button type="button" onClick={() => setProfileOpen(true)} className="shrink-0 rounded-full" aria-label="Mon profil">
+          {avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- photo du bucket Supabase, domaine non déclaré à next/image
+            <img src={avatarUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
+          ) : (
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-red text-xs font-bold text-white">{initials || "?"}</span>
+          )}
+        </button>
       </div>
     </div>
+    {profileOpen && <MyProfileModal onClose={() => setProfileOpen(false)} />}
+    </>
   );
 }
