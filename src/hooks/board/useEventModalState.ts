@@ -4,6 +4,9 @@ import { notifyEventAssignment } from "@/app/actions/event-notifications";
 import { useEffect, useMemo, useState } from "react";
 import { addDays, differenceInCalendarDays, format, parseISO } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { emptyRequests, requestCount, requestsFromRows, type PresenceRequests } from "@/lib/board/presence";
+import { savePresenceRequests } from "@/app/actions/event-presence";
 import { useAuth } from "@/contexts/AuthContext";
 import { ORG_TO_EVENT_TYPE, type CalendarEvent } from "@/lib/board/calendar";
 import type { OrgKey } from "@/lib/board/tokens";
@@ -119,8 +122,37 @@ export function useEventModalState({
   const [dateStr, setDateStr] = useState(format(start, "yyyy-MM-dd"));
   const [startTime, setStartTime] = useState(format(start, "HH:mm"));
   const [endTime, setEndTime] = useState(format(end, "HH:mm"));
-  // Jours entre début et fin d'un événement existant sur plusieurs jours (la fiche n'a qu'une date).
-  const [endDayOffset] = useState(() => Math.max(0, differenceInCalendarDays(end, start)));
+  // Jours entre début et fin (événement sur plusieurs jours) : changer la date de début décale la fin d'autant.
+  const [endDayOffset, setEndDayOffset] = useState(() => Math.max(0, differenceInCalendarDays(end, start)));
+  const endDateStr = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? format(addDays(new Date(`${dateStr}T12:00:00`), endDayOffset), "yyyy-MM-dd") : dateStr;
+  /** Date de fin choisie : jamais avant la date de début. */
+  const setEndDateStr = (next: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(next) || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
+    setEndDayOffset(Math.max(0, differenceInCalendarDays(new Date(`${next}T12:00:00`), new Date(`${dateStr}T12:00:00`))));
+  };
+  // Présences souhaitées (vidéo, photo, CD) jour par jour — événement de plusieurs jours.
+  const [presenceRequests, setPresenceRequestsState] = useState<PresenceRequests>(emptyRequests);
+  const [requestsDirty, setRequestsDirty] = useState(false);
+  // Création : membres du comité directeur à inviter (invitation « à confirmer » à l'enregistrement).
+  const [pendingDirectors, setPendingDirectors] = useState<string[]>([]);
+  const setPresenceRequests = (next: PresenceRequests) => {
+    setPresenceRequestsState(next);
+    setRequestsDirty(true);
+  };
+  useEffect(() => {
+    if (!event?.id) return;
+    let cancelled = false;
+    (createClient() as unknown as SupabaseClient)
+      .from("event_presence_requests")
+      .select("kind, day, start_time, end_time")
+      .eq("event_id", event.id)
+      .then(({ data }) => {
+        if (!cancelled && data) setPresenceRequestsState(requestsFromRows(data as { kind: string; day: string; start_time: string | null; end_time: string | null }[]));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [event?.id]);
   const [saving, setSaving] = useState(false);
   const [reminders, setReminders] = useState<{ id: string; reminder_offset: string }[]>([]);
   const [wantsCoverage, setWantsCoverage] = useState(d?.wantsCoverage ?? false);
@@ -268,6 +300,10 @@ export function useEventModalState({
         const ok = await updateEvent(event.id, payload);
         if (ok) {
           await rescheduleMyReminders(event.id, payload.startISO);
+          if (requestsDirty) {
+            const res = await savePresenceRequests(event.id, presenceRequests, payload.startISO, payload.endISO);
+            if (res.error) alert(`Présences souhaitées non enregistrées : ${res.error}`);
+          }
           onSaved();
           onClose();
         }
@@ -276,6 +312,18 @@ export function useEventModalState({
 
       const newId = await createEvent(payload);
       if (!newId) return;
+
+      // Invitations du comité directeur : même circuit que l'ajout depuis la fiche (notification, réponse).
+      if (pendingDirectors.length > 0 && user) {
+        const { error: cdError } = await createClient()
+          .from("director_attendance")
+          .insert(pendingDirectors.map((id) => ({ event_id: newId, director_id: id, status: "pending", created_by: user.id, updated_by: user.id })));
+        if (cdError) console.error("[handleSave.directors]", cdError.message);
+      }
+      if (requestCount(presenceRequests) > 0) {
+        const res = await savePresenceRequests(newId, presenceRequests, payload.startISO, payload.endISO);
+        if (res.error) alert(`Présences souhaitées non enregistrées : ${res.error}`);
+      }
 
       if (pendingParticipants.length > 0) {
         const supabase = createClient();
@@ -386,6 +434,13 @@ export function useEventModalState({
     start,
     dateStr,
     setDateStr,
+    endDateStr,
+    setEndDateStr,
+    endDayOffset,
+    presenceRequests,
+    setPresenceRequests,
+    pendingDirectors,
+    setPendingDirectors,
     startTime,
     setStartTime: changeStartTime,
     endTime,

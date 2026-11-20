@@ -10,6 +10,6 @@ export async function getMySolicitedEventIds(): Promise<string[]> {
   const { data } = await supabase.auth.getClaims();
   const userId = data?.claims?.sub;
   if (!userId) return [];
-  const roles = await getSolicitations(createServiceClient(), userId, { includePendingDirector: true, includeProposedCoverage: true });
+  const roles = await getSolicitations(createServiceClient(), userId, { includePendingDirector: true, includeProposedCoverage: true, includePresence: true });
   return [...roles.keys()];
 }

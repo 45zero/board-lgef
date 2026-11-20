@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useCalendarDefaults, type AccountScope } from "@/hooks/board/useCalendarDefaults";
 
-type ScopeKey = "mailBox" | "dashMailBox" | "googleCalendars";
+type ScopeKey = "mailBox" | "dashMailBox" | "googleCalendars" | "dashGoogleCalendars";
 
 /**
  * Boîte(s) affichée(s) quand plusieurs comptes Google sont connectés : « all » ou un compte. Le clic

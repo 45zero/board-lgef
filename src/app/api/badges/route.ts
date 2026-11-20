@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { isPublisher } from "@/lib/board/publishers";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
-import { getInboxUnreadCount } from "@/lib/google/gmail";
+import { getInboxUnreadCount, listMailAccounts } from "@/lib/mail";
 import { getMyExpenses, getMyValidatorScope } from "@/app/actions/expenses";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import { isPrestataire } from "@/lib/board/expensesCore";
@@ -60,7 +59,7 @@ export async function GET(request: Request) {
   const [mails, calendrier, inscription, audiovisuel, frais, trello, fief] = await Promise.all([
     withMails
       ? safe(async () => {
-          const accounts = await prisma.connectedAccount.findMany({ where: { user_id: userId, provider: "google" } });
+          const accounts = await listMailAccounts({ user_id: userId });
           const counts = await Promise.all(accounts.map((a) => getInboxUnreadCount(a).catch(() => 0)));
           return {
             total: counts.reduce((n, c) => n + c, 0),

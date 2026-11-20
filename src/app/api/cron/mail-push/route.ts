@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
-import { listNewPrimaryInbox, type NewInboxMail } from "@/lib/google/gmail";
+import type { NewInboxMail } from "@/lib/google/gmail";
+import { listMailAccounts, listNewPrimaryInbox } from "@/lib/mail";
 import { sendPush } from "@/lib/push/sendPush";
 import { usersWithWebPush } from "@/lib/push/webPush";
 
@@ -25,9 +26,8 @@ export async function GET(request: Request) {
   }
 
   const service = createServiceClient();
-  const accounts = (await prisma.connectedAccount.findMany({ where: { provider: "google" } })).filter((a) =>
-    a.scopes.some((s) => s.includes("gmail"))
-  );
+  // Comptes Gmail et iCloud (mail coché) ; iCloud interrogé en IMAP à chaque passage.
+  const accounts = await listMailAccounts();
   if (!accounts.length) return NextResponse.json({ pushed: 0 });
 
   const userIds = [...new Set(accounts.map((a) => a.user_id))];
@@ -39,9 +39,11 @@ export async function GET(request: Request) {
   const withApp = new Set([...(tokens ?? []).map((t) => t.user_id), ...withComputer]);
   const muted = new Set((profiles ?? []).filter((p) => p.notify_push === false).map((p) => p.id));
 
-  // Canal « mail » ; icône de la messagerie du compte (le M de Gmail pour un compte Google).
-  const push = (userId: string, title: string, body: string, data: Record<string, string>) =>
-    sendPush({ userId, title, body, type: "mail", channel: "mail", icon: "ic_stat_gmail", native: true, data: { ...data, large_icon: "gmail" } });
+  // Canal « mail » ; icône de la messagerie du compte (le M de Gmail pour un compte Google, icône du board pour iCloud).
+  const push = (userId: string, title: string, body: string, data: Record<string, string>, provider: string) =>
+    provider === "icloud"
+      ? sendPush({ userId, title, body, type: "mail", channel: "mail", icon: "ic_stat_lgef", native: true, data })
+      : sendPush({ userId, title, body, type: "mail", channel: "mail", icon: "ic_stat_gmail", native: true, data: { ...data, large_icon: "gmail" } });
 
   // Plusieurs boîtes connectées : chaque notification dit quelle adresse a reçu le mail.
   const boxesPerUser = new Map<string, number>();
@@ -72,12 +74,12 @@ export async function GET(request: Request) {
         for (const m of fresh) {
           // Objet, puis le début du mail (quelques lignes visibles en dépliant la notification).
           const body = [box ? `Pour ${box} · ${m.subject}` : m.subject, m.snippet.slice(0, 280)].filter(Boolean).join("\n");
-          if (await push(account.user_id, senderName(m.from), body, { ...data, message_id: m.id })) pushed++;
+          if (await push(account.user_id, senderName(m.from), body, { ...data, message_id: m.id }, account.provider)) pushed++;
         }
       } else {
         const senders = [...new Set(fresh.map((m) => senderName(m.from)))].slice(0, 4).join(", ");
         const title = box ? `${fresh.length} nouveaux mails pour ${box}` : `${fresh.length} nouveaux mails`;
-        if (await push(account.user_id, title, senders, data)) pushed++;
+        if (await push(account.user_id, title, senders, data, account.provider)) pushed++;
       }
       await prisma.$executeRaw`
         update public.mail_push_state

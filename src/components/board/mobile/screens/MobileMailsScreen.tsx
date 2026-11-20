@@ -8,6 +8,8 @@ import { mergeFirstPage, getCachedMail, loadMail, loadBoxesList, hasMorePages, p
 import { useAccountScope } from "@/hooks/board/useAccountScope";
 import { BoxChips, BoxDefaultMenu, BoxTag, UnreadBubble, boxName } from "@/components/board/mail/MailBoxes";
 import { readOpenMailAccountParam, clearOpenMailAccountParam } from "@/lib/board/deepLink";
+import { isMailAccount } from "@/lib/board/accountKinds";
+import { AddAccountModal } from "@/components/board/mail/AddAccountModal";
 import {
   Mail,
   Plus,
@@ -100,7 +102,9 @@ export function MobileMailsScreen({
   /** Libellé « Dossier · compte » affiché sous le titre de l'en-tête. */
   onContextChange?: (label: string) => void;
 }) {
-  const [accounts, setAccounts] = useState<Account[] | null>(() => readCache<Account[]>("mail:accounts") ?? null);
+  // Comptes de messagerie (Gmail, iCloud avec le mail coché).
+  const [accounts, setAccounts] = useState<Account[] | null>(() => readCache<Account[]>("mail:accounts")?.filter(isMailAccount) ?? null);
+  const [addingAccount, setAddingAccount] = useState(false);
   // Boîte affichée : « Toutes les boîtes » ou un compte (réglage par défaut dans le menu du logo).
   const box = useAccountScope("mailBox", accounts);
   const { scope, accountIds, setScope } = box;
@@ -136,11 +140,13 @@ export function MobileMailsScreen({
     setScope(id);
   }, [setScope]);
 
-  useEffect(() => {
+  const reloadAccounts = () =>
     getMyConnectedAccounts().then((accs) => {
-      setAccounts(accs);
+      setAccounts(accs.filter(isMailAccount));
       writeCache("mail:accounts", accs);
     });
+  useEffect(() => {
+    void reloadAccounts();
   }, []);
 
   useEffect(() => {
@@ -401,7 +407,12 @@ export function MobileMailsScreen({
   }
 
   if (accounts.length === 0) {
-    return <MobileConnectAccountEmptyState />;
+    return (
+      <>
+        <MobileConnectAccountEmptyState onIcloud={() => setAddingAccount(true)} />
+        {addingAccount && <AddAccountModal initial="icloud" defaults={{ mail: true, calendar: false }} onClose={() => setAddingAccount(false)} onConnected={() => void reloadAccounts()} />}
+      </>
+    );
   }
 
   const multiple = accounts.length > 1;
@@ -450,12 +461,15 @@ export function MobileMailsScreen({
                   {multiple && <UnreadBubble count={unreadByAccount?.[acc.id]} className={scope === acc.id ? "!bg-white !text-navy" : ""} />}
                 </button>
               ))}
-              <a
-                href="/api/oauth/google/start"
+              <button
+                onClick={() => {
+                  onMenuClose?.();
+                  setAddingAccount(true);
+                }}
                 className="flex items-center gap-1 rounded-full border border-dashed border-line px-3 py-1.5 text-xs font-semibold text-ink-3"
               >
                 <Plus size={12} /> Compte
-              </a>
+              </button>
             </div>
             {/* Pas de clic droit sur le téléphone : le réglage par défaut s'ouvre en touchant ce lien. */}
             {multiple && (
@@ -654,6 +668,8 @@ export function MobileMailsScreen({
           onPreview={handlePreview}
         />
       )}
+
+      {addingAccount && <AddAccountModal onClose={() => setAddingAccount(false)} onConnected={() => void reloadAccounts()} />}
 
       {composing && (
         <MobileComposeModal
@@ -1243,7 +1259,7 @@ function MobileForwardModal({
   );
 }
 
-function MobileConnectAccountEmptyState() {
+function MobileConnectAccountEmptyState({ onIcloud }: { onIcloud: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-btn bg-subtle text-ink-3">
@@ -1256,12 +1272,14 @@ function MobileConnectAccountEmptyState() {
           normalement sans.
         </p>
       </div>
-      <a
-        href="/api/oauth/google/start"
-        className="rounded-btn bg-navy px-4 py-2.5 text-sm font-bold text-white"
-      >
-        Connecter Gmail
-      </a>
+      <div className="flex flex-wrap justify-center gap-2">
+        <a href="/api/oauth/google/start" className="rounded-btn bg-navy px-4 py-2.5 text-sm font-bold text-white">
+          Connecter Gmail
+        </a>
+        <button onClick={onIcloud} className="rounded-btn border border-line px-4 py-2.5 text-sm font-bold text-ink-2">
+          Connecter iCloud
+        </button>
+      </div>
     </div>
   );
 }

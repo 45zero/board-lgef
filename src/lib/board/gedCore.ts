@@ -85,8 +85,11 @@ export async function unpaidPayables(service: Service): Promise<{ invoices: numb
   };
 }
 
-/** Notes de frais en attente de tout le monde (compta), déclarations vides exclues. */
-export async function countAllPendingExpenses(service: Service): Promise<number> {
-  const { data } = await service.from("expense_submissions").select("status, total_amount, expense_ids").in("status", ["pending", "revision_requested"]);
-  return (data ?? []).filter((s) => !isEmptyDeclaration(s)).length;
+/**
+ * Notes de frais en attente de tout le monde (compta, admin), déclarations vides exclues, sauf celles
+ * de `excludeIds` (ma chaîne au-dessus de moi : on ne valide jamais son N+1, son N+2…).
+ */
+export async function countAllPendingExpenses(service: Service, excludeIds: string[] = []): Promise<number> {
+  const { data } = await service.from("expense_submissions").select("user_id, status, total_amount, expense_ids").in("status", ["pending", "revision_requested"]);
+  return (data ?? []).filter((s) => !isEmptyDeclaration(s) && !excludeIds.includes(s.user_id)).length;
 }

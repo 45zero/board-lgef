@@ -5,11 +5,21 @@ import { publicationThumbs } from "@/lib/board/publicationThumbs";
 import { myOpenCards } from "@/lib/board/myCards";
 import { isPublisher } from "@/lib/board/publishers";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
-import { computeMyExpenses, countPendingForValidator, isPrestataire } from "@/lib/board/expensesCore";
+import { computeMyExpenses, countPendingForValidator, fraisDeclarationMode, isPrestataire } from "@/lib/board/expensesCore";
 import { invoicesToValidate, isCompta, myMissingInvoices, unpaidPayables } from "@/lib/board/gedCore";
 import { euros } from "@/lib/board/staff";
 import type { DbEventType } from "@/lib/board/calendar";
 import { getSolicitations, technicianFilter } from "@/lib/board/solicitation";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+/** Décalage horaire de Paris un jour donné (« +01:00 » l'hiver, « +02:00 » l'été). */
+function parisOffset(day: string) {
+  const d = new Date(`${day}T12:00:00Z`);
+  const paris = new Date(d.toLocaleString("en-US", { timeZone: "Europe/Paris" }));
+  const utc = new Date(d.toLocaleString("en-US", { timeZone: "UTC" }));
+  const min = Math.round((paris.getTime() - utc.getTime()) / 60000);
+  return `${min >= 0 ? "+" : "-"}${String(Math.floor(Math.abs(min) / 60)).padStart(2, "0")}:${String(Math.abs(min) % 60).padStart(2, "0")}`;
+}
 
 // Tableau de bord : ce que l'utilisateur a À FAIRE (actions, toutes échéances confondues) et son
 // PROGRAMME (événements où il est sollicité) sur la journée ou la semaine. Chaque bloc est calculé
@@ -50,6 +60,8 @@ export type ProgrammeItem = {
   location: string | null;
   eventType: DbEventType | null;
   roles: string[];
+  /** Événement sur plusieurs jours où je ne viens que certains jours : mes jours / heures de la période. */
+  myPresence?: string | null;
 };
 
 export type Dashboard = {
@@ -58,6 +70,8 @@ export type Dashboard = {
   birthdays?: { id: string; firstName: string; lastName: string; isMe: boolean }[];
   actions: DashboardAction[];
   programme: ProgrammeItem[];
+  /** Frais à déclarer : proposés d'office (« auto ») ou saisis par la personne (« manuel »). Clic droit sur « Mes actions ». */
+  fraisMode?: "auto" | "manuel";
 };
 
 async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
@@ -90,6 +104,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
   else to.setDate(to.getDate() + 7 - ((from.getDay() + 6) % 7)); // jusqu'à dimanche inclus
 
   const actions: DashboardAction[] = [];
+  let fraisMode: "auto" | "manuel" = "auto";
   const push = (a: DashboardAction) => {
     if (a.count > 0) actions.push(a);
   };
@@ -113,12 +128,14 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
 
     // Frais et factures (GED) : à déclarer / déposer (moi), à valider (N+1, compta), à payer (compta).
     safe(async () => {
-      const [mine, pending, prestataire, compta] = await Promise.all([
+      const [mine, pending, prestataire, compta, mode] = await Promise.all([
         computeMyExpenses(service, userId),
         countPendingForValidator(service, userId),
         isPrestataire(service, userId),
         isCompta(service, userId),
+        fraisDeclarationMode(service, userId),
       ]);
+      fraisMode = mode;
       const toDeclare = mine.filter((m) => m.status === "a_declarer" && !m.upcoming).length;
       const rejected = mine.filter((m) => m.status === "rejected").length;
       push({ id: "frais-valider", app: "frais", tone: "red", count: pending, title: "Notes de frais à valider", detail: "Votre équipe attend votre validation" });
@@ -129,7 +146,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
         tone: "orange",
         count: toDeclare,
         title: "Frais à déclarer",
-        detail: prestataire ? "Frais saisis, pas encore envoyés" : "Événements où vous étiez sollicité",
+        detail: prestataire || mode === "manuel" ? "Frais saisis, pas encore envoyés" : "Événements où vous étiez sollicité",
       });
 
       const [missing, toValidate, due] = await Promise.all([
@@ -291,9 +308,22 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
   // Programme : événements de la période où je suis sollicité (ou que j'organise).
   const programme = await safe(async () => {
     // Uniquement les événements où je suis sollicité (avoir créé l'événement ne suffit pas).
-    const roles = await getSolicitations(service, userId, { includePendingDirector: true, includeProposedCoverage: true });
+    const roles = await getSolicitations(service, userId, { includePendingDirector: true, includeProposedCoverage: true, includePresence: true });
     const ids = [...roles.keys()];
     if (ids.length === 0) return [];
+    // Présence jour par jour : un événement de plusieurs jours n'apparaît que les jours où je viens.
+    const parisDay = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: "Europe/Paris" });
+    const fromDay = parisDay(from);
+    const toDay = parisDay(new Date(to.getTime() - 1));
+    const { data: presenceRows } = await (service as unknown as SupabaseClient)
+      .from("event_presence_days")
+      .select("event_id, day, start_time, end_time")
+      .eq("user_id", userId)
+      .in("event_id", ids);
+    const presence = new Map<string, { day: string; start_time: string | null; end_time: string | null }[]>();
+    for (const r of (presenceRows ?? []) as { event_id: string; day: string; start_time: string | null; end_time: string | null }[]) {
+      presence.set(r.event_id, [...(presence.get(r.event_id) ?? []), r]);
+    }
     const { data: events } = await service
       .from("events")
       .select("id, title, start_date, end_date, location, event_type")
@@ -301,19 +331,44 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
       .lt("start_date", to.toISOString())
       .gte("end_date", from.toISOString())
       .order("start_date");
-    return (events ?? []).map((e) => ({
-      eventId: e.id,
-      title: e.title,
-      start: e.start_date,
-      end: e.end_date,
-      location: e.location,
-      eventType: e.event_type as DbEventType | null,
-      roles: [...(roles.get(e.id) ?? [])],
-    }));
+    const hm = (t: string | null) => (t ? t.slice(0, 5).replace(":", " h ").replace(/ h 00$/, " h") : null);
+    return (events ?? []).flatMap((e) => {
+      const mine = presence.get(e.id);
+      let myPresence: string | null = null;
+      let start = e.start_date;
+      if (mine) {
+        const inPeriod = mine.filter((r) => r.day >= fromDay && r.day <= toDay).sort((a, b) => a.day.localeCompare(b.day));
+        if (!inPeriod.length) return [];
+        myPresence = inPeriod
+          .map((r) => {
+            const label = new Date(`${r.day}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "short" });
+            const hours = r.start_time || r.end_time ? ` ${hm(r.start_time) ?? "…"} – ${hm(r.end_time) ?? "…"}` : "";
+            return `${label}${hours}`;
+          })
+          .join(" · ");
+        // Heure affichée : mon arrivée le premier de mes jours de la période (sinon le début de l'événement).
+        const first = inPeriod[0];
+        if (first.day > parisDay(new Date(e.start_date)) || first.start_time) {
+          start = new Date(`${first.day}T${(first.start_time ?? "09:00").slice(0, 5)}:00${parisOffset(first.day)}`).toISOString();
+        }
+      }
+      return [
+        {
+          eventId: e.id,
+          title: e.title,
+          start,
+          end: e.end_date,
+          location: e.location,
+          eventType: e.event_type as DbEventType | null,
+          roles: [...(roles.get(e.id) ?? [])],
+          myPresence,
+        },
+      ];
+    });
   }, [] as ProgrammeItem[]);
 
   const toneOrder = { red: 0, orange: 1, navy: 2 };
   actions.sort((a, b) => toneOrder[a.tone] - toneOrder[b.tone] || b.count - a.count);
   const birthdays = (await todaysBirthdays(service)).map((b) => ({ id: b.id, firstName: b.firstName, lastName: b.lastName, isMe: b.id === userId }));
-  return { firstName: me?.first_name ?? null, birthdays, actions, programme };
+  return { firstName: me?.first_name ?? null, birthdays, actions, programme, fraisMode };
 }

@@ -9,6 +9,8 @@ import { mergeFirstPage, getCachedMail, loadMail, loadBoxesList, hasMorePages, p
 import { useAccountScope } from "@/hooks/board/useAccountScope";
 import { BoxDefaultMenu, BoxTag, UnreadBubble, boxName, boxTone } from "@/components/board/mail/MailBoxes";
 import { readOpenMailAccountParam, clearOpenMailAccountParam } from "@/lib/board/deepLink";
+import { isMailAccount } from "@/lib/board/accountKinds";
+import { AddAccountModal } from "@/components/board/mail/AddAccountModal";
 import {
   Mail,
   Menu,
@@ -88,7 +90,9 @@ const folderLabelIds = (folder: string) => {
 const messagesCache = new Map<string, BoxMail[]>();
 
 export function MailsScreen() {
-  const [accounts, setAccounts] = useState<Account[] | null>(() => readCache<Account[]>("mail:accounts") ?? null);
+  // Comptes de messagerie (Gmail, iCloud avec le mail coché) ; un iCloud « agenda seul » n'apparaît pas ici.
+  const [accounts, setAccounts] = useState<Account[] | null>(() => readCache<Account[]>("mail:accounts")?.filter(isMailAccount) ?? null);
+  const [addingAccount, setAddingAccount] = useState(false);
   // Boîte affichée : « Toutes les boîtes » ou un compte (clic droit : par défaut, voir useAccountScope).
   const box = useAccountScope("mailBox", accounts);
   const { scope, accountIds } = box;
@@ -149,11 +153,13 @@ export function MailsScreen() {
     setScope(id);
   }, [setScope]);
 
-  useEffect(() => {
+  const reloadAccounts = () =>
     getMyConnectedAccounts().then((accs) => {
-      setAccounts(accs);
+      setAccounts(accs.filter(isMailAccount));
       writeCache("mail:accounts", accs);
     });
+  useEffect(() => {
+    void reloadAccounts();
   }, []);
 
   // Libellés : propres à un compte, affichés seulement quand une seule boîte est ouverte.
@@ -395,7 +401,12 @@ export function MailsScreen() {
   }
 
   if (accounts.length === 0) {
-    return <ConnectAccountEmptyState />;
+    return (
+      <>
+        <ConnectAccountEmptyState onIcloud={() => setAddingAccount(true)} />
+        {addingAccount && <AddAccountModal initial="icloud" defaults={{ mail: true, calendar: false }} onClose={() => setAddingAccount(false)} onConnected={() => void reloadAccounts()} />}
+      </>
+    );
   }
 
   const multiple = accounts.length > 1;
@@ -602,16 +613,16 @@ export function MailsScreen() {
               </>
             )}
           </BoxDefaultMenu>
-          <a
-            href="/api/oauth/google/start"
-            title="Ajouter un compte"
-            className={`flex shrink-0 items-center gap-2 rounded-btn px-3 py-2 text-sm font-semibold text-ink-3 hover:bg-hover ${
+          <button
+            onClick={() => setAddingAccount(true)}
+            title="Ajouter un compte (Google ou iCloud)"
+            className={`flex shrink-0 items-center gap-2 rounded-btn px-3 py-2 text-left text-sm font-semibold text-ink-3 hover:bg-hover ${
               menuOpen ? "w-full" : "h-9 w-9 justify-center px-0"
             }`}
           >
             <Plus size={16} className="shrink-0" />
             {menuOpen && "Ajouter un compte"}
-          </a>
+          </button>
         </aside>
 
         <div className="grid min-w-0 flex-1 grid-cols-[340px_1fr] gap-3 overflow-hidden">
@@ -815,6 +826,8 @@ export function MailsScreen() {
         </div>
         </div>
       </div>
+
+      {addingAccount && <AddAccountModal onClose={() => setAddingAccount(false)} onConnected={() => void reloadAccounts()} />}
 
       {composing && (
         <ComposeModal
@@ -1120,7 +1133,7 @@ function ForwardModal({
   );
 }
 
-function ConnectAccountEmptyState() {
+function ConnectAccountEmptyState({ onIcloud }: { onIcloud: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 rounded-panel border border-dashed border-line bg-card/60 p-10 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-btn bg-subtle text-ink-3">
@@ -1130,8 +1143,8 @@ function ConnectAccountEmptyState() {
         <h2 className="text-base font-bold text-ink">Aucun compte mail connecté</h2>
         <p className="mt-1 max-w-md text-sm text-ink-3">
           Connectez un compte pour voir vos mails ici. C&rsquo;est facultatif : Board LGEF fonctionne
-          normalement sans. La connexion Outlook (environnement FFF) arrivera dès l&rsquo;ouverture du
-          portail Azure par la FFF — en attendant, vous pouvez tester avec un compte Gmail.
+          normalement sans. Gmail et iCloud sont disponibles ; la connexion Outlook (environnement FFF)
+          arrivera dès l&rsquo;ouverture du portail Azure par la FFF.
         </p>
       </div>
       <div className="flex items-center gap-2">
@@ -1141,6 +1154,9 @@ function ConnectAccountEmptyState() {
         >
           Connecter Gmail
         </a>
+        <button onClick={onIcloud} className="rounded-btn border border-line px-4 py-2.5 text-sm font-semibold text-ink-2 hover:bg-hover">
+          Connecter iCloud
+        </button>
         <button
           disabled
           className="rounded-btn border border-line px-4 py-2.5 text-sm font-semibold text-ink-4 opacity-60"

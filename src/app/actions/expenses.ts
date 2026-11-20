@@ -1,6 +1,6 @@
 "use server";
 
-import { canApprove, firstApprovers, teamOf } from "@/lib/board/hierarchy";
+import { canApprove, firstApprovers, isAboveMe, managerChain, teamOf } from "@/lib/board/hierarchy";
 import { COMPTA_SLUG } from "@/lib/board/fraisFlavor";
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
@@ -279,13 +279,13 @@ export async function getMyValidatorScope(): Promise<{
   unpaid: number;
 }> {
   const { userId, isAdmin, seesAll, canManageValidators, service } = await currentUser();
-  const ids = await teamOf(service, "frais", userId);
+  const [ids, above] = await Promise.all([teamOf(service, "frais", userId), seesAll ? managerChain(service, userId) : Promise.resolve([] as string[])]);
   const [{ data: links }, pending, pendingAll, toValidate, due, { count: invoicesAll }] = await Promise.all([
     ids.length
       ? service.from("profile_specialties").select("user_id, specialties!inner(slug)").eq("specialties.slug", "tech-prestataire").in("user_id", ids)
       : Promise.resolve({ data: [] as { user_id: string }[] }),
     countPendingForValidator(service, userId),
-    seesAll ? countAllPendingExpenses(service) : Promise.resolve(0),
+    seesAll ? countAllPendingExpenses(service, [userId, ...above]) : Promise.resolve(0),
     invoicesToValidate(service, userId, seesAll),
     seesAll ? unpaidPayables(service) : Promise.resolve(null),
     seesAll ? service.from("event_invoices").select("id", { count: "exact", head: true }).eq("status", "pending") : Promise.resolve({ count: 0 }),
@@ -314,9 +314,14 @@ export async function getSubmissionsToReview(
 ): Promise<SubmissionToReview[]> {
   const { userId, seesAll, service } = await currentUser();
   let userIds: string[] | null = null;
+  // « Tout le monde » (admin, compta) : sauf mes propres frais et ceux de mon N+1, N+2… — on ne se
+  // valide jamais soi-même ni sa hiérarchie.
+  let above: string[] = [];
   if (scope === "mine" || !seesAll) {
     userIds = await teamOf(service, "frais", userId);
     if (userIds.length === 0) return [];
+  } else {
+    above = [userId, ...(await managerChain(service, userId))];
   }
 
   let q = service
@@ -327,7 +332,7 @@ export async function getSubmissionsToReview(
     .limit(200);
   if (userIds) q = q.in("user_id", userIds);
   // Déclarations vides (ancienne appli) : « pas de frais », rien à valider.
-  const subs = ((await q).data ?? []).filter((s) => !isEmptyDeclaration(s));
+  const subs = ((await q).data ?? []).filter((s) => !isEmptyDeclaration(s) && !above.includes(s.user_id));
   if (!subs.length) return [];
 
   const personIds = [...new Set(subs.map((s) => s.user_id))];
@@ -392,6 +397,8 @@ export async function reviewSubmission(
       .eq("id", submissionId)
       .single();
     if (!sub) throw new Error("Déclaration introuvable.");
+    if (sub.user_id === userId) throw new Error("Vous ne pouvez pas valider vos propres frais.");
+    if (await isAboveMe(service, userId, sub.user_id)) throw new Error("Cette personne est au-dessus de vous dans la hiérarchie (N+1, N+2…) : vous ne pouvez pas valider ses frais.");
     if (!seesAll) {
       if (!(await canApprove(service, "frais", userId, sub.user_id))) throw new Error("Vous n'êtes ni le N+1 de cette personne, ni au-dessus d'elle, ni délégataire pour ses frais.");
     }
@@ -778,8 +785,11 @@ export type ArchivedReceipt = {
 export async function getArchivedReceipts(): Promise<ArchivedReceipt[]> {
   const { userId, canManageValidators, service } = await currentUser();
   let userIds: string[] | null = null;
+  let above: string[] = [];
   if (!canManageValidators) {
     userIds = [userId, ...(await teamOf(service, "frais", userId))];
+  } else {
+    above = await managerChain(service, userId);
   }
 
   const since = new Date(Date.now() - 730 * 86_400_000).toISOString();
@@ -793,7 +803,7 @@ export async function getArchivedReceipts(): Promise<ArchivedReceipt[]> {
     byAttachment = byAttachment.in("user_id", userIds);
   }
   const [{ data: a }, { data: b }] = await Promise.all([byFileUrl, byAttachment]);
-  const lines = [...new Map([...(a ?? []), ...(b ?? [])].map((l) => [l.id, l])).values()];
+  const lines = [...new Map([...(a ?? []), ...(b ?? [])].map((l) => [l.id, l])).values()].filter((l) => !l.user_id || !above.includes(l.user_id));
   if (!lines.length) return [];
 
   const full = await withAttachments(service, lines as Record<string, unknown>[]);

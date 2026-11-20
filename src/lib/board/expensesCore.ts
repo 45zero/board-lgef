@@ -41,6 +41,12 @@ export async function isPrestataire(service: Service, userId: string): Promise<b
   return (data ?? []).length > 0;
 }
 
+/** Mode de déclaration des frais (profiles.notification_prefs.frais_declaration) : « auto » par défaut. */
+export async function fraisDeclarationMode(service: Service, userId: string): Promise<"auto" | "manuel"> {
+  const { data } = await service.from("profiles").select("notification_prefs").eq("id", userId).maybeSingle();
+  return (data?.notification_prefs as { frais_declaration?: string } | null)?.frais_declaration === "manuel" ? "manuel" : "auto";
+}
+
 /** Mois d'une ligne hors événement : sa date de dépense, à défaut sa date de saisie. */
 export const lineMonth = (l: { expense_date: string | null; created_at: string }) => (l.expense_date ?? l.created_at).slice(0, 7);
 
@@ -63,13 +69,14 @@ export async function countPendingForValidator(service: Service, userId: string)
  * saisi des frais / une déclaration, plus chacune de mes dépenses hors événement (une fiche par
  * dépense : déclarée, validée et payée seule).
  * Un prestataire facture ses interventions (Mes factures) : seuls les événements où il a saisi des
- * frais ou déclaré quelque chose sont listés, rien n'est « à déclarer » d'office.
+ * frais ou déclaré quelque chose sont listés, rien n'est « à déclarer » d'office. Même chose pour qui a
+ * choisi la déclaration manuelle (fraisDeclarationMode) : il saisit ses frais et les rattache lui-même.
  */
 export async function computeMyExpenses(service: Service, userId: string): Promise<MyExpenseItem[]> {
   const since = new Date(Date.now() - 365 * 86_400_000).toISOString();
 
   // Frais : seulement les sollicitations effectives (présence confirmée, captation acceptée).
-  const [roles, submissions, allLines, prestataire, perso] = await Promise.all([
+  const [roles, submissions, allLines, isPresta, perso, mode] = await Promise.all([
     getSolicitations(service, userId),
     service
       .from("expense_submissions")
@@ -85,7 +92,10 @@ export async function computeMyExpenses(service: Service, userId: string): Promi
     isPrestataire(service, userId),
     // Mes événements Perso (event_type « kanban » réutilisé pour Perso, cf. calendar.ts).
     service.from("events").select("id").eq("created_by", userId).eq("event_type", "kanban").gte("start_date", since),
+    fraisDeclarationMode(service, userId),
   ]);
+  // Rien d'office : prestataire, ou déclaration manuelle choisie.
+  const prestataire = isPresta || mode === "manuel";
   for (const e of perso.data ?? []) {
     if (!roles.has(e.id)) roles.set(e.id, new Set());
     roles.get(e.id)!.add("Perso");

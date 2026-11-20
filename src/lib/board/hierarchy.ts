@@ -48,6 +48,14 @@ export async function teamOf(service: Service, action: ApprovalAction | null, ui
   return ids(await rpc(service, "team_of", { p_action: action, p_uid: uid }));
 }
 
+/**
+ * `uid` est-il sous `userId` (`userId` = son N+1, N+2…) ? Règle du N-1 partout, administrateurs et
+ * compta compris : on ne voit ni ne valide jamais ce qui revient à sa propre hiérarchie.
+ */
+export async function isAboveMe(service: Service, uid: string, userId: string): Promise<boolean> {
+  return (await managerChain(service, uid)).includes(userId);
+}
+
 /** `uid` peut-il valider l'action pour `userId` ? (administrateurs compris) */
 export async function canApprove(service: Service, action: ApprovalAction, uid: string, userId: string): Promise<boolean> {
   return (await rpc(service, "can_approve", { p_action: action, p_uid: uid, p_user: userId })) === true;

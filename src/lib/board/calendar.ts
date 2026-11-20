@@ -91,6 +91,13 @@ export interface CalendarEvent {
   myPersonal?: boolean;
   /** L'utilisateur connecté est désigné sur la couverture et doit encore accepter ou refuser. */
   awaitingMyAnswer?: boolean;
+  /**
+   * Événement sur plusieurs jours où l'utilisateur connecté a précisé ses jours (event_presence_days) :
+   * jour « AAAA-MM-JJ » → heures d'arrivée / de départ (« HH:MM » ou ""). Absent : tous les jours.
+   */
+  myDays?: Record<string, { start: string; end: string }> | null;
+  /** Présences souhaitées jour par jour (vidéo, photo, CD) : jour « AAAA-MM-JJ » → rôle → créneau. */
+  wanted?: Record<string, Partial<Record<"video" | "photo" | "cd", { start: string; end: string }>>> | null;
   status: "pending" | "approved" | "rejected" | "completed" | null;
 }
 

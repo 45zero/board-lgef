@@ -3,8 +3,7 @@
 import { toResult, unwrap } from "@/lib/board/actionResult";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/lib/supabase/database.types";
-import { getOwnedGoogleAccount } from "@/lib/google/accounts";
-import { getMessage } from "@/lib/google/gmail";
+import { getMessage, getOwnedMailAccount } from "@/lib/mail";
 import { attachTeamFilesFromEmail } from "./team-attachments";
 
 // E-mails liés aux cartes de l'Espace Team (sql/2026-10-09_team_card_emails.sql). Le message est
@@ -109,7 +108,7 @@ export const searchLinkableTeamCards = async (query: string) =>
 export const linkEmailToTeamCard = async (cardId: string, accountId: string, messageId: string, opts: { copyAttachments: boolean }) =>
   toResult(async (): Promise<{ alreadyLinked: boolean; failedAttachments: string[] }> => {
     const { supabase, userId } = await session();
-    const account = await getOwnedGoogleAccount(accountId, userId);
+    const account = await getOwnedMailAccount(accountId, userId);
     const m = await getMessage(account, messageId);
     const sent = m.date ? new Date(m.date) : null;
     const html = m.bodyHtml.length <= MAX_HTML ? m.bodyHtml : "";

@@ -7,6 +7,7 @@ import type { BoardPreferences, NavStyle, ContextPanelWidgets } from "@/hooks/bo
 import { useNotificationPreferences } from "@/hooks/board/useNotificationPreferences";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import { getMyConnectedAccounts, disconnectMyAccount } from "@/app/actions/connected-accounts";
+import { AddAccountModal } from "@/components/board/mail/AddAccountModal";
 import {
   getBoardDriveAccountId,
   setBoardDriveAccount,
@@ -529,8 +530,10 @@ function GoogleAccountsSection() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
+  const [addingIcloud, setAddingIcloud] = useState(false);
+  const reloadAccounts = () => getMyConnectedAccounts().then(setAccounts);
   useEffect(() => {
-    getMyConnectedAccounts().then(setAccounts);
+    void reloadAccounts();
   }, []);
 
   useEffect(() => {
@@ -539,6 +542,7 @@ function GoogleAccountsSection() {
   }, [canManageDrive]);
 
   const googleAccounts = accounts.filter((a) => a.provider === "google");
+  const icloudAccounts = accounts.filter((a) => a.provider === "icloud");
 
   const handleDisconnect = async (id: string, email: string) => {
     const isBoardDrive = boardAccountId === id;
@@ -625,6 +629,34 @@ function GoogleAccountsSection() {
           {googleAccounts.length === 0 ? "Connecter un compte Google" : "+ Connecter un autre compte Google"}
         </a>
       </div>
+
+      {/* iCloud : mot de passe pour app, Mail et / ou Agenda (voir AddAccountModal). */}
+      <div className="mb-2 mt-4 font-mono text-[10px] tracking-[0.1em] text-ink-4 uppercase">Comptes iCloud</div>
+      <div className="space-y-2 rounded-btn border border-line p-3">
+        {icloudAccounts.length === 0 && <p className="text-xs text-ink-4">Aucun compte iCloud connecté.</p>}
+        {icloudAccounts.map((a) => (
+          <div key={a.id} className="flex items-center justify-between gap-2 rounded-btn bg-subtle px-2.5 py-2">
+            <span className="min-w-0">
+              <span className="block truncate text-sm text-ink-2">{a.email}</span>
+              <span className="block text-[11px] text-ink-4">
+                {[a.scopes.includes("icloud:mail") && "Mail", a.scopes.includes("icloud:calendar") && "Agenda"].filter(Boolean).join(" · ")}
+              </span>
+            </span>
+            <button
+              disabled={busyId !== null}
+              onClick={() => handleDisconnect(a.id, a.email)}
+              className="shrink-0 text-xs font-semibold text-bad hover:underline disabled:opacity-50"
+            >
+              {busyId === a.id ? "…" : "Déconnecter"}
+            </button>
+          </div>
+        ))}
+        <button onClick={() => setAddingIcloud(true)} className="block text-xs font-semibold text-link hover:underline">
+          {icloudAccounts.length === 0 ? "Connecter un compte iCloud" : "+ Connecter un autre compte iCloud"}
+        </button>
+        <p className="text-[11px] text-ink-4">Pour changer Mail / Agenda sur un compte, reconnectez-le avec la même adresse.</p>
+      </div>
+      {addingIcloud && <AddAccountModal initial="icloud" onClose={() => setAddingIcloud(false)} onConnected={() => void reloadAccounts()} />}
     </div>
   );
 }

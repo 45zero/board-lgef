@@ -10,6 +10,7 @@ import { EmailBody } from "@/components/board/mail/EmailBody";
 import { SenderAvatar, parseSenderName } from "@/components/board/mail/SenderAvatar";
 import { refreshBadges, useLive } from "@/components/board/live/LiveProvider";
 import { useAccountScope } from "@/hooks/board/useAccountScope";
+import { isMailAccount } from "@/lib/board/accountKinds";
 import { BoxChips, BoxTag, boxName } from "@/components/board/mail/MailBoxes";
 
 // Accueil — « Mes mails non lus » : les derniers mails non lus de la boîte de réception (comptes
@@ -217,7 +218,7 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
   const [noAccount, setNoAccount] = useState(false);
   const [error, setError] = useState(false);
   const [open, setOpen] = useState<{ item: Item; mode: Mode } | null>(null);
-  const [accounts, setAccounts] = useState<Account[]>(() => (readCache<Account[]>("mail:accounts") ?? []).filter((a) => a.provider === "google"));
+  const [accounts, setAccounts] = useState<Account[]>(() => (readCache<Account[]>("mail:accounts") ?? []).filter(isMailAccount));
   const [markingAll, setMarkingAll] = useState(false);
   // Plusieurs boîtes : « Toutes » ou une adresse (clic droit sur les pastilles : par défaut).
   const box = useAccountScope("dashMailBox", accounts);
@@ -232,13 +233,13 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
     const load = async () => {
       try {
         const cachedAccounts = readCache<Account[]>("mail:accounts");
-        const accounts = (cachedAccounts ?? (await getMyConnectedAccounts())).filter((a) => a.provider === "google");
+        const accounts = (cachedAccounts ?? (await getMyConnectedAccounts())).filter(isMailAccount);
         if (cancelled) return;
         setAccounts(accounts);
         // Compte connecté depuis : liste des comptes relue au passage suivant.
         if (cachedAccounts) void getMyConnectedAccounts().then((fresh) => {
           writeCache("mail:accounts", fresh);
-          if (!cancelled && fresh.length !== cachedAccounts.length) setAccounts(fresh.filter((a) => a.provider === "google"));
+          if (!cancelled && fresh.length !== cachedAccounts.length) setAccounts(fresh.filter(isMailAccount));
         }).catch(() => undefined);
         if (!accounts.length) {
           setNoAccount(true);
@@ -329,18 +330,7 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
             <span className="rounded-full bg-red px-1.5 text-[10px] font-bold text-white">{(total ?? inScope.length) > 99 ? "99+" : (total ?? inScope.length)}</span>
           )}
         </h2>
-        <div className="flex min-w-0 items-center gap-1.5">
-          {/* Plusieurs boîtes : pastilles en petit à côté de « Mails », non lus sur chacune. */}
-          {multiple && (
-            <BoxChips
-              accounts={accounts}
-              scope={box.scope}
-              onScope={box.setScope}
-              defaultScope={box.defaultScope}
-              onSetDefault={box.setDefault}
-              unread={byAccount}
-            />
-          )}
+        <div className="flex shrink-0 items-center gap-1.5">
           {(total ?? inScope.length) > 0 && (
             <button
               onClick={() => void markAllRead()}
@@ -359,6 +349,22 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
           )}
         </div>
       </div>
+
+      {/* Plusieurs boîtes : pastilles en petit sous le titre (la colonne est trop étroite pour tout
+          tenir sur une ligne), non lus sur chacune, clic droit = boîte par défaut. */}
+      {multiple && (
+        <div className="-mt-0.5 mb-2">
+          <BoxChips
+            accounts={accounts}
+            scope={box.scope}
+            onScope={box.setScope}
+            defaultScope={box.defaultScope}
+            onSetDefault={box.setDefault}
+            unread={byAccount}
+            wrap
+          />
+        </div>
+      )}
 
       {items === null ? (
         <div className="rounded-panel border border-line bg-card p-6 text-sm text-ink-4">Chargement…</div>

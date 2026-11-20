@@ -1,5 +1,7 @@
 "use client";
 
+import { describeSlots, kindsOfRole, type DaySlots, type PresenceKind, type PresenceRequests } from "@/lib/board/presence";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Check, Crown, Loader2, Plus, Video, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -60,12 +62,18 @@ export function EventCrewBar({
   technicians,
   coverage,
   director,
+  requests = null,
+  onJoined,
 }: {
   eventId: string;
   role: ReturnType<typeof useUserRole>;
   technicians: TechnicianOption[];
   coverage: ReturnType<typeof useEventCoverage>;
   director: ReturnType<typeof useDirectorAttendance>;
+  /** Événement de plusieurs jours : présences souhaitées par rôle (jours et moment fort). */
+  requests?: PresenceRequests | null;
+  /** Vient de confirmer sa présence ou de se proposer : on lui demande ses jours (onglet Planning). */
+  onJoined?: () => void;
 }) {
   const { user } = useAuth();
   const me = user?.id ?? null;
@@ -78,6 +86,14 @@ export function EventCrewBar({
   const req = coverage.request;
   const leadId = req?.assigned_technician_id ?? null;
   const techName = (id: string) => technicians.find((t) => t.id === id)?.name ?? "—";
+  /** Jours / heures demandés pour le rôle de cette personne (« mar. 15 déc. 14h–17h »). */
+  const requestedFor = (p: Pill) => {
+    if (!requests) return null;
+    const kinds: PresenceKind[] = p.kind === "cd" ? ["cd"] : kindsOfRole(p.role);
+    const merged: DaySlots = {};
+    for (const k of kinds) Object.assign(merged, requests[k]);
+    return Object.keys(merged).length ? describeSlots(merged) : null;
+  };
 
   const pills = useMemo(() => {
     const cd: Pill[] = director.attendances.map((a) => {
@@ -163,10 +179,12 @@ export function EventCrewBar({
                       canManage={p.kind === "cd" ? canManageCd : p.kind === "lead" ? role.isSuperUser : canManageCrew}
                       freeDirectors={director.freeDirectors}
                       onClose={() => setOpen(null)}
+                      requested={requestedFor(p)}
                       onRespond={async (ok, note) => {
                         if (p.kind === "cd") await director.respondToAttendance(ok ? "approved" : "denied", note);
                         else if (p.kind === "lead") await coverage.respondToCoverage(ok ? "accepted" : "rejected", note);
                         else await crew.respond(p.rowId, ok ? "accepted" : "declined", note);
+                        if (ok && p.userId === me) onJoined?.();
                       }}
                       onForward={(id, note) => director.forwardAttendance(id, note)}
                       onRole={async (r) => {
@@ -204,7 +222,10 @@ export function EventCrewBar({
                           : technicians.filter((t) => !takenMedia.has(t.id)).map((t) => ({ id: t.id, name: t.name }))
                       }
                       onPick={async (id) => {
-                        if (g.id === "cd") await director.addDirector(id);
+                        if (g.id === "cd") {
+                          // Un membre du CD qui se greffe : on lui demande ses jours sur un multijour.
+                          if ((await director.addDirector(id)) && id === me) onJoined?.();
+                        }
                         else {
                           const t = technicians.find((x) => x.id === id);
                           if (t) await addMedia(t, g.id);
@@ -289,7 +310,9 @@ function PillDetail({
   onForward,
   onRole,
   onRemove,
+  requested,
 }: {
+  requested?: string | null;
   pill: Pill;
   travel?: Travel;
   isMe: boolean;
@@ -328,6 +351,11 @@ function PillDetail({
         </p>
         {travel && <p className="mt-1 font-mono text-[11px] text-ink-3">🚗 {Math.round(travel.km)} km · {shortTime(travel.minutes)} (aller)</p>}
         {pill.note && <p className="mt-1 rounded-btn bg-subtle px-2 py-1.5 italic text-ink-2">« {pill.note} »</p>}
+        {requested && (
+          <p className="mt-1.5 rounded-btn bg-sel-bg px-2 py-1.5 text-navy">
+            <span className="font-bold">Présence demandée :</span> {requested}
+          </p>
+        )}
       </div>
 
       {isMe && pill.status === "wait" && !declining && (

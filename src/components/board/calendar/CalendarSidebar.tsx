@@ -31,6 +31,7 @@ export function CalendarSidebar({
   onGoogleScopeChange,
   googleDefaultScope,
   onGoogleDefaultChange,
+  onAddAccount,
 }: {
   anchorDate: Date;
   onSelectDay: (d: Date) => void;
@@ -50,6 +51,8 @@ export function CalendarSidebar({
   onGoogleScopeChange: (scope: AccountScope) => void;
   googleDefaultScope: AccountScope;
   onGoogleDefaultChange: (scope: AccountScope) => void;
+  /** Connecter un agenda iCloud (Google : via « Ajouter un compte »). */
+  onAddAccount?: () => void;
 }) {
   const [miniMonth, setMiniMonth] = useState(anchorDate);
 
@@ -186,7 +189,7 @@ export function CalendarSidebar({
 
           {accounts && accounts.length === 1 && (
             <div>
-              <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Compte Google</div>
+              <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Agenda connecté</div>
               <div className="truncate px-1.5 text-xs font-semibold text-ink-2" title={accounts[0].email}>
                 {boxName(accounts[0])}
               </div>
@@ -195,18 +198,18 @@ export function CalendarSidebar({
           {/* Plusieurs comptes : tous les agendas Google ensemble ou un seul ; clic droit = par défaut. */}
           {accounts && accounts.length > 1 && (
             <div>
-              <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Agendas Google</div>
+              <div className="mb-2 font-mono text-[9px] tracking-[0.1em] text-ink-4 uppercase">Agendas connectés</div>
               <BoxDefaultMenu
                 accounts={accounts}
                 defaultScope={googleDefaultScope}
                 onSetDefault={onGoogleDefaultChange}
-                title="Agendas Google affichés par défaut"
+                title="Agendas affichés par défaut"
                 allLabel="Tous les agendas"
                 className="relative flex flex-col gap-1"
               >
                 {(onContextMenu) => (
                   <>
-                    {[{ id: "all", label: "Tous les agendas", color: null as string | null, email: "Tous les comptes Google" }, ...accounts.map((a) => ({ id: a.id, label: boxName(a), color: boxTone(accounts, a.id), email: a.email }))].map((o) => {
+                    {[{ id: "all", label: "Tous les agendas", color: null as string | null, email: "Tous les comptes connectés" }, ...accounts.map((a) => ({ id: a.id, label: boxName(a), color: boxTone(accounts, a.id), email: a.email }))].map((o) => {
                       const active = googleScope === o.id;
                       return (
                         <button
@@ -230,6 +233,12 @@ export function CalendarSidebar({
                 )}
               </BoxDefaultMenu>
             </div>
+          )}
+
+          {onAddAccount && (
+            <button onClick={onAddAccount} className="-mt-2 self-start px-1.5 text-[11px] font-semibold text-link hover:underline">
+              + Connecter un agenda iCloud
+            </button>
           )}
 
           <div className="mt-auto">

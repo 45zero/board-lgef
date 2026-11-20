@@ -87,6 +87,7 @@ export function BoxChips({
   onSetDefault,
   unread,
   size = "sm",
+  wrap = false,
 }: {
   accounts: BoxAccount[];
   scope: AccountScope;
@@ -95,6 +96,8 @@ export function BoxChips({
   onSetDefault: (scope: AccountScope) => void;
   unread?: Record<string, number>;
   size?: "sm" | "md";
+  /** Pastilles sur plusieurs lignes au lieu d'un défilement horizontal (colonne étroite). */
+  wrap?: boolean;
 }) {
   if (accounts.length < 2) return null;
   const total = accounts.reduce((n, a) => n + (unread?.[a.id] ?? 0), 0);
@@ -106,7 +109,7 @@ export function BoxChips({
   return (
     <BoxDefaultMenu accounts={accounts} defaultScope={defaultScope} onSetDefault={onSetDefault} className="relative min-w-0">
       {(onContextMenu) => (
-        <div className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
+        <div className={`flex min-w-0 items-center gap-1 ${wrap ? "flex-wrap" : "overflow-x-auto [scrollbar-width:none]"}`}>
           <button type="button" onClick={() => onScope("all")} onContextMenu={onContextMenu} className={chip(scope === "all")} title={`Toutes les boîtes${hint}`}>
             <Inbox size={size === "sm" ? 11 : 13} /> Toutes
             <UnreadBubble count={total} className={scope === "all" ? "!bg-white !text-navy" : ""} />

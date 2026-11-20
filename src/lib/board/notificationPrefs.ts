@@ -33,6 +33,12 @@ export type NotificationPrefs = {
   frais_decision?: string;
   frais_refus?: string;
   frais_a_valider?: string;
+  /**
+   * Hors notifications, rangé ici faute de mieux (Accueil → clic droit sur « Mes actions ») :
+   * « auto » (défaut) = les événements où je suis sollicité arrivent d'office dans « Frais à déclarer » ;
+   * « manuel » = je saisis mes frais moi-même et les rattache à l'événement, rien n'est proposé d'office.
+   */
+  frais_declaration?: "auto" | "manuel";
 };
 
 /** Catégories affichées dans les Paramètres, dans l'ordre, avec les canaux par défaut (= comportement d'avant). */

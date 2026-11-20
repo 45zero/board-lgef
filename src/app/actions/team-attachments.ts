@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/serviceClient";
 import type { Json } from "@/lib/supabase/database.types";
 import { getOwnedGoogleAccount } from "@/lib/google/accounts";
-import { getAttachment, getMessage } from "@/lib/google/gmail";
+import { getAttachment, getMessage, getOwnedMailAccount } from "@/lib/mail";
 import {
   copyTaggedFile,
   createResumableUploadSession,
@@ -307,7 +307,7 @@ export const attachTeamFilesFromEmail = async (cardId: string, accountId: string
     const card = await visibleCard(supabase, cardId);
     await requireEditable(supabase, cardId, userId);
     await requireDrive();
-    const mailbox = await getOwnedGoogleAccount(accountId, userId);
+    const mailbox = await getOwnedMailAccount(accountId, userId);
     const message = await getMessage(mailbox, messageId);
     const failed: string[] = [];
     for (const a of message.attachments.filter((x) => attachmentIds.includes(x.attachmentId))) {

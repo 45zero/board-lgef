@@ -12,8 +12,10 @@ import {
   ImageIcon,
   MapPin,
   Play,
+  SlidersHorizontal,
 } from "lucide-react";
-import { getDashboard, type Dashboard, type DashboardAction, type ProgrammeItem } from "@/app/actions/dashboard";
+import { getDashboard, setFraisDeclarationMode, type Dashboard, type DashboardAction, type ProgrammeItem } from "@/app/actions/dashboard";
+import { DefaultMenu } from "@/components/board/calendar/DefaultMenu";
 import type { RecentPost } from "@/lib/board/recentPosts";
 import { readCache, writeCache } from "@/lib/board/localCache";
 import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
@@ -22,6 +24,9 @@ import { ActionPopup } from "@/components/board/dashboard/ActionPopup";
 import { EventArrow, useOpenEvent } from "@/components/board/calendar/EventOpener";
 import { useForecast } from "@/components/board/calendar/DayWeather";
 import { UnreadMails } from "@/components/board/dashboard/UnreadMails";
+import { useDashboardAgenda, type AgendaEvent } from "@/components/board/dashboard/GoogleAgenda";
+import { BoxChips, BoxTag } from "@/components/board/mail/MailBoxes";
+import { GoogleEventModal } from "@/components/board/calendar/GoogleEventModal";
 import { FacebookIcon, InstagramIcon, YoutubeIcon } from "@/components/board/publication/BrandIcons";
 import { weatherIcon } from "@/lib/board/weather";
 
@@ -90,6 +95,19 @@ export function AccueilScreen({
   const [openAction, setOpenAction] = useState<DashboardAction | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const { open: openEvent } = useOpenEvent();
+  // Clic droit sur « Mes actions » : frais à déclarer proposés d'office ou saisis soi-même.
+  const changeFraisMode = (mode: "auto" | "manuel") => {
+    if (data?.fraisMode === mode || (!data?.fraisMode && mode === "auto")) return;
+    setData((d) => (d ? { ...d, fraisMode: mode } : d));
+    void setFraisDeclarationMode(mode).then(() => setReloadKey((k) => k + 1));
+  };
+  // Appui long (mobile) sur « Mes actions » : même menu que le clic droit. Annulé si le doigt bouge.
+  const pressTimer = useRef<number | null>(null);
+  const longPressed = useRef(false);
+  const cancelPress = () => {
+    if (pressTimer.current) window.clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+  };
   // En direct : toute action (frais, captation, inscription, notification…) met le tableau de bord à jour.
   useLiveRefresh(null, () => setReloadKey((k) => k + 1), 1000);
 
@@ -132,12 +150,22 @@ export function AccueilScreen({
   const actions = data?.actions ?? [];
   const programme = data?.programme ?? [];
   const periodLabel = period === "day" ? "aujourd'hui" : "cette semaine";
+  // Agendas des comptes connectés (Google), mêlés au programme ; plusieurs comptes : pastilles.
+  const agenda = useDashboardAgenda(period, reloadKey);
+  const [openAgenda, setOpenAgenda] = useState<AgendaEvent | null>(null);
 
-  // Programme groupé par jour (utile en vue semaine).
-  const byDay = new Map<string, typeof programme>();
-  for (const p of programme) {
-    const k = new Date(p.start).toDateString();
-    byDay.set(k, [...(byDay.get(k) ?? []), p]);
+  // Programme et agendas, dans l'ordre des heures, groupés par jour (utile en vue semaine).
+  type Entry = { kind: "board"; p: (typeof programme)[number]; start: string } | { kind: "agenda"; g: AgendaEvent; start: string };
+  // Journée entière (Google : « AAAA-MM-JJ ») : lue en heure locale, placée en tête du jour.
+  const agendaStart = (g: AgendaEvent) => (g.allDay ? `${g.start.slice(0, 10)}T00:00:00` : g.start);
+  const entries: Entry[] = [
+    ...programme.map((p) => ({ kind: "board" as const, p, start: p.start })),
+    ...(data === null ? [] : agenda.events.map((g) => ({ kind: "agenda" as const, g, start: agendaStart(g) }))),
+  ].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+  const byDay = new Map<string, Entry[]>();
+  for (const e of entries) {
+    const k = new Date(e.start).toDateString();
+    byDay.set(k, [...(byDay.get(k) ?? []), e]);
   }
 
   return (
@@ -153,15 +181,71 @@ export function AccueilScreen({
 
 
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-          <section className="order-1 min-w-0">
-            <SectionTitle>
-              Mes actions
-              {actions.length > 0 && (
-                <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red px-1 align-[2px] text-[9px] font-extrabold text-white">
-                  {actions.length}
-                </span>
-              )}
-            </SectionTitle>
+          <DefaultMenu
+            title="Mes frais"
+            atCursor
+            className="order-1 min-w-0"
+            footnote={null}
+            options={[
+              {
+                label: "Automatique",
+                hint: "Les événements où vous êtes sollicité arrivent ici, à déclarer.",
+                selected: (data?.fraisMode ?? "auto") === "auto",
+                onSelect: () => changeFraisMode("auto"),
+              },
+              {
+                label: "Manuel",
+                hint: "Vous déclarez vos frais directement dans Frais et les rattachez à l'événement ; ils ne seront plus proposés ici.",
+                selected: data?.fraisMode === "manuel",
+                onSelect: () => changeFraisMode("manuel"),
+              },
+            ]}
+          >
+          {(onContextMenu, openMenuAt) => (
+          <section
+            onContextMenu={onContextMenu}
+            onTouchStart={(e) => {
+              const t = e.touches[0];
+              cancelPress();
+              longPressed.current = false;
+              pressTimer.current = window.setTimeout(() => {
+                pressTimer.current = null;
+                longPressed.current = true;
+                navigator.vibrate?.(10);
+                openMenuAt(t.clientX, t.clientY);
+              }, 550);
+            }}
+            onTouchMove={cancelPress}
+            onTouchEnd={(e) => {
+              cancelPress();
+              // Appui long : pas de clic sur la carte touchée en relâchant.
+              if (longPressed.current) e.preventDefault();
+            }}
+            onTouchCancel={cancelPress}
+          >
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <h2 className="text-sm font-extrabold text-ink md:text-base">
+                Mes actions
+                {actions.length > 0 && (
+                  <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red px-1 align-[2px] text-[9px] font-extrabold text-white">
+                    {actions.length}
+                  </span>
+                )}
+              </h2>
+              {/* Toujours visible : le réglage reste accessible quand « Frais à déclarer » a disparu. */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  openMenuAt(r.right - 256, r.bottom + 6);
+                }}
+                title="Mes frais : automatiques ou manuels (aussi au clic droit ou à l'appui long)"
+                className="flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-ink-3 hover:bg-hover hover:text-ink md:text-xs"
+              >
+                <SlidersHorizontal size={12} />
+                {data?.fraisMode === "manuel" ? "Frais manuels" : "Frais auto"}
+              </button>
+            </div>
             {/* Mobile : carrousel de petites cartes (comme les médias), le nombre en pastille. */}
             {data !== null && actions.length > 0 && (
               <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2 lg:hidden">
@@ -208,6 +292,8 @@ export function AccueilScreen({
             )}
             </div>
           </section>
+          )}
+          </DefaultMenu>
 
           {/* Mobile : actions (carrousel), aujourd'hui, mails ; ordinateur : trois colonnes. */}
           <section className="order-3 min-w-0 lg:order-2">
@@ -234,18 +320,59 @@ export function AccueilScreen({
                 </button>
               )}
             </div>
+            {agenda.box.multiple && (
+              <div className="-mt-0.5 mb-2">
+                <BoxChips
+                  accounts={agenda.accounts}
+                  scope={agenda.box.scope}
+                  onScope={agenda.box.setScope}
+                  defaultScope={agenda.box.defaultScope}
+                  onSetDefault={agenda.box.setDefault}
+                  wrap
+                />
+              </div>
+            )}
             {data === null ? (
               <div className="rounded-panel border border-line bg-card p-6 text-sm text-ink-4">Chargement…</div>
-            ) : programme.length === 0 ? (
+            ) : entries.length === 0 ? (
               <div className="flex flex-col items-start gap-2 rounded-panel border border-line bg-card p-4 text-sm text-ink-3 sm:flex-row sm:items-center">
-                <CalendarDays size={18} className="shrink-0 text-ink-4" /> Aucun événement où vous êtes sollicité {periodLabel}.
+                <CalendarDays size={18} className="shrink-0 text-ink-4" /> Aucun événement où vous êtes sollicité {periodLabel}{agenda.accounts.length ? ", rien non plus dans vos agendas" : ""}.
               </div>
             ) : (
               <div className="space-y-3">
                 {[...byDay.entries()].map(([k, items]) => (
                   <div key={k} className="space-y-2">
                     {period === "week" && <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">{dayLabel(items[0].start)}</div>}
-                    {items.map((p) => {
+                    {items.map((entry) => {
+                      if (entry.kind === "agenda") {
+                        const g = entry.g;
+                        return (
+                          <button
+                            key={`g:${g.accountId}:${g.id}`}
+                            onClick={() => setOpenAgenda(g)}
+                            className="flex w-full flex-col gap-1.5 rounded-card border border-dashed border-line-strong bg-card p-3 text-left shadow-card transition hover:-translate-y-px sm:flex-row sm:items-start sm:gap-3 sm:p-3.5"
+                          >
+                            <span className="flex items-center gap-1.5 sm:w-14 sm:shrink-0 sm:flex-col sm:items-start sm:gap-1">
+                              <span className="font-mono text-xs font-extrabold text-ink sm:text-sm">{g.allDay ? "Journée" : time(g.start)}</span>
+                              <span className="rounded-full bg-subtle px-1.5 py-0.5 text-[9px] font-bold text-ink-3">Agenda</span>
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="line-clamp-2 text-[13px] font-bold leading-tight text-ink sm:text-sm">{g.summary}</span>
+                              {agenda.box.multiple && (
+                                <span className="mt-1 flex">
+                                  <BoxTag accounts={agenda.accounts} accountId={g.accountId} />
+                                </span>
+                              )}
+                              {g.location && (
+                                <span className="mt-0.5 flex items-center gap-1 text-[11px] text-ink-4">
+                                  <MapPin size={10} className="shrink-0" /> <span className="truncate">{g.location}</span>
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        );
+                      }
+                      const p = entry.p;
                       const org = p.eventType ? EVENT_TYPE_TO_ORG[p.eventType] : null;
                       const color = org ? ORG_COLORS[org] : null;
                       const state = eventState(p);
@@ -268,6 +395,11 @@ export function AccueilScreen({
                               {p.roles.join(", ")}
                               {org ? ` · ${ORG_LABELS[org]}` : ""}
                             </span>
+                            {p.myPresence && (
+                              <span className="mt-0.5 block truncate text-[11px] font-semibold text-link" title={p.myPresence}>
+                                Vous : {p.myPresence}
+                              </span>
+                            )}
                             {p.location && (
                               <span className="mt-0.5 flex items-center gap-1 text-[11px] text-ink-4">
                                 <MapPin size={10} className="shrink-0" /> <span className="truncate">{p.location}</span>
@@ -286,6 +418,18 @@ export function AccueilScreen({
         </div>
 
         <RecentPosts posts={posts} onSeeAll={onNavigate ? () => onNavigate("audiovisuel") : undefined} />
+
+        {openAgenda && (
+          <GoogleEventModal
+            accountId={openAgenda.accountId}
+            calendarId={openAgenda.calendarId}
+            event={openAgenda}
+            onClose={() => {
+              setOpenAgenda(null);
+              agenda.reload();
+            }}
+          />
+        )}
 
         {openAction && (
           <ActionPopup

@@ -39,6 +39,8 @@ export const LIVE_TABLES = [
   "team_card_members",
   "team_checklist_items",
   "team_card_comments",
+  "event_presence_days",
+  "event_presence_requests",
 ] as const;
 export type LiveTable = (typeof LIVE_TABLES)[number] | "notifications" | "mails";
 

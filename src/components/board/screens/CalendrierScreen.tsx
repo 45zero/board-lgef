@@ -4,7 +4,7 @@ import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { DirectorGlyph } from "@/components/board/calendar/DirectorGlyph";
 import { CoverageToggle } from "@/components/board/calendar/CoverageToggle";
 import { TeamCardGlyph, useEventTeamCards } from "@/components/board/team/TeamCardOpener";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, Search, User, X, PanelLeftOpen, Camera, Video, Mic } from "lucide-react";
 import {
   addDays,
@@ -29,6 +29,8 @@ import { useSolicitedFilter } from "@/hooks/board/useSolicitedFilter";
 import { passesCoverageFilters, useCoverageFilters } from "@/hooks/board/useCoverageFilters";
 import { useCalendarDefaults, type CalendarView } from "@/hooks/board/useCalendarDefaults";
 import { useAccountScope } from "@/hooks/board/useAccountScope";
+import { isCalendarAccount } from "@/lib/board/accountKinds";
+import { AddAccountModal } from "@/components/board/mail/AddAccountModal";
 import { DefaultMenu } from "@/components/board/calendar/DefaultMenu";
 import { DayWeatherBadge, useForecast } from "@/components/board/calendar/DayWeather";
 import { CoverageGlyph } from "@/components/board/calendar/CoverageGlyph";
@@ -61,6 +63,8 @@ type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
 type GoogleEventItem = Awaited<ReturnType<typeof listMyEvents>>[number] & { accountId: string };
 type ViewMode = CalendarView;
 
+const fmtHour = (h: number) => `${Math.floor(h)}:${h % 1 ? "30" : "00"}`;
+
 function hourFloat(iso: string) {
   const d = parseISO(iso);
   return d.getHours() + d.getMinutes() / 60;
@@ -77,6 +81,66 @@ const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: "month", label: "Mois" },
   { id: "map", label: "Carte" },
 ];
+
+const isoDay = (d: Date) => format(d, "yyyy-MM-dd");
+const shortHour = (t: string) => t.replace(":", "h").replace(/h00$/, "h");
+
+/** Info-bulle d'un bandeau : dates de l'événement, puis mes jours (et heures) si je les ai précisés. */
+function bannerTitle(ev: CalendarEvent) {
+  const base = `${ev.title} — du ${format(parseISO(ev.start), "d MMM HH:mm", { locale: fr })} au ${format(parseISO(ev.end), "d MMM HH:mm", { locale: fr })}`;
+  const lines = [base];
+  if (ev.wanted) {
+    const KIND: Record<string, string> = { video: "vidéo", photo: "photo", cd: "CD" };
+    const wanted = Object.entries(ev.wanted)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, kinds]) => {
+        const what = Object.entries(kinds)
+          .map(([k, h]) => `${KIND[k]}${h && (h.start || h.end) ? ` ${shortHour(h.start || "…")}–${shortHour(h.end || "…")}` : ""}`)
+          .join(", ");
+        return `${format(new Date(`${day}T12:00:00`), "EEE d MMM", { locale: fr })} : ${what}`;
+      });
+    lines.push(`Présence souhaitée — ${wanted.join(" · ")}`);
+  }
+  if (!ev.myDays) return lines.join("\n");
+  const mine = Object.entries(ev.myDays)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, h]) => `${format(new Date(`${day}T12:00:00`), "EEE d MMM", { locale: fr })}${h.start || h.end ? ` ${shortHour(h.start || "…")}–${shortHour(h.end || "…")}` : ""}`);
+  lines.push(`Vous venez : ${mine.join(", ")}`);
+  return lines.join("\n");
+}
+
+/**
+ * Dans le bandeau d'un événement de plusieurs jours : mes jours de présence restent pleins (soulignés,
+ * avec mes heures), les autres jours sont estompés — sans créer d'autre événement.
+ */
+function PresenceSegments({ ev, days }: { ev: CalendarEvent; days: Date[] }) {
+  if ((!ev.myDays && !ev.wanted) || days.length === 0) return null;
+  const color = ORG_COLORS[ev.org];
+  return (
+    <span aria-hidden className="pointer-events-none absolute inset-0 -z-10 flex">
+      {days.map((d) => {
+        const key = isoDay(d);
+        const mine = ev.myDays ? ev.myDays[key] : undefined;
+        const faded = !!ev.myDays && !mine;
+        const wanted = ev.wanted?.[key];
+        return (
+          <span key={d.toISOString()} className={`relative flex flex-1 items-center justify-end gap-0.5 pr-1 ${faded ? "bg-card/60" : ""}`}>
+            {mine && <span className="absolute inset-x-0 bottom-0 h-[3px]" style={{ background: color.base }} />}
+            {/* Présence souhaitée ce jour-là : vidéo / photo / CD (le moment fort dans l'info-bulle). */}
+            {wanted?.video && <Video size={9} className="shrink-0 opacity-80" />}
+            {wanted?.photo && <Camera size={9} className="shrink-0 opacity-80" />}
+            {wanted?.cd && <span className="shrink-0 text-[7.5px] font-extrabold leading-none opacity-80">CD</span>}
+            {mine && (mine.start || mine.end) && (
+              <span className="rounded-sm px-0.5 font-mono text-[8.5px] font-bold leading-[10px]" style={{ background: color.bg, color: color.ink }}>
+                {shortHour(mine.start || "…")}–{shortHour(mine.end || "…")}
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
 
 export function CalendrierScreen() {
   // Vue par défaut (clic droit sur les vues) : celle du compte, reprise sur le mobile ; le clic simple vaut pour la session.
@@ -113,7 +177,9 @@ export function CalendrierScreen() {
 
   const { events, refetch } = useCalendarEvents(rangeStart, rangeEnd);
 
+  // Comptes d'agenda : Google, iCloud avec l'agenda coché.
   const [accounts, setAccounts] = useState<Account[] | null>(null);
+  const [addingAccount, setAddingAccount] = useState(false);
   // Agendas Google affichés : tous les comptes ou un seul (clic droit : réglage par défaut).
   const googleBox = useAccountScope("googleCalendars", accounts);
   const googleAccountIds = googleBox.accountIds;
@@ -177,6 +243,8 @@ export function CalendrierScreen() {
           .then(async (items) => {
             // Copies Google des événements du board : masquées (déjà affichées en vrai) ou, si
             // l'événement a disparu, supprimées de Google. Seul ce qui a été créé dans Google reste.
+            // iCloud : pas de copies du board, rien à rapprocher.
+            if (accounts?.find((a) => a.id === accountId)?.provider === "icloud") return items.map((e) => ({ ...e, accountId }));
             const sorted = await reconcileGoogleMirrors(
               accountId,
               items.map((e) => ({ googleEventId: e.id, calendarId: e.calendarId, boardEventId: e.boardEventId }))
@@ -189,10 +257,9 @@ export function CalendrierScreen() {
     ).then((lists) => setGoogleEvents(lists.flat()));
   };
 
+  const reloadAccounts = () => getMyConnectedAccounts().then((accs) => setAccounts(accs.filter(isCalendarAccount)));
   useEffect(() => {
-    getMyConnectedAccounts().then((accs) => {
-      setAccounts(accs);
-    });
+    void reloadAccounts();
   }, []);
 
   useEffect(() => {
@@ -331,6 +398,61 @@ export function CalendrierScreen() {
     setEditingInternal("new");
   };
 
+  // Création en glissant : vue Mois, d'une case à l'autre (plusieurs jours, 9 h → 18 h) ; vues
+  // Semaine / Jour, d'un créneau à un autre (même journée ou plusieurs). Un simple clic ne crée rien.
+  type DragPoint = { day: Date; hour: number };
+  const [drag, setDrag] = useState<{ mode: "month" | "grid"; a: DragPoint; b: DragPoint } | null>(null);
+  const dragRef = useRef(drag);
+  useEffect(() => {
+    dragRef.current = drag;
+  }, [drag]);
+  const snapHour = (h: number) => Math.max(hourStart, Math.min(hourEnd, Math.round(h * 2) / 2));
+  const gridHourAt = (e: React.MouseEvent<HTMLElement>) => snapHour(hourStart + (e.clientY - e.currentTarget.getBoundingClientRect().top) / PX_PER_HOUR);
+  const dragRange = (d: NonNullable<typeof drag>) => {
+    const t = (p: DragPoint) => startOfDay(p.day).getTime() + p.hour * 3_600_000;
+    const [first, last] = t(d.a) <= t(d.b) ? [d.a, d.b] : [d.b, d.a];
+    return { first, last };
+  };
+  const startDrag = (mode: "month" | "grid", day: Date, hour: number, e: React.MouseEvent<HTMLElement>) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
+    setDrag({ mode, a: { day, hour }, b: { day, hour } });
+  };
+  const moveDrag = (day: Date, hour?: number) =>
+    setDrag((d) => (d && (!isSameDay(d.b.day, day) || (hour !== undefined && hour !== d.b.hour)) ? { ...d, b: { day, hour: hour ?? d.b.hour } } : d));
+  const inDrag = (day: Date) => {
+    if (!drag) return false;
+    const { first, last } = dragRange(drag);
+    return startOfDay(day) >= startOfDay(first.day) && startOfDay(day) <= startOfDay(last.day);
+  };
+  useEffect(() => {
+    if (!drag) return;
+    const up = () => {
+      const d = dragRef.current;
+      setDrag(null);
+      if (!d) return;
+      const { first, last } = dragRange(d);
+      const sameDay = isSameDay(first.day, last.day);
+      if (d.mode === "month") {
+        if (sameDay) return;
+        const start = new Date(first.day);
+        start.setHours(9, 0, 0, 0);
+        const end = new Date(last.day);
+        end.setHours(18, 0, 0, 0);
+        setNewSlot({ start, end });
+      } else {
+        if (sameDay && Math.abs(last.hour - first.hour) < 0.5) return;
+        const at = (p: DragPoint) => new Date(startOfDay(p.day).getTime() + p.hour * 3_600_000);
+        setNewSlot({ start: at(first), end: at(last) });
+      }
+      setEditingInternal("new");
+    };
+    window.addEventListener("mouseup", up);
+    return () => window.removeEventListener("mouseup", up);
+    // dragRange ne dépend que de son argument : relancer l'écoute à chaque mouvement serait inutile.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!drag]);
+
   const closeDrawer = useCallback(() => setDrawerDay(null), []);
   const shiftDrawerDay = useCallback(
     (delta: number) =>
@@ -370,6 +492,7 @@ export function CalendrierScreen() {
         onGoogleScopeChange={googleBox.setScope}
         googleDefaultScope={googleBox.defaultScope}
         onGoogleDefaultChange={googleBox.setDefault}
+        onAddAccount={() => setAddingAccount(true)}
       />
 
       <div className="flex h-full min-w-0 flex-1 flex-col gap-3 pt-2">
@@ -571,12 +694,13 @@ export function CalendrierScreen() {
                       <button
                         key={ev.id}
                         onClick={() => setEditingInternal(ev)}
-                        title={`${ev.title} — du ${format(parseISO(ev.start), "d MMM HH:mm", { locale: fr })} au ${format(parseISO(ev.end), "d MMM HH:mm", { locale: fr })}`}
-                        className={`mx-0.5 my-px flex h-[22px] items-center gap-1 overflow-hidden px-1.5 text-left text-[11px] font-bold ${
+                        title={bannerTitle(ev)}
+                        className={`relative isolate mx-0.5 my-px flex h-[22px] items-center gap-1 overflow-hidden px-1.5 text-left text-[11px] font-bold ${
                           fromBefore ? "rounded-l-none" : "rounded-l-chip border-l-4"
                         } ${toAfter ? "rounded-r-none" : "rounded-r-chip"} ${ev.awaitingMyAnswer ? "ring-2 ring-red" : ""}`}
                         style={{ gridColumn: `${colStart + 1} / ${colEnd + 2}`, gridRow: lane + 1, background: color.bg, borderLeftColor: color.base, color: color.ink }}
                       >
+                        <PresenceSegments ev={ev} days={displayDays.slice(colStart, colEnd + 1)} />
                         {fromBefore && <ChevronLeft size={11} className="shrink-0 opacity-70" />}
                         <span className="min-w-0 flex-1 truncate">{ev.title}</span>
                         <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
@@ -654,10 +778,27 @@ export function CalendrierScreen() {
                       </button>
 
                       <div
-                        className={`relative ${isWeekend ? "bg-subtle/40" : ""}`}
+                        className={`relative ${isWeekend ? "bg-subtle/40" : ""} ${drag ? "select-none" : ""}`}
                         style={{ height: gridHeight }}
                         onDoubleClick={(e) => handleSlotDoubleClick(day, e)}
+                        onMouseDown={(e) => startDrag("grid", day, gridHourAt(e), e)}
+                        onMouseMove={(e) => drag && moveDrag(day, gridHourAt(e))}
                       >
+                        {/* Créneau en cours de sélection (glisser pour créer). */}
+                        {drag?.mode === "grid" && inDrag(day) && (() => {
+                          const { first, last } = dragRange(drag);
+                          const from = isSameDay(day, first.day) ? first.hour : hourStart;
+                          const to = isSameDay(day, last.day) ? last.hour : hourEnd;
+                          return (
+                            <div
+                              aria-hidden
+                              className="pointer-events-none absolute inset-x-1 z-[6] rounded-chip border-2 border-link bg-sel-bg/80 px-1.5 py-0.5 font-mono text-[10px] font-bold text-link"
+                              style={{ top: (from - hourStart) * PX_PER_HOUR, height: Math.max(6, (to - from) * PX_PER_HOUR) }}
+                            >
+                              {isSameDay(day, first.day) && `${fmtHour(first.hour)} → ${isSameDay(first.day, last.day) ? fmtHour(last.hour) : format(last.day, "EEE d", { locale: fr }) + " " + fmtHour(last.hour)}`}
+                            </div>
+                          );
+                        })()}
                         {Array.from({ length: hourEnd - hourStart }, (_, i) => (
                           <div key={i} className="border-b border-line/60" style={{ height: PX_PER_HOUR }} />
                         ))}
@@ -693,6 +834,32 @@ export function CalendrierScreen() {
                             </div>
                           );
                         })}
+
+                        {/* Événement de plusieurs jours où je viens à heures précises : mon créneau, en pointillés (pas un événement de plus). */}
+                        {visibleEvents
+                          .filter((ev) => isMultiDayEvent(ev) && ev.myDays?.[isoDay(day)] && (ev.myDays[isoDay(day)].start || ev.myDays[isoDay(day)].end))
+                          .map((ev) => {
+                            const mine = ev.myDays![isoDay(day)];
+                            const from = mine.start ? Number(mine.start.slice(0, 2)) + Number(mine.start.slice(3, 5)) / 60 : hourStart;
+                            const to = mine.end ? Number(mine.end.slice(0, 2)) + Number(mine.end.slice(3, 5)) / 60 : Math.min(hourEnd, from + 2);
+                            const top = Math.max(0, (from - hourStart) * PX_PER_HOUR);
+                            const height = Math.max(MIN_BLOCK_H, Math.min(gridHeight, (to - hourStart) * PX_PER_HOUR) - top - 2);
+                            const color = ORG_COLORS[ev.org];
+                            return (
+                              <button
+                                key={`presence-${ev.id}`}
+                                onClick={() => setEditingInternal(ev)}
+                                title={`Vous venez ${shortHour(mine.start || "…")}–${shortHour(mine.end || "…")} · ${ev.title}`}
+                                className="absolute inset-x-1 z-[1] overflow-hidden rounded-chip border-2 border-dashed px-1.5 py-0.5 text-left hover:z-[5] hover:shadow-card"
+                                style={{ top, height, borderColor: color.base, color: color.ink, background: `color-mix(in srgb, ${color.bg} 55%, transparent)` }}
+                              >
+                                <div className="truncate font-mono text-[10px] font-bold">
+                                  Vous · {shortHour(mine.start || "…")}–{shortHour(mine.end || "…")}
+                                </div>
+                                {height > 30 && <div className="truncate text-[11px] font-semibold">{ev.title}</div>}
+                              </button>
+                            );
+                          })}
 
                         {dayEvents.map((ev) => {
                           const pos = positions.get(`i:${ev.id}`);
@@ -788,7 +955,11 @@ export function CalendrierScreen() {
                     <div
                       key={`bg-${day.toISOString()}`}
                       onDoubleClick={() => handleMonthCellDoubleClick(day)}
-                      className={`border-r border-line last:border-r-0 ${isSameMonth(day, anchorDate) ? "" : "bg-subtle/40"}`}
+                      onMouseDown={(e) => startDrag("month", day, 9, e)}
+                      onMouseEnter={() => drag && moveDrag(day)}
+                      className={`border-r border-line last:border-r-0 ${
+                        drag?.mode === "month" && inDrag(day) ? "bg-sel-bg" : isSameMonth(day, anchorDate) ? "" : "bg-subtle/40"
+                      }`}
                       style={{ gridColumn: i + 1, gridRow: "1 / -1" }}
                     />
                   ))}
@@ -805,6 +976,7 @@ export function CalendrierScreen() {
                         key={`head-${day.toISOString()}`}
                         onClick={() => setDrawerDay(day)}
                         onDoubleClick={() => handleMonthCellDoubleClick(day)}
+                        onMouseEnter={() => drag && moveDrag(day)}
                         title={`Afficher la journée du ${format(day, "EEEE d MMMM", { locale: fr })}`}
                         className="group relative flex min-h-[32px] items-center justify-between gap-1 px-1.5 pt-1 text-left hover:bg-hover/70"
                         style={{ gridColumn: i + 1, gridRow: 1 }}
@@ -844,8 +1016,8 @@ export function CalendrierScreen() {
                           e.stopPropagation();
                           setEditingInternal(ev);
                         }}
-                        title={`${ev.title} — du ${format(parseISO(ev.start), "d MMM HH:mm", { locale: fr })} au ${format(parseISO(ev.end), "d MMM HH:mm", { locale: fr })}`}
-                        className={`relative mx-1 my-px flex h-[20px] items-center gap-1 overflow-hidden px-1.5 text-left text-[10px] font-semibold ${
+                        title={bannerTitle(ev)}
+                        className={`relative isolate mx-1 my-px flex h-[20px] items-center gap-1 overflow-hidden px-1.5 text-left text-[10px] font-semibold ${
                           fromBefore ? "rounded-l-none border-l-0" : "rounded-l-[4px] border-l-2"
                         } ${toAfter ? "rounded-r-none" : "rounded-r-[4px]"} ${ev.awaitingMyAnswer ? "ring-2 ring-red" : ""}`}
                         style={{
@@ -858,6 +1030,7 @@ export function CalendrierScreen() {
                           marginRight: toAfter ? 0 : undefined,
                         }}
                       >
+                        <PresenceSegments ev={ev} days={week.slice(colStart, colEnd + 1)} />
                         {fromBefore && <ChevronLeft size={10} className="shrink-0 opacity-70" />}
                         <span className="min-w-0 flex-1 truncate">{ev.title}</span>
                         <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
@@ -872,7 +1045,9 @@ export function CalendrierScreen() {
                     <div
                       key={`events-${day.toISOString()}`}
                       onDoubleClick={() => handleMonthCellDoubleClick(day)}
-                      className="relative flex min-w-0 flex-col gap-0.5 px-1.5 pb-1.5 pt-0.5"
+                      onMouseDown={(e) => startDrag("month", day, 9, e)}
+                      onMouseEnter={() => drag && moveDrag(day)}
+                      className={`relative flex min-w-0 flex-col gap-0.5 px-1.5 pb-1.5 pt-0.5 ${drag ? "select-none" : ""}`}
                       style={{ gridColumn: i + 1, gridRow: laneCount + 2 }}
                     >
                       {eventsForDay(day).map((ev) => {
@@ -966,6 +1141,10 @@ export function CalendrierScreen() {
             setEditingInternal("new");
           }}
         />
+      )}
+
+      {addingAccount && (
+        <AddAccountModal initial="icloud" defaults={{ mail: false, calendar: true }} onClose={() => setAddingAccount(false)} onConnected={() => void reloadAccounts()} />
       )}
 
       {editingGoogle && (editingGoogle !== "new" || googleAccountIds.length > 0) && (

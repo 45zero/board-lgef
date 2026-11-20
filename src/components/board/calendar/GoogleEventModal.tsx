@@ -76,7 +76,7 @@ export function GoogleEventModal({
       <div className="w-full max-w-lg rounded-modal border border-line bg-card p-6 shadow-modal">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-bold text-ink">
-            {event ? "Modifier l'événement Google" : "Nouvel événement Google"}
+            {event ? "Modifier l'événement de l'agenda" : "Nouvel événement d'agenda"}
           </h3>
           <button onClick={onClose} className="text-ink-4 hover:text-ink">
             <X size={16} />

@@ -3,12 +3,15 @@
 import { EventCrewBar } from "@/components/board/calendar/EventCrewBar";
 import { EventWeather } from "@/components/board/calendar/DayWeather";
 import { EventTeamCards } from "@/components/board/team/TeamCardOpener";
+import { EventPlanningTab, MyPresenceBar } from "@/components/board/calendar/EventPlanningTab";
+import { DaySlotsPicker } from "@/components/board/calendar/DaySlotsPicker";
+import { eventDays } from "@/lib/board/presence";
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { fr } from "date-fns/locale";
-import { X, Trash2, MapPin, ChevronDown, Camera, Video, ClipboardCheck, FileText, MessageSquare, Users, Receipt, Wallet, Map as MapIcon, Sprout } from "lucide-react";
+import { X, Trash2, MapPin, ChevronDown, Camera, Video, ClipboardCheck, FileText, MessageSquare, Users, Receipt, Wallet, Map as MapIcon, Sprout, CalendarRange } from "lucide-react";
 import { ORG_LABELS, ORG_COLORS } from "@/lib/board/tokens";
-import { type CalendarEvent } from "@/lib/board/calendar";
+import { isMultiDayEvent, type CalendarEvent } from "@/lib/board/calendar";
 import { useEventModalState } from "@/hooks/board/useEventModalState";
 import { PersonName } from "@/components/board/calendar/PersonName";
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
@@ -30,11 +33,21 @@ import {
   AttachmentsField,
 } from "@/components/board/calendar/EventTabs";
 
-type Tab = "details" | "discussion" | "equipe" | "frais" | "gestion" | "carte" | "fief";
+// Encarts de la fiche : couverture médiatique en bleu, comité directeur en doré (couleur de sa pastille).
+const COVERAGE_ACCENT = ORG_COLORS.pem;
+const CD_ACCENT = ORG_COLORS.tirages;
+const panelStyle = (c: { base: string; bg: string }) => ({
+  borderColor: `color-mix(in srgb, ${c.base} 25%, transparent)`,
+  borderLeftColor: c.base,
+  background: `color-mix(in srgb, ${c.bg} 55%, var(--color-card))`,
+});
+
+type Tab = "details" | "planning" | "discussion" | "equipe" | "frais" | "gestion" | "carte" | "fief";
 
 // Onglets en icônes (le nom en info-bulle et pour les lecteurs d'écran).
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
   { id: "details", label: "Détails", icon: FileText },
+  { id: "planning", label: "Planning — présence jour par jour", icon: CalendarRange },
   { id: "discussion", label: "Discussion", icon: MessageSquare },
   { id: "equipe", label: "Équipe", icon: Users },
   { id: "frais", label: "Mes frais", icon: Receipt },
@@ -67,6 +80,18 @@ export function EventModal({
   const mapsLoaded = useGoogleMapsScript();
 
   const m = useEventModalState({ event, defaultStart, defaultEnd, draft, onClose, onSaved });
+  // Champ « Au » : affiché d'emblée pour un événement sur plusieurs jours, sinon via « + jours ».
+  const [multiDayOpen, setMultiDay] = useState(false);
+  const multiDay = multiDayOpen || m.endDayOffset > 0;
+  // Onglet Planning : événement existant sur plusieurs jours. askMine : vient d'accepter / de se proposer.
+  const showPlanning = !!event && isMultiDayEvent(event);
+  const [askMine, setAskMine] = useState(false);
+  const [cdOpen, setCdOpen] = useState(false);
+  const openPlanning = (ask = false) => {
+    setAskMine(ask);
+    setTab("planning");
+  };
+  const formDays = /^\d{4}-\d{2}-\d{2}$/.test(m.dateStr) && /^\d{4}-\d{2}-\d{2}$/.test(m.endDateStr) ? eventDays(`${m.dateStr}T12:00:00`, `${m.endDateStr}T13:00:00`) : [];
   const { isEditing } = m;
   // Onglet FIEF : équipe FIEF seulement (module « fief »).
   const showFief = canShowModule(useVisibleModules(), "fief");
@@ -124,7 +149,7 @@ export function EventModal({
 
         {/* Onglets */}
         <div className="flex shrink-0 items-center gap-1 border-b border-line bg-panel px-4 py-2">
-          {TABS.filter((t) => t.id !== "fief" || showFief).map((t) => {
+          {TABS.filter((t) => (t.id !== "fief" || showFief) && (t.id !== "planning" || showPlanning)).map((t) => {
             const count =
               t.id === "equipe"
                 ? m.team.team.length
@@ -198,7 +223,19 @@ export function EventModal({
 
               <div className="flex flex-wrap items-end gap-2">
                 <div className="w-[138px]">
-                  <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Date</label>
+                  <label className="mb-1 flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+                    {multiDay ? "Du" : "Date"}
+                    {!multiDay && (
+                      <button
+                        type="button"
+                        onClick={() => setMultiDay(true)}
+                        title="Événement sur plusieurs jours"
+                        className="font-sans text-[10px] font-semibold normal-case tracking-normal text-link hover:underline"
+                      >
+                        + jours
+                      </button>
+                    )}
+                  </label>
                   <input
                     type="date"
                     value={m.dateStr}
@@ -206,6 +243,20 @@ export function EventModal({
                     className="w-full rounded-btn border border-line px-2 py-1.5 text-xs outline-none"
                   />
                 </div>
+                {multiDay && (
+                  <div className="w-[138px]">
+                    <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
+                      Au{m.endDayOffset > 0 ? ` · ${m.endDayOffset + 1} jours` : ""}
+                    </label>
+                    <input
+                      type="date"
+                      value={m.endDateStr}
+                      min={m.dateStr}
+                      onChange={(e) => m.setEndDateStr(e.target.value)}
+                      className="w-full rounded-btn border border-line px-2 py-1.5 text-xs outline-none"
+                    />
+                  </div>
+                )}
                 <div className="w-[84px]">
                   <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Début</label>
                   <input
@@ -303,52 +354,139 @@ export function EventModal({
                 <Toggle on={m.registrationEnabled} onClick={() => m.setRegistrationEnabled(!m.registrationEnabled)} />
               </div>
 
-              {!isEditing && (
-                <div className="flex flex-wrap items-start gap-4">
-                  <div className="w-[230px] shrink-0">
-                    <div className="mb-1 text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">Couverture</div>
-                    <div className="flex items-center justify-between rounded-btn border border-line px-3 py-2">
-                      <span className="flex items-center gap-1.5 text-sm font-bold text-ink">
-                        <Camera size={14} /> Couverture médiatique
-                      </span>
-                      <Toggle on={m.wantsCoverage} onClick={() => m.setWantsCoverage(!m.wantsCoverage)} />
-                    </div>
+              {/* Couverture médiatique (bleu) : demande, message, technicien et — plusieurs jours — jours et moment fort. */}
+              {(!isEditing || (showPlanning && formDays.length > 1)) && (
+                <div className="space-y-2.5 rounded-btn border border-l-4 p-3" style={panelStyle(COVERAGE_ACCENT)}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-sm font-bold" style={{ color: COVERAGE_ACCENT.ink }}>
+                      <Camera size={14} /> Couverture médiatique
+                    </span>
+                    {!isEditing ? (
+                      <Toggle
+                        on={m.wantsCoverage}
+                        onClick={() => {
+                          // Sans couverture, pas de jours vidéo / photo souhaités.
+                          if (m.wantsCoverage) m.setPresenceRequests({ ...m.presenceRequests, video: {}, photo: {} });
+                          m.setWantsCoverage(!m.wantsCoverage);
+                        }}
+                      />
+                    ) : m.coverage.request ? (
+                      <span className="text-[11px] text-ink-3">Équipe média : barre du bas</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void m.coverage.requestCoverage()}
+                        className="rounded-btn px-2.5 py-1 text-[11px] font-bold text-white"
+                        style={{ background: COVERAGE_ACCENT.base }}
+                      >
+                        Demander la couverture
+                      </button>
+                    )}
                   </div>
-
-                  {m.wantsCoverage && (
-                    <div className="min-w-[200px] flex-1">
-                      <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
-                        Message à l&rsquo;équipe média (optionnel)
-                      </label>
+                  {!isEditing && m.wantsCoverage && (
+                    <div className="flex flex-wrap gap-2">
                       <textarea
                         value={m.coverageDetails}
                         onChange={(e) => m.setCoverageDetails(e.target.value)}
                         rows={2}
-                        placeholder="Précisions pour l'équipe média — photo, vidéo, angle souhaité…"
-                        className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
+                        placeholder="Message à l'équipe média (optionnel) — photo, vidéo, angle souhaité…"
+                        className="min-w-[200px] flex-1 rounded-btn border border-line bg-card px-3 py-2 text-sm outline-none"
+                      />
+                      {m.role.canAssignCoverage && (
+                        <select
+                          value={m.coverageTechnicianId}
+                          onChange={(e) => m.setCoverageTechnicianId(e.target.value)}
+                          title="Assigner directement un technicien (optionnel)"
+                          className="h-fit min-w-[200px] flex-1 rounded-btn border border-line bg-card px-3 py-2 text-sm outline-none"
+                        >
+                          <option value="">Technicien : laisser en attente — le réseau salarié assignera</option>
+                          {m.technicians.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                  {formDays.length > 1 && (isEditing ? !!m.coverage.request : m.wantsCoverage) && (
+                    <div className="space-y-2">
+                      <DaySlotsPicker
+                        label="Vidéo"
+                        icon={<Video size={12} />}
+                        days={formDays}
+                        value={m.presenceRequests.video}
+                        onChange={(video) => m.setPresenceRequests({ ...m.presenceRequests, video })}
+                        accent={COVERAGE_ACCENT}
+                      />
+                      <DaySlotsPicker
+                        label="Photo"
+                        icon={<Camera size={12} />}
+                        days={formDays}
+                        value={m.presenceRequests.photo}
+                        onChange={(photo) => m.setPresenceRequests({ ...m.presenceRequests, photo })}
+                        accent={COVERAGE_ACCENT}
                       />
                     </div>
                   )}
                 </div>
               )}
 
-              {!isEditing && m.wantsCoverage && m.role.canAssignCoverage && (
-                <div>
-                  <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.1em] text-ink-4">
-                    Assigner directement un technicien (optionnel)
-                  </label>
-                  <select
-                    value={m.coverageTechnicianId}
-                    onChange={(e) => m.setCoverageTechnicianId(e.target.value)}
-                    className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
-                  >
-                    <option value="">Laisser en attente — le réseau salarié assignera</option>
-                    {m.technicians.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
+              {/* Comité directeur (doré) : à la création, membres à inviter ; plusieurs jours — jours et moment fort. */}
+              {(!isEditing || (showPlanning && formDays.length > 1)) && (
+                <div className="space-y-2.5 rounded-btn border border-l-4 p-3" style={panelStyle(CD_ACCENT)}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-sm font-bold" style={{ color: CD_ACCENT.ink }}>
+                      <Users size={14} /> Comité directeur
+                    </span>
+                    {!isEditing ? (
+                      <Toggle
+                        on={cdOpen}
+                        onClick={() => {
+                          // Désactivé : ni invitation ni jours souhaités pour le CD.
+                          if (cdOpen) {
+                            m.setPendingDirectors([]);
+                            m.setPresenceRequests({ ...m.presenceRequests, cd: {} });
+                          }
+                          setCdOpen(!cdOpen);
+                        }}
+                      />
+                    ) : (
+                      <span className="text-[11px] text-ink-3">Membres invités : barre du bas</span>
+                    )}
+                  </div>
+                  {!isEditing && cdOpen && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {m.director.directors.length === 0 && <span className="text-xs text-ink-4">Aucun membre du comité directeur.</span>}
+                      {m.director.directors.map((d) => {
+                        const on = m.pendingDirectors.includes(d.id);
+                        return (
+                          <button
+                            key={d.id}
+                            type="button"
+                            onClick={() => m.setPendingDirectors(on ? m.pendingDirectors.filter((x) => x !== d.id) : [...m.pendingDirectors, d.id])}
+                            aria-pressed={on}
+                            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${on ? "text-white" : "border-line bg-card text-ink-2 hover:bg-hover"}`}
+                            style={on ? { background: CD_ACCENT.base, borderColor: CD_ACCENT.base } : undefined}
+                          >
+                            {[d.first_name, d.last_name].filter(Boolean).join(" ") || d.email}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {formDays.length > 1 && (isEditing || cdOpen) && (
+                    <DaySlotsPicker
+                      label="Présence souhaitée"
+                      days={formDays}
+                      value={m.presenceRequests.cd}
+                      onChange={(cd) => m.setPresenceRequests({ ...m.presenceRequests, cd })}
+                      accent={CD_ACCENT}
+                    />
+                  )}
+                  {!isEditing && cdOpen && m.pendingDirectors.length > 0 && (
+                    <p className="text-[10px] text-ink-4">Invitation « à confirmer » envoyée à l&rsquo;enregistrement ; chacun pourra ensuite indiquer d&rsquo;autres jours.</p>
+                  )}
                 </div>
               )}
 
@@ -364,6 +502,8 @@ export function EventModal({
                 />
               </div>
 
+              {/* Plusieurs jours : chacun indique les jours (et heures) où il vient. */}
+              {showPlanning && event && <MyPresenceBar eventId={event.id} solicited={!!event.solicited} onOpenPlanning={() => openPlanning()} />}
               {isEditing && <EventTeamCards eventId={event!.id} />}
 
               {isEditing && (
@@ -383,6 +523,24 @@ export function EventModal({
             </div>
           )}
 
+          {tab === "planning" && showPlanning && event && (
+            <EventPlanningTab
+              eventId={event.id}
+              startISO={event.start}
+              endISO={event.end}
+              solicited={!!event.solicited}
+              team={m.team.team}
+              attendances={m.director.attendances}
+              directors={m.director.directors}
+              technicians={m.technicians}
+              lead={
+                m.coverage.request?.assigned_technician_id
+                  ? { id: m.coverage.request.assigned_technician_id, role: m.coverage.request.technician_role ?? null, accepted: m.coverage.request.technician_response === "accepted" }
+                  : null
+              }
+              askMine={askMine}
+            />
+          )}
           {tab === "discussion" && isEditing && <DiscussionTab hook={m.comments} />}
           {tab === "equipe" && isEditing && <EquipeTab hook={m.team} />}
           {tab === "frais" && isEditing && event && <FraisTab eventId={event.id} onDeclared={() => void m.expenses.refetch()} />}
@@ -408,7 +566,15 @@ export function EventModal({
             {isEditing && (
               <>
                 <span className="mt-1 h-6 w-px shrink-0 bg-line" aria-hidden />
-                <EventCrewBar eventId={event!.id} role={m.role} technicians={m.technicians} coverage={m.coverage} director={m.director} />
+                <EventCrewBar
+                  eventId={event!.id}
+                  role={m.role}
+                  technicians={m.technicians}
+                  coverage={m.coverage}
+                  director={m.director}
+                  requests={showPlanning ? m.presenceRequests : null}
+                  onJoined={showPlanning ? () => openPlanning(true) : undefined}
+                />
               </>
             )}
           </div>

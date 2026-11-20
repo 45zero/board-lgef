@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Check } from "lucide-react";
 
-export type DefaultOption = { label: string; selected: boolean; onSelect: () => void };
+export type DefaultOption = { label: string; selected: boolean; onSelect: () => void; /** Précision sous le libellé. */ hint?: string };
 
 /**
  * Menu du clic droit « affichage par défaut » des contrôles du calendrier (bonhomme, couvertures,
@@ -19,11 +19,13 @@ export function DefaultMenu({
 }: {
   title: string;
   options: DefaultOption[];
-  footnote?: string;
+  /** `null` : pas de note en bas du menu. */
+  footnote?: string | null;
   /** Menu posé au curseur (position fixe) : pas coupé par une colonne qui défile (volets latéraux). */
   atCursor?: boolean;
   className?: string;
-  children: (onContextMenu: (e: React.MouseEvent) => void) => ReactNode;
+  /** `openAt` : ouvrir le menu à une position (bouton visible, appui long sur mobile). */
+  children: (onContextMenu: (e: React.MouseEvent) => void, openAt: (x: number, y: number) => void) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
@@ -40,14 +42,18 @@ export function DefaultMenu({
     };
   }, [open]);
 
+  // 256 px de large, ~200 de haut : gardé dans la fenêtre.
+  const openAt = (x: number, y: number) => {
+    setAt({ x: Math.max(8, Math.min(x, window.innerWidth - 264)), y: Math.max(8, Math.min(y, window.innerHeight - 220)) });
+    setOpen(true);
+  };
+
   return (
     <div ref={ref} className={className}>
       {children((e) => {
         e.preventDefault();
-        // 256 px de large, ~200 de haut : gardé dans la fenêtre.
-        setAt({ x: Math.max(8, Math.min(e.clientX, window.innerWidth - 264)), y: Math.max(8, Math.min(e.clientY, window.innerHeight - 220)) });
-        setOpen(true);
-      })}
+        openAt(e.clientX, e.clientY);
+      }, openAt)}
       {open && (
         <div
           className={`${atCursor && at ? "fixed z-[80]" : "absolute right-0 top-full z-30 mt-1.5"} w-64 rounded-card border border-line bg-card p-1.5 text-left shadow-card`}
@@ -61,13 +67,18 @@ export function DefaultMenu({
                 o.onSelect();
                 setOpen(false);
               }}
-              className="flex w-full items-center gap-2 rounded-btn px-2 py-1.5 text-left text-[13px] text-ink-2 hover:bg-hover"
+              className="flex w-full items-start gap-2 rounded-btn px-2 py-1.5 text-left text-[13px] text-ink-2 hover:bg-hover"
             >
-              <span className="w-4">{o.selected && <Check size={14} className="text-good" />}</span>
-              {o.label}
+              <span className="mt-0.5 w-4 shrink-0">{o.selected && <Check size={14} className="text-good" />}</span>
+              <span className="min-w-0">
+                {o.label}
+                {o.hint && <span className="mt-0.5 block text-[11px] leading-snug text-ink-4">{o.hint}</span>}
+              </span>
             </button>
           ))}
-          <p className="px-2 pb-1 pt-1 text-[10px] leading-snug text-ink-4">{footnote} Le réglage par défaut suit votre compte, sur ordinateur comme sur mobile.</p>
+          {footnote !== null && (
+            <p className="px-2 pb-1 pt-1 text-[10px] leading-snug text-ink-4">{footnote} Le réglage par défaut suit votre compte, sur ordinateur comme sur mobile.</p>
+          )}
         </div>
       )}
     </div>

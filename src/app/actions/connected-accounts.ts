@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { listConnectedAccounts, disconnectAccount } from "@/lib/google/accounts";
+import { connectIcloudAccount } from "@/lib/icloud/accounts";
 
 async function requireUserId() {
   const supabase = await createClient();
@@ -22,4 +23,10 @@ export async function getMyConnectedAccounts() {
 export async function disconnectMyAccount(accountId: string) {
   const userId = await requireUserId();
   await disconnectAccount(accountId, userId);
+}
+
+/** Compte iCloud : adresse + mot de passe pour app (appleid.apple.com), Mail et / ou Agenda. */
+export async function connectMyIcloudAccount(input: { email: string; password: string; mail: boolean; calendar: boolean }) {
+  const userId = await requireUserId();
+  return connectIcloudAccount(userId, input);
 }

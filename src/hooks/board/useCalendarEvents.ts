@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { useAuth } from "@/contexts/AuthContext";
 import { mapEventRow, type CalendarEvent, type EventRow, type CoverageRequestRow, type PublishedMedia } from "@/lib/board/calendar";
 import { readCache, writeCache } from "@/lib/board/localCache";
@@ -106,9 +107,11 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
     const publishedByEvent = new Map<string, PublishedMedia>();
     let photoCovered = new Set<string>();
     const directorByEvent = new Map<string, "approved" | "pending" | "denied">();
+    const myDaysByEvent = new Map<string, Record<string, { start: string; end: string }>>();
+    const wantedByEvent = new Map<string, NonNullable<CalendarEvent["wanted"]>>();
     const eventIds = rows.map((r) => r.id);
     if (eventIds.length > 0) {
-      const [{ data: coverageRows }, { data: publishedRows }, { data: photoRows }, { data: directorRows }] = await Promise.all([
+      const [{ data: coverageRows }, { data: publishedRows }, { data: photoRows }, { data: directorRows }, { data: presenceRows }, { data: wantedRows }] = await Promise.all([
         supabase
           .from("coverage_requests")
           .select("event_id, status, coverage_symbol, technician_response, assigned_technician_id")
@@ -120,7 +123,25 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
         supabase.from("photo_missions").select("event_id").in("event_id", eventIds),
         // Présence du comité directeur (pastille « CD »).
         supabase.from("director_attendance").select("event_id, status, director_id").in("event_id", eventIds),
+        // Mes jours de présence sur les événements de plusieurs jours (bandeau : mes jours mis en avant).
+        (supabase as unknown as SupabaseClient)
+          .from("event_presence_days")
+          .select("event_id, day, start_time, end_time")
+          .eq("user_id", user.id)
+          .in("event_id", eventIds),
+        // Présences souhaitées (vidéo, photo, CD) : la demande s'affiche le jour voulu dans le bandeau.
+        (supabase as unknown as SupabaseClient).from("event_presence_requests").select("event_id, kind, day, start_time, end_time").in("event_id", eventIds),
       ]);
+      for (const w of (wantedRows ?? []) as { event_id: string; kind: "video" | "photo" | "cd"; day: string; start_time: string | null; end_time: string | null }[]) {
+        const byDay = wantedByEvent.get(w.event_id) ?? {};
+        byDay[w.day] = { ...(byDay[w.day] ?? {}), [w.kind]: { start: w.start_time?.slice(0, 5) ?? "", end: w.end_time?.slice(0, 5) ?? "" } };
+        wantedByEvent.set(w.event_id, byDay);
+      }
+      for (const p of (presenceRows ?? []) as { event_id: string; day: string; start_time: string | null; end_time: string | null }[]) {
+        const days = myDaysByEvent.get(p.event_id) ?? {};
+        days[p.day] = { start: p.start_time?.slice(0, 5) ?? "", end: p.end_time?.slice(0, 5) ?? "" };
+        myDaysByEvent.set(p.event_id, days);
+      }
       // Plusieurs membres CD possibles : un « confirmé » suffit ; « décliné » seulement si tous ont décliné.
       const rank = { approved: 2, pending: 1, denied: 0 } as const;
       for (const d of directorRows ?? []) {
@@ -150,6 +171,8 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       weekendMatch: row.event_type === "match_du_week_end",
       photoCoverage: photoCovered.has(row.id),
       director: directorByEvent.get(row.id) ?? null,
+      myDays: myDaysByEvent.get(row.id) ?? null,
+      wanted: wantedByEvent.get(row.id) ?? null,
       solicited: solicited.has(row.id),
       myPersonal: row.event_type === "kanban" && row.created_by === user.id,
       awaitingMyAnswer: (() => {
@@ -181,6 +204,8 @@ export function useCalendarEvents(rangeStart: Date, rangeEnd: Date) {
       // Participants / assignations : l'icône « où je suis sollicité » suit sans rechargement.
       .on("postgres_changes", { event: "*", schema: "public", table: "event_team_members" }, () => fetchEvents())
       .on("postgres_changes", { event: "*", schema: "public", table: "event_assignments" }, () => fetchEvents())
+      .on("postgres_changes", { event: "*", schema: "public", table: "event_presence_days" }, () => fetchEvents())
+      .on("postgres_changes", { event: "*", schema: "public", table: "event_presence_requests" }, () => fetchEvents())
       .subscribe();
     return () => {
       supabase.removeChannel(channel);

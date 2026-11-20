@@ -20,14 +20,19 @@ export const technicianFilter = (userId: string) =>
   `assigned_technician_id.eq.${userId},and(assigned_technician_id.is.null,technician_id.eq.${userId})`;
 
 /** « Perso » : mon propre événement Perso — ajouté par le module Frais seulement (computeMyExpenses). */
-export type SolicitationRole = "Responsable" | "Membre" | "Assigné" | "Comité directeur" | "Comité directeur (à confirmer)" | "Captation" | "Perso";
+export type SolicitationRole = "Responsable" | "Membre" | "Assigné" | "Comité directeur" | "Comité directeur (à confirmer)" | "Captation" | "Perso" | "Présent";
 
 export async function getSolicitations(
   client: SupabaseClient<Database>,
   userId: string,
-  opts: { includePendingDirector?: boolean; includeProposedCoverage?: boolean } = {}
+  opts: {
+    includePendingDirector?: boolean;
+    includeProposedCoverage?: boolean;
+    /** « Je viens » sur des jours d'un événement (event_presence_days) : calendrier et programme seulement, pas les frais. */
+    includePresence?: boolean;
+  } = {}
 ): Promise<Map<string, Set<SolicitationRole>>> {
-  const [team, assigned, directors, coverage, photo] = await Promise.all([
+  const [team, assigned, directors, coverage, photo, presence] = await Promise.all([
     client.from("event_team_members").select("event_id, role").eq("user_id", userId),
     client.from("event_assignments").select("event_id").eq("user_id", userId),
     client.from("director_attendance").select("event_id, status").eq("director_id", userId).neq("status", "denied"),
@@ -38,6 +43,9 @@ export async function getSolicitations(
       .neq("status", "cancelled"),
     // Réseau photo : match pris (sql/2026-09-29_reseau_photo.sql) — frais déclarables comme une captation.
     client.from("photo_missions").select("event_id").eq("photographer_id", userId).eq("status", "taken"),
+    opts.includePresence
+      ? (client as unknown as SupabaseClient).from("event_presence_days").select("event_id").eq("user_id", userId)
+      : Promise.resolve({ data: [] as { event_id: string }[] }),
   ]);
 
   const roles = new Map<string, Set<SolicitationRole>>();
@@ -62,5 +70,6 @@ export async function getSolicitations(
     if (c.technician_response === "accepted" || (opts.includeProposedCoverage && c.technician_response !== "rejected")) add(c.event_id, "Captation");
   }
   for (const p of photo.data ?? []) add(p.event_id, "Captation");
+  for (const p of (presence.data ?? []) as { event_id: string }[]) if (!roles.has(p.event_id)) add(p.event_id, "Présent");
   return roles;
 }

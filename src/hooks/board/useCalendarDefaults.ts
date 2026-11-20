@@ -22,12 +22,13 @@ export type CalendarDefaults = {
   mailBox: AccountScope;
   dashMailBox: AccountScope;
   googleCalendars: AccountScope;
+  dashGoogleCalendars: AccountScope;
 };
 
 const KEY = "lgef-board:calendar-defaults";
 const LEGACY_COVERAGE = "lgef-board:calendar-coverage-defaults";
 const LEGACY_MINE = "lgef-board:calendar-mine-only";
-const FALLBACK: CalendarDefaults = { view: "month", mine: false, video: false, photo: false, mailBox: "all", dashMailBox: "all", googleCalendars: "all" };
+const FALLBACK: CalendarDefaults = { view: "month", mine: false, video: false, photo: false, mailBox: "all", dashMailBox: "all", googleCalendars: "all", dashGoogleCalendars: "all" };
 
 function readLocal(): CalendarDefaults {
   try {
