@@ -591,7 +591,6 @@ function AttachmentRow({
                 isDrive && <span className="ml-1.5 rounded-full bg-subtle px-1.5 py-0.5 font-semibold text-ink-3">Drive</span>
               )}
             </span>
-            <PublishBadges file={file} />
           </span>
         </button>
         <div className="flex shrink-0 items-center gap-2">
@@ -609,6 +608,10 @@ function AttachmentRow({
             </button>
           )}
         </div>
+      </div>
+      {/* Hors du bouton d'ouverture : liens et bouton de partage ne peuvent pas être imbriqués dans un <button>. */}
+      <div className="pl-[23px]">
+        <PublishBadges file={file} />
       </div>
       {viewing && (
         <FileViewer
