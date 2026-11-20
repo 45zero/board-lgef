@@ -3,10 +3,11 @@
 import { useAppLabel } from "@/hooks/board/useFraisFlavor";
 import { useState } from "react";
 import Image from "next/image";
-import { Search, Moon, Sun, ChevronRight, Settings, Lock } from "lucide-react";
+import { Moon, Sun, ChevronRight, Settings, Lock } from "lucide-react";
 import { NotificationBell } from "@/components/board/live/NotificationBell";
 import { SupportButton } from "@/components/board/support/SupportButton";
 import { QuickDrop } from "@/components/board/dashboard/QuickDrop";
+import { GlobalSearch } from "@/components/board/search/GlobalSearch";
 import type { BoardApp } from "@/lib/board/tokens";
 import type { Theme } from "./BoardShell";
 import { MyProfileModal } from "@/components/board/profile/MyProfileModal";
@@ -18,6 +19,7 @@ export function TopBar({
   onToggleTheme,
   onOpenSettings,
   onOpenModuleAccess,
+  onNavigate,
 }: {
   currentApp: BoardApp;
   theme: Theme;
@@ -25,6 +27,8 @@ export function TopBar({
   onOpenSettings: () => void;
   /** Administrateurs : régler qui voit le module ouvert. */
   onOpenModuleAccess?: () => void;
+  /** Ouvre un module (recherche globale). */
+  onNavigate?: (app: string) => void;
 }) {
   const { name, initials, avatarUrl } = useCurrentProfile();
   const [profileOpen, setProfileOpen] = useState(false);
@@ -62,16 +66,7 @@ export function TopBar({
           )}
         </div>
 
-        <div className="ml-2 flex flex-1 items-center gap-2 rounded-btn border border-line bg-subtle px-3 py-2 text-ink-3">
-          <Search size={16} />
-          <input
-            placeholder="Rechercher, créer, lancer une commande..."
-            className="w-full bg-transparent text-sm outline-none placeholder:text-ink-4"
-          />
-          <kbd className="rounded border border-line-strong px-1.5 py-0.5 font-mono text-[10px] text-ink-4">
-            ⌘K
-          </kbd>
-        </div>
+        <GlobalSearch onNavigate={onNavigate} />
 
         <QuickDrop />
 

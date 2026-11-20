@@ -137,6 +137,7 @@ export function BoardShell() {
           onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
           onOpenSettings={() => setSettingsOpen((o) => !o)}
           onOpenModuleAccess={canManageAccess && app !== "accueil" ? () => setAccessOpen(true) : undefined}
+          onNavigate={selectApp}
         />
 
         <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
