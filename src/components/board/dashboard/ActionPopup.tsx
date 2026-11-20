@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { MapPopup } from "@/components/board/calendar/MapPopup";
 import { useEffect, useState } from "react";
-import { X, Check, ChevronRight, ChevronDown, CalendarDays, MapPin, Map as MapIcon, Loader2, Send, FileText, Search, Eye, Paperclip } from "lucide-react";
+import { X, Check, ChevronRight, ChevronDown, CalendarDays, MapPin, Map as MapIcon, Loader2, Send, FileText, Search, Eye, Paperclip, Clock } from "lucide-react";
 import { Composer } from "@/components/board/screens/PublicationScreen";
 import { getMediaPublication, type MediaPublication } from "@/lib/board/mediaPublications";
 import { createClient } from "@/lib/supabase/client";
@@ -946,13 +946,18 @@ function AssignRow({ item, technicians, onDone }: { item: DashboardActionItem; t
       {/* Couverture refusée : qui a refusé (et pourquoi), en rouge au-dessus de la demande d'origine. */}
       {item.detail?.startsWith("Refusée") && <div className="text-[11px] font-semibold text-bad">{item.detail}</div>}
       {details && details !== item.detail && <div className="truncate text-[11px] text-ink-4">{details}</div>}
+      {item.waitingFor && (
+        <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-warn-bg px-2 py-0.5 text-[11px] font-semibold text-warn">
+          <Clock size={11} /> Proposée à {item.waitingFor} — en attente de sa réponse
+        </div>
+      )}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <select
           value={techId}
           onChange={(e) => setTechId(e.target.value)}
           className="min-w-0 flex-1 rounded-btn border border-line bg-card px-2 py-1.5 text-sm outline-none"
         >
-          <option value="">Choisir un membre TeamMedias…</option>
+          <option value="">{item.waitingFor ? "Proposer à quelqu'un d'autre…" : "Choisir un membre TeamMedias…"}</option>
           {sorted.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}
