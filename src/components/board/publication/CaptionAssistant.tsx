@@ -2,27 +2,31 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Sparkles, Undo2, Wand2 } from "lucide-react";
-import { proposePublicationCaption } from "@/app/actions/publication-caption";
+import { proposePublicationCaption, type CaptionSource } from "@/app/actions/publication-caption";
 
 /**
  * Sous le champ texte d'une publication : Claude propose un texte prêt à publier à partir de ce que
- * le board sait du média (événement, date, lieu, description, nombre de photos / vidéos), ou retouche
+ * le board sait du média (événement, date, lieu, description, nombre de photos / vidéos) et d'aperçus
+ * des photos / vidéos (lus côté serveur, ou fournis par `getImages` avant l'envoi des médias), ou retouche
  * le texte actuel selon une consigne (« plus court », « ajoute le score 3-1 »…). Texte vide à
  * l'ouverture : une première proposition est préparée tout de suite. « Annuler » remet le texte
  * d'avant la dernière proposition.
  */
 export function CaptionAssistant({
-  publicationId,
+  source,
   value,
   onChange,
   networks,
   autoStart = false,
+  getImages,
 }: {
-  publicationId: string;
+  source: CaptionSource;
   value: string;
   onChange: (text: string) => void;
   networks: string[];
   autoStart?: boolean;
+  /** Aperçus JPEG (data URL) des médias pas encore envoyés — fenêtre « Nouvelle publication ». */
+  getImages?: () => Promise<string[]>;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +38,8 @@ export function CaptionAssistant({
   const run = async (opts: { current: string; instruction: string }) => {
     setBusy(true);
     setError(null);
-    const res = await proposePublicationCaption(publicationId, { ...opts, networks });
+    const images = getImages ? await getImages().catch(() => []) : undefined;
+    const res = await proposePublicationCaption(source, { ...opts, networks, images });
     setBusy(false);
     if (res.error || !res.text) return setError(res.error ?? "Pas de proposition.");
     setPrevious(opts.current);
@@ -57,7 +62,7 @@ export function CaptionAssistant({
     "inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-1 text-[11px] font-semibold text-ink-2 hover:bg-hover disabled:opacity-50";
 
   return (
-    <div className="-mt-2 space-y-1.5">
+    <div className="-mt-1 space-y-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
         {busy ? (
           <span className="inline-flex items-center gap-1.5 text-[11px] text-ink-4">
@@ -119,4 +124,30 @@ export function CaptionAssistant({
       {error && <p className="text-[11px] text-bad">{error}</p>}
     </div>
   );
+}
+
+/**
+ * Aperçus des photos choisies dans le navigateur, avant leur envoi : 4 au plus (répartis sur la
+ * sélection), réduits à 640 px en JPEG pour rester légers. Les vidéos ne sont pas lues ici.
+ */
+export async function localPreviewImages(files: File[]): Promise<string[]> {
+  const photos = files.filter((f) => f.type.startsWith("image/"));
+  const n = Math.min(4, photos.length);
+  const picked = n < photos.length ? Array.from({ length: n }, (_, i) => photos[Math.round((i * (photos.length - 1)) / Math.max(n - 1, 1))]) : photos;
+  const out: string[] = [];
+  for (const f of picked) {
+    try {
+      const bmp = await createImageBitmap(f);
+      const scale = Math.min(1, 640 / Math.max(bmp.width, bmp.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(bmp.width * scale);
+      canvas.height = Math.round(bmp.height * scale);
+      canvas.getContext("2d")?.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+      bmp.close();
+      out.push(canvas.toDataURL("image/jpeg", 0.7));
+    } catch {
+      // format non lisible par le navigateur (HEIC…) : ignoré
+    }
+  }
+  return out;
 }

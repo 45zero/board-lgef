@@ -1,7 +1,7 @@
 "use client";
 
 import { InstagramMentionField } from "@/components/board/publication/InstagramMentionField";
-import { CaptionAssistant } from "@/components/board/publication/CaptionAssistant";
+import { CaptionAssistant, localPreviewImages } from "@/components/board/publication/CaptionAssistant";
 import { PublicationSettings } from "@/components/board/publication/PublicationSettings";
 import { useCanPublish } from "@/hooks/board/useCanPublish";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -795,6 +795,7 @@ function PublishElsewhere({ pub, onChanged }: { pub: MediaPublication; onChanged
         placeholder="Texte de la publication…"
         className="w-full rounded-btn border border-line px-2.5 py-1.5 text-xs outline-none"
       />
+      <CaptionAssistant source={{ publicationId: pub.id }} value={caption} onChange={setCaption} networks={selected} />
       <div className="flex justify-end gap-2">
         <button onClick={() => setOpen(false)} className="rounded-btn border border-line px-3 py-1 text-[11px] text-ink-2">
           Annuler
@@ -1486,7 +1487,7 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
           className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
         />
         <CaptionAssistant
-          publicationId={pub.id}
+          source={{ publicationId: pub.id }}
           value={caption}
           onChange={setCaption}
           autoStart={pub.status === "to_publish"}
@@ -1940,6 +1941,21 @@ function NewPublicationDialog({ onClose, onCreated }: { onClose: () => void; onC
               rows={4}
               placeholder="Texte de la publication…"
               className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
+            />
+            <CaptionAssistant
+              source={{
+                draft: {
+                  eventId: event?.id ?? null,
+                  title,
+                  category: event ? null : category,
+                  photos: files.filter((f) => !f.type.startsWith("video")).length,
+                  videos: files.filter((f) => f.type.startsWith("video")).length,
+                },
+              }}
+              value={caption}
+              onChange={setCaption}
+              networks={[]}
+              getImages={() => localPreviewImages(files)}
             />
 
             <div className="space-y-1.5">
