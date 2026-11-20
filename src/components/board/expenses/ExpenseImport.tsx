@@ -234,7 +234,13 @@ export function ExpenseImport({
     patch(d.id, { event, auto: false });
     if (!event || d.category !== "mileage" || kmOf(d) > 0) return;
     void getMileageSuggestion(event.id).then((m) => {
-      if (m.status === "ok") patch(d.id, { kmText: String(m.km), description: d.description || `Domicile → ${m.to} (aller-retour)`, date: m.date ?? d.date });
+      // Un aller-retour proposé ; sur plusieurs jours, la précision le rappelle (à multiplier si besoin).
+      if (m.status === "ok")
+        patch(d.id, {
+          kmText: String(m.km),
+          description: d.description || (m.days > 1 ? `Domicile → ${m.to} (aller-retour) · événement sur ${m.days} jours` : `Domicile → ${m.to} (aller-retour)`),
+          date: m.date ?? d.date,
+        });
       else if (m.status === "blocked") patch(d.id, { error: m.message });
     });
   };

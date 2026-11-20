@@ -226,21 +226,23 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
     attachments: files(),
     currency: isMileage ? "EUR" : currency,
   });
-  /** Ajoute la ligne kilométrique proposée, telle quelle. */
-  const addSuggested = (m: Extract<MileageSuggestion, { status: "ok" }>) =>
-    save([
+  /** Ajoute la ligne kilométrique proposée : `trips` allers-retours (un par jour de présence, ou un seul). */
+  const addSuggested = (m: Extract<MileageSuggestion, { status: "ok" }>, trips: number) => {
+    const km = Math.round(m.km * trips * 10) / 10;
+    return save([
       {
         eventId,
         category: "mileage",
-        amount: m.amount,
+        amount: Math.round(km * m.rate * 100) / 100,
         date: m.date,
         merchant: null,
-        description: `Domicile → ${m.to} (aller-retour)`,
-        distanceKm: m.km,
+        description: trips > 1 ? `Domicile → ${m.to} · ${trips} allers-retours (${trips} jours)` : `Domicile → ${m.to} (aller-retour)`,
+        distanceKm: km,
         attachments: [],
         currency: "EUR",
       },
     ]);
+  };
   /** Saisie à la main des kilomètres (trajet différent, lieu inconnu). */
   const editMileage = (prefillKm?: number, prefillDate?: string | null) => {
     setCategory("mileage");
@@ -323,10 +325,24 @@ export function ExpenseLinesEditor({ target, locked = false, onChanged }: { targ
                 <div className="text-xs text-ink-3">
                   Domicile → {mileage.to} · {mileage.km.toLocaleString("fr-FR")} km aller-retour × {mileage.rate.toLocaleString("fr-FR")} € ={" "}
                   <strong className="text-ink">{formatEuros(mileage.amount)}</strong>
+                  {mileage.days > 1 && ` · présence sur ${mileage.days} jours`}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <button disabled={busy} onClick={() => addSuggested(mileage)} className="rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
-                    Ajouter {formatEuros(mileage.amount)}
+                  {mileage.days > 1 && (
+                    <button disabled={busy} onClick={() => addSuggested(mileage, mileage.days)} className="rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+                      {mileage.days} allers-retours · {formatEuros(Math.round(mileage.km * mileage.days * 10) / 10 * mileage.rate)}
+                    </button>
+                  )}
+                  <button
+                    disabled={busy}
+                    onClick={() => addSuggested(mileage, 1)}
+                    className={
+                      mileage.days > 1
+                        ? "rounded-btn border border-navy bg-card px-3 py-1.5 text-xs font-bold text-navy disabled:opacity-50"
+                        : "rounded-btn bg-navy px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                    }
+                  >
+                    {mileage.days > 1 ? `1 seul aller-retour (hébergé sur place) · ${formatEuros(mileage.amount)}` : `Ajouter ${formatEuros(mileage.amount)}`}
                   </button>
                   <button disabled={busy} onClick={() => editMileage(mileage.km, mileage.date)} className="rounded-btn border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-2 hover:bg-hover">
                     Autre distance
