@@ -88,12 +88,15 @@ async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
  * (utilisateur connecté) et par l'envoi du programme de 7 h (chaque abonné).
  */
 export async function buildDashboard(service: ReturnType<typeof createServiceClient>, userId: string, period: "day" | "week"): Promise<Dashboard> {
-  const { data: me } = await service.from("profiles").select("first_name, role").eq("id", userId).single();
+  // Trois lectures indépendantes, en parallèle (audit de vitesse du 20/11) : profil, droit de publier
+  // (centre de publication : administrateurs et personnes habilitées), réceptionnaires des demandes de
+  // couverture (Paramètres → Circuits de notification).
+  const [{ data: me }, isMediaTeam, { data: settings }] = await Promise.all([
+    service.from("profiles").select("first_name, role").eq("id", userId).single(),
+    isPublisher(service, userId),
+    service.from("board_settings").select("coverage_receiver_ids").eq("id", true).single(),
+  ]);
   const isAdmin = me?.role === "admin" || me?.role === "super_user";
-  // Centre de publication : administrateurs et personnes habilitées uniquement.
-  const isMediaTeam = await isPublisher(service, userId);
-  // Réceptionnaires des demandes de couverture (Paramètres → Circuits de notification).
-  const { data: settings } = await service.from("board_settings").select("coverage_receiver_ids").eq("id", true).single();
   const isCoverageReceiver = ((settings as { coverage_receiver_ids?: string[] } | null)?.coverage_receiver_ids ?? []).includes(userId);
   const handlesCoverage = isAdmin || isCoverageReceiver;
 
@@ -109,7 +112,8 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
     if (a.count > 0) actions.push(a);
   };
 
-  await Promise.all([
+  // Actions, programme et anniversaires sont calculés en même temps (indépendants les uns des autres).
+  const actionsDone = Promise.all([
     // Cartes de l'Espace Team qui me sont assignées et pas encore faites (rouge si une est en retard).
     safe(async () => {
       const cards = await myOpenCards(service, userId);
@@ -306,7 +310,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
   ]);
 
   // Programme : événements de la période où je suis sollicité (ou que j'organise).
-  const programme = await safe(async () => {
+  const programmeDone = safe(async () => {
     // Uniquement les événements où je suis sollicité (avoir créé l'événement ne suffit pas).
     const roles = await getSolicitations(service, userId, { includePendingDirector: true, includeProposedCoverage: true, includePresence: true });
     const ids = [...roles.keys()];
@@ -315,22 +319,25 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
     const parisDay = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: "Europe/Paris" });
     const fromDay = parisDay(from);
     const toDay = parisDay(new Date(to.getTime() - 1));
-    const { data: presenceRows } = await (service as unknown as SupabaseClient)
-      .from("event_presence_days")
-      .select("event_id, day, start_time, end_time")
-      .eq("user_id", userId)
-      .in("event_id", ids);
+    // Présences et événements : deux lectures indépendantes, en parallèle.
+    const [{ data: presenceRows }, { data: events }] = await Promise.all([
+      (service as unknown as SupabaseClient)
+        .from("event_presence_days")
+        .select("event_id, day, start_time, end_time")
+        .eq("user_id", userId)
+        .in("event_id", ids),
+      service
+        .from("events")
+        .select("id, title, start_date, end_date, location, event_type")
+        .in("id", ids)
+        .lt("start_date", to.toISOString())
+        .gte("end_date", from.toISOString())
+        .order("start_date"),
+    ]);
     const presence = new Map<string, { day: string; start_time: string | null; end_time: string | null }[]>();
     for (const r of (presenceRows ?? []) as { event_id: string; day: string; start_time: string | null; end_time: string | null }[]) {
       presence.set(r.event_id, [...(presence.get(r.event_id) ?? []), r]);
     }
-    const { data: events } = await service
-      .from("events")
-      .select("id, title, start_date, end_date, location, event_type")
-      .in("id", ids)
-      .lt("start_date", to.toISOString())
-      .gte("end_date", from.toISOString())
-      .order("start_date");
     const hm = (t: string | null) => (t ? t.slice(0, 5).replace(":", " h ").replace(/ h 00$/, " h") : null);
     return (events ?? []).flatMap((e) => {
       const mine = presence.get(e.id);
@@ -367,8 +374,9 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
     });
   }, [] as ProgrammeItem[]);
 
+  const [, programme, birthdayRows] = await Promise.all([actionsDone, programmeDone, todaysBirthdays(service)]);
   const toneOrder = { red: 0, orange: 1, navy: 2 };
   actions.sort((a, b) => toneOrder[a.tone] - toneOrder[b.tone] || b.count - a.count);
-  const birthdays = (await todaysBirthdays(service)).map((b) => ({ id: b.id, firstName: b.firstName, lastName: b.lastName, isMe: b.id === userId }));
+  const birthdays = birthdayRows.map((b) => ({ id: b.id, firstName: b.firstName, lastName: b.lastName, isMe: b.id === userId }));
   return { firstName: me?.first_name ?? null, birthdays, actions, programme, fraisMode };
 }

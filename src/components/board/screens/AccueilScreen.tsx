@@ -109,7 +109,36 @@ export function AccueilScreen({
     pressTimer.current = null;
   };
   // En direct : toute action (frais, captation, inscription, notification…) met le tableau de bord à jour.
-  useLiveRefresh(null, () => setReloadKey((k) => k + 1), 1000);
+  // Seulement les tables dont dépend le tableau de bord (dashboardCore.ts : cartes, frais, captations,
+  // comité, publications, inscriptions, programme, accès aux modules) et le retour après absence ;
+  // plus les détails de match, checklists et commentaires de cartes (audit de vitesse du 20/11).
+  useLiveRefresh(
+    [
+      "events",
+      "coverage_requests",
+      "director_attendance",
+      "event_assignments",
+      "event_team_members",
+      "photo_missions",
+      "media_publications",
+      "comment_moderation",
+      "event_registration_campaigns",
+      "event_registration_recipients",
+      "event_expenses",
+      "expense_submissions",
+      "event_presence_days",
+      "event_presence_requests",
+      "team_boards",
+      "team_lists",
+      "team_cards",
+      "team_card_members",
+      "module_access",
+      "notifications",
+      "resume",
+    ],
+    () => setReloadKey((k) => k + 1),
+    1000
+  );
 
   useEffect(() => {
     let cancelled = false;

@@ -319,7 +319,10 @@ export function useLive() {
 
 /**
  * Relance `fn` dès qu'une des tables change (toutes si `tables` est nul), regroupé sur `delay` ms
- * pour qu'une rafale de changements ne déclenche qu'un rechargement.
+ * pour qu'une rafale de changements ne déclenche qu'un rechargement. Board caché (onglet en
+ * arrière-plan, appli du Dock réduite) : le rechargement attend le retour à l'écran et n'a lieu
+ * qu'une fois — personne ne regarde, inutile de solliciter la base (audit de vitesse du 20/11).
+ * Les pastilles et les notifications, elles, suivent en arrière-plan (LiveProvider).
  */
 export function useLiveRefresh(tables: LiveTable[] | null, fn: () => void, delay = 600) {
   const { subscribe } = useLive();
@@ -330,12 +333,26 @@ export function useLiveRefresh(tables: LiveTable[] | null, fn: () => void, delay
   const key = tables ? tables.join(",") : "*";
   useEffect(() => {
     let timer: number | null = null;
+    let pending = false;
+    const run = () => {
+      if (document.visibilityState === "hidden") {
+        pending = true;
+        return;
+      }
+      pending = false;
+      fnRef.current();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && pending) run();
+    };
     const unsubscribe = subscribe(key === "*" ? null : (key.split(",") as LiveTable[]), () => {
       if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(() => fnRef.current(), delay);
+      timer = window.setTimeout(run, delay);
     });
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       unsubscribe();
+      document.removeEventListener("visibilitychange", onVisible);
       if (timer) window.clearTimeout(timer);
     };
   }, [subscribe, key, delay]);
