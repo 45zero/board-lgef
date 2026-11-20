@@ -1,6 +1,7 @@
 "use client";
 
 import { InstagramMentionField } from "@/components/board/publication/InstagramMentionField";
+import { CaptionAssistant } from "@/components/board/publication/CaptionAssistant";
 import { PublicationSettings } from "@/components/board/publication/PublicationSettings";
 import { useCanPublish } from "@/hooks/board/useCanPublish";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -1483,6 +1484,17 @@ export function Composer({ pub, onClose, onDone }: { pub: MediaPublication; onCl
           rows={4}
           placeholder="Texte de la publication…"
           className="w-full rounded-btn border border-line px-3 py-2 text-sm outline-none"
+        />
+        <CaptionAssistant
+          publicationId={pub.id}
+          value={caption}
+          onChange={setCaption}
+          autoStart={pub.status === "to_publish"}
+          networks={[
+            ...(youtube ? ["youtube"] : []),
+            ...FACEBOOK_REGIONS.filter((r) => fb[r.key]).map((r) => r.key),
+            ...(instagram ? ["instagram"] : []),
+          ]}
         />
 
         <div className="space-y-2">
