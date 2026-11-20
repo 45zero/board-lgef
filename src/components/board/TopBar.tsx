@@ -6,6 +6,7 @@ import Image from "next/image";
 import { Search, Moon, Sun, ChevronRight, Settings, Lock } from "lucide-react";
 import { NotificationBell } from "@/components/board/live/NotificationBell";
 import { SupportButton } from "@/components/board/support/SupportButton";
+import { QuickDrop } from "@/components/board/dashboard/QuickDrop";
 import type { BoardApp } from "@/lib/board/tokens";
 import type { Theme } from "./BoardShell";
 import { MyProfileModal } from "@/components/board/profile/MyProfileModal";
@@ -71,6 +72,8 @@ export function TopBar({
             ⌘K
           </kbd>
         </div>
+
+        <QuickDrop />
 
         <SupportButton app={currentApp.id} />
 

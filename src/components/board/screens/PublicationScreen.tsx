@@ -1802,7 +1802,16 @@ function EventSearch({ onPick }: { onPick: (e: EventOption) => void }) {
  * (titre + catégorie, médias sur le Drive du board). Sans fichier, c'est un post texte. Crée la
  * publication dans « À publier » puis ouvre le compositeur (réseaux, publier/programmer).
  */
-function NewPublicationDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (pubId: string) => void }) {
+export function NewPublicationDialog({
+  onClose,
+  onCreated,
+  initialFiles = [],
+}: {
+  onClose: () => void;
+  onCreated?: (pubId: string) => void;
+  /** Médias déjà choisis (dépôt depuis le tableau de bord). */
+  initialFiles?: File[];
+}) {
   const { userId } = useMe();
   const { runTask } = useBackgroundTasks();
   const [step, setStep] = useState<"ask" | "event" | "content">("ask");
@@ -1810,7 +1819,7 @@ function NewPublicationDialog({ onClose, onCreated }: { onClose: () => void; onC
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<DbEventType>("communication");
   const [caption, setCaption] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<File[]>(initialFiles);
   const [converting, setConverting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -1851,7 +1860,7 @@ function NewPublicationDialog({ onClose, onCreated }: { onClose: () => void; onC
       },
       { success: () => "Prête dans « À publier » — choisissez les réseaux pour la publier." }
     ).then((id) => {
-      if (id) onCreated(id);
+      if (id) onCreated?.(id);
     });
   };
 
