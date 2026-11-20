@@ -4,7 +4,7 @@ import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { DirectorGlyph } from "@/components/board/calendar/DirectorGlyph";
 import { CoverageToggle } from "@/components/board/calendar/CoverageToggle";
 import { TeamCardGlyph, useEventTeamCards } from "@/components/board/team/TeamCardOpener";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, Search, User, X, PanelLeftOpen, Camera, Video, Mic } from "lucide-react";
 import {
   addDays,
@@ -41,14 +41,18 @@ import { GoogleEventModal } from "@/components/board/calendar/GoogleEventModal";
 import { ORG_COLORS, type OrgKey } from "@/lib/board/tokens";
 import { CalendarSidebar } from "@/components/board/calendar/CalendarSidebar";
 import { StaffEventsMap } from "@/components/board/calendar/StaffEventsMap";
-import { isMultiDayEvent, isMyEvent, layoutBanners, type CalendarEvent } from "@/lib/board/calendar";
+import { DayDrawer } from "@/components/board/calendar/DayDrawer";
+import { isMultiDayEvent, isMyEvent, layoutBanners, layoutOverlaps, type CalendarEvent } from "@/lib/board/calendar";
 import { useMyTravelTimes } from "@/hooks/board/useMyTravelTimes";
 import { departureTime, formatTravel } from "@/lib/board/geo";
 
+// Plage horaire affichée par défaut ; elle s'élargit d'elle-même pour qu'aucun événement (match à
+// 20 h 30, départ à 7 h) ne sorte de la grille.
 const HOUR_START = 8;
 const HOUR_END = 20;
 const PX_PER_HOUR = 56;
-const GRID_HEIGHT = (HOUR_END - HOUR_START) * PX_PER_HOUR;
+const MIN_BLOCK_H = 40;
+const DAY_HEADER_H = 56;
 const WEEK_OPTS = { weekStartsOn: 1 as const, locale: fr };
 
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
@@ -60,10 +64,9 @@ function hourFloat(iso: string) {
   return d.getHours() + d.getMinutes() / 60;
 }
 
-function blockStyle(startISO: string, endISO: string) {
-  const top = Math.max(0, (hourFloat(startISO) - HOUR_START) * PX_PER_HOUR);
-  const height = Math.max(40, (hourFloat(endISO) - hourFloat(startISO)) * PX_PER_HOUR - 4);
-  return { top, height: Math.min(height, GRID_HEIGHT - top) };
+/** Heure de fin sur l'échelle du jour de début : une fin le lendemain (minuit pile compris) vaut 24 h. */
+function endHourFloat(startISO: string, endISO: string) {
+  return isSameDay(parseISO(startISO), parseISO(endISO)) ? hourFloat(endISO) : 24;
 }
 
 const VIEW_MODES: { id: ViewMode; label: string }[] = [
@@ -136,6 +139,8 @@ export function CalendrierScreen() {
   };
 
   const [editingInternal, setEditingInternal] = useState<CalendarEvent | "new" | null>(null);
+  // Journée ouverte en panneau latéral (clic sur un jour en vue Mois / Semaine).
+  const [drawerDay, setDrawerDay] = useState<Date | null>(null);
   const [newSlot, setNewSlot] = useState<{ start: Date; end: Date } | null>(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [draft, setDraft] = useState<EventDraft | null>(null);
@@ -207,9 +212,18 @@ export function CalendrierScreen() {
     });
   }, [events, searchQuery, hiddenOrgs, mineOnly, coverage]);
 
+  // Panneau de la journée : tout ce qui touche ce jour, bandeaux de plusieurs jours compris.
+  const drawerEvents = useMemo(() => {
+    if (!drawerDay) return [];
+    const from = startOfDay(drawerDay).getTime();
+    const to = endOfDay(drawerDay).getTime();
+    return visibleEvents.filter((e) => parseISO(e.start).getTime() <= to && parseISO(e.end).getTime() > from);
+  }, [drawerDay, visibleEvents]);
   const teamCards = useEventTeamCards(visibleEvents.map((e) => e.id));
   // Temps de route depuis le domicile (événements où je suis sollicité) : bloc « départ » en pointillé.
-  const myTravel = useMyTravelTimes(viewMode === "day" || viewMode === "week" ? visibleEvents : []);
+  // Aussi pour le panneau de la journée (vue Mois comprise). Seulement mes propres trajets : calculés
+  // côté serveur depuis mon adresse, pour les événements où je suis sollicité.
+  const myTravel = useMyTravelTimes(viewMode === "day" || viewMode === "week" ? visibleEvents : drawerEvents);
   // Google Maps préchargé : la mini-carte d'itinéraire de la fiche s'affiche sans attendre le script.
   useGoogleMapsScript();
   // Les événements de plusieurs jours sont en bandeaux (layoutBanners), pas dans la case de leur premier jour.
@@ -238,9 +252,38 @@ export function CalendrierScreen() {
   // 35h/semaine posée comme capacité de référence — pas de vraie notion de disponibilité en base.
   const availabilityPct = Math.max(0, Math.min(100, Math.round(100 - (plannedMinutes / 60 / 35) * 100)));
 
+  // Grille horaire : 8 h – 20 h, élargie au plus tôt / plus tard des événements affichés.
+  const { hourStart, hourEnd } = useMemo(() => {
+    let lo = HOUR_START;
+    let hi = HOUR_END;
+    if (viewMode === "day" || viewMode === "week") {
+      const inRange = (iso: string) => displayDays.some((d) => isSameDay(parseISO(iso), d));
+      const spans = [
+        ...visibleEvents.filter((e) => !isMultiDayEvent(e) && inRange(e.start)),
+        ...googleEvents.filter((e) => !e.allDay && inRange(e.start)),
+      ];
+      for (const e of spans) {
+        lo = Math.min(lo, Math.floor(hourFloat(e.start)));
+        hi = Math.max(hi, Math.ceil(endHourFloat(e.start, e.end)), Math.ceil(hourFloat(e.start) + MIN_BLOCK_H / PX_PER_HOUR));
+      }
+    }
+    return { hourStart: Math.max(0, lo), hourEnd: Math.min(24, hi) };
+  }, [viewMode, displayDays, visibleEvents, googleEvents]);
+  const gridHeight = (hourEnd - hourStart) * PX_PER_HOUR;
+
+  const blockStyle = (startISO: string, endISO: string) => {
+    const top = Math.max(0, (hourFloat(startISO) - hourStart) * PX_PER_HOUR);
+    const height = Math.max(MIN_BLOCK_H, (endHourFloat(startISO, endISO) - hourFloat(startISO)) * PX_PER_HOUR - 4);
+    return { top, height: Math.min(height, gridHeight - top) };
+  };
+  const blockSpan = (startISO: string, endISO: string) => {
+    const { top, height } = blockStyle(startISO, endISO);
+    return { top, bottom: top + height };
+  };
+
   const now = new Date();
-  const nowTop = (now.getHours() + now.getMinutes() / 60 - HOUR_START) * PX_PER_HOUR;
-  const showNowLine = nowTop >= 0 && nowTop <= GRID_HEIGHT;
+  const nowTop = (now.getHours() + now.getMinutes() / 60 - hourStart) * PX_PER_HOUR;
+  const showNowLine = nowTop >= 0 && nowTop <= gridHeight;
 
   const goPrev = () => {
     if (period === "day") setAnchorDate((d) => addDays(d, -1));
@@ -264,7 +307,7 @@ export function CalendrierScreen() {
   const handleSlotDoubleClick = (day: Date, e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const offsetY = e.clientY - rect.top;
-    const hour = HOUR_START + offsetY / PX_PER_HOUR;
+    const hour = hourStart + offsetY / PX_PER_HOUR;
     const start = new Date(day);
     start.setHours(Math.floor(hour), hour % 1 >= 0.5 ? 30 : 0, 0, 0);
     const end = new Date(start.getTime() + 60 * 60_000);
@@ -279,6 +322,19 @@ export function CalendrierScreen() {
     setNewSlot({ start, end });
     setEditingInternal("new");
   };
+
+  const closeDrawer = useCallback(() => setDrawerDay(null), []);
+  const shiftDrawerDay = useCallback(
+    (delta: number) =>
+      setDrawerDay((d) => {
+        if (!d) return d;
+        const next = addDays(d, delta);
+        // Hors de la période chargée : le calendrier suit (mois ou semaine voisins).
+        if (next < rangeStart || next > rangeEnd) setAnchorDate(next);
+        return next;
+      }),
+    [rangeStart, rangeEnd]
+  );
 
   return (
     <div className="flex h-full gap-3">
@@ -478,8 +534,8 @@ export function CalendrierScreen() {
             className="flex-1"
           />
         </div>
-      ) :viewMode !== "month" ? (
-        <div className="flex flex-1 flex-col overflow-hidden rounded-panel border border-line bg-card">
+      ) : viewMode !== "month" ? (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-panel border border-line bg-card">
           {/* Événements de plusieurs jours : bandeaux au-dessus de la grille horaire. */}
           {(() => {
             const banners = layoutBanners(visibleEvents, displayDays);
@@ -487,7 +543,7 @@ export function CalendrierScreen() {
             const laneCount = banners.reduce((n, b) => Math.max(n, b.lane + 1), 0);
             const rangeEnd = addDays(displayDays[displayDays.length - 1], 1);
             return (
-              <div className="flex shrink-0 border-b border-line bg-subtle/40">
+              <div className="flex max-h-[30%] shrink-0 overflow-y-auto border-b border-line bg-subtle/40">
                 <div className="flex w-12 shrink-0 items-center justify-end border-r border-line pr-1.5 text-right font-mono text-[9px] leading-tight text-ink-4">
                   Plusieurs
                   <br />
@@ -514,7 +570,7 @@ export function CalendrierScreen() {
                         {fromBefore && <ChevronLeft size={11} className="shrink-0 opacity-70" />}
                         <span className="min-w-0 flex-1 truncate">{ev.title}</span>
                         <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
-<DirectorGlyph status={ev.director} size={10} />
+                        <DirectorGlyph status={ev.director} size={10} />
                         <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
                         {toAfter && <ChevronRight size={11} className="shrink-0 opacity-70" />}
                       </button>
@@ -524,117 +580,173 @@ export function CalendrierScreen() {
               </div>
             );
           })()}
-          <div className="flex min-h-0 flex-1 overflow-hidden">
-          <div className="w-12 shrink-0 border-r border-line pt-8">
-            {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => (
-              <div key={i} style={{ height: PX_PER_HOUR }} className="pr-2 text-right font-mono text-[10px] text-ink-4">
-                {HOUR_START + i}h
+
+          {/* Un seul défilement pour les heures et les jours : la colonne des heures reste alignée. */}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <div className="flex min-w-0">
+              <div className="w-12 shrink-0 border-r border-line">
+                <div className="sticky top-0 z-[3] border-b border-line bg-card" style={{ height: DAY_HEADER_H }} />
+                {Array.from({ length: hourEnd - hourStart }, (_, i) => (
+                  <div key={i} style={{ height: PX_PER_HOUR }} className="pr-2 pt-0.5 text-right font-mono text-[10px] text-ink-4">
+                    {hourStart + i}h
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          <div
-            className="grid flex-1 overflow-y-auto"
-            style={{ gridTemplateColumns: `repeat(${displayDays.length}, minmax(0, 1fr))` }}
-          >
-            {displayDays.map((day) => {
-              const isWeekend = day.getDay() === 0 || day.getDay() === 6;
-              const isToday = isSameDay(day, new Date());
-              return (
-                <div key={day.toISOString()} className="flex flex-col border-r border-line last:border-r-0">
-                  <div className={`sticky top-0 z-[1] border-b border-line px-2 py-1.5 text-center ${isToday ? "bg-navy text-white" : "bg-card"}`}>
-                    <div className="text-[10px] font-mono uppercase tracking-[0.1em] opacity-80">
-                      {format(day, "EEE", { locale: fr })}
-                    </div>
-                    <div className="text-sm font-bold">{format(day, "d")}</div>
-                    <div className="flex h-3.5 justify-center">
-                      <DayWeatherBadge day={day} forecast={forecast} />
-                    </div>
-                  </div>
-
-                  <div
-                    className={`relative ${isWeekend ? "bg-subtle/40" : ""}`}
-                    style={{ height: GRID_HEIGHT }}
-                    onDoubleClick={(e) => handleSlotDoubleClick(day, e)}
-                  >
-                    {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => (
-                      <div key={i} className="border-b border-line/60" style={{ height: PX_PER_HOUR }} />
-                    ))}
-
-                    {isToday && showNowLine && (
-                      <div className="absolute left-0 right-0 z-[1] border-t-2 border-red" style={{ top: nowTop }} />
-                    )}
-
-                    {eventsForDay(day).map((ev) => {
-                      const travel = myTravel[ev.id];
-                      if (!travel) return null;
-                      const departure = departureTime(ev.start, travel.minutes);
-                      const evTop = (hourFloat(ev.start) - HOUR_START) * PX_PER_HOUR;
-                      const depTop = Math.max(0, evTop - ((parseISO(ev.start).getTime() - departure.getTime()) / 3_600_000) * PX_PER_HOUR);
-                      const height = evTop - depTop - 2;
-                      if (height < 6) return null;
-                      const color = ORG_COLORS[ev.org];
-                      return (
-                        <div
-                          key={`travel-${ev.id}`}
-                          aria-hidden
-                          className="pointer-events-none absolute left-0.5 right-0.5 overflow-hidden rounded-chip border-2 border-dashed px-1.5"
-                          style={{ top: depTop, height, borderColor: color.base, color: color.ink }}
-                        >
-                          {height >= 16 && (
-                            <div className="truncate font-mono text-[10px] font-semibold">
-                              Départ {format(departure, "HH:mm")} · {formatTravel(travel)}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-
-                    {eventsForDay(day).map((ev) => {
-                      const { top, height } = blockStyle(ev.start, ev.end);
-                      const color = ORG_COLORS[ev.org];
-                      return (
-                        <button
-                          key={ev.id}
-                          onClick={() => setEditingInternal(ev)}
-                          className={`absolute left-0.5 right-0.5 overflow-hidden rounded-chip border-l-4 px-1.5 py-1 text-left shadow-sm ${ev.awaitingMyAnswer ? "ring-2 ring-red" : ""}`}
-                          style={{ top, height, background: color.bg, borderLeftColor: color.base }}
-                        >
-                          <div className="flex items-center gap-1">
-                            <span className="truncate text-[11.5px] font-bold" style={{ color: color.ink }}>
-                              {ev.title}
+              <div className="grid min-w-0 flex-1" style={{ gridTemplateColumns: `repeat(${displayDays.length}, minmax(0, 1fr))` }}>
+                {displayDays.map((day) => {
+                  const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+                  const isToday = isSameDay(day, new Date());
+                  const dayEvents = eventsForDay(day);
+                  const dayGoogle = googleEventsForDay(day);
+                  const positions = layoutOverlaps([
+                    ...dayEvents.map((ev) => ({ key: `i:${ev.id}`, ...blockSpan(ev.start, ev.end) })),
+                    ...dayGoogle.map((ev) => ({ key: `g:${ev.id}`, ...blockSpan(ev.start, ev.end) })),
+                  ]);
+                  // Largeur d'un bloc en part de la journée : sous un certain seuil, affichage resserré.
+                  const narrow = (p: { cols: number; span: number }) => (p.span / p.cols) * (displayDays.length > 1 ? 1 : 7) < 0.6;
+                  const placeStyle = (p: { col: number; cols: number; span: number }) => ({
+                    left: `calc(${(p.col / p.cols) * 100}% + 2px)`,
+                    width: `calc(${(p.span / p.cols) * 100}% - ${p.col + p.span < p.cols ? 3 : 4}px)`,
+                  });
+                  const count = dayEvents.length + dayGoogle.length;
+                  return (
+                    <div key={day.toISOString()} className="flex min-w-0 flex-col border-r border-line last:border-r-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (viewMode !== "day") setDrawerDay(day);
+                        }}
+                        title={viewMode === "day" ? undefined : `Afficher la journée du ${format(day, "EEEE d MMMM", { locale: fr })}`}
+                        className={`group sticky top-0 z-[2] flex flex-col items-center justify-center border-b border-line px-2 text-center ${
+                          isToday ? "bg-navy text-white" : "bg-card"
+                        } ${viewMode === "day" ? "cursor-default" : isToday ? "hover:bg-navy-600" : "hover:bg-hover"}`}
+                        style={{ height: DAY_HEADER_H }}
+                      >
+                        <span className="text-[10px] font-mono uppercase tracking-[0.1em] opacity-80">
+                          {format(day, "EEE", { locale: fr })}
+                        </span>
+                        <span className="flex items-center gap-1 text-sm font-bold">
+                          {format(day, "d")}
+                          {count > 0 && viewMode !== "day" && (
+                            <span
+                              className={`rounded-full px-1.5 text-[9px] font-bold leading-[14px] ${
+                                isToday ? "bg-white/20 text-white" : "bg-subtle text-ink-3"
+                              }`}
+                            >
+                              {count}
                             </span>
-                            <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
-<DirectorGlyph status={ev.director} size={10} />
-                            <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
-                          </div>
-                          <div className="font-mono text-[10px]" style={{ color: color.ink }}>
-                            {format(parseISO(ev.start), "HH:mm")}
-                          </div>
-                        </button>
-                      );
-                    })}
+                          )}
+                        </span>
+                        <span className="flex h-3.5 justify-center">
+                          <DayWeatherBadge day={day} forecast={forecast} />
+                        </span>
+                      </button>
 
-                    {googleEventsForDay(day).map((ev) => {
-                      const { top, height } = blockStyle(ev.start, ev.end);
-                      return (
-                        <button
-                          key={`g-${ev.id}`}
-                          onClick={() => setEditingGoogle(ev)}
-                          className="absolute left-0.5 right-0.5 overflow-hidden rounded-chip border border-dashed border-line-strong bg-card/90 px-1.5 py-1 text-left"
-                          style={{ top, height }}
-                          title={`Google — ${ev.summary}`}
-                        >
-                          <div className="truncate text-[11px] font-semibold text-ink-2">G · {ev.summary}</div>
-                          <div className="font-mono text-[10px] text-ink-4">{format(parseISO(ev.start), "HH:mm")}</div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                      <div
+                        className={`relative ${isWeekend ? "bg-subtle/40" : ""}`}
+                        style={{ height: gridHeight }}
+                        onDoubleClick={(e) => handleSlotDoubleClick(day, e)}
+                      >
+                        {Array.from({ length: hourEnd - hourStart }, (_, i) => (
+                          <div key={i} className="border-b border-line/60" style={{ height: PX_PER_HOUR }} />
+                        ))}
+
+                        {isToday && showNowLine && (
+                          <div className="pointer-events-none absolute left-0 right-0 z-[4] border-t-2 border-red" style={{ top: nowTop }}>
+                            <span className="absolute -left-1 -top-[5px] h-2 w-2 rounded-full bg-red" />
+                          </div>
+                        )}
+
+                        {dayEvents.map((ev) => {
+                          const travel = myTravel[ev.id];
+                          const pos = positions.get(`i:${ev.id}`);
+                          if (!travel || !pos) return null;
+                          const departure = departureTime(ev.start, travel.minutes);
+                          const evTop = (hourFloat(ev.start) - hourStart) * PX_PER_HOUR;
+                          const depTop = Math.max(0, evTop - ((parseISO(ev.start).getTime() - departure.getTime()) / 3_600_000) * PX_PER_HOUR);
+                          const height = evTop - depTop - 2;
+                          if (height < 6) return null;
+                          const color = ORG_COLORS[ev.org];
+                          return (
+                            <div
+                              key={`travel-${ev.id}`}
+                              aria-hidden
+                              className="pointer-events-none absolute overflow-hidden rounded-chip border-2 border-dashed px-1.5"
+                              style={{ ...placeStyle(pos), top: depTop, height, borderColor: color.base, color: color.ink }}
+                            >
+                              {height >= 16 && !narrow(pos) && (
+                                <div className="truncate font-mono text-[10px] font-semibold">
+                                  Départ {format(departure, "HH:mm")} · {formatTravel(travel)}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        {dayEvents.map((ev) => {
+                          const pos = positions.get(`i:${ev.id}`);
+                          if (!pos) return null;
+                          const { top, height } = blockStyle(ev.start, ev.end);
+                          const color = ORG_COLORS[ev.org];
+                          const tight = narrow(pos);
+                          return (
+                            <button
+                              key={ev.id}
+                              onClick={() => setEditingInternal(ev)}
+                              title={`${format(parseISO(ev.start), "HH:mm")}–${format(parseISO(ev.end), "HH:mm")} · ${ev.title}`}
+                              className={`absolute z-[1] overflow-hidden rounded-chip border-l-[3px] text-left shadow-sm transition-shadow hover:z-[5] hover:shadow-card ${
+                                tight ? "px-1 py-0.5" : "px-1.5 py-1"
+                              } ${ev.awaitingMyAnswer ? "ring-2 ring-red" : "ring-1 ring-card"}`}
+                              style={{ ...placeStyle(pos), top, height, background: color.bg, borderLeftColor: color.base, color: color.ink }}
+                            >
+                              <div className="font-mono text-[10px] leading-tight opacity-80">{format(parseISO(ev.start), "HH:mm")}</div>
+                              <div
+                                className={`font-bold leading-tight ${tight ? "text-[10.5px]" : "text-[11.5px]"}`}
+                                style={{
+                                  display: "-webkit-box",
+                                  WebkitBoxOrient: "vertical",
+                                  WebkitLineClamp: Math.max(1, Math.floor((height - (tight ? 16 : 34)) / 14)),
+                                  overflow: "hidden",
+                                  overflowWrap: "anywhere",
+                                }}
+                              >
+                                {ev.title}
+                              </div>
+                              {!tight && (
+                                <div className="mt-0.5 flex items-center gap-1">
+                                  <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={10} />
+                                  <DirectorGlyph status={ev.director} size={10} />
+                                  <TeamCardGlyph cards={teamCards[ev.id]} size={10} color={color.ink} />
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+
+                        {dayGoogle.map((ev) => {
+                          const pos = positions.get(`g:${ev.id}`);
+                          if (!pos) return null;
+                          const { top, height } = blockStyle(ev.start, ev.end);
+                          return (
+                            <button
+                              key={`g-${ev.id}`}
+                              onClick={() => setEditingGoogle(ev)}
+                              className="absolute z-[1] overflow-hidden rounded-chip border border-dashed border-line-strong bg-card/95 px-1.5 py-1 text-left hover:z-[5] hover:shadow-card"
+                              style={{ ...placeStyle(pos), top, height }}
+                              title={`Google — ${format(parseISO(ev.start), "HH:mm")} · ${ev.summary}`}
+                            >
+                              <div className="font-mono text-[10px] leading-tight text-ink-4">{format(parseISO(ev.start), "HH:mm")}</div>
+                              <div className="truncate text-[11px] font-semibold text-ink-2">G · {ev.summary}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       ) : (
@@ -674,30 +786,39 @@ export function CalendrierScreen() {
                   {week.map((day, i) => {
                     const isToday = isSameDay(day, new Date());
                     const inMonth = isSameMonth(day, anchorDate);
+                    const dayCount = eventsForDay(day).length + googleEventsForDay(day).length;
                     return (
-                      <div
+                      // Toute la ligne d'en-tête de la case (numéro, météo, nombre d'événements) ouvre la journée :
+                      // une cible large, facile à toucher même quand la case déborde d'événements.
+                      <button
+                        type="button"
                         key={`head-${day.toISOString()}`}
+                        onClick={() => setDrawerDay(day)}
                         onDoubleClick={() => handleMonthCellDoubleClick(day)}
-                        className="relative flex items-start justify-between px-1.5 pt-1.5"
+                        title={`Afficher la journée du ${format(day, "EEEE d MMMM", { locale: fr })}`}
+                        className="group relative flex min-h-[32px] items-center justify-between gap-1 px-1.5 pt-1 text-left hover:bg-hover/70"
                         style={{ gridColumn: i + 1, gridRow: 1 }}
                       >
-                        <button
-                          onClick={() => {
-                            setViewMode("day");
-                            setAnchorDate(day);
-                          }}
-                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                            isToday ? "bg-navy text-white" : inMonth ? "text-ink-2 hover:bg-hover" : "text-ink-4"
-                          }`}
-                        >
-                          {format(day, "d")}
-                        </button>
+                        <span className="flex items-center gap-1">
+                          <span
+                            className={`flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full px-1 text-xs font-bold ${
+                              isToday ? "bg-navy text-white" : inMonth ? "text-ink-2 group-hover:bg-card" : "text-ink-4"
+                            }`}
+                          >
+                            {format(day, "d")}
+                          </span>
+                          {dayCount > 2 && (
+                            <span className="rounded-full bg-subtle px-1.5 text-[9.5px] font-bold leading-4 text-ink-3 group-hover:bg-card">
+                              {dayCount}
+                            </span>
+                          )}
+                        </span>
                         {inMonth && (
-                          <span className="pointer-events-none pt-0.5 text-ink-3">
+                          <span className="pointer-events-none text-ink-3">
                             <DayWeatherBadge day={day} forecast={forecast} />
                           </span>
                         )}
-                      </div>
+                      </button>
                     );
                   })}
 
@@ -784,6 +905,31 @@ export function CalendrierScreen() {
         </div>
       )}
       </div>
+
+      <DayDrawer
+        day={drawerDay}
+        events={drawerEvents}
+        googleEvents={drawerDay ? googleEventsForDay(drawerDay) : []}
+        forecast={forecast}
+        teamCards={teamCards}
+        travel={myTravel}
+        paused={!!editingInternal || !!editingGoogle || voiceOpen}
+        onClose={closeDrawer}
+        onShiftDay={shiftDrawerDay}
+        onOpenEvent={(ev) => setEditingInternal(ev)}
+        onOpenGoogle={(id) => {
+          const g = googleEvents.find((e) => e.id === id);
+          if (g) setEditingGoogle(g);
+        }}
+        onCreate={() => drawerDay && handleMonthCellDoubleClick(drawerDay)}
+        onVoice={() => setVoiceOpen(true)}
+        onOpenDayView={() => {
+          if (!drawerDay) return;
+          setAnchorDate(drawerDay);
+          setViewMode("day");
+          setDrawerDay(null);
+        }}
+      />
 
       {editingInternal && (
         <EventModal

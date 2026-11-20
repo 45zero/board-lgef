@@ -3,7 +3,7 @@
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { DirectorGlyph } from "@/components/board/calendar/DirectorGlyph";
 import { useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown, User, X, Plus, Camera, Video, Mic } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, User, X, Plus, Camera, Video, Mic, Car } from "lucide-react";
 import {
   addDays,
   addMonths,
@@ -34,6 +34,8 @@ import { MobileEventModal } from "@/components/board/mobile/MobileEventModal";
 import { VoiceEventDialog } from "@/components/board/calendar/VoiceEvent";
 import type { EventDraft } from "@/app/actions/event-dictation";
 import { DayWeatherBadge, useForecast } from "@/components/board/calendar/DayWeather";
+import { useMyTravelTimes } from "@/hooks/board/useMyTravelTimes";
+import { departureTime, formatTravel } from "@/lib/board/geo";
 
 type View = "mois" | "semaine";
 
@@ -262,7 +264,8 @@ export function MobileCalendrierScreen() {
 
       {view === "mois" ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden pb-1" style={{ touchAction: "pan-y" }} {...swipeHandlers}>
-          {/* Le mois tient toujours dans l'écran (aucun défilement) : les cases se partagent la hauteur. */}
+          {/* Le mois remplit l'écran quand il est calme ; une semaine chargée s'agrandit pour montrer tous ses
+              événements (rien n'est coupé) et la grille défile alors verticalement. */}
           <div className="grid grid-cols-7 pb-1">
             {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => (
               <div key={i} className="text-center font-mono text-[9px] uppercase text-ink-4">
@@ -270,13 +273,13 @@ export function MobileCalendrierScreen() {
               </div>
             ))}
           </div>
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-line bg-card">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain border-t border-line bg-card">
             {weeks.map((week, weekIdx) => {
               const banners = bannersForWeek(week);
               return (
                 <div
                   key={week[0].toISOString()}
-                  className={`grid min-h-0 flex-1 grid-cols-7 ${weekIdx > 0 ? "border-t border-line" : ""}`}
+                  className={`grid min-h-[72px] flex-[1_0_auto] grid-cols-7 ${weekIdx > 0 ? "border-t border-line" : ""}`}
                   style={{ gridTemplateRows: `1fr repeat(${banners.length}, auto)` }}
                 >
                   {week.map((day, dayIdx) => {
@@ -287,7 +290,8 @@ export function MobileCalendrierScreen() {
                       <button
                         key={day.toISOString()}
                         onClick={() => setSelectedDay(day)}
-                        className={`flex h-full min-h-0 flex-col gap-0.5 overflow-hidden p-1 text-left ${
+                        aria-label={`${format(day, "EEEE d MMMM", { locale: fr })} — ${dayEvents.length} événement${dayEvents.length > 1 ? "s" : ""}`}
+                        className={`flex h-full min-w-0 flex-col gap-[3px] p-1 text-left active:bg-hover ${
                           dayIdx > 0 ? "border-l border-line" : ""
                         } ${inMonth ? "bg-card" : "bg-subtle/40 opacity-50"}`}
                       >
@@ -309,11 +313,11 @@ export function MobileCalendrierScreen() {
                           <span
                             key={ev.id}
                             className="flex shrink-0 items-center gap-0.5 overflow-hidden rounded-[4px] pr-0.5"
-                            style={{ background: ORG_COLORS[ev.org].bg, height: 15 }}
+                            style={{ background: ORG_COLORS[ev.org].bg, height: 16 }}
                           >
                             <span className="h-full w-[3px] shrink-0" style={{ background: ORG_COLORS[ev.org].base }} />
                             <span
-                              className="min-w-0 flex-1 truncate text-[8px] font-bold"
+                              className="min-w-0 flex-1 truncate text-[8.5px] font-bold leading-none"
                               style={{ color: ORG_COLORS[ev.org].ink }}
                             >
                               {ev.title}
@@ -458,6 +462,8 @@ function DayPanel({
   onVoice: () => void;
 }) {
   const dayForecast = useForecast();
+  // Mes temps de route depuis chez moi (événements où je suis sollicité, mon adresse uniquement).
+  const travel = useMyTravelTimes(open ? events : []);
   return (
     <div
       className={`fixed inset-0 z-40 flex justify-end transition-opacity duration-300 ${
@@ -507,6 +513,16 @@ function DayPanel({
               <div className="text-sm font-bold" style={{ color: ORG_COLORS[ev.org].ink }}>
                 {ev.title}
               </div>
+              {travel[ev.id] && (
+                <div
+                  className="mt-1.5 flex items-center gap-1.5 rounded-[6px] border border-dashed px-2 py-1 text-[11px] font-semibold"
+                  style={{ borderColor: ORG_COLORS[ev.org].base, color: ORG_COLORS[ev.org].ink }}
+                >
+                  <Car size={12} className="shrink-0" />
+                  <span>Partir à {format(departureTime(ev.start, travel[ev.id].minutes), "HH:mm")}</span>
+                  <span className="truncate font-normal opacity-80">· {formatTravel(travel[ev.id])}</span>
+                </div>
+              )}
             </button>
           ))}
           <div className="flex gap-2">

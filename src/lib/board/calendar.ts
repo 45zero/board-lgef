@@ -217,3 +217,46 @@ export function layoutBanners<T extends { start: string; end: string }>(events: 
   }
   return placed;
 }
+
+/**
+ * Répartition côte à côte des blocs qui se chevauchent dans une colonne horaire (vues Jour / Semaine).
+ * Les blocs sont groupés par paquets qui se touchent ; dans un paquet, chacun prend la première
+ * sous-colonne libre, et `cols` est le nombre de sous-colonnes du paquet (largeur = 1 / cols).
+ * `span` laisse un bloc s'élargir vers la droite tant que les sous-colonnes voisines sont libres.
+ * Travaille sur les positions affichées (top / bottom en px) : deux blocs qui se recouvrent à
+ * l'écran — un 30 min rallongé à la hauteur minimale compris — sont toujours séparés.
+ */
+export function layoutOverlaps<K>(items: { key: K; top: number; bottom: number }[]) {
+  const out = new Map<K, { col: number; cols: number; span: number }>();
+  const sorted = [...items].sort((a, b) => a.top - b.top || b.bottom - b.top - (a.bottom - a.top));
+  let cluster: { key: K; top: number; bottom: number; col: number }[] = [];
+  let colBottoms: number[] = [];
+  let clusterBottom = -Infinity;
+
+  const flush = () => {
+    const cols = colBottoms.length;
+    for (const it of cluster) {
+      let span = 1;
+      while (
+        it.col + span < cols &&
+        !cluster.some((o) => o.col === it.col + span && o.top < it.bottom && o.bottom > it.top)
+      )
+        span++;
+      out.set(it.key, { col: it.col, cols, span });
+    }
+    cluster = [];
+    colBottoms = [];
+    clusterBottom = -Infinity;
+  };
+
+  for (const it of sorted) {
+    if (it.top >= clusterBottom) flush();
+    let col = colBottoms.findIndex((b) => b <= it.top);
+    if (col === -1) col = colBottoms.length;
+    colBottoms[col] = it.bottom;
+    cluster.push({ ...it, col });
+    clusterBottom = Math.max(clusterBottom, it.bottom);
+  }
+  flush();
+  return out;
+}
