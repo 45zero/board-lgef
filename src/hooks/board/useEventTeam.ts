@@ -39,11 +39,12 @@ export function useEventTeam(eventId: string, createdBy: string | null) {
     if (!canManageMembers) return;
     const supabase = createClient();
 
-    if (role === "responsable") {
-      await supabase.from("event_team_members").delete().eq("event_id", eventId).eq("role", "responsable");
-    }
-
+    // Nouveau responsable inscrit AVANT de retirer l'ancien : un responsable qui passe la main garde
+    // son droit jusqu'au bout (règle etm_* de sql/2026-11-20_tables_ouvertes.sql).
     const { error } = await supabase.from("event_team_members").insert({ event_id: eventId, user_id: userId, role });
+    if (!error && role === "responsable") {
+      await supabase.from("event_team_members").delete().eq("event_id", eventId).eq("role", "responsable").neq("user_id", userId);
+    }
     if (!error) void notifyEventAssignment(eventId, [userId], role);
     fetchTeam();
   };
@@ -61,16 +62,18 @@ export function useEventTeam(eventId: string, createdBy: string | null) {
   const setResponsable = async (userId: string) => {
     if (!canManageMembers) return;
     const supabase = createClient();
-    await supabase
-      .from("event_team_members")
-      .update({ role: "membre" })
-      .eq("event_id", eventId)
-      .eq("role", "responsable");
+    // Le nouveau d'abord, l'ancien ensuite : voir addMember.
     await supabase
       .from("event_team_members")
       .update({ role: "responsable" })
       .eq("event_id", eventId)
       .eq("user_id", userId);
+    await supabase
+      .from("event_team_members")
+      .update({ role: "membre" })
+      .eq("event_id", eventId)
+      .eq("role", "responsable")
+      .neq("user_id", userId);
     fetchTeam();
   };
 
