@@ -5,6 +5,7 @@ import { EventOpenerProvider } from "@/components/board/calendar/EventOpener";
 import { LiveProvider } from "@/components/board/live/LiveProvider";
 import { TeamCardOpenerHost, TeamCardOpenerProvider } from "@/components/board/team/TeamCardOpener";
 import { RedReminderPopup } from "@/components/board/team/RedReminderPopup";
+import { DeliveryReminderPopup } from "@/components/board/dashboard/DeliveryReminderPopup";
 
 // Les server actions appelées depuis cette page héritent de ce budget. Une publication vidéo cumule
 // extraction de la couverture (≤ 25 s), envoi Facebook (Meta télécharge la vidéo avant de répondre)
@@ -21,6 +22,7 @@ export default function Home() {
               <BoardShell />
               <TeamCardOpenerHost />
               <RedReminderPopup />
+              <DeliveryReminderPopup />
             </EventOpenerProvider>
           </TeamCardOpenerProvider>
         </LiveProvider>

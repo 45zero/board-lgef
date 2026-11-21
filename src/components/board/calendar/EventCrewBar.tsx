@@ -14,6 +14,7 @@ import type { useDirectorAttendance, DirectorProfile } from "@/hooks/board/useDi
 import type { useEventCoverage, CoverageRole } from "@/hooks/board/useEventCoverage";
 import type { TechnicianOption } from "@/hooks/board/useAvailableTechnicians";
 import { useCoverageCrew } from "@/hooks/board/useCoverageCrew";
+import { DeliveryDateField, saveDeliveryDate } from "@/components/board/calendar/DeliveryDateField";
 
 /**
  * Barre du bas de la fiche événement (à côté de « Supprimer ») : qui sera là.
@@ -173,6 +174,7 @@ export function EventCrewBar({
                 {open === `${g.id}:${p.key}` && (
                   <UpPopover onClose={() => setOpen(null)}>
                     <PillDetail
+                      eventId={eventId}
                       pill={p}
                       travel={travel[p.userId]}
                       isMe={p.userId === me}
@@ -300,6 +302,7 @@ function UpPopover({ onClose, children }: { onClose: () => void; children: React
 }
 
 function PillDetail({
+  eventId,
   pill,
   travel,
   isMe,
@@ -313,6 +316,7 @@ function PillDetail({
   requested,
 }: {
   requested?: string | null;
+  eventId: string;
   pill: Pill;
   travel?: Travel;
   isMe: boolean;
@@ -327,6 +331,9 @@ function PillDetail({
   const [busy, setBusy] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [note, setNote] = useState("");
+  // Photo / vidéo : date de remise des fichiers demandée à l'acceptation (réglage des administrateurs).
+  const [day, setDay] = useState("");
+  const asksDate = isMe && pill.status === "wait" && pill.kind !== "cd";
   const c = STATUS_COLOR[pill.status];
   const what = pill.kind === "cd" ? "Comité directeur" : pill.role ? ROLE_LABEL[pill.role] : "Captation";
   const run = async (fn: () => Promise<unknown>) => {
@@ -358,12 +365,22 @@ function PillDetail({
         )}
       </div>
 
+      {asksDate && !declining && <DeliveryDateField eventId={eventId} role={pill.role ?? null} value={day} onChange={setDay} />}
       {isMe && pill.status === "wait" && !declining && (
         <div className="flex gap-2">
           <button disabled={busy} onClick={() => setDeclining(true)} className="flex-1 rounded-btn border border-line py-2 font-semibold text-red disabled:opacity-60">
             Décliner
           </button>
-          <button disabled={busy} onClick={() => run(() => onRespond(true))} className="flex flex-1 items-center justify-center gap-1 rounded-btn bg-red py-2 font-bold text-white shadow-btn-red disabled:opacity-60">
+          <button
+            disabled={busy || (asksDate && !day)}
+            onClick={() =>
+              run(async () => {
+                await onRespond(true);
+                if (asksDate) await saveDeliveryDate(eventId, day);
+              })
+            }
+            className="flex flex-1 items-center justify-center gap-1 rounded-btn bg-red py-2 font-bold text-white shadow-btn-red disabled:opacity-60"
+          >
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Confirmer
           </button>
         </div>

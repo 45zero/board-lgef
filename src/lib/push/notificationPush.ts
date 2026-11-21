@@ -52,6 +52,8 @@ const PUSHED: Record<string, { icon: PushIcon; route: string }> = {
   director_invitation: EVENT,
   director_accepted: EVENT,
   director_declined: EVENT,
+  // Remise de photos / vidéos : relances du N+1, réponses, nouvelle date (hors catégorie : toujours envoyées).
+  media_delivery: EVENT,
   account_request: { icon: "ic_stat_lgef", route: "/" },
   delegation: { icon: "ic_stat_lgef", route: "/" },
   support_ticket: { icon: "ic_stat_lgef", route: "/" },

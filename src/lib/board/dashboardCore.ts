@@ -4,6 +4,7 @@ import { todaysBirthdays } from "@/lib/board/birthdays";
 import { publicationThumbs } from "@/lib/board/publicationThumbs";
 import { myOpenCards, type MyCard } from "@/lib/board/myCards";
 import { isPublisher } from "@/lib/board/publishers";
+import { deliveriesBoard, publisherNames, type DeliveriesBoard } from "@/lib/board/mediaDeliveriesCore";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import { computeMyExpenses, countPendingForValidator, fraisDeclarationMode, isPrestataire } from "@/lib/board/expensesCore";
 import { invoicesToValidate, isCompta, myMissingInvoices, unpaidPayables } from "@/lib/board/gedCore";
@@ -52,6 +53,8 @@ export type DashboardAction = {
   detail: string;
   /** Image de l'action (Médias à publier : premier média de la première publication). */
   thumbUrl?: string | null;
+  /** Personnes chargées de l'action (Médias à publier : celles désignées dans Paramètres → Publication). */
+  assignees?: string[];
 };
 
 export type ProgrammeItem = {
@@ -77,6 +80,9 @@ export type Dashboard = {
   /** Cartes de l'Espace Team qui me sont assignées, pas encore faites : panneau « Mes cartes » de
    *  l'accueil (l'action « cartes » reste pour le mail de 7 h, l'accueil la sort de « Mes actions »). */
   cards?: MyCard[];
+  /** Remises de photos / vidéos : les miennes (en retard, du jour, date à confirmer) et celles en retard
+   *  de mon équipe (je suis leur N+1) — encart en tête de l'accueil (mediaDeliveriesCore.ts). */
+  deliveries?: DeliveriesBoard;
 };
 
 async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
@@ -114,6 +120,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
   const actions: DashboardAction[] = [];
   let fraisMode: "auto" | "manuel" = "auto";
   let myCards: MyCard[] = [];
+  let deliveries: DeliveriesBoard = { mine: [], team: [] };
   const push = (a: DashboardAction) => {
     if (a.count > 0) actions.push(a);
   };
@@ -296,9 +303,22 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
         return { id: p.id, eventId: p.event_id, title: ev?.title ?? p.title ?? "Publication", date: ev?.start_date ?? p.created_at };
       });
       // Une image pour l'action : le premier média qui a une miniature.
-      const thumbs = pubs?.length ? await publicationThumbs(service, pubs.slice(0, 6)) : new Map<string, string | null>();
+      const [thumbs, names] = await Promise.all([
+        pubs?.length ? publicationThumbs(service, pubs.slice(0, 6)) : new Map<string, string | null>(),
+        pubs?.length ? publisherNames(service).catch(() => null) : null,
+      ]);
       const thumbUrl = [...thumbs.values()].find(Boolean) ?? null;
-      push({ id: "publier", app: "audiovisuel", tone: "red", count: pubItems.length, items: pubItems, title: "Médias à publier", detail: "Photos et vidéos en attente dans le centre de publication", thumbUrl });
+      push({
+        id: "publier",
+        app: "audiovisuel",
+        tone: "red",
+        count: pubItems.length,
+        items: pubItems,
+        title: "Médias à publier",
+        detail: "Photos et vidéos en attente dans le centre de publication",
+        thumbUrl,
+        assignees: names ?? undefined,
+      });
       const { count: flagged } = await service
         .from("comment_moderation")
         .select("id", { count: "exact", head: true })
@@ -306,6 +326,21 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
         // « À vérifier » masqué d'office : reste à trancher tant que personne n'a décidé.
         .or("action.in.(none,hide_failed),and(verdict.eq.review,action.eq.hidden)");
       push({ id: "commentaires", app: "audiovisuel", tone: "orange", count: flagged ?? 0, title: "Commentaires à vérifier", detail: "Signalés par la modération automatique" });
+    }, undefined),
+
+    // Remises de photos / vidéos (encart de l'accueil) ; l'action « remises » ne sert qu'au mail de 7 h.
+    safe(async () => {
+      deliveries = await deliveriesBoard(service, userId, isAdmin);
+      const mineLate = deliveries.mine.filter((d) => d.state === "late").length;
+      const teamLate = deliveries.team.length;
+      push({
+        id: "remises",
+        app: "accueil",
+        tone: "red",
+        count: mineLate + teamLate,
+        title: "Photos et vidéos en retard",
+        detail: [mineLate ? `${mineLate} à remettre par vous` : null, teamLate ? `${teamLate} dans votre équipe` : null].filter(Boolean).join(" · "),
+      });
     }, undefined),
 
     // Demandes de compte (formulaire /demande-acces) : à affecter, accepter ou refuser — administrateurs,
@@ -409,5 +444,5 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
   const toneOrder = { red: 0, orange: 1, navy: 2 };
   actions.sort((a, b) => toneOrder[a.tone] - toneOrder[b.tone] || b.count - a.count);
   const birthdays = birthdayRows.map((b) => ({ id: b.id, firstName: b.firstName, lastName: b.lastName, isMe: b.id === userId }));
-  return { firstName: me?.first_name ?? null, birthdays, actions, programme, fraisMode, cards: myCards };
+  return { firstName: me?.first_name ?? null, birthdays, actions, programme, fraisMode, cards: myCards, deliveries };
 }

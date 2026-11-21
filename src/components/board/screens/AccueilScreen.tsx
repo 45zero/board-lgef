@@ -34,6 +34,7 @@ import { readCache, writeCache } from "@/lib/board/localCache";
 import { EVENT_TYPE_TO_ORG, type DbEventType } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
 import { ActionPopup } from "@/components/board/dashboard/ActionPopup";
+import { MediaDeliveriesPanel } from "@/components/board/dashboard/MediaDeliveriesPanel";
 import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { ackTeamCardReminder, finishTeamCard, remindTeamCardMember, setMyCardStatus, updateTeamChecklistItem } from "@/app/actions/team";
 import { EventArrow, useOpenEvent } from "@/components/board/calendar/EventOpener";
@@ -180,6 +181,7 @@ export function AccueilScreen({
       "expense_submissions",
       "event_presence_days",
       "event_presence_requests",
+      "media_deliveries",
       "team_boards",
       "team_lists",
       "team_cards",
@@ -239,8 +241,9 @@ export function AccueilScreen({
     };
   }, [reloadKey]);
 
-  // Les cartes Espace Team ont leur propre panneau (« Mes cartes », archivage direct) : hors de « Mes actions ».
-  const actions = (data?.actions ?? []).filter((a) => a.id !== "cartes");
+  // Les cartes Espace Team ont leur propre panneau (« Mes cartes », archivage direct) et les remises de
+  // photos / vidéos leur encart en tête : hors de « Mes actions » (ces actions servent au mail de 7 h).
+  const actions = (data?.actions ?? []).filter((a) => a.id !== "cartes" && a.id !== "remises");
   const programme = data?.programme ?? [];
   const periodLabel = period === "day" ? "aujourd'hui" : "cette semaine";
   // Agendas des comptes connectés (Google), mêlés au programme ; plusieurs comptes : pastilles.
@@ -274,8 +277,11 @@ export function AccueilScreen({
         {/* Ordinateur : à gauche bandeau fin, ligne des derniers médias, actions ; à droite mails puis agenda.
             Mobile : bandeau, médias, actions, mails, agenda. */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)] lg:grid-rows-[auto_auto_1fr] lg:items-start">
-          <div className="min-w-0 lg:col-start-1">
+          {/* Bandeau, puis l'encart d'alerte des photos / vidéos à remettre (TeamMedia) et des retards de
+              l'équipe (N+1) — dans le même bloc : la colonne de droite garde ses trois lignes. */}
+          <div className="flex min-w-0 flex-col gap-4 lg:col-start-1">
             <HomeBanner firstName={data?.firstName ?? null} birthdays={data?.birthdays ?? []} punchedIn={punchedIn} onTogglePunch={onTogglePunch} />
+            <MediaDeliveriesPanel deliveries={data?.deliveries} onChanged={() => setReloadKey((k) => k + 1)} />
           </div>
 
           <RecentPosts posts={posts} onSeeAll={onNavigate ? () => onNavigate("audiovisuel") : undefined} />
@@ -382,6 +388,7 @@ export function AccueilScreen({
                       <span className="min-w-0 flex-1">
                         <span className="line-clamp-2 block text-[13px] font-bold leading-tight text-ink sm:text-sm">{a.title}</span>
                         <span className="mt-0.5 line-clamp-2 block text-[11px] text-ink-3 sm:text-xs">{a.detail}</span>
+                        {a.assignees && a.assignees.length > 0 && <Assignees names={a.assignees} />}
                       </span>
                       <ChevronRight size={16} className="hidden shrink-0 text-ink-4 sm:block" />
                     </button>
@@ -1112,6 +1119,23 @@ function ActionPhoto({ action: a, className = "" }: { action: DashboardAction; c
   );
 }
 
+/** Personnes chargées de l'action (Médias à publier : désignées dans Paramètres → Publication). */
+function Assignees({ names, compact = false }: { names: string[]; compact?: boolean }) {
+  const shown = names.slice(0, compact ? 2 : 4);
+  const more = names.length - shown.length;
+  return (
+    <span className={`mt-1 flex flex-wrap items-center gap-1 ${compact ? "text-[10px]" : "text-[11px]"}`}>
+      <span className="font-semibold text-ink-3">À publier par</span>
+      {shown.map((n) => (
+        <span key={n} className="rounded-full bg-sel-bg px-1.5 py-px font-bold text-navy">
+          {n}
+        </span>
+      ))}
+      {more > 0 && <span className="font-semibold text-ink-3">+{more}</span>}
+    </span>
+  );
+}
+
 /** Carte d'action du carrousel mobile, au format des vignettes Airbnb : photo carrée, titre et détail dessous. */
 function ActionCard({ action: a, onClick }: { action: DashboardAction; onClick: () => void }) {
   const tone = TONES[a.tone];
@@ -1124,7 +1148,7 @@ function ActionCard({ action: a, onClick }: { action: DashboardAction; onClick: 
         </span>
       </div>
       <div className="mt-1.5 line-clamp-2 text-[12px] font-bold leading-tight text-ink">{a.title}</div>
-      <div className="mt-0.5 line-clamp-2 text-[11px] leading-tight text-ink-3">{a.detail}</div>
+      {a.assignees && a.assignees.length > 0 ? <Assignees names={a.assignees} compact /> : <div className="mt-0.5 line-clamp-2 text-[11px] leading-tight text-ink-3">{a.detail}</div>}
     </button>
   );
 }

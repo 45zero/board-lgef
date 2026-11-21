@@ -1,6 +1,7 @@
 "use client";
 
 import { DirectorDeclineForm } from "@/components/board/calendar/DirectorDeclineForm";
+import { DeliveryDateField, saveDeliveryDate } from "@/components/board/calendar/DeliveryDateField";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOpenTeamCard } from "@/components/board/team/TeamCardOpener";
 import { MapPopup } from "@/components/board/calendar/MapPopup";
@@ -857,21 +858,32 @@ function DeclareList({ statuses, onChanged }: { statuses: MyExpenseItem["status"
 function CoverageRow({ item, onDone }: { item: DashboardActionItem; onDone: () => void }) {
   const cov = useEventCoverage(item.eventId ?? undefined);
   const [busy, setBusy] = useState(false);
+  // Accepter : on demande d'abord la date de remise des fichiers (réglage des administrateurs).
+  const [accepting, setAccepting] = useState(false);
+  const [day, setDay] = useState("");
   const respond = async (r: "accepted" | "rejected") => {
     setBusy(true);
     const ok = await cov.respondToCoverage(r);
+    if (ok && r === "accepted" && item.eventId) await saveDeliveryDate(item.eventId, day);
     setBusy(false);
     if (ok) onDone();
   };
   return (
-    <Row title={item.title} eventId={item.eventId} date={item.date} location={item.location} subtitle={item.detail}>
-      <button disabled={busy || !cov.request} onClick={() => respond("rejected")} className={btnKo}>
-        Refuser
-      </button>
-      <button disabled={busy || !cov.request} onClick={() => respond("accepted")} className={btnOk}>
-        <Check size={12} /> Accepter
-      </button>
-    </Row>
+    <>
+      <Row title={item.title} eventId={item.eventId} date={item.date} location={item.location} subtitle={item.detail}>
+        <button disabled={busy || !cov.request} onClick={() => (accepting ? setAccepting(false) : respond("rejected"))} className={btnKo}>
+          {accepting ? "Annuler" : "Refuser"}
+        </button>
+        <button disabled={busy || !cov.request || (accepting && !day)} onClick={() => (accepting ? respond("accepted") : setAccepting(true))} className={btnOk}>
+          <Check size={12} /> {accepting ? "Confirmer" : "Accepter"}
+        </button>
+      </Row>
+      {accepting && item.eventId && (
+        <div className="border-b border-line px-4 pb-3">
+          <DeliveryDateField eventId={item.eventId} role={cov.request?.technician_role ?? null} value={day} onChange={setDay} />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1119,6 +1131,16 @@ export function ActionPopup({
             <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-white/70">Action rapide</div>
             <h3 className="mt-1 text-base font-extrabold">{action.title}</h3>
             <div className="text-xs text-white/80">{action.detail}</div>
+            {action.assignees && action.assignees.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[11px]">
+                <span className="font-semibold text-white/70">À publier par</span>
+                {action.assignees.map((n) => (
+                  <span key={n} className="rounded-full bg-white/15 px-1.5 py-px font-bold text-white">
+                    {n}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
           <button onClick={onClose} className="rounded-full p-1 text-white/80 hover:bg-white/10">
             <X size={18} />

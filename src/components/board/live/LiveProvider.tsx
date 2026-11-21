@@ -41,6 +41,7 @@ export const LIVE_TABLES = [
   "team_card_comments",
   "event_presence_days",
   "event_presence_requests",
+  "media_deliveries",
 ] as const;
 /**
  * « resume » : retour après une absence (onglet ou appli caché ≥ 1 min, réveil de l'ordinateur, réseau
