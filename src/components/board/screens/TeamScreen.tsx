@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, Check, ChevronDown, Inbox, Kanban, MoreHorizontal, Plus, Search, Users, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, Inbox, Kanban, MoreHorizontal, Plus, Search, Users, X, Eye, EyeOff } from "lucide-react";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useAuth } from "@/contexts/AuthContext";
 import { readCache, writeCache } from "@/lib/board/localCache";
@@ -20,10 +20,27 @@ import {
   deleteTeamCard,
   updateTeamList,
 } from "@/app/actions/team";
-import { TEAM_COLORS, isCardDone, type TeamBoard, type TeamCard, type TeamList, type TeamPerson, type TeamWorkspace } from "@/lib/board/team";
-import { CardShortcut, type CardShortcutAction, Avatar, CardTile, ChecklistChip, DueChip, EventChip, Popover } from "@/components/board/team/TeamUi";
+import { TEAM_COLORS, initialsOf, isCardDone, type TeamBoard, type TeamCard, type TeamList, type TeamPerson, type TeamWorkspace } from "@/lib/board/team";
+import { CardShortcut, type CardShortcutAction, Avatar, ChecklistChip, DueChip, EventChip, Popover } from "@/components/board/team/TeamUi";
 import { TeamCardModal } from "@/components/board/team/TeamCardModal";
 import { NewCardDialog } from "@/components/board/team/NewCardDialog";
+import { MyCardTile, useCardActions } from "@/components/board/team/MyCardsPanel";
+import type { MyCard } from "@/lib/board/myCards";
+
+/** Bouton « mes cartes » d'une liste : état par défaut retenu sur cet appareil (clic droit). */
+const ONLY_MINE_PREFIX = "team:onlyMine:";
+function readOnlyMineDefaults(): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  try {
+    for (let k = 0; k < localStorage.length; k++) {
+      const key = localStorage.key(k);
+      if (key?.startsWith(ONLY_MINE_PREFIX)) out[key.slice(ONLY_MINE_PREFIX.length)] = localStorage.getItem(key) === "1";
+    }
+  } catch {
+    /* stockage indisponible */
+  }
+  return out;
+}
 
 // Espace Team : chacun organise ses tableaux ; une carte assignée reste sur le tableau de son
 // créateur et « atterrit » dans Mes cartes de chaque assigné. La section Équipe montre, personne
@@ -37,7 +54,9 @@ const LIVE = ["team_boards", "team_lists", "team_cards", "team_card_members", "t
 const section = "px-4 pb-1.5 pt-4 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-4";
 const navItem = (active: boolean) =>
   `relative flex w-full items-center gap-2.5 rounded-btn px-3 py-2 text-left text-[13px] ${
-    active ? "bg-sel-bg font-bold text-ink before:absolute before:-left-2 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-full before:bg-red" : "text-ink-2 hover:bg-hover"
+    active
+      ? "bg-sel-bg font-bold text-ink before:absolute before:-left-2 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-full before:bg-red"
+      : "text-ink-2 hover:bg-hover"
   }`;
 
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
@@ -52,12 +71,21 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
   const [view, setView] = useState<View>({ kind: "mine" });
   const [openCardId, setOpenCardId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [newCardFor, setNewCardFor] = useState<{ personId?: string; boardId?: string; listId?: string } | null>(null);
+  const [newCardFor, setNewCardFor] = useState<{
+    personId?: string;
+    boardId?: string;
+    listId?: string;
+  } | null>(null);
+  // Heure de la demande des données affichées : les choix faits sur les cartes (statut, relance, case
+  // cochée) restent affichés jusqu'aux données demandées après eux (useCardActions).
+  const [dataAt, setDataAt] = useState(0);
 
   const load = useCallback(async () => {
     try {
+      const startedAt = Date.now();
       const fresh = unwrap(await getTeamWorkspace());
       setWs(fresh);
+      setDataAt(startedAt);
       writeCache(cacheKey, fresh);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Chargement impossible.");
@@ -75,7 +103,14 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
   }, []);
 
   const patchLocal = useCallback((cardId: string, patch: Partial<TeamCard>) => {
-    setWs((prev) => (prev ? { ...prev, cards: prev.cards.map((c) => (c.id === cardId ? { ...c, ...patch } : c)) } : prev));
+    setWs((prev) =>
+      prev
+        ? {
+            ...prev,
+            cards: prev.cards.map((c) => (c.id === cardId ? { ...c, ...patch } : c)),
+          }
+        : prev
+    );
   }, []);
 
   const derived = useMemo(() => {
@@ -92,26 +127,45 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
     // Équipe : mes équipiers (je suis leur N+1), puis toute personne dont je vois au moins une carte.
     const reports = ws.people.filter((p) => p.managerId === ws.meId && p.id !== ws.meId);
     const withCards = ws.people.filter((p) => p.id !== ws.meId && p.managerId !== ws.meId && assignedTo(p.id).length > 0);
-    const team = [...reports, ...withCards].map((p) => ({ person: p, isReport: p.managerId === ws.meId, active: active(assignedTo(p.id)).length }));
-    return { peopleById, listsById, boardsById, myBoards, assignedTo, active, mine, unseen, team, me: peopleById.get(ws.meId) };
+    const team = [...reports, ...withCards].map((p) => ({
+      person: p,
+      isReport: p.managerId === ws.meId,
+      active: active(assignedTo(p.id)).length,
+    }));
+    return {
+      peopleById,
+      listsById,
+      boardsById,
+      myBoards,
+      assignedTo,
+      active,
+      mine,
+      unseen,
+      team,
+      me: peopleById.get(ws.meId),
+    };
   }, [ws]);
 
   if (!ws || !derived) {
-    return (
-      <div className="flex h-full items-center justify-center rounded-panel border border-line bg-card text-sm text-ink-4">
-        {error ?? "Chargement de l'Espace Team…"}
-      </div>
-    );
+    return <div className="flex h-full items-center justify-center rounded-panel border border-line bg-card text-sm text-ink-4">{error ?? "Chargement de l'Espace Team…"}</div>;
   }
 
   const { peopleById, listsById, boardsById, myBoards, assignedTo, active, mine, unseen, team, me } = derived;
-  const currentBoard = view.kind === "board" ? boardsById.get(view.id) : undefined;
+  // Section principale : mon premier tableau (renommable), là où l'on arrive. Mes autres tableaux dessous,
+  // puis les tableaux des autres qui portent une carte où je suis assigné (« Partagés avec moi »).
+  const mainBoard = myBoards[0];
+  const otherBoards = myBoards.slice(1);
+  const unseenIn = (boardId: string) => unseen.filter((c) => c.boardId === boardId).length;
+  const sharedBoards = ws.boards.filter((b) => b.ownerId !== ws.meId && active(mine).some((c) => c.boardId === b.id));
+  const currentBoard = view.kind === "board" ? boardsById.get(view.id) : view.kind === "mine" ? mainBoard : undefined;
+  const isCurrent = (b: TeamBoard) => currentBoard?.id === b.id && view.kind !== "person";
   const currentPerson = view.kind === "person" ? peopleById.get(view.id) : undefined;
   // Vue disparue (tableau supprimé) : retour à Mes cartes.
-  if ((view.kind === "board" && !currentBoard) || (view.kind === "person" && !currentPerson)) queueMicrotask(() => setView({ kind: "mine" }));
+  if ((view.kind === "board" && !boardsById.get(view.id)) || (view.kind === "person" && !currentPerson)) queueMicrotask(() => setView({ kind: "mine" }));
 
   const needle = query.trim().toLowerCase();
-  const matches = (c: TeamCard) => !needle || c.title.toLowerCase().includes(needle) || c.description.toLowerCase().includes(needle) || c.event?.title.toLowerCase().includes(needle);
+  const matches = (c: TeamCard) =>
+    !needle || c.title.toLowerCase().includes(needle) || c.description.toLowerCase().includes(needle) || c.event?.title.toLowerCase().includes(needle);
   const openCard = ws.cards.find((c) => c.id === openCardId);
   const manager = me?.managerId ? peopleById.get(me.managerId) : undefined;
   const dueToday = active(mine).filter((c) => c.dueAt && new Date(c.dueAt).toDateString() === new Date().toDateString()).length;
@@ -163,11 +217,7 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
   };
   const canDeleteCard = (card: TeamCard) => card.createdBy === ws.meId || boardsById.get(card.boardId)?.ownerId === ws.meId || !!ws.isAdmin;
   const shortcutFor = (card: TeamCard): CardShortcutAction | undefined =>
-    isCardDone(card, listsById)
-      ? canDeleteCard(card)
-        ? { kind: "delete", onClick: () => deleteCard(card) }
-        : undefined
-      : { kind: "archive", onClick: () => finishCard(card) };
+    isCardDone(card, listsById) ? (canDeleteCard(card) ? { kind: "delete", onClick: () => deleteCard(card) } : undefined) : { kind: "archive", onClick: () => finishCard(card) };
   const newCard = () => setNewCardFor(currentPerson ? { personId: currentPerson.id } : currentBoard ? { boardId: currentBoard.id } : {});
   const content = currentBoard ? (
     <BoardView
@@ -178,30 +228,31 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
       peopleById={peopleById}
       listsById={listsById}
       onOpen={setOpenCardId}
+      cardsAt={dataAt}
       onMoveLocal={(id, listId, position) => patchLocal(id, { listId, position })}
       onChanged={load}
       onError={toast}
       shortcutFor={shortcutFor}
     />
   ) : (
-    <CardInbox
-      compact={mobile}
-      shortcutFor={shortcutFor}
-      cards={(currentPerson ? assignedTo(currentPerson.id) : mine).filter(matches)}
-      personId={currentPerson?.id ?? ws.meId}
-      isMe={!currentPerson}
-      ws={ws}
-      peopleById={peopleById}
-      listsById={listsById}
-      boardsById={boardsById}
-      onOpen={setOpenCardId}
-    />
+    currentPerson && (
+      <CardInbox
+        compact={mobile}
+        shortcutFor={shortcutFor}
+        cards={assignedTo(currentPerson.id).filter(matches)}
+        personId={currentPerson?.id ?? ws.meId}
+        isMe={!currentPerson}
+        ws={ws}
+        peopleById={peopleById}
+        listsById={listsById}
+        boardsById={boardsById}
+        onOpen={setOpenCardId}
+      />
+    )
   );
   const overlays = (
     <>
-      {openCard && (
-        <TeamCardModal card={openCard} ws={ws} onClose={() => setOpenCardId(null)} onLocalPatch={patchLocal} onRefresh={() => void load()} onError={toast} />
-      )}
+      {openCard && <TeamCardModal card={openCard} ws={ws} onClose={() => setOpenCardId(null)} onLocalPatch={patchLocal} onRefresh={() => void load()} onError={toast} />}
       {newCardFor && (
         <NewCardDialog
           ws={ws}
@@ -217,30 +268,24 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
         />
       )}
       {error && ws && (
-        <div className={`fixed z-[90] max-w-sm rounded-btn bg-ink px-4 py-3 text-sm text-white shadow-card ${mobile ? "bottom-24 left-3 right-3" : "bottom-6 right-6"}`}>{error}</div>
+        <div className={`fixed z-[90] max-w-sm rounded-btn bg-ink px-4 py-3 text-sm text-white shadow-card ${mobile ? "bottom-24 left-3 right-3" : "bottom-6 right-6"}`}>
+          {error}
+        </div>
       )}
     </>
   );
 
   if (mobile) {
-    const chip = (active: boolean) =>
-      `flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${active ? "bg-navy text-white" : "bg-subtle text-ink-2"}`;
+    const chip = (active: boolean) => `flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${active ? "bg-navy text-white" : "bg-subtle text-ink-2"}`;
     return (
       <div className="flex h-full min-h-0 flex-col">
         <div className="shrink-0 space-y-2 border-b border-line bg-card px-3 pb-2.5 pt-3">
           {/* Sections : mes cartes, mes tableaux, mon équipe (la barre latérale de l'ordinateur). */}
           <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3">
-            <button onClick={() => setView({ kind: "mine" })} className={chip(view.kind === "mine")}>
-              <Inbox size={13} /> Mes cartes
-              {unseen.length > 0 ? (
-                <span className="rounded-full bg-red px-1.5 text-[10px] font-bold text-white">{unseen.length}</span>
-              ) : (
-                <span className="opacity-70">{active(mine).length}</span>
-              )}
-            </button>
-            {myBoards.map((b) => (
-              <button key={b.id} onClick={() => setView({ kind: "board", id: b.id })} className={chip(view.kind === "board" && view.id === b.id)}>
+            {[...myBoards, ...sharedBoards].map((b) => (
+              <button key={b.id} onClick={() => setView(b.id === mainBoard?.id ? { kind: "mine" } : { kind: "board", id: b.id })} className={chip(isCurrent(b))}>
                 <Kanban size={13} /> <span className="max-w-[140px] truncate">{b.title}</span>
+                {unseenIn(b.id) > 0 && <span className="rounded-full bg-red px-1.5 text-[10px] font-bold text-white">{unseenIn(b.id)}</span>}
               </button>
             ))}
             <button
@@ -296,6 +341,19 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
     );
   }
 
+  const boardNav = (b: TeamBoard, main = false) => (
+    <button key={b.id} onClick={() => setView(main ? { kind: "mine" } : { kind: "board", id: b.id })} className={navItem(isCurrent(b))}>
+      <Kanban size={15} className="text-ink-3" />
+      <span className="min-w-0 flex-1 truncate">{b.title}</span>
+      {b.ownerId !== ws.meId && <span className="max-w-[70px] truncate text-[10px] text-ink-4">{peopleById.get(b.ownerId)?.name.split(" ")[0]}</span>}
+      {unseenIn(b.id) > 0 && (
+        <span className="rounded-full bg-red px-1.5 text-[10px] font-bold text-white" title={`${unseenIn(b.id)} nouvelle(s) carte(s) pour vous`}>
+          {unseenIn(b.id)}
+        </span>
+      )}
+      <span className="font-mono text-[10px] text-ink-4">{ws.cards.filter((c) => c.boardId === b.id && !c.archivedAt).length}</span>
+    </button>
+  );
   return (
     <div className="flex h-full min-h-0 gap-4">
       {/* Barre latérale */}
@@ -318,25 +376,10 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
 
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           <p className={section}>Sections</p>
-          <button onClick={() => setView({ kind: "mine" })} className={navItem(view.kind === "mine")}>
-            <Inbox size={15} className="text-ink-3" />
-            <span className="flex-1">Mes cartes</span>
-            {unseen.length > 0 && (
-              <span className="rounded-full bg-red px-1.5 text-[10px] font-bold text-white" title={`${unseen.length} nouvelle(s)`}>
-                {unseen.length}
-              </span>
-            )}
-            <span className="font-mono text-[10px] text-ink-4">{active(mine).length}</span>
-          </button>
+          {mainBoard && boardNav(mainBoard, true)}
 
           <p className={section}>Mes tableaux</p>
-          {myBoards.map((b) => (
-            <button key={b.id} onClick={() => setView({ kind: "board", id: b.id })} className={navItem(view.kind === "board" && view.id === b.id)}>
-              <Kanban size={15} className="text-ink-3" />
-              <span className="min-w-0 flex-1 truncate">{b.title}</span>
-              <span className="font-mono text-[10px] text-ink-4">{ws.cards.filter((c) => c.boardId === b.id && !c.archivedAt).length}</span>
-            </button>
-          ))}
+          {otherBoards.map((b) => boardNav(b))}
           <InlineCreate
             placeholder="Nouveau tableau…"
             onCreate={async (t) => {
@@ -350,6 +393,13 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
             }}
           />
 
+          {sharedBoards.length > 0 && (
+            <>
+              <p className={section}>Partagés avec moi</p>
+              {sharedBoards.map((b) => boardNav(b))}
+            </>
+          )}
+
           <p className={`${section} flex items-center gap-1.5`}>
             <Users size={11} /> Équipe
           </p>
@@ -358,7 +408,11 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
             <button key={person.id} onClick={() => setView({ kind: "person", id: person.id })} className={navItem(view.kind === "person" && view.id === person.id)}>
               <Avatar person={person} size={22} />
               <span className="min-w-0 flex-1 truncate">{person.name}</span>
-              {isReport && <span className="rounded-chip bg-chip-bg px-1 text-[9px] font-bold text-ink-3" title="Vous êtes son N+1">N+1</span>}
+              {isReport && (
+                <span className="rounded-chip bg-chip-bg px-1 text-[9px] font-bold text-ink-3" title="Vous êtes son N+1">
+                  N+1
+                </span>
+              )}
               <span className="font-mono text-[10px] text-ink-4">{n}</span>
             </button>
           ))}
@@ -394,7 +448,12 @@ export function TeamScreen({ mobile = false }: { mobile?: boolean } = {}) {
           <div className="flex items-center gap-2">
             <div className="flex w-[260px] items-center gap-2 rounded-btn border border-line bg-panel px-3 py-2">
               <Search size={14} className="text-ink-4" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher une carte…" className="min-w-0 flex-1 bg-transparent text-[13px] outline-none" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Rechercher une carte…"
+                className="min-w-0 flex-1 bg-transparent text-[13px] outline-none"
+              />
               {query && (
                 <button onClick={() => setQuery("")} aria-label="Effacer">
                   <X size={13} className="text-ink-4" />
@@ -450,13 +509,22 @@ function CardInbox({
   const open = cards.filter((c) => !isCardDone(c, listsById));
   const fresh = open.filter(isNew).sort(byAssigned);
   // À traiter : échéance la plus proche d'abord, puis les plus récemment assignées.
-  const todo = open
-    .filter((c) => !isNew(c))
-    .sort((a, b) => (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999") || byAssigned(a, b));
+  const todo = open.filter((c) => !isNew(c)).sort((a, b) => (a.dueAt ?? "9999").localeCompare(b.dueAt ?? "9999") || byAssigned(a, b));
   const done = cards.filter((c) => isCardDone(c, listsById)).sort(byAssigned);
 
   const row = (c: TeamCard) => (
-    <CardRow key={c.id} card={c} member={membership(c)} isNew={isNew(c)} ws={ws} peopleById={peopleById} listsById={listsById} boardsById={boardsById} onOpen={() => onOpen(c.id)} shortcut={shortcutFor?.(c)} />
+    <CardRow
+      key={c.id}
+      card={c}
+      member={membership(c)}
+      isNew={isNew(c)}
+      ws={ws}
+      peopleById={peopleById}
+      listsById={listsById}
+      boardsById={boardsById}
+      onOpen={() => onOpen(c.id)}
+      shortcut={shortcutFor?.(c)}
+    />
   );
 
   if (!cards.length)
@@ -532,7 +600,9 @@ function CardRow({
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(e) => e.key === "Enter" && onOpen()}
-      className={`group flex cursor-pointer items-stretch overflow-hidden rounded-card border bg-card transition hover:shadow-bar ${isNew ? "border-red/40" : "border-line"} ${done ? "opacity-70" : ""}`}
+      className={`group flex cursor-pointer items-stretch overflow-hidden rounded-card border bg-card transition hover:shadow-bar ${isNew ? "border-red/40" : "border-line"} ${
+        done ? "opacity-70" : ""
+      }`}
     >
       <span className="w-1.5 shrink-0" style={{ background: stripe }} />
       <div className="flex min-w-0 flex-1 items-center gap-4 px-4 py-3">
@@ -580,6 +650,7 @@ function BoardView({
   peopleById,
   listsById,
   onOpen,
+  cardsAt,
   onMoveLocal,
   onChanged,
   onError,
@@ -590,6 +661,8 @@ function BoardView({
   peopleById: Map<string, TeamPerson>;
   listsById: Map<string, TeamList>;
   onOpen: (id: string) => void;
+  /** Heure de la demande des données affichées (choix faits sur les cartes : voir useCardActions). */
+  cardsAt: number;
   onMoveLocal: (id: string, listId: string, position: number) => void;
   onChanged: () => Promise<void>;
   onError: (m: string) => void;
@@ -599,6 +672,21 @@ function BoardView({
   const [showArchived, setShowArchived] = useState(false);
   const [drop, setDrop] = useState<DropTarget>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  const actions = useCardActions(cardsAt, () => void onChanged());
+  // « Cartes sans mission » par liste (masquer celles où je ne suis pas assigné) : choix du moment,
+  // sinon l'affichage par défaut choisi au clic droit (retenu sur cet appareil).
+  const [onlyMineDefaults, setOnlyMineDefaults] = useState(readOnlyMineDefaults);
+  const [onlyMineNow, setOnlyMineNow] = useState<Record<string, boolean>>({});
+  const onlyMineOf = (listId: string) => onlyMineNow[listId] ?? onlyMineDefaults[listId] ?? false;
+  const makeOnlyMineDefault = (listId: string, v: boolean) => {
+    setOnlyMineNow((m) => ({ ...m, [listId]: v }));
+    setOnlyMineDefaults((d) => ({ ...d, [listId]: v }));
+    try {
+      localStorage.setItem(ONLY_MINE_PREFIX + listId, v ? "1" : "0");
+    } catch {
+      /* stockage indisponible : vaut pour cette visite */
+    }
+  };
   const archivedCount = cards.filter((c) => c.archivedAt).length;
   const visible = cards.filter((c) => showArchived || !c.archivedAt);
 
@@ -642,8 +730,10 @@ function BoardView({
       )}
       <div className={`flex min-h-0 flex-1 items-start overflow-x-auto ${compact ? "snap-x snap-mandatory gap-3 px-3 py-3" : "gap-4 px-7 py-5"}`}>
         {board.lists.map((list, index) => {
-          const column = visible.filter((c) => c.listId === list.id).sort((a, b) => a.position - b.position);
-          const lastPos = column.at(-1)?.position ?? 0;
+          const all = visible.filter((c) => c.listId === list.id).sort((a, b) => a.position - b.position);
+          const lastPos = all.at(-1)?.position ?? 0;
+          const onlyMine = onlyMineOf(list.id);
+          const column = onlyMine ? all.filter((c) => c.members.some((m) => m.userId === ws.meId)) : all;
           return (
             <div
               key={list.id}
@@ -655,11 +745,17 @@ function BoardView({
                 e.preventDefault();
                 doDrop(drop?.listId === list.id ? drop : { listId: list.id, beforeId: null });
               }}
-              className={`flex max-h-full shrink-0 flex-col rounded-card border bg-panel ${compact ? "w-[85vw] snap-center" : "w-[290px]"} ${drop?.listId === list.id ? "border-navy/40" : "border-line"}`}
+              className={`flex max-h-full shrink-0 flex-col rounded-card border bg-panel ${compact ? "w-[85vw] snap-center" : "w-[290px]"} ${
+                drop?.listId === list.id ? "border-navy/40" : "border-line"
+              }`}
             >
               <ListHeader
                 list={list}
                 count={column.length}
+                onlyMine={onlyMine}
+                onlyMineDefault={onlyMineDefaults[list.id] ?? false}
+                onToggleOnlyMine={() => setOnlyMineNow((m) => ({ ...m, [list.id]: !onlyMine }))}
+                onMakeOnlyMineDefault={(v) => makeOnlyMineDefault(list.id, v)}
                 canLeft={index > 0}
                 canRight={index < board.lists.length - 1}
                 onMove={(dir) => void moveList(index, dir)}
@@ -682,11 +778,14 @@ function BoardView({
                     }}
                   >
                     {drop?.beforeId === c.id && dragId && dragId !== c.id && <div className="mb-2 h-1 rounded-full bg-navy/40" />}
-                    <CardTile
-                      card={c}
+                    <MyCardTile
+                      card={toMyCard(c, ws, peopleById, "")}
+                      actions={actions}
+                      showMine
+                      surface="card"
                       done={isCardDone(c, listsById)}
-                      peopleById={peopleById}
                       onOpen={() => onOpen(c.id)}
+                      action={shortcutFor?.(c) ? <CardShortcut {...shortcutFor(c)!} /> : null}
                       draggable
                       onDragStart={(e) => {
                         setDragId(c.id);
@@ -696,8 +795,6 @@ function BoardView({
                         setDragId(null);
                         setDrop(null);
                       }}
-                      isNew={c.members.some((m) => m.userId === ws.meId && !m.seenAt && m.assignedBy !== ws.meId)}
-                      shortcut={shortcutFor?.(c)}
                     />
                   </div>
                 ))}
@@ -705,7 +802,12 @@ function BoardView({
               </div>
               <AddCard
                 onAdd={async (title) => {
-                  const r = await createTeamCard({ boardId: board.id, listId: list.id, title, position: lastPos + 1000 });
+                  const r = await createTeamCard({
+                    boardId: board.id,
+                    listId: list.id,
+                    title,
+                    position: lastPos + 1000,
+                  });
                   if (!r.ok) onError(r.error);
                   await onChanged();
                 }}
@@ -732,6 +834,10 @@ function BoardView({
 function ListHeader({
   list,
   count,
+  onlyMine,
+  onlyMineDefault,
+  onToggleOnlyMine,
+  onMakeOnlyMineDefault,
   canLeft,
   canRight,
   onMove,
@@ -740,6 +846,10 @@ function ListHeader({
 }: {
   list: TeamList;
   count: number;
+  onlyMine: boolean;
+  onlyMineDefault: boolean;
+  onToggleOnlyMine: () => void;
+  onMakeOnlyMineDefault: (hide: boolean) => void;
   canLeft: boolean;
   canRight: boolean;
   onMove: (dir: -1 | 1) => void;
@@ -747,6 +857,7 @@ function ListHeader({
   onError: (m: string) => void;
 }) {
   const [menu, setMenu] = useState(false);
+  const [defMenu, setDefMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(list.title);
   const act = async (fn: () => Promise<{ ok: boolean; error?: string }>) => {
@@ -778,6 +889,47 @@ function ListHeader({
         </button>
       )}
       <span className="font-mono text-[10px] text-ink-4">{count}</span>
+      {/* « Cartes sans mission » : masquer celles où je ne suis pas assigné — clic droit : garder cet affichage par défaut. */}
+      <button
+        type="button"
+        onClick={onToggleOnlyMine}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setDefMenu(true);
+        }}
+        aria-pressed={onlyMine}
+        title={`${onlyMine ? "Cartes sans mission pour vous masquées — cliquer : les afficher" : "Cliquer : masquer les cartes où vous n'avez pas de mission"}. Clic droit : affichage par défaut (actuellement : ${onlyMineDefault ? "masquées" : "affichées"}).`}
+        className={`relative flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold transition-colors ${
+          onlyMine ? "bg-navy text-white" : "bg-subtle text-ink-3 hover:text-ink"
+        }`}
+      >
+        {onlyMine ? <EyeOff size={11} strokeWidth={2.5} /> : <Eye size={11} strokeWidth={2.5} />} Cartes sans mission
+        {onlyMineDefault && <span className={`h-1 w-1 rounded-full ${onlyMine ? "bg-white" : "bg-link"}`} aria-label="par défaut" />}
+      </button>
+      {/* Clic droit sur « Cartes sans mission » : choisir l'affichage par défaut de la liste. */}
+      <div className="absolute right-3 top-9">
+        <Popover open={defMenu} onClose={() => setDefMenu(false)} align="right" width={250}>
+          <p className="px-2 pb-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-4">Affichage par défaut</p>
+          {[
+            { hide: false, label: "Toutes les cartes", Icon: Eye },
+            { hide: true, label: "Masquer les cartes sans mission", Icon: EyeOff },
+          ].map(({ hide, label, Icon }) => (
+            <button
+              key={label}
+              onClick={() => {
+                setDefMenu(false);
+                onMakeOnlyMineDefault(hide);
+              }}
+              className="flex w-full items-center gap-2 rounded-btn px-2 py-1.5 text-left text-[13px] text-ink-2 hover:bg-hover"
+            >
+              <Icon size={13} className="text-ink-3" />
+              <span className="flex-1">{label}</span>
+              {onlyMineDefault === hide && <Check size={14} className="text-good" />}
+            </button>
+          ))}
+          <p className="px-2 pt-1 text-[10px] leading-snug text-ink-4">Retenu sur cet appareil, pour cette liste. Un clic sur le bouton change l&apos;affichage le temps de la visite.</p>
+        </Popover>
+      </div>
       <button onClick={() => setMenu((m) => !m)} aria-label="Options de la liste" className="rounded-md p-0.5 text-ink-4 hover:bg-hover hover:text-ink">
         <MoreHorizontal size={15} />
       </button>
@@ -786,7 +938,10 @@ function ListHeader({
           <button onClick={() => (setMenu(false), setRenaming(true))} className="w-full rounded-btn px-2 py-1.5 text-left text-[13px] text-ink-2 hover:bg-hover">
             Renommer
           </button>
-          <button onClick={() => void act(() => updateTeamList(list.id, { isDone: !list.isDone }))} className="flex w-full items-center gap-2 rounded-btn px-2 py-1.5 text-left text-[13px] text-ink-2 hover:bg-hover">
+          <button
+            onClick={() => void act(() => updateTeamList(list.id, { isDone: !list.isDone }))}
+            className="flex w-full items-center gap-2 rounded-btn px-2 py-1.5 text-left text-[13px] text-ink-2 hover:bg-hover"
+          >
             <span className="flex-1">Colonne « terminé »</span>
             {list.isDone && <Check size={14} className="text-good" />}
           </button>
@@ -824,7 +979,10 @@ function AddCard({ onAdd }: { onAdd: (title: string) => Promise<void> }) {
   };
   if (!open)
     return (
-      <button onClick={() => setOpen(true)} className="mx-3 mb-3 flex items-center gap-2 rounded-btn border border-dashed border-line-strong px-3 py-2 text-[13px] text-ink-3 hover:bg-hover hover:text-ink">
+      <button
+        onClick={() => setOpen(true)}
+        className="mx-3 mb-3 flex items-center gap-2 rounded-btn border border-dashed border-line-strong px-3 py-2 text-[13px] text-ink-3 hover:bg-hover hover:text-ink"
+      >
         <Plus size={14} /> Ajouter une carte
       </button>
     );
@@ -962,4 +1120,72 @@ function BoardTitle({
       </Popover>
     </div>
   );
+}
+
+/** Texte brut du début de la description (comme l'accueil : HTML et markdown léger retirés). */
+function excerptOf(description: string): string | null {
+  const text = description
+    .replace(/<br\s*\/?>|<\/p>|<\/li>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/[*_`#>]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return null;
+  return text.length > 160 ? `${text.slice(0, 157).trimEnd()}…` : text;
+}
+
+/** Carte d'un tableau → format de l'accueil (MyCardTile) : mêmes pastilles, statut et relances. */
+function toMyCard(c: TeamCard, ws: TeamWorkspace, peopleById: Map<string, TeamPerson>, boardTitle: string): MyCard {
+  const mine = c.members.find((m) => m.userId === ws.meId);
+  const myName = peopleById.get(ws.meId)?.name;
+  const tag = myName ? `@${myName}` : null;
+  const person = (id: string) => {
+    const p = peopleById.get(id);
+    const name = p?.name || "Membre";
+    return {
+      id,
+      initials: p?.initials || initialsOf(name),
+      name,
+      avatarUrl: p?.avatarUrl ?? null,
+      isMe: id === ws.meId,
+    };
+  };
+  const members: NonNullable<MyCard["members"]> = c.members.map((m) => ({
+    ...person(m.userId),
+    isCreator: m.userId === c.createdBy,
+    status: m.status,
+    reminderLevel: m.reminderLevel,
+  }));
+  // Créateur non assigné : sa pastille en tête (entourée d'or), sans statut.
+  if (c.createdBy && !c.members.some((m) => m.userId === c.createdBy))
+    members.unshift({
+      ...person(c.createdBy),
+      isCreator: true,
+      status: null,
+      reminderLevel: 0,
+    });
+  const total = c.checklist.length;
+  return {
+    id: c.id,
+    title: c.title,
+    boardTitle,
+    dueAt: c.dueAt,
+    eventId: c.event?.id ?? null,
+    isNew: !!mine && !mine.seenAt && mine.assignedBy !== ws.meId,
+    excerpt: excerptOf(c.description),
+    checklist: total ? { done: c.checklist.filter((i) => i.done).length, total } : null,
+    color: c.color,
+    assigned: !!mine,
+    createdByMe: c.createdBy === ws.meId,
+    myStatus: mine?.status ?? null,
+    members,
+    myItems: tag ? c.checklist.filter((i) => i.content.includes(tag)).map((i) => ({ id: i.id, content: i.content, done: i.done })) : [],
+    mentions: [],
+  };
 }
