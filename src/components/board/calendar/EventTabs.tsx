@@ -36,7 +36,7 @@ import { ensureFilePublication, getMediaPublication, type MediaPublication } fro
 import dynamic from "next/dynamic";
 import { getPublishedForFile, detachFileFromPublications } from "@/app/actions/social";
 import { eventPublicationAssignees } from "@/app/actions/publication-assignee";
-import { AssigneePicker } from "@/components/board/publication/AssigneePicker";
+import { AssigneePicker, EventPublisherField } from "@/components/board/publication/AssigneePicker";
 import { describeFailures, getNetworkEntry, networkLabel, networkUrl, NETWORK_KEYS, type NetworkKey } from "@/lib/social/targets";
 import { REMINDER_PRESETS } from "@/hooks/board/useEventModalState";
 import { EventCosts } from "@/components/board/calendar/EventCosts";
@@ -681,6 +681,7 @@ export function AttachmentsField({
   // « À publier par » des vidéos : publication pas encore publiée de chaque fichier (rechargée à chaque ajout / retrait).
   const [assignments, setAssignments] = useState<Map<string, { pubId: string; assignedTo: string | null }>>(new Map());
   const fileCount = hook.files.length;
+  const [assignKey, setAssignKey] = useState(0);
   useEffect(() => {
     let cancelled = false;
     void eventPublicationAssignees(eventId)
@@ -694,7 +695,7 @@ export function AttachmentsField({
     return () => {
       cancelled = true;
     };
-  }, [eventId, fileCount]);
+  }, [eventId, fileCount, assignKey]);
 
   const askRemove = async (file: EventFile) => {
     const published = await getPublishedForFile(file.id).catch(() => []);
@@ -719,6 +720,8 @@ export function AttachmentsField({
       }}
       className={`space-y-2 rounded-btn ${dragOver ? "bg-sel-bg outline-dashed outline-2 outline-offset-4 outline-navy/40" : ""}`}
     >
+      {/* Qui publie les vidéos de l'événement : choisi même sans vidéo ni captation acceptée. */}
+      <EventPublisherField eventId={eventId} onChanged={() => setAssignKey((k) => k + 1)} />
       {hook.files.length === 0 && !hook.loading && (
         <p className="text-xs italic text-ink-4">Aucune pièce jointe pour l&rsquo;instant.</p>
       )}

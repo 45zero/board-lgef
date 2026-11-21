@@ -4,8 +4,8 @@
 // événement et sur les cartes du centre de publication (actions/publication-assignee.ts).
 
 import { useEffect, useState } from "react";
-import { Loader2, UserRound } from "lucide-react";
-import { assignPublication, listPublicationAssignees, type AssigneeOption } from "@/app/actions/publication-assignee";
+import { Loader2, UserRound, Video } from "lucide-react";
+import { assignPublication, getEventPublisher, listPublicationAssignees, setEventPublisher, type AssigneeOption } from "@/app/actions/publication-assignee";
 
 // Liste chargée une fois par page, partagée par tous les menus.
 let cached: Promise<AssigneeOption[]> | null = null;
@@ -19,13 +19,18 @@ function loadOptions() {
   return cached;
 }
 
+type AssignResult = { ok: true } | { ok: false; error: string };
+
 export function AssigneePicker({
   pubId,
+  assign,
   value,
   onChanged,
   className = "",
 }: {
-  pubId: string;
+  /** Publication à attribuer ; ou `assign` pour un autre enregistrement (événement). */
+  pubId?: string;
+  assign?: (next: string | null) => Promise<AssignResult>;
   value: string | null | undefined;
   onChanged?: (assigneeId: string | null) => void;
   className?: string;
@@ -55,7 +60,8 @@ export function AssigneePicker({
     const previous = current;
     setCurrent(next);
     setBusy(true);
-    const res = await assignPublication(pubId, next).catch(() => ({ ok: false as const, error: "Attribution impossible pour le moment." }));
+    const save = assign ?? ((n: string | null) => assignPublication(pubId!, n) as Promise<AssignResult>);
+    const res = await save(next).catch((): AssignResult => ({ ok: false, error: "Attribution impossible pour le moment." }));
     setBusy(false);
     if (!res.ok) {
       setCurrent(previous);
@@ -91,5 +97,42 @@ export function AssigneePicker({
         {current && options && !options.some((o) => o.id === current) && <option value={current}>Personne sans accès</option>}
       </select>
     </label>
+  );
+}
+
+/**
+ * « Publication : à publier par … » sur l'événement — choisi à tout moment, même sans vidéo ni
+ * captation acceptée ; les vidéos déposées ensuite sont attribuées à cette personne.
+ */
+export function EventPublisherField({ eventId, onChanged }: { eventId: string; onChanged?: () => void }) {
+  const [value, setValue] = useState<string | null | undefined>(undefined);
+  // Liste vide = pas le droit de publier (Paramètres → Publication) : la ligne n'apparaît pas.
+  const [allowed, setAllowed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void loadOptions().then((o) => {
+      if (cancelled || !o.length) return;
+      setAllowed(true);
+      void getEventPublisher(eventId)
+        .then((r) => !cancelled && setValue(r.ok ? r.data : null))
+        .catch(() => !cancelled && setValue(null));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
+  if (!allowed || value === undefined) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-btn bg-panel px-2.5 py-2">
+      <span className="flex items-center gap-1 text-xs font-semibold text-ink-2">
+        <Video size={13} className="text-ink-3" /> Vidéos de l&rsquo;événement
+      </span>
+      <AssigneePicker value={value} assign={(next) => setEventPublisher(eventId, next) as Promise<AssignResult>}
+        onChanged={(next) => {
+          setValue(next);
+          onChanged?.();
+        }}
+      />
+    </div>
   );
 }
