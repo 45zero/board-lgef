@@ -8,6 +8,7 @@ import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useUserRole } from "@/hooks/board/useUserRole";
 import { EventArrow } from "@/components/board/calendar/EventOpener";
+import { AssigneePicker } from "@/components/board/publication/AssigneePicker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Send,
@@ -2142,6 +2143,7 @@ function PublicationCard({
             </>
           )}
         </div>
+        {tab !== "published" && <AssigneePicker pubId={pub.id} value={pub.assigned_to} className="mt-1" />}
         {kind === "text" && pub.caption && <p className="mt-1 line-clamp-2 text-xs text-ink-3">{pub.caption}</p>}
         {tab !== "published" && pub.publish_info?.lastError && (
           <p className="mt-1 flex items-start gap-1 text-[11px] text-bad">

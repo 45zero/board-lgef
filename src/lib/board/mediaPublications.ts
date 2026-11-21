@@ -52,6 +52,8 @@ export interface MediaPublication {
   event_files: EventFile | null;
   events: { title: string; start_date: string; event_type: DbEventType | null } | null;
   published_by: string | null;
+  /** Personne chargée de la publier (« À publier par ») — absent avant la migration 2026-11-22. */
+  assigned_to?: string | null;
   /** Qui a créé la publication (centre de publication) — null pour celles ajoutées automatiquement depuis un événement. */
   creator: PersonRef | null;
   /** Qui a cliqué « Publier ». */

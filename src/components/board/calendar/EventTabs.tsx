@@ -35,6 +35,8 @@ import { groupByFolder, pickedFromDrop, pickedFromInput } from "@/lib/board/fold
 import { ensureFilePublication, getMediaPublication, type MediaPublication } from "@/lib/board/mediaPublications";
 import dynamic from "next/dynamic";
 import { getPublishedForFile, detachFileFromPublications } from "@/app/actions/social";
+import { eventPublicationAssignees } from "@/app/actions/publication-assignee";
+import { AssigneePicker } from "@/components/board/publication/AssigneePicker";
 import { describeFailures, getNetworkEntry, networkLabel, networkUrl, NETWORK_KEYS, type NetworkKey } from "@/lib/social/targets";
 import { REMINDER_PRESETS } from "@/hooks/board/useEventModalState";
 import { EventCosts } from "@/components/board/calendar/EventCosts";
@@ -553,12 +555,15 @@ function AttachmentRow({
   canPublish,
   onRemove,
   onPublishClick,
+  assignment,
 }: {
   file: EventFile;
   canManage: boolean;
   canPublish: boolean;
   onRemove: () => void;
   onPublishClick: () => void;
+  /** Publication pas encore publiée de la vidéo et sa personne attribuée (« À publier par »). */
+  assignment?: { pubId: string; assignedTo: string | null };
 }) {
   const isVideo = (file.content_type ?? "").startsWith("video");
   const isImage = (file.content_type ?? "").startsWith("image");
@@ -611,6 +616,9 @@ function AttachmentRow({
       </div>
       {/* Hors du bouton d'ouverture : liens et bouton de partage ne peuvent pas être imbriqués dans un <button>. */}
       <div className="pl-[23px]">
+        {isVideo && assignment && (canPublish || canManage) && (
+          <AssigneePicker pubId={assignment.pubId} value={assignment.assignedTo} className="mt-1" />
+        )}
         <PublishBadges file={file} />
       </div>
       {viewing && (
@@ -670,6 +678,23 @@ export function AttachmentsField({
     }
   };
   const [removing, setRemoving] = useState<{ file: EventFile; networks: NetworkKey[] } | null>(null);
+  // « À publier par » des vidéos : publication pas encore publiée de chaque fichier (rechargée à chaque ajout / retrait).
+  const [assignments, setAssignments] = useState<Map<string, { pubId: string; assignedTo: string | null }>>(new Map());
+  const fileCount = hook.files.length;
+  useEffect(() => {
+    let cancelled = false;
+    void eventPublicationAssignees(eventId)
+      .then((res) => {
+        if (cancelled || !res.ok) return;
+        const next = new Map<string, { pubId: string; assignedTo: string | null }>();
+        for (const p of res.data) for (const id of p.fileIds) next.set(id, { pubId: p.pubId, assignedTo: p.assignedTo });
+        setAssignments(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, fileCount]);
 
   const askRemove = async (file: EventFile) => {
     const published = await getPublishedForFile(file.id).catch(() => []);
@@ -729,6 +754,7 @@ export function AttachmentsField({
                   canPublish={canPublish}
                   onRemove={() => askRemove(f)}
                   onPublishClick={() => openingId !== f.id && void openComposer(f)}
+                  assignment={assignments.get(f.id)}
                 />
               ))}
             </FolderBlock>
@@ -755,6 +781,7 @@ export function AttachmentsField({
                 canPublish={canPublish}
                 onRemove={() => askRemove(f)}
                 onPublishClick={() => openingId !== f.id && void openComposer(f)}
+                assignment={assignments.get(f.id)}
               />
             ))}
           </div>
