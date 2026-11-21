@@ -4,6 +4,7 @@ import { canShowModule, useHiddenModules, useVisibleModules } from "@/hooks/boar
 import { useAppBadges } from "@/hooks/board/useAppBadges";
 import { AppBadgePills } from "@/components/board/AppBadgePills";
 import type { ComponentType } from "react";
+import Image from "next/image";
 import {
   Home,
   Kanban,
@@ -81,10 +82,24 @@ export function AppRail({
   const labelOf = useAppLabel();
   return (
     <aside
-      className={`flex min-h-0 shrink-0 flex-col justify-between gap-2 rounded-panel border border-line bg-card/70 py-3 shadow-bar backdrop-blur ${
+      className={`flex min-h-0 shrink-0 flex-col justify-between gap-2 border-r border-line bg-card/70 pb-3 shadow-bar backdrop-blur ${
         nav === "rail" ? "w-[74px] items-center" : "w-[220px]"
       }`}
     >
+      {/* Le rail monte jusqu'en haut de l'écran : logo et nom de la Ligue en tête. Hauteur calée sur la
+          barre du haut (62 px) : le trait sous le logo prolonge le bas de la barre. */}
+      <div className={`flex h-[62px] shrink-0 items-center border-b border-line ${nav === "rail" ? "w-full flex-col justify-center gap-0.5 px-1" : "gap-2.5 px-4"}`}>
+        <Image src="/lgef-logo.png" alt="Ligue du Grand Est de Football" width={nav === "rail" ? 30 : 36} height={nav === "rail" ? 30 : 36} className="shrink-0 rounded-lg" />
+        {nav === "rail" ? (
+          <span className="text-center text-[7px] font-extrabold uppercase leading-[1.15] tracking-wide text-ink-2">Ligue du Grand Est</span>
+        ) : (
+          <span className="min-w-0 leading-tight">
+            <span className="block text-sm font-extrabold text-ink">Ligue du Grand Est</span>
+            <span className="block font-mono text-[9px] uppercase tracking-[0.12em] text-ink-4">de Football</span>
+          </span>
+        )}
+      </div>
+
       {/* Liste des applications défilante : le rail reste utilisable quel que soit le nombre d'applis. */}
       <div
         className={`flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain pt-1.5 [scrollbar-width:thin] ${

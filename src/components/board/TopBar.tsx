@@ -20,7 +20,10 @@ export function TopBar({
   onOpenSettings,
   onOpenModuleAccess,
   onNavigate,
+  brand = true,
 }: {
+  /** Logo et nom dans la barre ; false quand le rail (qui monte jusqu'en haut) les porte déjà. */
+  brand?: boolean;
   currentApp: BoardApp;
   theme: Theme;
   onToggleTheme: () => void;
@@ -37,7 +40,8 @@ export function TopBar({
   return (
     <>
       {/* relative z-40 : le backdrop-blur crée un contexte d'empilement — sans z-index, le volet des notifications passerait sous le contenu. */}
-      <header className="relative z-40 mx-4 mt-4 flex h-[62px] items-center gap-4 rounded-btn border border-line bg-card/80 px-4 shadow-bar backdrop-blur">
+      <header className={`relative z-40 flex h-[62px] shrink-0 items-center gap-4 rounded-btn border border-line bg-card/80 px-4 shadow-bar backdrop-blur ${brand ? "mx-4 mt-4" : "rounded-none border-x-0 border-t-0"}`}>
+        {brand && (
         <div className="flex items-center gap-2">
           <Image src="/lgef-logo.png" alt="Ligue Grand Est de Football" width={34} height={34} className="rounded-lg" />
 
@@ -48,6 +52,7 @@ export function TopBar({
             </div>
           </div>
         </div>
+        )}
 
         <div className="flex items-center gap-1 rounded-full border border-line bg-subtle px-2.5 py-1 text-xs font-semibold text-ink-2">
           <span className="h-1.5 w-1.5 rounded-full bg-good" />

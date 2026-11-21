@@ -166,8 +166,13 @@ export function BoardShell() {
 
   return (
     <div data-theme={theme} className="min-h-screen bg-shell relative overflow-hidden">
-      <div className="relative flex h-screen flex-col">
+      {/* Rail : collé aux bords de la fenêtre, il monte jusqu'en haut (logo de la Ligue en tête), la barre du
+          haut (collée au rail et au bord) et le contenu à sa droite. Dock : barre du haut pleine largeur, comme avant. */}
+      <div className={`relative flex h-screen ${prefs.navStyle === "rail" ? "" : "flex-col"}`}>
+        {prefs.navStyle === "rail" && <AppRail nav={nav} activeApp={app} onSelectApp={selectApp} onToggleNav={setNav} />}
+        <div className={prefs.navStyle === "rail" ? "flex min-w-0 flex-1 flex-col gap-4" : "contents"}>
         <TopBar
+          brand={prefs.navStyle !== "rail"}
           currentApp={currentApp}
           theme={theme}
           onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
@@ -176,10 +181,7 @@ export function BoardShell() {
           onNavigate={selectApp}
         />
 
-        <div className="flex flex-1 overflow-hidden px-4 pb-4 gap-4">
-          {prefs.navStyle === "rail" && (
-            <AppRail nav={nav} activeApp={app} onSelectApp={selectApp} onToggleNav={setNav} />
-          )}
+        <div className="flex flex-1 gap-4 overflow-hidden px-4 pb-4">
 
           {/* Les modules déjà ouverts restent montés (masqués quand inactifs) : y revenir est
               instantané, avec leurs données et leur position de défilement, comme une appli native. */}
@@ -216,6 +218,7 @@ export function BoardShell() {
               <ChevronLeft size={16} />
             </button>
           )}
+        </div>
         </div>
 
         {prefs.navStyle === "dock" && (

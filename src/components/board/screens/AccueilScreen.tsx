@@ -4,22 +4,27 @@ import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useEffect, useRef, useState } from "react";
 import {
   Eye,
+  Heart,
+  MessageCircle,
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock,
   ImageIcon,
+  ListChecks,
   MapPin,
   Play,
+  Search,
   SlidersHorizontal,
+  X,
 } from "lucide-react";
 import { getDashboard, setFraisDeclarationMode, type Dashboard, type DashboardAction, type ProgrammeItem } from "@/app/actions/dashboard";
 import { DefaultMenu } from "@/components/board/calendar/DefaultMenu";
 import type { RecentPost } from "@/lib/board/recentPosts";
 import { readCache, writeCache } from "@/lib/board/localCache";
-import { EVENT_TYPE_TO_ORG } from "@/lib/board/calendar";
-import { ORG_COLORS, ORG_LABELS } from "@/lib/board/tokens";
+import { EVENT_TYPE_TO_ORG, type DbEventType } from "@/lib/board/calendar";
+import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
 import { ActionPopup } from "@/components/board/dashboard/ActionPopup";
 import { EventArrow, useOpenEvent } from "@/components/board/calendar/EventOpener";
 import { useForecast } from "@/components/board/calendar/DayWeather";
@@ -60,18 +65,48 @@ function eventState(p: ProgrammeItem) {
   return { label: "À venir", className: "bg-sel-bg text-link" };
 }
 
-function SectionTitle({ children, action }: { children: React.ReactNode; action?: { label: string; onClick: () => void } }) {
+
+/** Panneau du tableau de bord : fond carte, bord fin, ombre douce. */
+const PANEL = "rounded-panel border border-line bg-card p-3 shadow-card";
+
+/** Titre de panneau : pastille d'icône, titre, compteur rouge, filtres éventuels au milieu, action à droite. */
+function PanelHead({
+  icon,
+  title,
+  count,
+  middle,
+  right,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  count?: number;
+  middle?: React.ReactNode;
+  right?: React.ReactNode;
+}) {
   return (
-    <div className="mb-2 flex items-baseline justify-between gap-2">
-      <h2 className="text-sm font-extrabold text-ink md:text-base">{children}</h2>
-      {action && (
-        <button onClick={action.onClick} className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-link hover:underline md:text-xs">
-          {action.label} <ChevronRight size={12} />
-        </button>
-      )}
+    <div className="mb-2.5 flex items-center justify-between gap-2">
+      <h2 className={`flex items-center gap-2 text-[13px] font-extrabold text-ink md:text-sm ${middle ? "shrink-0" : "min-w-0"}`}>
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-navy text-white">{icon}</span>
+        <span className="truncate">{title}</span>
+        {!!count && (
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red px-1.5 text-[10px] font-extrabold text-white">{count}</span>
+        )}
+      </h2>
+      {middle && <div className="min-w-0 flex-1">{middle}</div>}
+      {right}
     </div>
   );
 }
+
+/** Libellés courts des pôles pour les filtres de médias (les longs ne tiennent pas en pastille). */
+const ORG_SHORT: Partial<Record<OrgKey, string>> = { pem: "PEM", tirages: "Tirages" };
+/** Filtres de médias : les matchs du week-end sont rangés sous Compétitions (pas de filtre « Matchs »). */
+const MEDIA_ORG_MERGE: Partial<Record<OrgKey, OrgKey>> = { matchs: "red" };
+const ORG_ORDER = Object.keys(ORG_LABELS) as OrgKey[];
+const postOrg = (p: RecentPost): OrgKey | null => {
+  const org = p.eventType ? (EVENT_TYPE_TO_ORG[p.eventType as DbEventType] ?? null) : null;
+  return org ? (MEDIA_ORG_MERGE[org] ?? org) : null;
+};
 
 /**
  * Tableau de bord : bandeau (météo, pointage, anniversaires), les actions à faire et le programme
@@ -205,15 +240,20 @@ export function AccueilScreen({
         <img src="/lgef-logo.png" alt="" className="w-[min(42%,380px)] opacity-[0.06]" />
       </div>
       {/* Un seul défilement (aussi sur mobile) ; en blocs, pour qu'aucune section ne soit écrasée. Marge basse : barre d'onglets mobile. */}
-      <div className="relative h-full space-y-5 overflow-y-auto p-1 pb-28 md:pb-2">
-        <HomeBanner firstName={data?.firstName ?? null} birthdays={data?.birthdays ?? []} punchedIn={punchedIn} onTogglePunch={onTogglePunch} />
+      <div className="relative h-full overflow-y-auto p-1 pb-28 md:pb-2">
+        {/* Ordinateur : à gauche bandeau fin, ligne des derniers médias, actions ; à droite mails puis agenda.
+            Mobile : bandeau, médias, actions, mails, agenda. */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)] lg:items-start">
+          <div className="min-w-0 lg:col-start-1">
+            <HomeBanner firstName={data?.firstName ?? null} birthdays={data?.birthdays ?? []} punchedIn={punchedIn} onTogglePunch={onTogglePunch} />
+          </div>
 
+          <RecentPosts posts={posts} onSeeAll={onNavigate ? () => onNavigate("audiovisuel") : undefined} />
 
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
           <DefaultMenu
             title="Mes frais"
             atCursor
-            className="order-1 min-w-0"
+            className="min-w-0 lg:col-start-1"
             footnote={null}
             options={[
               {
@@ -251,17 +291,14 @@ export function AccueilScreen({
               if (longPressed.current) e.preventDefault();
             }}
             onTouchCancel={cancelPress}
+            className={PANEL}
           >
-            <div className="mb-2 flex items-baseline justify-between gap-2">
-              <h2 className="text-sm font-extrabold text-ink md:text-base">
-                Mes actions
-                {actions.length > 0 && (
-                  <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red px-1 align-[2px] text-[9px] font-extrabold text-white">
-                    {actions.length}
-                  </span>
-                )}
-              </h2>
-              {/* Toujours visible : le réglage reste accessible quand « Frais à déclarer » a disparu. */}
+            <PanelHead
+              icon={<ListChecks size={14} />}
+              title="Mes actions"
+              count={actions.length}
+              right={
+              /* Toujours visible : le réglage reste accessible quand « Frais à déclarer » a disparu. */
               <button
                 type="button"
                 onClick={(e) => {
@@ -274,7 +311,8 @@ export function AccueilScreen({
                 <SlidersHorizontal size={12} />
                 {data?.fraisMode === "manuel" ? "Frais manuels" : "Frais auto"}
               </button>
-            </div>
+              }
+            />
             {/* Mobile : carrousel de petites cartes (comme les médias), le nombre en pastille. */}
             {data !== null && actions.length > 0 && (
               <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2 lg:hidden">
@@ -285,23 +323,23 @@ export function AccueilScreen({
             )}
             <div className={data !== null && actions.length > 0 ? "hidden lg:block" : ""}>
             {data === null ? (
-              <div className="rounded-panel border border-line bg-card p-6 text-sm text-ink-4">Chargement…</div>
+              <div className="rounded-card bg-panel p-6 text-sm text-ink-4">Chargement…</div>
             ) : actions.length === 0 ? (
-              <div className="flex flex-col items-start gap-2 rounded-panel border border-line bg-card p-4 text-sm text-ink-2 sm:flex-row sm:items-center">
+              <div className="flex flex-col items-start gap-2 rounded-card bg-panel p-4 text-sm text-ink-2 sm:flex-row sm:items-center">
                 <CheckCircle2 size={20} className="shrink-0 text-good" /> Rien à faire, tout est à jour.
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="grid gap-2 xl:grid-cols-2">
                 {actions.map((a) => {
                   const tone = TONES[a.tone];
                   return (
                     <button
                       key={a.id}
                       onClick={() => setOpenAction(a)}
-                      className={`flex w-full flex-col gap-2 rounded-card border border-l-4 border-line bg-card p-3 text-left shadow-card transition hover:-translate-y-px hover:border-line-strong sm:flex-row sm:items-center sm:gap-3 sm:p-3.5 ${tone.border}`}
+                      className={`flex w-full flex-col gap-2 rounded-card border border-l-4 border-line bg-panel px-2.5 py-2 text-left transition hover:-translate-y-px hover:border-line-strong hover:shadow-card sm:flex-row sm:items-center sm:gap-3 ${tone.border}`}
                     >
                       {/* Même photo que la vignette mobile, le nombre en pastille dans le coin. */}
-                      <span className="relative block h-14 w-14 shrink-0">
+                      <span className="relative block h-10 w-10 shrink-0">
                         <span className="block h-full w-full overflow-hidden rounded-xl bg-subtle">
                           <ActionPhoto action={a} />
                         </span>
@@ -324,31 +362,40 @@ export function AccueilScreen({
           )}
           </DefaultMenu>
 
-          {/* Mobile : actions (carrousel), aujourd'hui, mails ; ordinateur : trois colonnes. */}
-          <section className="order-3 min-w-0 lg:order-2">
+          {/* Colonne de droite : les 5 derniers mails non lus, puis l'agenda. */}
+          <div className="flex min-w-0 flex-col gap-4 lg:col-start-2 lg:row-span-3 lg:row-start-1">
+          <section className={`min-w-0 ${PANEL}`}>
             <UnreadMails onOpenMails={onNavigate ? () => onNavigate("mails") : undefined} />
           </section>
 
-          <section className="order-2 min-w-0 lg:order-3">
-            {/* Aujourd'hui / Cette semaine : la période du calendrier, sur la ligne du titre. */}
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <div className="flex rounded-full bg-subtle p-0.5">
-                {(["day", "week"] as const).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setPeriod(p)}
-                    className={`rounded-full px-3 py-1 text-xs font-extrabold transition-colors md:text-sm ${period === p ? "bg-navy text-white" : "text-ink-3 hover:text-ink"}`}
-                  >
-                    {p === "day" ? "Aujourd'hui" : "Cette semaine"}
+          <section className={`min-w-0 ${PANEL}`}>
+            <PanelHead
+              icon={<CalendarDays size={14} />}
+              title="Agenda"
+              middle={
+                /* Aujourd'hui / Semaine : la période du calendrier, en petit sur la ligne du titre. */
+                <div className="flex justify-center">
+                  <div className="flex rounded-full bg-subtle p-0.5">
+                    {(["day", "week"] as const).map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => setPeriod(p)}
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-bold transition-colors ${period === p ? "bg-navy text-white" : "text-ink-3 hover:text-ink"}`}
+                      >
+                        {p === "day" ? "Aujourd'hui" : "Semaine"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              }
+              right={
+                onNavigate && (
+                  <button onClick={() => onNavigate("calendrier")} className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-link hover:underline md:text-xs">
+                    Calendrier <ChevronRight size={12} />
                   </button>
-                ))}
-              </div>
-              {onNavigate && (
-                <button onClick={() => onNavigate("calendrier")} className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-link hover:underline md:text-xs">
-                  Calendrier <ChevronRight size={12} />
-                </button>
-              )}
-            </div>
+                )
+              }
+            />
             {agenda.box.multiple && (
               <div className="-mt-0.5 mb-2">
                 <BoxChips
@@ -362,15 +409,15 @@ export function AccueilScreen({
               </div>
             )}
             {data === null ? (
-              <div className="rounded-panel border border-line bg-card p-6 text-sm text-ink-4">Chargement…</div>
+              <div className="rounded-card bg-panel p-6 text-sm text-ink-4">Chargement…</div>
             ) : entries.length === 0 ? (
-              <div className="flex flex-col items-start gap-2 rounded-panel border border-line bg-card p-4 text-sm text-ink-3 sm:flex-row sm:items-center">
+              <div className="flex flex-col items-start gap-2 rounded-card bg-panel p-4 text-sm text-ink-3 sm:flex-row sm:items-center">
                 <CalendarDays size={18} className="shrink-0 text-ink-4" /> Aucun événement où vous êtes sollicité {periodLabel}{agenda.accounts.length ? ", rien non plus dans vos agendas" : ""}.
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {[...byDay.entries()].map(([k, items]) => (
-                  <div key={k} className="space-y-2">
+                  <div key={k} className="space-y-1.5">
                     {period === "week" && <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">{dayLabel(items[0].start)}</div>}
                     {items.map((entry) => {
                       if (entry.kind === "agenda") {
@@ -379,7 +426,7 @@ export function AccueilScreen({
                           <button
                             key={`g:${g.accountId}:${g.id}`}
                             onClick={() => setOpenAgenda(g)}
-                            className="flex w-full flex-col gap-1.5 rounded-card border border-dashed border-line-strong bg-card p-3 text-left shadow-card transition hover:-translate-y-px sm:flex-row sm:items-start sm:gap-3 sm:p-3.5"
+                            className="flex w-full flex-col gap-1.5 rounded-card border border-dashed border-line-strong bg-panel px-2.5 py-2 text-left transition hover:-translate-y-px hover:shadow-card sm:flex-row sm:items-start sm:gap-3"
                           >
                             <span className="flex items-center gap-1.5 sm:w-14 sm:shrink-0 sm:flex-col sm:items-start sm:gap-1">
                               <span className="font-mono text-xs font-extrabold text-ink sm:text-sm">{g.allDay ? "Journée" : time(g.start)}</span>
@@ -409,7 +456,7 @@ export function AccueilScreen({
                         <button
                           key={p.eventId}
                           onClick={() => void openEvent(p.eventId)}
-                          className="flex w-full flex-col gap-1.5 rounded-card border border-line bg-card p-3 text-left shadow-card transition hover:-translate-y-px hover:border-line-strong sm:flex-row sm:items-start sm:gap-3 sm:p-3.5"
+                          className="flex w-full flex-col gap-1.5 rounded-card border border-line bg-panel px-2.5 py-2 text-left transition hover:-translate-y-px hover:border-line-strong hover:shadow-card sm:flex-row sm:items-start sm:gap-3"
                         >
                           <span className="flex items-center gap-1.5 sm:w-14 sm:shrink-0 sm:flex-col sm:items-start sm:gap-1">
                             <span className="font-mono text-xs font-extrabold text-ink sm:text-sm">{time(p.start)}</span>
@@ -444,9 +491,8 @@ export function AccueilScreen({
               </div>
             )}
           </section>
+          </div>
         </div>
-
-        <RecentPosts posts={posts} onSeeAll={onNavigate ? () => onNavigate("audiovisuel") : undefined} />
 
         {openAgenda && (
           <GoogleEventModal
@@ -542,69 +588,178 @@ const NETWORK_ICON = {
 
 /** Derniers médias publiés sur les réseaux de la Ligue (Facebook, Instagram, YouTube), avec le lien vers chaque post. */
 function RecentPosts({ posts, onSeeAll }: { posts: RecentPost[] | null; onSeeAll?: () => void }) {
+  // Filtre par pôle (événement rattaché) : seulement les pôles qui ont des médias, « Tous » par défaut.
+  const [filter, setFilter] = useState<OrgKey | "all">("all");
+  // Loupe : recherche sur toutes les publications publiées (titre, légende), pas seulement les dernières.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<RecentPost[] | null>(null);
+  const q = query.trim();
+  useEffect(() => {
+    if (q.length < 2) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      fetch(`/api/dashboard/recent-posts?q=${encodeURIComponent(q)}`)
+        .then((r) => (r.ok ? (r.json() as Promise<RecentPost[]>) : Promise.reject()))
+        .then((res) => !cancelled && setFound(res))
+        .catch(() => !cancelled && setFound([]));
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [q]);
+  const searching = searchOpen && q.length >= 2;
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setQuery("");
+    setFound(null);
+  };
   if (posts !== null && posts.length === 0) return null;
+  const source = searching ? found : posts;
+  const present = new Set((source ?? []).map(postOrg).filter((o): o is OrgKey => o !== null));
+  const orgs = ORG_ORDER.filter((o) => present.has(o));
+  const active = filter !== "all" && present.has(filter) ? filter : "all";
+  const visible = source === null ? null : active === "all" ? source : source.filter((p) => postOrg(p) === active);
+  const chip = (on: boolean) =>
+    `shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${on ? "bg-navy text-white" : "bg-subtle text-ink-3 hover:text-ink"}`;
   return (
-    <section className="min-w-0">
-      <SectionTitle action={onSeeAll ? { label: "Voir tout", onClick: onSeeAll } : undefined}>Derniers médias publiés</SectionTitle>
+    <section className={`min-w-0 lg:col-start-1 ${PANEL}`}>
+      <PanelHead
+        icon={<ImageIcon size={14} />}
+        title="Derniers médias"
+        middle={
+          searchOpen ? (
+            <div className="flex items-center gap-1.5 rounded-full border border-line bg-panel px-2.5 py-1">
+              <Search size={12} className="shrink-0 text-ink-4" />
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  if (e.target.value.trim().length < 2) setFound(null);
+                }}
+                onKeyDown={(e) => e.key === "Escape" && closeSearch()}
+                placeholder="Rechercher un média…"
+                className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-4"
+              />
+            </div>
+          ) : (
+          orgs.length > 0 && (
+            <div className="flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <button type="button" onClick={() => setFilter("all")} className={chip(active === "all")}>
+                Tous
+              </button>
+              {orgs.map((o) => (
+                <button key={o} type="button" onClick={() => setFilter(o)} className={`${chip(active === o)} flex items-center gap-1.5`}>
+                  {active !== o && <span className="h-1.5 w-1.5 rounded-full" style={{ background: ORG_COLORS[o].base }} />}
+                  {ORG_SHORT[o] ?? ORG_LABELS[o]}
+                </button>
+              ))}
+            </div>
+          )
+          )
+        }
+        right={
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+              title={searchOpen ? "Fermer la recherche" : "Rechercher un média"}
+              aria-label={searchOpen ? "Fermer la recherche" : "Rechercher un média"}
+              className="flex h-7 w-7 items-center justify-center rounded-full text-ink-3 hover:bg-hover hover:text-ink"
+            >
+              {searchOpen ? <X size={14} /> : <Search size={14} />}
+            </button>
+            {onSeeAll && (
+              <button onClick={onSeeAll} className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-link hover:underline md:text-xs">
+                Voir tout <ChevronRight size={12} />
+              </button>
+            )}
+          </div>
+        }
+      />
+      {searching && found !== null && visible!.length === 0 ? (
+        <div className="rounded-card bg-panel p-4 text-sm text-ink-3">Aucun média publié ne correspond à « {q} ».</div>
+      ) : (
       <HScroll>
-        {posts === null
-          ? Array.from({ length: 5 }, (_, i) => <div key={i} className="aspect-square w-32 shrink-0 animate-pulse rounded-card bg-subtle sm:w-40" />)
-          : posts.map((p) => {
+        {visible === null
+          ? Array.from({ length: 8 }, (_, i) => <div key={i} className="aspect-square w-28 shrink-0 animate-pulse rounded-xl bg-subtle sm:w-32" />)
+          : visible.map((p) => {
               const link = p.networks.find((n) => n.url)?.url ?? null;
-              const content = (
-                <>
-                  <div className="relative aspect-square overflow-hidden rounded-card bg-gradient-to-br from-navy to-navy-500 shadow-card">
-                    <div className="absolute inset-0 flex items-center justify-center text-white/50">
-                      <ImageIcon size={26} />
-                    </div>
-                    {p.thumbUrl && (
-                      // eslint-disable-next-line @next/next/no-img-element -- miniature signée (Drive, Storage ou YouTube)
-                      <img
-                        src={p.thumbUrl}
-                        alt=""
-                        loading="lazy"
-                        className="relative h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                        onError={(e) => (e.currentTarget.style.display = "none")}
-                      />
-                    )}
-                    {p.kind === "video" && (
-                      <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white">
-                        <Play size={11} fill="currentColor" />
-                      </span>
-                    )}
-                    <div className="absolute bottom-1.5 left-1.5 flex gap-1">
+              const tip = [p.title, ago(p.publishedAt), p.views != null ? `${p.views.toLocaleString("fr-FR")} vues` : null].filter(Boolean).join(" · ");
+              const thumb = (
+                <div className="relative aspect-square overflow-hidden rounded-xl bg-gradient-to-br from-navy to-navy-500">
+                  <div className="absolute inset-0 flex items-center justify-center text-white/50">
+                    <ImageIcon size={20} />
+                  </div>
+                  {p.thumbUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element -- miniature signée (Drive, Storage ou YouTube)
+                    <img
+                      src={p.thumbUrl}
+                      alt=""
+                      loading="lazy"
+                      className="relative h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      onError={(e) => (e.currentTarget.style.display = "none")}
+                    />
+                  )}
+                  {p.kind === "video" && (
+                    <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-white">
+                      <Play size={9} fill="currentColor" />
+                    </span>
+                  )}
+                  {/* Dégradé bas : réseaux et vues lisibles sur toute image. */}
+                  <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-1 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1 pt-4">
+                    <span className="flex gap-0.5">
                       {p.networks.map((n) => {
                         const { Icon, label, color } = NETWORK_ICON[n.network];
                         return (
-                          <span key={n.network} title={label} className="flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-card" style={{ color }}>
-                            <Icon size={13} />
+                          <span key={n.network} title={label} className="flex h-4 w-4 items-center justify-center rounded-full bg-white" style={{ color }}>
+                            <Icon size={9} />
                           </span>
                         );
                       })}
-                    </div>
-                  </div>
-                  <div className="mt-1.5 line-clamp-2 text-[12px] font-semibold leading-tight text-ink">{p.title}</div>
-                  <div className="flex items-center gap-2 text-[10px] text-ink-4">
-                    <span>{ago(p.publishedAt)}</span>
+                    </span>
                     {p.views != null && (
-                      <span className="flex items-center gap-0.5 font-semibold text-ink-3" title="Vues cumulées sur les réseaux">
-                        <Eye size={11} /> {p.views.toLocaleString("fr-FR")}
+                      <span className="flex items-center gap-0.5 text-[9px] font-bold text-white">
+                        <Eye size={9} /> {p.views.toLocaleString("fr-FR")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+              const content = (
+                <>
+                  {thumb}
+                  <div className="mt-1.5 line-clamp-2 text-[11px] font-semibold leading-tight text-ink">{p.title}</div>
+                  {/* Ligne de la date : likes et commentaires cumulés sur les réseaux (dernier relevé). */}
+                  <div className="mt-0.5 flex items-center gap-2 text-[10px] text-ink-4">
+                    <span className="truncate">{ago(p.publishedAt)}</span>
+                    {p.likes != null && (
+                      <span className="flex shrink-0 items-center gap-0.5 font-semibold text-ink-3" title="J'aime cumulés sur les réseaux">
+                        <Heart size={10} /> {p.likes.toLocaleString("fr-FR")}
+                      </span>
+                    )}
+                    {p.comments != null && (
+                      <span className="flex shrink-0 items-center gap-0.5 font-semibold text-ink-3" title="Commentaires cumulés sur les réseaux">
+                        <MessageCircle size={10} /> {p.comments.toLocaleString("fr-FR")}
                       </span>
                     )}
                   </div>
                 </>
               );
               return link ? (
-                <a key={p.id} href={link} target="_blank" rel="noreferrer" className="group w-32 shrink-0 snap-start sm:w-40">
+                <a key={p.id} href={link} target="_blank" rel="noreferrer" title={tip} className="group w-28 shrink-0 snap-start sm:w-32">
                   {content}
                 </a>
               ) : (
-                <div key={p.id} className="group w-32 shrink-0 snap-start sm:w-40">
+                <div key={p.id} title={tip} className="group w-28 shrink-0 snap-start sm:w-32">
                   {content}
                 </div>
               );
             })}
       </HScroll>
+      )}
     </section>
   );
 }
@@ -613,17 +768,17 @@ function RecentPosts({ posts, onSeeAll }: { posts: RecentPost[] | null; onSeeAll
 function HScroll({ children }: { children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const scroll = (dir: -1 | 1) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth * 0.8, behavior: "smooth" });
-  const arrow = "absolute top-[38%] z-[1] hidden h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-card text-ink shadow-modal hover:bg-hover md:group-hover/row:flex";
+  const arrow = "absolute top-1/2 z-[1] hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-card text-ink shadow-modal hover:bg-hover md:group-hover/row:flex";
   return (
     <div className="group/row relative">
-      <div ref={ref} className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-2">
+      <div ref={ref} className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {children}
       </div>
       <button type="button" onClick={() => scroll(-1)} className={`${arrow} -left-2`} aria-label="Précédents">
-        <ChevronLeft size={18} />
+        <ChevronLeft size={16} />
       </button>
       <button type="button" onClick={() => scroll(1)} className={`${arrow} -right-2`} aria-label="Suivants">
-        <ChevronRight size={18} />
+        <ChevronRight size={16} />
       </button>
     </div>
   );
@@ -662,18 +817,18 @@ function HomeBanner({
       />
       <div aria-hidden className="absolute inset-0 bg-gradient-to-r from-navy via-navy/85 to-navy/20 md:via-navy/50 md:to-transparent" />
 
-      <div className="relative flex min-h-[220px] max-w-full flex-col justify-center px-5 py-6 md:min-h-[260px] md:max-w-[52%] md:px-8">
+      <div className="relative flex min-h-[150px] max-w-full flex-col justify-center px-5 py-4 md:min-h-[160px] md:max-w-[60%] md:px-7">
         {mine ? (
-          <h1 className="text-2xl font-extrabold leading-tight md:text-[34px]">
+          <h1 className="text-xl font-extrabold leading-tight md:text-2xl">
             Joyeux anniversaire 🎉
             <br />
             <span className="text-[#F2C14E]">{mine.firstName || firstName} !</span>
           </h1>
         ) : (
-          <h1 className="text-2xl font-extrabold md:text-[34px]">Bonjour{firstName ? ` ${firstName}` : ""}.</h1>
+          <h1 className="text-xl font-extrabold md:text-2xl">Bonjour{firstName ? ` ${firstName}` : ""}.</h1>
         )}
 
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-white/80 md:text-[11px]">{TODAY}</span>
           {now && (
             <>
@@ -701,18 +856,18 @@ function HomeBanner({
           </div>
         )}
 
-        {mine && <p className="mt-3 text-sm text-white/85">Toute l&rsquo;équipe de la Ligue Grand Est de Football te souhaite une excellente journée !</p>}
+        {mine && <p className="mt-2 text-xs text-white/85">Toute l&rsquo;équipe de la Ligue Grand Est de Football te souhaite une excellente journée !</p>}
         {othersLabel && (
-          <p className="mt-3 inline-flex w-fit items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur-sm">
+          <p className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur-sm">
             🎂 C&rsquo;est l&rsquo;anniversaire de {othersLabel} aujourd&rsquo;hui !
           </p>
         )}
 
-        <div className="mt-5">
+        <div className="mt-3">
           <button
             type="button"
             onClick={onTogglePunch}
-            className="flex items-center gap-2 rounded-btn bg-red px-5 py-3 text-sm font-bold shadow-btn-red transition hover:bg-red-700"
+            className="flex items-center gap-2 rounded-btn bg-red px-4 py-2 text-sm font-bold shadow-btn-red transition hover:bg-red-700"
           >
             <Clock size={16} />
             {punchedIn ? "Pointer la sortie" : "Pointer l'entrée"}

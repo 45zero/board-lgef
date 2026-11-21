@@ -270,7 +270,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
           items: assignItems,
           title: "Demandes de captation à traiter",
           detail: waitingCount
-            ? `À valider et attribuer à un membre TeamMedias — ${waitingCount} déjà proposée${waitingCount > 1 ? "s" : ""}, en attente de réponse`
+            ? `${waitingCount} déjà proposée${waitingCount > 1 ? "s" : ""}, en attente de réponse`
             : "À valider et attribuer à un membre TeamMedias",
         });
       }

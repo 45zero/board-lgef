@@ -19,7 +19,8 @@ import { BoxChips, BoxTag, boxName } from "@/components/board/mail/MailBoxes";
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
 type Item = MailList["messages"][number] & { accountId: string };
 
-const MAX = 6;
+/** Non lus chargés ; la liste en montre environ 5 et défile pour le reste. */
+const MAX = 30;
 /** Comme le compteur du rail : onglet Principal de Gmail seulement (voir getInboxUnreadCount). */
 const PRIMARY_QUERY = "is:unread category:primary";
 
@@ -323,11 +324,14 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
 
   return (
     <>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 className="flex shrink-0 items-center gap-1.5 text-sm font-extrabold text-ink md:text-base">
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <h2 className="flex shrink-0 items-center gap-2 text-[13px] font-extrabold text-ink md:text-sm">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-navy text-white">
+            <Mail size={14} />
+          </span>
           Mes mails non lus
           {(total ?? inScope.length) > 0 && (
-            <span className="rounded-full bg-red px-1.5 text-[10px] font-bold text-white">{(total ?? inScope.length) > 99 ? "99+" : (total ?? inScope.length)}</span>
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red px-1.5 text-[10px] font-extrabold text-white">{(total ?? inScope.length) > 99 ? "99+" : (total ?? inScope.length)}</span>
           )}
         </h2>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -379,7 +383,7 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
           <Mail size={18} className="shrink-0 text-good" /> Aucun mail non lu.
         </div>
       ) : (
-        <div className="overflow-hidden rounded-card border border-line bg-card shadow-card">
+        <div className="max-h-[300px] overflow-y-auto overscroll-contain rounded-card border border-line bg-card shadow-card">
           {shown.map((m) => (
             <div
               key={`${m.accountId}:${m.id}`}
@@ -387,9 +391,9 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
               tabIndex={0}
               onClick={() => openMail(m)}
               onKeyDown={(e) => e.key === "Enter" && openMail(m)}
-              className="group relative flex w-full cursor-pointer items-start gap-2.5 border-b border-line px-3 py-2.5 text-left last:border-b-0 hover:bg-hover"
+              className="group relative flex w-full cursor-pointer items-start gap-2 border-b border-line px-2.5 py-2 text-left last:border-b-0 hover:bg-hover"
             >
-              <SenderAvatar name={m.from} size={32} />
+              <SenderAvatar name={m.from} size={28} />
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline justify-between gap-2">
                   <span className="truncate text-[13px] font-bold text-ink">{parseSenderName(m.from)}</span>
