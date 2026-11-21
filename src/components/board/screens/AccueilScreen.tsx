@@ -29,7 +29,7 @@ import { EVENT_TYPE_TO_ORG, type DbEventType } from "@/lib/board/calendar";
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
 import { ActionPopup } from "@/components/board/dashboard/ActionPopup";
 import { PANEL, PanelHead } from "@/components/board/dashboard/Panel";
-import { MyCardsPanel } from "@/components/board/team/MyCardsPanel";
+import { TeamBoardsPanel } from "@/components/board/team/TeamBoardsPanel";
 import { MediaDeliveriesPanel } from "@/components/board/dashboard/MediaDeliveriesPanel";
 import { EventArrow, useOpenEvent } from "@/components/board/calendar/EventOpener";
 import { useForecast } from "@/components/board/calendar/DayWeather";
@@ -103,9 +103,6 @@ export function AccueilScreen({
   // Clic sur une action : popup de traitement rapide (valider, accepter…) plutôt que le module complet.
   const [openAction, setOpenAction] = useState<DashboardAction | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  // Heure de lancement de la demande qui a produit `data` : les choix faits sur l'accueil après cette
-  // heure (statut, relance, case cochée) restent affichés jusqu'à la réponse suivante (MyCardsPanel).
-  const [dataAt, setDataAt] = useState(0);
   const { open: openEvent } = useOpenEvent();
   // Clic droit sur « Mes actions » : frais à déclarer proposés d'office ou saisis soi-même.
   const changeFraisMode = (mode: "auto" | "manuel") => {
@@ -166,12 +163,10 @@ export function AccueilScreen({
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      const startedAt = Date.now();
       return getDashboard(period)
         .then((d) => {
           if (cancelled) return;
           setData(d);
-          setDataAt(startedAt);
           writeCache(`dashboard:${period}`, d);
         })
         .catch(() => undefined);
@@ -502,12 +497,8 @@ export function AccueilScreen({
             <UnreadMails onOpenMails={onNavigate ? () => onNavigate("mails") : undefined} />
           </section>
 
-          <MyCardsPanel
-            cards={data?.cards ?? null}
-            cardsAt={dataAt}
-            onOpenBoard={onNavigate ? () => onNavigate("trello") : undefined}
-            onChanged={() => setReloadKey((k) => k + 1)}
-          />
+          {/* Espace Team : mes tableaux (défilement latéral), listes et cartes mission. */}
+          <TeamBoardsPanel onOpenSpace={onNavigate ? () => onNavigate("trello") : undefined} />
           </div>
         </div>
 

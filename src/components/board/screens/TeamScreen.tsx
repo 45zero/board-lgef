@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, Check, ChevronDown, Inbox, Kanban, MoreHorizontal, Plus, Search, Users, X, Eye, EyeOff } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, Inbox, Kanban, MoreHorizontal, Plus, Search, Users, X } from "lucide-react";
 import { useLiveRefresh } from "@/components/board/live/LiveProvider";
 import { useAuth } from "@/contexts/AuthContext";
 import { readCache, writeCache } from "@/lib/board/localCache";
@@ -20,27 +20,14 @@ import {
   deleteTeamCard,
   updateTeamList,
 } from "@/app/actions/team";
-import { TEAM_COLORS, initialsOf, isCardDone, type TeamBoard, type TeamCard, type TeamList, type TeamPerson, type TeamWorkspace } from "@/lib/board/team";
+import { TEAM_COLORS, isCardDone, type TeamBoard, type TeamCard, type TeamList, type TeamPerson, type TeamWorkspace } from "@/lib/board/team";
 import { CardShortcut, type CardShortcutAction, Avatar, ChecklistChip, DueChip, EventChip, Popover } from "@/components/board/team/TeamUi";
 import { TeamCardModal } from "@/components/board/team/TeamCardModal";
 import { NewCardDialog } from "@/components/board/team/NewCardDialog";
-import { MyCardTile, useCardActions } from "@/components/board/team/MyCardsPanel";
-import type { MyCard } from "@/lib/board/myCards";
+import { MyCardTile, useCardActions } from "@/components/board/team/MissionCard";
+import { MissionFilter } from "@/components/board/team/MissionFilter";
+import { readOnlyMineDefaults, saveOnlyMineDefault, toMyCard } from "@/components/board/team/boardCards";
 
-/** Bouton « mes cartes » d'une liste : état par défaut retenu sur cet appareil (clic droit). */
-const ONLY_MINE_PREFIX = "team:onlyMine:";
-function readOnlyMineDefaults(): Record<string, boolean> {
-  const out: Record<string, boolean> = {};
-  try {
-    for (let k = 0; k < localStorage.length; k++) {
-      const key = localStorage.key(k);
-      if (key?.startsWith(ONLY_MINE_PREFIX)) out[key.slice(ONLY_MINE_PREFIX.length)] = localStorage.getItem(key) === "1";
-    }
-  } catch {
-    /* stockage indisponible */
-  }
-  return out;
-}
 
 // Espace Team : chacun organise ses tableaux ; une carte assignée reste sur le tableau de son
 // créateur et « atterrit » dans Mes cartes de chaque assigné. La section Équipe montre, personne
@@ -681,11 +668,7 @@ function BoardView({
   const makeOnlyMineDefault = (listId: string, v: boolean) => {
     setOnlyMineNow((m) => ({ ...m, [listId]: v }));
     setOnlyMineDefaults((d) => ({ ...d, [listId]: v }));
-    try {
-      localStorage.setItem(ONLY_MINE_PREFIX + listId, v ? "1" : "0");
-    } catch {
-      /* stockage indisponible : vaut pour cette visite */
-    }
+    saveOnlyMineDefault(listId, v);
   };
   const archivedCount = cards.filter((c) => c.archivedAt).length;
   const visible = cards.filter((c) => showArchived || !c.archivedAt);
@@ -857,7 +840,6 @@ function ListHeader({
   onError: (m: string) => void;
 }) {
   const [menu, setMenu] = useState(false);
-  const [defMenu, setDefMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(list.title);
   const act = async (fn: () => Promise<{ ok: boolean; error?: string }>) => {
@@ -889,47 +871,7 @@ function ListHeader({
         </button>
       )}
       <span className="font-mono text-[10px] text-ink-4">{count}</span>
-      {/* « Cartes sans mission » : masquer celles où je ne suis pas assigné — clic droit : garder cet affichage par défaut. */}
-      <button
-        type="button"
-        onClick={onToggleOnlyMine}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setDefMenu(true);
-        }}
-        aria-pressed={onlyMine}
-        title={`${onlyMine ? "Cartes sans mission pour vous masquées — cliquer : les afficher" : "Cliquer : masquer les cartes où vous n'avez pas de mission"}. Clic droit : affichage par défaut (actuellement : ${onlyMineDefault ? "masquées" : "affichées"}).`}
-        className={`relative flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold transition-colors ${
-          onlyMine ? "bg-navy text-white" : "bg-subtle text-ink-3 hover:text-ink"
-        }`}
-      >
-        {onlyMine ? <EyeOff size={11} strokeWidth={2.5} /> : <Eye size={11} strokeWidth={2.5} />} Cartes sans mission
-        {onlyMineDefault && <span className={`h-1 w-1 rounded-full ${onlyMine ? "bg-white" : "bg-link"}`} aria-label="par défaut" />}
-      </button>
-      {/* Clic droit sur « Cartes sans mission » : choisir l'affichage par défaut de la liste. */}
-      <div className="absolute right-3 top-9">
-        <Popover open={defMenu} onClose={() => setDefMenu(false)} align="right" width={250}>
-          <p className="px-2 pb-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-4">Affichage par défaut</p>
-          {[
-            { hide: false, label: "Toutes les cartes", Icon: Eye },
-            { hide: true, label: "Masquer les cartes sans mission", Icon: EyeOff },
-          ].map(({ hide, label, Icon }) => (
-            <button
-              key={label}
-              onClick={() => {
-                setDefMenu(false);
-                onMakeOnlyMineDefault(hide);
-              }}
-              className="flex w-full items-center gap-2 rounded-btn px-2 py-1.5 text-left text-[13px] text-ink-2 hover:bg-hover"
-            >
-              <Icon size={13} className="text-ink-3" />
-              <span className="flex-1">{label}</span>
-              {onlyMineDefault === hide && <Check size={14} className="text-good" />}
-            </button>
-          ))}
-          <p className="px-2 pt-1 text-[10px] leading-snug text-ink-4">Retenu sur cet appareil, pour cette liste. Un clic sur le bouton change l&apos;affichage le temps de la visite.</p>
-        </Popover>
-      </div>
+      <MissionFilter hide={onlyMine} hideByDefault={onlyMineDefault} onToggle={onToggleOnlyMine} onMakeDefault={onMakeOnlyMineDefault} />
       <button onClick={() => setMenu((m) => !m)} aria-label="Options de la liste" className="rounded-md p-0.5 text-ink-4 hover:bg-hover hover:text-ink">
         <MoreHorizontal size={15} />
       </button>
@@ -1120,72 +1062,4 @@ function BoardTitle({
       </Popover>
     </div>
   );
-}
-
-/** Texte brut du début de la description (comme l'accueil : HTML et markdown léger retirés). */
-function excerptOf(description: string): string | null {
-  const text = description
-    .replace(/<br\s*\/?>|<\/p>|<\/li>/gi, " ")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/[*_`#>]+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!text) return null;
-  return text.length > 160 ? `${text.slice(0, 157).trimEnd()}…` : text;
-}
-
-/** Carte d'un tableau → format de l'accueil (MyCardTile) : mêmes pastilles, statut et relances. */
-function toMyCard(c: TeamCard, ws: TeamWorkspace, peopleById: Map<string, TeamPerson>, boardTitle: string): MyCard {
-  const mine = c.members.find((m) => m.userId === ws.meId);
-  const myName = peopleById.get(ws.meId)?.name;
-  const tag = myName ? `@${myName}` : null;
-  const person = (id: string) => {
-    const p = peopleById.get(id);
-    const name = p?.name || "Membre";
-    return {
-      id,
-      initials: p?.initials || initialsOf(name),
-      name,
-      avatarUrl: p?.avatarUrl ?? null,
-      isMe: id === ws.meId,
-    };
-  };
-  const members: NonNullable<MyCard["members"]> = c.members.map((m) => ({
-    ...person(m.userId),
-    isCreator: m.userId === c.createdBy,
-    status: m.status,
-    reminderLevel: m.reminderLevel,
-  }));
-  // Créateur non assigné : sa pastille en tête (entourée d'or), sans statut.
-  if (c.createdBy && !c.members.some((m) => m.userId === c.createdBy))
-    members.unshift({
-      ...person(c.createdBy),
-      isCreator: true,
-      status: null,
-      reminderLevel: 0,
-    });
-  const total = c.checklist.length;
-  return {
-    id: c.id,
-    title: c.title,
-    boardTitle,
-    dueAt: c.dueAt,
-    eventId: c.event?.id ?? null,
-    isNew: !!mine && !mine.seenAt && mine.assignedBy !== ws.meId,
-    excerpt: excerptOf(c.description),
-    checklist: total ? { done: c.checklist.filter((i) => i.done).length, total } : null,
-    color: c.color,
-    assigned: !!mine,
-    createdByMe: c.createdBy === ws.meId,
-    myStatus: mine?.status ?? null,
-    members,
-    myItems: tag ? c.checklist.filter((i) => i.content.includes(tag)).map((i) => ({ id: i.id, content: i.content, done: i.done })) : [],
-    mentions: [],
-  };
 }
