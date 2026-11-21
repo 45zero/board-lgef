@@ -277,11 +277,8 @@ export function AccueilScreen({
         {/* Ordinateur : à gauche bandeau fin, ligne des derniers médias, actions ; à droite mails puis agenda.
             Mobile : bandeau, médias, actions, mails, agenda. */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)] lg:grid-rows-[auto_auto_1fr] lg:items-start">
-          {/* Bandeau, puis l'encart d'alerte des photos / vidéos à remettre (TeamMedia) et des retards de
-              l'équipe (N+1) — dans le même bloc : la colonne de droite garde ses trois lignes. */}
           <div className="flex min-w-0 flex-col gap-4 lg:col-start-1">
             <HomeBanner firstName={data?.firstName ?? null} birthdays={data?.birthdays ?? []} punchedIn={punchedIn} onTogglePunch={onTogglePunch} />
-            <MediaDeliveriesPanel deliveries={data?.deliveries} onChanged={() => setReloadKey((k) => k + 1)} />
           </div>
 
           <RecentPosts posts={posts} onSeeAll={onNavigate ? () => onNavigate("audiovisuel") : undefined} />
@@ -539,8 +536,10 @@ export function AccueilScreen({
           </section>
           </div>
 
-          {/* Colonne de droite : les mails non lus, puis « Mes cartes ». */}
+          {/* Colonne de droite : l'encart d'alerte des photos / vidéos à remettre (TeamMedia) et des
+              retards de l'équipe (N+1), les mails non lus, puis « Mes cartes ». */}
           <div className="flex min-w-0 flex-col gap-4 lg:col-start-2 lg:row-span-3 lg:row-start-1">
+          <MediaDeliveriesPanel deliveries={data?.deliveries} onChanged={() => setReloadKey((k) => k + 1)} />
           <section className={`min-w-0 ${PANEL}`}>
             <UnreadMails onOpenMails={onNavigate ? () => onNavigate("mails") : undefined} />
           </section>
