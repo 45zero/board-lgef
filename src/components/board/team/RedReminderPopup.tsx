@@ -13,14 +13,32 @@ import { MEMBER_STATUSES, type MemberStatus } from "@/lib/board/team";
 
 type Reminder = { cardId: string; title: string; dueAt: string | null; status: MemberStatus; remindedAt: string | null; by: string | null };
 
-/** Petit « wizz » synthétisé (aucun fichier audio) : trois bourdonnements courts. Silencieux si le navigateur bloque le son. */
-function playWizz() {
+// Son : les navigateurs (Safari surtout) n'autorisent l'audio qu'après un geste de l'utilisateur dans la
+// page. Le lecteur est donc créé / débloqué au premier clic ou touche n'importe où sur le board, puis
+// gardé : une relance qui arrive plus tard peut sonner. Page jamais touchée depuis son ouverture : pas de
+// son (le pop-up et le tremblement restent).
+let audio: AudioContext | null = null;
+
+function unlockAudio() {
   try {
-    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    void ctx.resume?.();
-    const t0 = ctx.currentTime;
+    if (!audio) {
+      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) return;
+      audio = new Ctx();
+    }
+    if (audio.state === "suspended") void audio.resume();
+  } catch {
+    /* son indisponible */
+  }
+}
+
+/** Petit « wizz » synthétisé (aucun fichier audio) : trois bourdonnements courts. */
+function playWizz() {
+  unlockAudio();
+  const ctx = audio;
+  if (!ctx || ctx.state !== "running") return;
+  try {
+    const t0 = ctx.currentTime + 0.02;
     for (let i = 0; i < 3; i++) {
       const start = t0 + i * 0.16;
       const osc = ctx.createOscillator();
@@ -41,7 +59,6 @@ function playWizz() {
       osc.stop(start + 0.14);
       lfo.stop(start + 0.14);
     }
-    window.setTimeout(() => void ctx.close(), 1000);
   } catch {
     /* son indisponible : le pop-up suffit */
   }
@@ -65,6 +82,17 @@ export function RedReminderPopup() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- l'état n'est posé qu'à la réponse du serveur
     void load();
   }, [load]);
+
+  // Débloque le son au premier geste sur le board (voir unlockAudio).
+  useEffect(() => {
+    const opts = { capture: true, passive: true } as const;
+    window.addEventListener("pointerdown", unlockAudio, opts);
+    window.addEventListener("keydown", unlockAudio, opts);
+    return () => {
+      window.removeEventListener("pointerdown", unlockAudio, opts);
+      window.removeEventListener("keydown", unlockAudio, opts);
+    };
+  }, []);
   useLiveRefresh(["team_card_members", "notifications"], () => {
     setHidden(null);
     void load();
