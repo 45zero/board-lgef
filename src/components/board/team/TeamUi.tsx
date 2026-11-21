@@ -1,9 +1,9 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
-import { Archive, ArrowUpRight, CalendarDays, CheckSquare, MessageSquare, Trash2 } from "lucide-react";
+import { Archive, ArrowUpRight, BellRing, CalendarDays, CheckSquare, MessageSquare, Trash2 } from "lucide-react";
 import { useOpenEvent } from "@/components/board/calendar/EventOpener";
-import { TEAM_COLORS, dueInfo, type TeamCard, type TeamPerson } from "@/lib/board/team";
+import { MEMBER_STATUSES, MEMBER_STATUS_COLOR, TEAM_COLORS, dueInfo, type TeamCard, type TeamPerson } from "@/lib/board/team";
 
 // Briques de l'Espace Team partagées par le tableau, « Mes cartes », l'équipe et la fiche carte.
 
@@ -37,6 +37,45 @@ export function AvatarStack({ people, max = 3, size = 24 }: { people: (TeamPerso
       {people.length > max && (
         <span style={{ width: size, height: size }} className="inline-flex items-center justify-center rounded-full bg-chip-bg text-[9px] font-bold text-ink-3 ring-2 ring-card">
           +{people.length - max}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * Membres d'une carte : pastilles avec, dessous, le point de statut de chacun (rouge à faire, orange
+ * en cours, vert fait) ; le créateur de la carte est entouré d'or.
+ */
+export function MemberStack({ card, peopleById, max = 4, size = 22 }: { card: TeamCard; peopleById: Map<string, TeamPerson>; max?: number; size?: number }) {
+  const shown = card.members.slice(0, max);
+  return (
+    <span className="flex items-center -space-x-1 pb-1">
+      {shown.map((m) => {
+        const person = peopleById.get(m.userId);
+        const creator = m.userId === card.createdBy;
+        const label = `${MEMBER_STATUSES.find((s) => s.id === m.status)?.label ?? ""}${m.reminderLevel ? ` — relancé${m.reminderLevel === 2 ? " 2 fois" : ""}` : ""}`;
+        return (
+          <span key={m.userId} className="relative" title={`${person?.name ?? "Personne supprimée"}${creator ? " — créateur" : ""}${label ? ` — ${label}` : ""}`}>
+            <span className={`block rounded-full ring-2 ${creator ? "ring-[#F2C14E]" : "ring-card"}`}>
+              <Avatar person={person} size={size} />
+            </span>
+            <span className="absolute -bottom-1.5 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full ring-1 ring-card" style={{ background: MEMBER_STATUS_COLOR[m.status] }} />
+            {/* Relance en attente : cloche orange (1re), rouge (2e) — jusqu'à ce que la personne réagisse. */}
+            {m.reminderLevel > 0 && (
+              <span
+                className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full text-white ring-1 ring-card"
+                style={{ background: m.reminderLevel === 2 ? "#E1141B" : "#E08A0B" }}
+              >
+                <BellRing size={7} strokeWidth={3} />
+              </span>
+            )}
+          </span>
+        );
+      })}
+      {card.members.length > max && (
+        <span style={{ width: size, height: size }} className="inline-flex items-center justify-center rounded-full bg-chip-bg text-[9px] font-bold text-ink-3 ring-2 ring-card">
+          +{card.members.length - max}
         </span>
       )}
     </span>
@@ -186,7 +225,7 @@ export function CardTile({
           </span>
         )}
         <span className="ml-auto">
-          <AvatarStack people={card.members.map((m) => peopleById.get(m.userId))} />
+          <MemberStack card={card} peopleById={peopleById} />
         </span>
         {shortcut && <CardShortcut {...shortcut} />}
       </div>

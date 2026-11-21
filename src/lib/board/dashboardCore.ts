@@ -2,7 +2,7 @@ import "server-only";
 import { countReviewableAccessRequests } from "@/lib/board/accessRequestsCore";
 import { todaysBirthdays } from "@/lib/board/birthdays";
 import { publicationThumbs } from "@/lib/board/publicationThumbs";
-import { myOpenCards } from "@/lib/board/myCards";
+import { myOpenCards, type MyCard } from "@/lib/board/myCards";
 import { isPublisher } from "@/lib/board/publishers";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import { computeMyExpenses, countPendingForValidator, fraisDeclarationMode, isPrestataire } from "@/lib/board/expensesCore";
@@ -74,6 +74,9 @@ export type Dashboard = {
   programme: ProgrammeItem[];
   /** Frais à déclarer : proposés d'office (« auto ») ou saisis par la personne (« manuel »). Clic droit sur « Mes actions ». */
   fraisMode?: "auto" | "manuel";
+  /** Cartes de l'Espace Team qui me sont assignées, pas encore faites : panneau « Mes cartes » de
+   *  l'accueil (l'action « cartes » reste pour le mail de 7 h, l'accueil la sort de « Mes actions »). */
+  cards?: MyCard[];
 };
 
 async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
@@ -110,6 +113,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
 
   const actions: DashboardAction[] = [];
   let fraisMode: "auto" | "manuel" = "auto";
+  let myCards: MyCard[] = [];
   const push = (a: DashboardAction) => {
     if (a.count > 0) actions.push(a);
   };
@@ -118,7 +122,9 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
   const actionsDone = Promise.all([
     // Cartes de l'Espace Team qui me sont assignées et pas encore faites (rouge si une est en retard).
     safe(async () => {
-      const cards = await myOpenCards(service, userId);
+      // Panneau « Mes cartes » : assignées (À faire) + créées par moi (Suivi) ; l'action et le mail de 7 h : assignées seulement.
+      myCards = await myOpenCards(service, userId, { includeCreated: true });
+      const cards = myCards.filter((c) => c.assigned);
       const late = cards.filter((c) => c.dueAt && new Date(c.dueAt) < now).length;
       const fresh = cards.filter((c) => c.isNew).length;
       const items = cards.map((c) => ({
@@ -403,5 +409,5 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
   const toneOrder = { red: 0, orange: 1, navy: 2 };
   actions.sort((a, b) => toneOrder[a.tone] - toneOrder[b.tone] || b.count - a.count);
   const birthdays = birthdayRows.map((b) => ({ id: b.id, firstName: b.firstName, lastName: b.lastName, isMe: b.id === userId }));
-  return { firstName: me?.first_name ?? null, birthdays, actions, programme, fraisMode };
+  return { firstName: me?.first_name ?? null, birthdays, actions, programme, fraisMode, cards: myCards };
 }

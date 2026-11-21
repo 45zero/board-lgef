@@ -32,13 +32,14 @@ import {
   markTeamCardSeen,
   moveTeamCard,
   searchTeamEvents,
+  setMyCardStatus,
   setTeamCardMembers,
   updateTeamCard,
   updateTeamChecklistItem,
   type TeamCardPatch,
 } from "@/app/actions/team";
 import { unwrap } from "@/lib/board/actionResult";
-import { TEAM_COLORS, TEAM_COLOR_IDS, isCardDone, type TeamCard, type TeamColor, type TeamComment, type TeamWorkspace } from "@/lib/board/team";
+import { MEMBER_STATUSES, MEMBER_STATUS_COLOR, TEAM_COLORS, TEAM_COLOR_IDS, isCardDone, type MemberStatus, type TeamCard, type TeamColor, type TeamComment, type TeamWorkspace } from "@/lib/board/team";
 import { Avatar, DueChip, EventChip, LeaveBeforeEventContext, Popover } from "./TeamUi";
 import { TeamAttachments } from "./TeamAttachments";
 import { TeamTransfers } from "./TeamTransfers";
@@ -134,7 +135,7 @@ export function TeamCardModal({
   const saveMembers = (ids: string[]) => {
     const now = new Date().toISOString();
     onLocalPatch(card.id, {
-      members: ids.map((id) => card.members.find((m) => m.userId === id) ?? { userId: id, assignedBy: me, assignedAt: now, seenAt: id === me ? now : null }),
+      members: ids.map((id) => card.members.find((m) => m.userId === id) ?? { userId: id, assignedBy: me, assignedAt: now, seenAt: id === me ? now : null, status: "red" as const, reminderLevel: 0 as const }),
     });
     void run(async () => unwrap(await setTeamCardMembers(card.id, ids)));
   };
@@ -177,6 +178,14 @@ export function TeamCardModal({
   const progress = card.checklist.length ? Math.round((checklistDone / card.checklist.length) * 100) : 0;
   const creator = card.createdBy ? peopleById.get(card.createdBy) : undefined;
   const otherMembers = card.members.filter((m) => m.userId !== card.createdBy);
+  // Mon statut sur la carte (si j'y suis assigné) : rouge à faire, orange en cours, vert fait.
+  const myMembership = card.members.find((m) => m.userId === me);
+  const changeMyStatus = (status: MemberStatus) => {
+    // Même statut : utile quand on est relancé (confirmer son statut efface la relance).
+    if (!myMembership || (myMembership.status === status && !myMembership.reminderLevel)) return;
+    onLocalPatch(card.id, { members: card.members.map((m) => (m.userId === me ? { ...m, status, reminderLevel: 0 as const } : m)) });
+    void run(async () => unwrap(await setMyCardStatus(card.id, status)));
+  };
 
   const saveTitle = () => {
     setEditingTitle(false);
@@ -240,8 +249,16 @@ export function TeamCardModal({
                 <p className={sectionTitle}>Membres</p>
                 <div className="flex items-center gap-1.5">
                   {card.members.map((m) => (
-                    <span key={m.userId} className="group/member relative">
-                      <Avatar person={peopleById.get(m.userId)} size={30} />
+                    <span
+                      key={m.userId}
+                      className="group/member relative pb-1.5"
+                      title={`${peopleById.get(m.userId)?.name ?? ""}${m.userId === card.createdBy ? " — créateur" : ""} — ${MEMBER_STATUSES.find((s) => s.id === m.status)?.label ?? ""}`}
+                    >
+                      {/* Créateur entouré d'or ; point de statut de la personne sous sa pastille. */}
+                      <span className={`block rounded-full ring-2 ${m.userId === card.createdBy ? "ring-[#F2C14E]" : "ring-transparent"}`}>
+                        <Avatar person={peopleById.get(m.userId)} size={30} />
+                      </span>
+                      <span className="absolute bottom-0 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full ring-2 ring-card" style={{ background: MEMBER_STATUS_COLOR[m.status] }} />
                       {canEdit && (
                         <button
                           onClick={() => removeMember(m.userId)}
@@ -262,6 +279,25 @@ export function TeamCardModal({
                   {!card.members.length && !canEdit && <span className="text-xs text-ink-4">Personne</span>}
                 </div>
               </div>
+              {myMembership && (
+                <div>
+                  <p className={sectionTitle}>Mon statut</p>
+                  <div className="flex rounded-full bg-subtle p-0.5">
+                    {MEMBER_STATUSES.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => changeMyStatus(s.id)}
+                        aria-pressed={myMembership.status === s.id}
+                        className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold transition-colors ${myMembership.status === s.id ? "bg-card text-ink shadow-card" : "text-ink-3 hover:text-ink"}`}
+                      >
+                        <span className="h-2 w-2 rounded-full" style={{ background: s.color }} />
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <p className={sectionTitle}>Étiquettes</p>
                 <div className="flex flex-wrap items-center gap-1.5">

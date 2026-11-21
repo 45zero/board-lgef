@@ -4725,6 +4725,10 @@ export type Database = {
         Row: {
           card_id: string
           user_id: string
+          status: string
+          reminder_level: number
+          reminded_at: string | null
+          reminded_by: string | null
           assigned_by: string | null
           assigned_at: string
           seen_at: string | null
@@ -4732,6 +4736,10 @@ export type Database = {
         Insert: {
           card_id: string
           user_id: string
+          status?: string
+          reminder_level?: number
+          reminded_at?: string | null
+          reminded_by?: string | null
           assigned_by?: string | null
           assigned_at?: string
           seen_at?: string | null
@@ -4739,6 +4747,10 @@ export type Database = {
         Update: {
           card_id?: string
           user_id?: string
+          status?: string
+          reminder_level?: number
+          reminded_at?: string | null
+          reminded_by?: string | null
           assigned_by?: string | null
           assigned_at?: string
           seen_at?: string | null

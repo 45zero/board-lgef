@@ -861,7 +861,8 @@ export function MailsScreen() {
   );
 }
 
-function ComposeModal({
+/** Nouveau message (aussi ouvert depuis le « + » de « Mes mails non lus » à l'accueil). */
+export function ComposeModal({
   accounts,
   accountId: initialAccountId,
   draftId,

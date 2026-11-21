@@ -30,7 +30,21 @@ export type TeamList = { id: string; boardId: string; title: string; isDone: boo
 
 export type TeamBoard = { id: string; ownerId: string; title: string; position: number; lists: TeamList[] };
 
-export type TeamCardMember = { userId: string; assignedBy: string | null; assignedAt: string; seenAt: string | null };
+/** Statut d'une personne sur une carte : rouge à faire (départ), orange en cours, vert fait. */
+export type MemberStatus = "red" | "orange" | "green";
+export const isMemberStatus = (s: unknown): s is MemberStatus => s === "red" || s === "orange" || s === "green";
+export const MEMBER_STATUSES: { id: MemberStatus; label: string; color: string }[] = [
+  { id: "red", label: "À faire", color: "#E1141B" },
+  { id: "orange", label: "En cours", color: "#E08A0B" },
+  { id: "green", label: "Fait", color: "#2C9A6B" },
+];
+export const MEMBER_STATUS_COLOR: Record<MemberStatus, string> = { red: "#E1141B", orange: "#E08A0B", green: "#2C9A6B" };
+
+/** reminderLevel : relance en cours — 0 aucune, 1 orange (notification), 2 rouge (pop-up chez la personne). */
+export type ReminderLevel = 0 | 1 | 2;
+export const toReminderLevel = (n: unknown): ReminderLevel => (n === 1 || n === 2 ? n : 0);
+
+export type TeamCardMember = { userId: string; assignedBy: string | null; assignedAt: string; seenAt: string | null; status: MemberStatus; reminderLevel: ReminderLevel };
 
 export type TeamChecklistItem = { id: string; content: string; done: boolean; position: number };
 

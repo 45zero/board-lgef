@@ -17,6 +17,10 @@ import {
   type TeamLabel,
   type TeamPerson,
   type TeamWorkspace,
+  isMemberStatus,
+  type MemberStatus,
+  toReminderLevel,
+  type ReminderLevel,
 } from "@/lib/board/team";
 
 // Espace Team (sql/2026-10-02_team_space.sql). Toutes les lectures et écritures passent par le
@@ -175,7 +179,7 @@ async function getTeamWorkspaceImpl(): Promise<TeamWorkspace> {
 
   const [memberRows, checklistRows, commentRows, eventRows] = await Promise.all([
     cardIds.length
-      ? supabase.from("team_card_members").select("card_id, user_id, assigned_by, assigned_at, seen_at").in("card_id", cardIds).then(check)
+      ? supabase.from("team_card_members").select("card_id, user_id, assigned_by, assigned_at, seen_at, status, reminder_level").in("card_id", cardIds).then(check)
       : [],
     cardIds.length
       ? supabase.from("team_checklist_items").select("id, card_id, content, done, position").in("card_id", cardIds).order("position").then(check)
@@ -214,7 +218,7 @@ async function getTeamWorkspaceImpl(): Promise<TeamWorkspace> {
     archivedAt: c.archived_at,
     members: memberRows
       .filter((m) => m.card_id === c.id)
-      .map((m) => ({ userId: m.user_id, assignedBy: m.assigned_by, assignedAt: m.assigned_at, seenAt: m.seen_at })),
+      .map((m) => ({ userId: m.user_id, assignedBy: m.assigned_by, assignedAt: m.assigned_at, seenAt: m.seen_at, status: isMemberStatus(m.status) ? m.status : "red", reminderLevel: toReminderLevel(m.reminder_level) })),
     checklist: checklistRows
       .filter((i) => i.card_id === c.id)
       .map((i) => ({ id: i.id, content: i.content, done: i.done, position: i.position })),
@@ -476,6 +480,98 @@ export const deleteTeamChecklistItem = async (itemId: string) =>
   toResult(async () => {
     const { supabase } = await session();
     check(await supabase.from("team_checklist_items").delete().eq("id", itemId));
+  });
+
+/** Mon statut sur une carte (rouge à faire, orange en cours, vert fait) : seulement sa propre assignation. */
+export const setMyCardStatus = async (cardId: string, status: MemberStatus) =>
+  toResult(async () => {
+    if (!isMemberStatus(status)) throw new Error("Statut inconnu.");
+    const { supabase, userId } = await session();
+    // Mettre à jour son statut répond à la relance : la cloche (orange ou rouge) disparaît.
+    const rows = check(
+      await supabase
+        .from("team_card_members")
+        .update({ status, reminder_level: 0, reminded_at: null, reminded_by: null })
+        .eq("card_id", cardId)
+        .eq("user_id", userId)
+        .select("card_id")
+    );
+    if (!rows.length) throw new Error("Vous n'êtes pas assigné à cette carte.");
+  });
+
+/** « Vu » sur une relance orange (clic sur la cloche) : elle disparaît. La rouge exige une mise à jour du statut. */
+export const ackTeamCardReminder = async (cardId: string) =>
+  toResult(async () => {
+    const { supabase, userId } = await session();
+    check(
+      await supabase
+        .from("team_card_members")
+        .update({ reminder_level: 0, reminded_at: null, reminded_by: null })
+        .eq("card_id", cardId)
+        .eq("user_id", userId)
+        .eq("reminder_level", 1)
+    );
+  });
+
+/** Relances rouges en attente pour moi : pop-up du board tant que je n'ai pas mis à jour mon statut. */
+export const myRedReminders = async () =>
+  toResult(async () => {
+    const { supabase, userId } = await session();
+    const rows = check(
+      await supabase.from("team_card_members").select("card_id, status, reminded_at, reminded_by").eq("user_id", userId).eq("reminder_level", 2)
+    );
+    if (!rows.length) return [];
+    const service = createServiceClient();
+    const [cards, people] = await Promise.all([
+      service.from("team_cards").select("id, title, due_at, archived_at").in("id", rows.map((r) => r.card_id)).then(check),
+      service.from("profiles").select("id, first_name, last_name, email").in("id", rows.map((r) => r.reminded_by).filter((x): x is string => !!x)).then(check),
+    ]);
+    return rows.flatMap((r) => {
+      const card = cards.find((c) => c.id === r.card_id);
+      if (!card || card.archived_at) return [];
+      const by = people.find((p) => p.id === r.reminded_by);
+      return [{ cardId: r.card_id, title: card.title, dueAt: card.due_at, status: isMemberStatus(r.status) ? r.status : ("red" as MemberStatus), remindedAt: r.reminded_at, by: by ? personName(by) : null }];
+    });
+  });
+
+/**
+ * Relance (pastille d'un membre sur l'accueil) : la personne reçoit une notification sur la carte qui
+ * lui rappelle sa mission — échéance et éléments de checklist où elle est identifiée, pas encore cochés.
+ * Réservé aux membres et au créateur de la carte ; jamais soi-même.
+ */
+export const remindTeamCardMember = async (cardId: string, targetId: string) =>
+  toResult(async () => {
+    const { supabase, userId } = await session();
+    if (targetId === userId) throw new Error("Vous ne pouvez pas vous relancer vous-même.");
+    const service = createServiceClient();
+    const [card, members, target, items, actor] = await Promise.all([
+      service.from("team_cards").select("title, due_at, created_by").eq("id", cardId).single().then(check),
+      service.from("team_card_members").select("user_id, reminder_level").eq("card_id", cardId).then(check),
+      service.from("profiles").select("first_name, last_name, email").eq("id", targetId).single().then(check),
+      service.from("team_checklist_items").select("content, done").eq("card_id", cardId).order("position").then(check),
+      actorOf(supabase, userId),
+    ]);
+    const ids = members.map((m) => m.user_id);
+    if (!ids.includes(userId) && card.created_by !== userId) throw new Error("Seuls les membres de la carte peuvent relancer.");
+    if (!ids.includes(targetId)) throw new Error("Cette personne n'est pas assignée à la carte.");
+    const tag = `@${personName(target)}`;
+    const todo = items.filter((i) => !i.done && i.content.includes(tag)).map((i) => i.content.replace(tag, "").replace(/\s+/g, " ").trim());
+    const due = card.due_at ? `Échéance le ${new Date(card.due_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", timeZone: "Europe/Paris" })}` : null;
+    const message = [due, todo.length ? `À faire : ${todo.join(" ; ")}` : "Pensez à faire le point sur votre mission."].filter(Boolean).join(" · ");
+    // 1re relance : orange (notification). Sans réaction, la suivante passe au rouge (pop-up sur son board).
+    const level = Math.min(2, toReminderLevel(members.find((m) => m.user_id === targetId)?.reminder_level) + 1) as ReminderLevel;
+    // Client service : la policy ne laisse chacun modifier que sa propre ligne ; droits vérifiés ci-dessus.
+    check(
+      await service
+        .from("team_card_members")
+        .update({ reminder_level: level, reminded_at: new Date().toISOString(), reminded_by: userId })
+        .eq("card_id", cardId)
+        .eq("user_id", targetId)
+    );
+    // Type existant « identifié » (pas de nouveau type de notification en base) : même affichage et même push.
+    const title = level === 2 ? `${actor} vous relance à nouveau sur la carte « ${card.title} » — mettez à jour votre statut` : `${actor} vous relance sur la carte « ${card.title} »`;
+    await notify(supabase, [targetId], { type: "card_mentioned", title, message: excerpt(message, 240), cardId, actor });
+    return level;
   });
 
 /* ---------- Discussion ---------- */

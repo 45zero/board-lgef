@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Archive, CheckCheck, ChevronRight, Forward, Mail, Paperclip, Reply, Send, Trash2, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Archive, CheckCheck, ChevronRight, Forward, Mail, Paperclip, Plus, Reply, Send, Trash2, X } from "lucide-react";
+import { ComposeModal } from "@/components/board/screens/MailsScreen";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import { archiveMyMessage, forwardMyMessage, markAllMyInboxRead, modifyMyMessageLabels, replyToMyMessage, trashMyMessage } from "@/app/actions/gmail";
 import { loadMail, loadMailList, forgetMail, type MailDetail, type MailList } from "@/lib/board/mailClient";
@@ -223,6 +224,10 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
   const [markingAll, setMarkingAll] = useState(false);
   // Plusieurs boîtes : « Toutes » ou une adresse (clic droit sur les pastilles : par défaut).
   const box = useAccountScope("dashMailBox", accounts);
+  const [composing, setComposing] = useState(false);
+  // 4 mails visibles, la suite au défilement : hauteur calée sur le bas du 4e (lignes de hauteur variable).
+  const listRef = useRef<HTMLDivElement>(null);
+  const [listMax, setListMax] = useState<number | undefined>(undefined);
   const multiple = accounts.length > 1;
   // Total exact (onglet Principal), le même que le rail / dock ; la liste n'en charge que 15.
   const badges = useLive().badges;
@@ -299,6 +304,20 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
   const inScope = (items ?? []).filter((m) => box.scope === "all" || m.accountId === box.scope);
   const shown = inScope.slice(0, MAX);
   const more = Math.max((total ?? inScope.length) - shown.length, 0);
+  const shownKey = shown.map((m) => m.id).join(",");
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const measure = () => {
+      const rows = el.children;
+      const fourth = rows[Math.min(3, rows.length - 1)] as HTMLElement | undefined;
+      setListMax(fourth && rows.length > 4 ? fourth.offsetTop + fourth.offsetHeight : undefined);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [shownKey]);
 
   /** « Tout marquer comme lu » : boîte(s) affichée(s) ; liste et compteurs remis à zéro tout de suite. */
   const markAllRead = async () => {
@@ -324,17 +343,38 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
 
   return (
     <>
+      {composing && accounts.length > 0 && (
+        <ComposeModal
+          accounts={accounts}
+          accountId={accounts.some((a) => a.id === box.scope) ? box.scope : accounts[0].id}
+          draftId={null}
+          onClose={() => setComposing(false)}
+        />
+      )}
       <div className="mb-2.5 flex items-center justify-between gap-2">
         <h2 className="flex shrink-0 items-center gap-2 text-[13px] font-extrabold text-ink md:text-sm">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-navy text-white">
+          <span className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-navy text-white">
             <Mail size={14} />
+            {(total ?? inScope.length) > 0 && (
+              <span className="absolute -right-1.5 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red px-1 text-[9px] font-extrabold leading-none text-white ring-2 ring-card">
+                {(total ?? inScope.length) > 99 ? "99+" : (total ?? inScope.length)}
+              </span>
+            )}
           </span>
           Mes mails non lus
-          {(total ?? inScope.length) > 0 && (
-            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red px-1.5 text-[10px] font-extrabold text-white">{(total ?? inScope.length) > 99 ? "99+" : (total ?? inScope.length)}</span>
-          )}
         </h2>
         <div className="flex shrink-0 items-center gap-1.5">
+          {accounts.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setComposing(true)}
+              title="Nouveau message"
+              aria-label="Nouveau message"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-btn bg-navy text-white transition hover:opacity-90"
+            >
+              <Plus size={14} strokeWidth={2.5} />
+            </button>
+          )}
           {(total ?? inScope.length) > 0 && (
             <button
               onClick={() => void markAllRead()}
@@ -383,7 +423,7 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
           <Mail size={18} className="shrink-0 text-good" /> Aucun mail non lu.
         </div>
       ) : (
-        <div className="max-h-[300px] overflow-y-auto overscroll-contain rounded-card border border-line bg-card shadow-card">
+        <div ref={listRef} style={{ maxHeight: listMax }} className="relative overflow-y-auto overscroll-contain rounded-card border border-line bg-card shadow-card">
           {shown.map((m) => (
             <div
               key={`${m.accountId}:${m.id}`}
