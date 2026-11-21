@@ -65,7 +65,7 @@ const toLocalInput = (iso: string | null) => {
 const sectionTitle = "mb-2 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-4";
 const sideBtn = "flex w-full items-center gap-2 rounded-btn bg-subtle px-3 py-2 text-left text-[13px] font-semibold text-ink-2 hover:bg-chip-bg disabled:opacity-50";
 
-type Pop = "members" | "labels" | "due" | "event" | "move" | null;
+type Pop = "members" | "membersInline" | "labels" | "due" | "event" | "move" | null;
 
 export function TeamCardModal({
   card,
@@ -272,9 +272,18 @@ export function TeamCardModal({
                     </span>
                   ))}
                   {canEdit && (
-                    <button onClick={() => setPop("members")} aria-label="Assigner" className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-subtle text-ink-3 hover:bg-chip-bg">
-                      <Plus size={14} />
-                    </button>
+                    // Même menu que « Membres » à droite, ouvert directement sous le « + ».
+                    <span className="relative">
+                      <button
+                        onClick={() => setPop(pop === "membersInline" ? null : "membersInline")}
+                        aria-label="Assigner"
+                        aria-expanded={pop === "membersInline"}
+                        className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-subtle text-ink-3 hover:bg-chip-bg"
+                      >
+                        <Plus size={14} />
+                      </button>
+                      <MembersPopover open={pop === "membersInline"} onClose={closePop} card={card} ws={ws} onSave={saveMembers} />
+                    </span>
                   )}
                   {!card.members.length && !canEdit && <span className="text-xs text-ink-4">Personne</span>}
                 </div>
