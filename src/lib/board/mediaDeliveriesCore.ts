@@ -212,38 +212,3 @@ export async function deliveriesBoard(service: Service, userId: string, isAdmin:
     team: team.map((r) => ({ ...toItem(r, evById.get(r.event_id), now, people), person: people.get(r.user_id) })),
   };
 }
-
-/* ---------- Publicateurs ---------- */
-
-/**
- * Personnes désignées pour publier (règle d'accès du module « audiovisuel », Paramètres → Publication) :
- * même règle que public.module_rule_matches, sans les administrateurs qui y ont accès d'office.
- * `null` : règle ouverte à tout le monde (ou pas de règle).
- */
-export async function publisherNames(service: Service): Promise<string[] | null> {
-  const { data: rule } = await db(service)
-    .from("module_access")
-    .select("everyone, roles, specialty_slugs, include_user_ids, exclude_user_ids, hidden")
-    .eq("module_id", "audiovisuel")
-    .maybeSingle();
-  if (!rule) return null;
-  const r = rule as { everyone: boolean; roles: string[] | null; specialty_slugs: string[] | null; include_user_ids: string[] | null; exclude_user_ids: string[] | null; hidden?: boolean };
-  if (r.hidden) return [];
-  if (r.everyone) return null;
-  const ids = new Set(r.include_user_ids ?? []);
-  const [byRole, bySpecialty] = await Promise.all([
-    r.roles?.length ? db(service).from("profiles").select("id").in("role", r.roles) : Promise.resolve({ data: [] as { id: string }[] }),
-    r.specialty_slugs?.length
-      ? db(service).from("profile_specialties").select("user_id, specialties!inner(slug)").in("specialties.slug", r.specialty_slugs)
-      : Promise.resolve({ data: [] as { user_id: string }[] }),
-  ]);
-  for (const p of (byRole.data ?? []) as { id: string }[]) ids.add(p.id);
-  for (const p of (bySpecialty.data ?? []) as { user_id: string }[]) ids.add(p.user_id);
-  for (const x of r.exclude_user_ids ?? []) ids.delete(x);
-  if (!ids.size) return [];
-  const { data: people } = await service.from("profiles").select("first_name, last_name, email").in("id", [...ids]);
-  return (people ?? [])
-    .map((p) => [p.first_name, p.last_name ? `${p.last_name.charAt(0)}.` : null].filter(Boolean).join(" ") || p.email || "")
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b, "fr"));
-}

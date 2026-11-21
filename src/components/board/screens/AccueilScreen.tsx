@@ -385,7 +385,6 @@ export function AccueilScreen({
                       <span className="min-w-0 flex-1">
                         <span className="line-clamp-2 block text-[13px] font-bold leading-tight text-ink sm:text-sm">{a.title}</span>
                         <span className="mt-0.5 line-clamp-2 block text-[11px] text-ink-3 sm:text-xs">{a.detail}</span>
-                        {a.assignees && a.assignees.length > 0 && <Assignees names={a.assignees} />}
                       </span>
                       <ChevronRight size={16} className="hidden shrink-0 text-ink-4 sm:block" />
                     </button>
@@ -1118,23 +1117,6 @@ function ActionPhoto({ action: a, className = "" }: { action: DashboardAction; c
   );
 }
 
-/** Personnes chargées de l'action (Médias à publier : désignées dans Paramètres → Publication). */
-function Assignees({ names, compact = false }: { names: string[]; compact?: boolean }) {
-  const shown = names.slice(0, compact ? 2 : 4);
-  const more = names.length - shown.length;
-  return (
-    <span className={`mt-1 flex flex-wrap items-center gap-1 ${compact ? "text-[10px]" : "text-[11px]"}`}>
-      <span className="font-semibold text-ink-3">À publier par</span>
-      {shown.map((n) => (
-        <span key={n} className="rounded-full bg-sel-bg px-1.5 py-px font-bold text-navy">
-          {n}
-        </span>
-      ))}
-      {more > 0 && <span className="font-semibold text-ink-3">+{more}</span>}
-    </span>
-  );
-}
-
 /** Carte d'action du carrousel mobile, au format des vignettes Airbnb : photo carrée, titre et détail dessous. */
 function ActionCard({ action: a, onClick }: { action: DashboardAction; onClick: () => void }) {
   const tone = TONES[a.tone];
@@ -1147,7 +1129,7 @@ function ActionCard({ action: a, onClick }: { action: DashboardAction; onClick: 
         </span>
       </div>
       <div className="mt-1.5 line-clamp-2 text-[12px] font-bold leading-tight text-ink">{a.title}</div>
-      {a.assignees && a.assignees.length > 0 ? <Assignees names={a.assignees} compact /> : <div className="mt-0.5 line-clamp-2 text-[11px] leading-tight text-ink-3">{a.detail}</div>}
+      <div className="mt-0.5 line-clamp-2 text-[11px] leading-tight text-ink-3">{a.detail}</div>
     </button>
   );
 }

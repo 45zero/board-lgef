@@ -1131,16 +1131,6 @@ export function ActionPopup({
             <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-white/70">Action rapide</div>
             <h3 className="mt-1 text-base font-extrabold">{action.title}</h3>
             <div className="text-xs text-white/80">{action.detail}</div>
-            {action.assignees && action.assignees.length > 0 && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[11px]">
-                <span className="font-semibold text-white/70">À publier par</span>
-                {action.assignees.map((n) => (
-                  <span key={n} className="rounded-full bg-white/15 px-1.5 py-px font-bold text-white">
-                    {n}
-                  </span>
-                ))}
-              </div>
-            )}
           </div>
           <button onClick={onClose} className="rounded-full p-1 text-white/80 hover:bg-white/10">
             <X size={18} />

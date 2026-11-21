@@ -4,7 +4,7 @@ import { todaysBirthdays } from "@/lib/board/birthdays";
 import { publicationThumbs } from "@/lib/board/publicationThumbs";
 import { myOpenCards, type MyCard } from "@/lib/board/myCards";
 import { isPublisher } from "@/lib/board/publishers";
-import { deliveriesBoard, publisherNames, type DeliveriesBoard } from "@/lib/board/mediaDeliveriesCore";
+import { deliveriesBoard, type DeliveriesBoard } from "@/lib/board/mediaDeliveriesCore";
 import type { createServiceClient } from "@/lib/supabase/serviceClient";
 import { computeMyExpenses, countPendingForValidator, fraisDeclarationMode, isPrestataire } from "@/lib/board/expensesCore";
 import { invoicesToValidate, isCompta, myMissingInvoices, unpaidPayables } from "@/lib/board/gedCore";
@@ -53,8 +53,6 @@ export type DashboardAction = {
   detail: string;
   /** Image de l'action (Médias à publier : premier média de la première publication). */
   thumbUrl?: string | null;
-  /** Personnes chargées de l'action (Médias à publier : celles désignées dans Paramètres → Publication). */
-  assignees?: string[];
 };
 
 export type ProgrammeItem = {
@@ -303,10 +301,7 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
         return { id: p.id, eventId: p.event_id, title: ev?.title ?? p.title ?? "Publication", date: ev?.start_date ?? p.created_at };
       });
       // Une image pour l'action : le premier média qui a une miniature.
-      const [thumbs, names] = await Promise.all([
-        pubs?.length ? publicationThumbs(service, pubs.slice(0, 6)) : new Map<string, string | null>(),
-        pubs?.length ? publisherNames(service).catch(() => null) : null,
-      ]);
+      const thumbs = pubs?.length ? await publicationThumbs(service, pubs.slice(0, 6)) : new Map<string, string | null>();
       const thumbUrl = [...thumbs.values()].find(Boolean) ?? null;
       push({
         id: "publier",
@@ -317,7 +312,6 @@ export async function buildDashboard(service: ReturnType<typeof createServiceCli
         title: "Médias à publier",
         detail: "Photos et vidéos en attente dans le centre de publication",
         thumbUrl,
-        assignees: names ?? undefined,
       });
       const { count: flagged } = await service
         .from("comment_moderation")
