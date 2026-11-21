@@ -1,14 +1,14 @@
 "use client";
 
-// Encart « Photos et vidéos à remettre » en tête de l'accueil (mediaDeliveriesCore.ts).
+// Encart repliable « Vidéo à remettre » au-dessus des mails de l'accueil (mediaDeliveriesCore.ts).
 //   TeamMedia : ses remises en retard (rouge, l'encart reste tant que ce n'est pas remis), du jour
 //   (orange) ou dont la date par défaut est à confirmer ; déposer, « C'est remis », « Contacter mon N+1 ».
 //   Cloche orange = relancé (clic : « vu ») ; rouge = relancé à nouveau (pop-up plein écran + wizz).
 //   N+1 : retards de son équipe ; cloche pour relancer (orange, puis rouge), nouvelle date, remis.
 
 import { useState } from "react";
-import { BellRing, Camera, CalendarClock, Check, ExternalLink, Loader2, Mail, MessageSquare, Send, Video } from "lucide-react";
-import { useOpenEvent } from "@/components/board/calendar/EventOpener";
+import { BellRing, Camera, CalendarClock, Check, ChevronRight, ExternalLink, Loader2, Mail, MessageSquare, Send, Video } from "lucide-react";
+import { EventArrow, useOpenEvent } from "@/components/board/calendar/EventOpener";
 import {
   ackDeliveryReminder,
   contactManagerAboutDelivery,
@@ -152,6 +152,7 @@ function MineRow({ d, onChanged }: { d: DeliveryItem; onChanged: () => void }) {
           <div className={`mt-0.5 text-xs font-semibold ${late ? "text-bad" : "text-warn"}`}>{when(d)}</div>
           {d.remindedBy && level > 0 && <div className="mt-0.5 text-[11px] text-ink-3">Relancé par {d.remindedBy}</div>}
         </div>
+        <EventArrow eventId={d.eventId} className="mt-0.5" />
         {level > 0 && (
           <Bell
             level={level}
@@ -248,6 +249,7 @@ function TeamRow({ d, onChanged }: { d: DeliveryItem; onChanged: () => void }) {
           </div>
           <div className="mt-0.5 text-xs font-semibold text-bad">{when(d)}</div>
         </div>
+        <EventArrow eventId={d.eventId} className="mt-0.5" />
         <Bell
           level={level}
           busy={busy === "remind"}
@@ -297,43 +299,52 @@ function TeamRow({ d, onChanged }: { d: DeliveryItem; onChanged: () => void }) {
 }
 
 export function MediaDeliveriesPanel({ deliveries, onChanged }: { deliveries: DeliveriesBoard | undefined; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
   const mine = deliveries?.mine ?? [];
   const team = deliveries?.team ?? [];
   if (!mine.length && !team.length) return null;
   const mineLate = mine.filter((d) => d.state === "late").length;
   const urgent = mineLate > 0 || team.length > 0;
+  const total = mine.length + team.length;
+  // Barre compacte : flèche qui clignote + « Vidéo à remettre » ; un clic déplie les encarts en glissant.
+  const label = mine.length
+    ? `${mine.length > 1 ? "Vidéos" : "Vidéo"} à remettre${mineLate ? " · en retard" : ""}`
+    : `${team.length > 1 ? "Vidéos" : "Vidéo"} en retard dans l'équipe`;
+  const tone = urgent ? "text-bad" : "text-warn";
   return (
-    <section className={`min-w-0 rounded-panel border-2 p-3 shadow-card ${urgent ? "border-[#E1141B] bg-bad-bg" : "border-[#F59E0B] bg-warn-bg"}`} aria-live="polite">
-      {mine.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <span className={`flex h-6 w-6 items-center justify-center rounded-full text-white ${mineLate ? "bg-[#E1141B]" : "bg-[#F59E0B]"}`}>
-              <Video size={13} />
-            </span>
-            <h2 className={`text-sm font-extrabold ${mineLate ? "text-bad" : "text-warn"}`}>
-              {mineLate ? `Photos / vidéos en retard : ${mineLate} à remettre` : "Photos / vidéos à remettre"}
-            </h2>
+    <section className={`min-w-0 rounded-panel border-2 shadow-card ${urgent ? "border-[#E1141B] bg-bad-bg" : "border-[#F59E0B] bg-warn-bg"}`} aria-live="polite">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+        <ChevronRight size={18} strokeWidth={3} className={`shrink-0 transition-transform duration-300 ${tone} ${open ? "rotate-90" : "animate-pulse"}`} />
+        <Video size={15} className={`shrink-0 ${tone}`} />
+        <span className={`min-w-0 flex-1 truncate text-sm font-extrabold ${tone}`}>{label}</span>
+        <span className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold text-white ${urgent ? "bg-[#E1141B]" : "bg-[#F59E0B]"}`}>
+          {total}
+        </span>
+      </button>
+      <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+        <div className="min-h-0 overflow-hidden">
+          <div className="space-y-4 px-3 pb-3">
+            {mine.length > 0 && (
+              <div className="space-y-2">
+                {team.length > 0 && <h3 className={`text-xs font-extrabold ${mineLate ? "text-bad" : "text-warn"}`}>Mes remises</h3>}
+                {mine.map((d) => (
+                  <MineRow key={`${d.id}:${d.reminderLevel}:${d.dueAt}`} d={d} onChanged={onChanged} />
+                ))}
+              </div>
+            )}
+            {team.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="flex items-center gap-1.5 text-xs font-extrabold text-bad">
+                  <BellRing size={12} /> Votre équipe : {team.length} remise{team.length > 1 ? "s" : ""} en retard
+                </h3>
+                {team.map((d) => (
+                  <TeamRow key={`${d.id}:${d.reminderLevel}:${d.dueAt}`} d={d} onChanged={onChanged} />
+                ))}
+              </div>
+            )}
           </div>
-          {mine.map((d) => (
-            <MineRow key={`${d.id}:${d.reminderLevel}:${d.dueAt}`} d={d} onChanged={onChanged} />
-          ))}
         </div>
-      )}
-      {team.length > 0 && (
-        <div className={`space-y-2 ${mine.length ? "mt-4" : ""}`}>
-          <div className="flex items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#E1141B] text-white">
-              <BellRing size={13} />
-            </span>
-            <h2 className="text-sm font-extrabold text-bad">
-              Votre équipe : {team.length} remise{team.length > 1 ? "s" : ""} en retard
-            </h2>
-          </div>
-          {team.map((d) => (
-            <TeamRow key={`${d.id}:${d.reminderLevel}:${d.dueAt}`} d={d} onChanged={onChanged} />
-          ))}
-        </div>
-      )}
+      </div>
     </section>
   );
 }
