@@ -143,6 +143,9 @@ export function AccueilScreen({
   // Clic sur une action : popup de traitement rapide (valider, accepter…) plutôt que le module complet.
   const [openAction, setOpenAction] = useState<DashboardAction | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Heure de lancement de la demande qui a produit `data` : les choix faits sur l'accueil après cette
+  // heure (statut, relance, case cochée) restent affichés jusqu'à la réponse suivante (MyCardsPanel).
+  const [dataAt, setDataAt] = useState(0);
   const { open: openEvent } = useOpenEvent();
   // Clic droit sur « Mes actions » : frais à déclarer proposés d'office ou saisis soi-même.
   const changeFraisMode = (mode: "auto" | "manuel") => {
@@ -189,18 +192,29 @@ export function AccueilScreen({
     1000
   );
 
+  // Cache affiché seulement au changement de période : le recopier à chaque événement en direct
+  // réaffichait une version plus ancienne qu'un clic (pastille qui disparaissait puis revenait).
+  const shownPeriod = useRef(period);
+  useEffect(() => {
+    if (shownPeriod.current === period) return;
+    shownPeriod.current = period;
+    const cached = readCache<Dashboard>(`dashboard:${period}`);
+    if (cached) queueMicrotask(() => setData(cached));
+  }, [period]);
+
   useEffect(() => {
     let cancelled = false;
-    const cached = readCache<Dashboard>(`dashboard:${period}`);
-    const load = () =>
-      getDashboard(period)
+    const load = () => {
+      const startedAt = Date.now();
+      return getDashboard(period)
         .then((d) => {
           if (cancelled) return;
           setData(d);
+          setDataAt(startedAt);
           writeCache(`dashboard:${period}`, d);
         })
         .catch(() => undefined);
-    if (cached) queueMicrotask(() => !cancelled && setData(cached));
+    };
     void load();
     const timer = window.setInterval(load, 120_000);
     return () => {
@@ -526,6 +540,7 @@ export function AccueilScreen({
 
           <MyCardsPanel
             cards={data?.cards ?? null}
+            cardsAt={dataAt}
             onOpenBoard={onNavigate ? () => onNavigate("trello") : undefined}
             onChanged={() => setReloadKey((k) => k + 1)}
           />
@@ -582,24 +597,52 @@ function readCardsView(): CardsView {
 }
 
 /**
+ * Valeurs choisies sur l'accueil en attendant que le serveur les renvoie. Une valeur vaut tant que les
+ * données affichées ont été demandées avant son enregistrement (`dataAt`) ; ensuite le serveur fait foi.
+ */
+function useOverrides<T>(dataAt: number) {
+  const [map, setMap] = useState<Record<string, { v: T; at: number }>>({});
+  return {
+    get: (key: string): T | undefined => {
+      const o = map[key];
+      return o && o.at > dataAt ? o.v : undefined;
+    },
+    /** Choix en cours d'envoi : affiché jusqu'à settle / drop. */
+    set: (key: string, v: T) => setMap((m) => ({ ...m, [key]: { v, at: Infinity } })),
+    /** Enregistré : les données demandées à partir de maintenant le remplacent. */
+    settle: (key: string) => {
+      const at = Date.now();
+      setMap((m) => (m[key] ? { ...m, [key]: { ...m[key], at } } : m));
+    },
+    drop: (key: string) =>
+      setMap((m) => {
+        const next = { ...m };
+        delete next[key];
+        return next;
+      }),
+  };
+}
+
+/**
  * « Mes cartes » : cartes de l'Espace Team qui me sont assignées et pas encore faites. Clic = la fiche
  * de la carte en popup ; « Archiver » = comme dans Espace Team (colonne Terminé de son tableau, archivée
  * s'il n'y en a pas), la carte disparaît tout de suite. Toujours affiché : « + » crée une carte.
  */
-function MyCardsPanel({ cards, onOpenBoard, onChanged }: { cards: MyCard[] | null; onOpenBoard?: () => void; onChanged: () => void }) {
+function MyCardsPanel({ cards, cardsAt, onOpenBoard, onChanged }: { cards: MyCard[] | null; cardsAt: number; onOpenBoard?: () => void; onChanged: () => void }) {
   const { open, create } = useOpenTeamCard();
   const [archived, setArchived] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   // « En retard » : comparé à l'heure d'ouverture de l'accueil (le rendu reste pur).
   const [now] = useState(() => Date.now());
   // Mes éléments de checklist cochés/décochés depuis l'accueil (affichage immédiat, avant rechargement).
-  const [checked, setChecked] = useState<Record<string, boolean>>({});
-  // Relances : pastille en cours d'envoi, puis confirmée quelques secondes.
-  // Relances : niveau posé ici (affichage immédiat) par « carte:personne » ; 0 aucune, 1 orange, 2 rouge.
-  const [levels, setLevels] = useState<Record<string, ReminderLevel>>({});
+  // Choix faits ici, affichés tout de suite : cases cochées (clé = élément), relances (« carte:personne »,
+  // 0 aucune, 1 orange, 2 rouge), mon statut (clé = carte). Chacun garde l'heure où le serveur l'a
+  // enregistré (Infinity tant que l'envoi est en cours) : dès qu'arrivent des données demandées après,
+  // elles font foi — un changement fait par quelqu'un d'autre s'affiche donc en direct.
+  const checkedOv = useOverrides<boolean>(cardsAt);
+  const levelsOv = useOverrides<ReminderLevel>(cardsAt);
+  const statusOv = useOverrides<MemberStatus>(cardsAt);
   const [sending, setSending] = useState<string | null>(null);
-  // Mon statut choisi ici (affichage immédiat) : clé = carte.
-  const [statuses, setStatuses] = useState<Record<string, MemberStatus>>({});
   // Onglets : « Tous » puis un onglet par tableau de l'Espace Team (ordre d'apparition des cartes).
   const [tab, setTab] = useState<string>("all");
   // Vue : Tous, À faire (cartes où je suis assigné : statut, cases à cocher) ou Suivi (cartes que j'ai
@@ -611,7 +654,7 @@ function MyCardsPanel({ cards, onOpenBoard, onChanged }: { cards: MyCard[] | nul
   // À faire = ma part (cartes où je suis assigné, compté sur mon statut).
   // Suivi = la part des autres : cartes partagées avec d'autres membres, ou créées par moi sans assigné
   // (compté par personne ; « personne d'assigné » en gris). Une carte peut être dans les deux vues.
-  const myStatus = (c: MyCard): MemberStatus => statuses[c.id] ?? c.myStatus ?? "red";
+  const myStatus = (c: MyCard): MemberStatus => statusOv.get(c.id) ?? c.myStatus ?? "red";
   const others = (c: MyCard) => (c.members ?? []).filter((m): m is typeof m & { status: MemberStatus } => !m.isMe && !!m.status);
   const unassigned = (c: MyCard) => !c.assigned && others(c).length === 0;
   const isTodo = (c: MyCard) => c.assigned;
@@ -648,32 +691,38 @@ function MyCardsPanel({ cards, onOpenBoard, onChanged }: { cards: MyCard[] | nul
     `flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${on ? "bg-navy text-white" : "bg-subtle text-ink-3 hover:text-ink"}`;
 
   const changeStatus = async (c: MyCard, next: MemberStatus) => {
-    const before = statuses[c.id] ?? c.myStatus ?? "red";
+    const before = myStatus(c);
     const me = c.members?.find((m) => m.isMe);
     const myLevel = me ? levelOf(c, me) : 0;
     // Même statut accepté si on m'a relancé : confirmer son statut efface la relance.
     if (before === next && !myLevel) return;
-    setStatuses((s) => ({ ...s, [c.id]: next }));
-    if (me) setLevel(`${c.id}:${me.id}`, 0);
+    const levelKey = me ? `${c.id}:${me.id}` : null;
+    statusOv.set(c.id, next);
+    if (levelKey) levelsOv.set(levelKey, 0);
     const res = await setMyCardStatus(c.id, next).catch(() => ({ ok: false as const, error: "Statut impossible à changer pour le moment." }));
     if (!res.ok) {
-      setStatuses((s) => ({ ...s, [c.id]: before }));
+      statusOv.drop(c.id);
+      if (levelKey) levelsOv.drop(levelKey);
       window.alert(res.error);
+      return;
     }
+    statusOv.settle(c.id);
+    if (levelKey) levelsOv.settle(levelKey);
   };
 
   const toggleItem = async (item: { id: string; done: boolean }) => {
-    const before = checked[item.id] ?? item.done;
-    setChecked((s) => ({ ...s, [item.id]: !before }));
+    const before = checkedOv.get(item.id) ?? item.done;
+    checkedOv.set(item.id, !before);
     const res = await updateTeamChecklistItem(item.id, { done: !before }).catch(() => ({ ok: false as const, error: "Impossible de cocher pour le moment." }));
     if (!res.ok) {
-      setChecked((s) => ({ ...s, [item.id]: before }));
+      checkedOv.drop(item.id);
       window.alert(res.error);
+      return;
     }
+    checkedOv.settle(item.id);
   };
 
-  const levelOf = (c: MyCard, m: NonNullable<MyCard["members"]>[number]): ReminderLevel => levels[`${c.id}:${m.id}`] ?? m.reminderLevel ?? 0;
-  const setLevel = (key: string, l: ReminderLevel) => setLevels((s) => ({ ...s, [key]: l }));
+  const levelOf = (c: MyCard, m: NonNullable<MyCard["members"]>[number]): ReminderLevel => levelsOv.get(`${c.id}:${m.id}`) ?? m.reminderLevel ?? 0;
 
   // Clic sur la pastille d'un membre : 1re relance orange (notification), 2e rouge (pop-up + son chez lui).
   const remind = async (c: MyCard, m: NonNullable<MyCard["members"]>[number]) => {
@@ -688,16 +737,18 @@ function MyCardsPanel({ cards, onOpenBoard, onChanged }: { cards: MyCard[] | nul
       window.alert(res.error);
       return;
     }
-    setLevel(key, res.data);
+    levelsOv.set(key, res.data);
+    levelsOv.settle(key);
   };
 
   // Ma cloche orange : « vu » au clic. La rouge ne part qu'en mettant à jour mon statut.
   const ackMine = async (c: MyCard, m: NonNullable<MyCard["members"]>[number]) => {
     const key = `${c.id}:${m.id}`;
     if (levelOf(c, m) !== 1) return;
-    setLevel(key, 0);
+    levelsOv.set(key, 0);
     const res = await ackTeamCardReminder(c.id).catch(() => ({ ok: false as const, error: "Impossible pour le moment." }));
-    if (!res.ok) setLevel(key, 1);
+    if (res.ok) levelsOv.settle(key);
+    else levelsOv.drop(key);
   };
 
   const archive = async (c: MyCard) => {
@@ -807,7 +858,10 @@ function MyCardsPanel({ cards, onOpenBoard, onChanged }: { cards: MyCard[] | nul
           const dueClass = late ? "bg-bad-bg text-bad" : soon ? "bg-warn-bg text-warn" : "bg-subtle text-ink-3";
           const accent = c.color ? TEAM_COLORS[c.color].base : late ? "var(--red)" : "var(--navy)";
           const myItems = c.myItems ?? [];
-          const delta = myItems.reduce((n, i) => n + (checked[i.id] === undefined || checked[i.id] === i.done ? 0 : checked[i.id] ? 1 : -1), 0);
+          const delta = myItems.reduce((n, i) => {
+            const v = checkedOv.get(i.id);
+            return n + (v === undefined || v === i.done ? 0 : v ? 1 : -1);
+          }, 0);
           const check = c.checklist ? { done: c.checklist.done + delta, total: c.checklist.total } : null;
           const mention = c.mentions?.[0];
           // Mon statut sur la carte (si j'y suis assigné) : rouge à faire, orange en cours, vert fait.
@@ -835,7 +889,7 @@ function MyCardsPanel({ cards, onOpenBoard, onChanged }: { cards: MyCard[] | nul
               {showMine && myItems.length > 0 && (
                 <ul className="mt-1.5 space-y-0.5">
                   {myItems.slice(0, 4).map((i) => {
-                    const done = checked[i.id] ?? i.done;
+                    const done = checkedOv.get(i.id) ?? i.done;
                     return (
                       <li key={i.id}>
                         <button

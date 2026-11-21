@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Archive, CheckCheck, ChevronRight, Forward, Mail, Paperclip, Plus, Reply, Send, Trash2, X } from "lucide-react";
+import { Archive, CheckCheck, ChevronRight, Forward, Mail, MailOpen, Paperclip, Plus, Reply, Send, Trash2, X } from "lucide-react";
 import { ComposeModal } from "@/components/board/screens/MailsScreen";
 import { getMyConnectedAccounts } from "@/app/actions/connected-accounts";
 import { archiveMyMessage, forwardMyMessage, markAllMyInboxRead, modifyMyMessageLabels, replyToMyMessage, trashMyMessage } from "@/app/actions/gmail";
@@ -20,8 +20,9 @@ import { BoxChips, BoxTag, boxName } from "@/components/board/mail/MailBoxes";
 type Account = Awaited<ReturnType<typeof getMyConnectedAccounts>>[number];
 type Item = MailList["messages"][number] & { accountId: string };
 
-/** Non lus chargés ; la liste en montre environ 5 et défile pour le reste. */
-const MAX = 30;
+/** Tous les non lus sont chargés (page après page) : 4 visibles, le reste au défilement — jamais « + N autres ».
+ *  Garde-fou : au plus MAX_PAGES pages par boîte (une boîte jamais triée ne bloque pas l'accueil). */
+const MAX_PAGES = 20;
 /** Comme le compteur du rail : onglet Principal de Gmail seulement (voir getInboxUnreadCount). */
 const PRIMARY_QUERY = "is:unread category:primary";
 
@@ -253,11 +254,21 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
           return;
         }
         const lists = await Promise.all(
-          accounts.map((a) =>
-            loadMailList(a.id, { labelIds: ["INBOX"], query: PRIMARY_QUERY })
-              .then((l) => l.messages.map((m) => ({ ...m, accountId: a.id })))
-              .catch(() => [] as Item[])
-          )
+          accounts.map(async (a) => {
+            const all: Item[] = [];
+            let page: string | undefined;
+            try {
+              for (let i = 0; i < MAX_PAGES; i++) {
+                const l = await loadMailList(a.id, { labelIds: ["INBOX"], query: PRIMARY_QUERY, pageToken: page });
+                all.push(...l.messages.map((m) => ({ ...m, accountId: a.id })));
+                if (!l.nextPageToken) break;
+                page = l.nextPageToken;
+              }
+            } catch {
+              /* boîte en erreur : on garde ce qui a été chargé */
+            }
+            return all;
+          })
         );
         if (cancelled) return;
         const merged = lists.flat().sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime());
@@ -291,6 +302,17 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
       .catch(() => undefined);
   };
 
+  // Lu sans l'ouvrir : retiré de la liste, reste dans la boîte de réception.
+  const markRead = (item: Item) => {
+    dropFromList(item);
+    void modifyMyMessageLabels(item.accountId, item.id, { removeLabelIds: ["UNREAD"] })
+      .then(() => {
+        forgetMail(item.accountId, item.id);
+        refreshBadges("mails");
+      })
+      .catch(() => setItems((prev) => [item, ...(prev ?? [])].sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime())));
+  };
+
   const remove = async (item: Item, kind: "archive" | "trash") => {
     dropFromList(item);
     try {
@@ -302,8 +324,7 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
   };
 
   const inScope = (items ?? []).filter((m) => box.scope === "all" || m.accountId === box.scope);
-  const shown = inScope.slice(0, MAX);
-  const more = Math.max((total ?? inScope.length) - shown.length, 0);
+  const shown = inScope;
   const shownKey = shown.map((m) => m.id).join(",");
   useLayoutEffect(() => {
     const el = listRef.current;
@@ -445,8 +466,11 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
                 </span>
                 <span className="block truncate text-[11px] text-ink-4">{m.snippet}</span>
               </span>
-              {/* Survol (ordinateur) : comme dans Mails — archiver, supprimer, transférer. */}
+              {/* Survol (ordinateur) : comme dans Mails — marquer comme lu, archiver, supprimer, transférer. */}
               <span className="absolute right-2 top-1.5 hidden items-center rounded-btn border border-line bg-card shadow-card md:group-hover:flex">
+                <IconAction label="Marquer comme lu" onClick={() => markRead(m)}>
+                  <MailOpen size={14} />
+                </IconAction>
                 <IconAction label="Archiver" onClick={() => void remove(m, "archive")}>
                   <Archive size={14} />
                 </IconAction>
@@ -459,11 +483,6 @@ export function UnreadMails({ onOpenMails }: { onOpenMails?: () => void }) {
               </span>
             </div>
           ))}
-          {more > 0 && onOpenMails && (
-            <button onClick={onOpenMails} className="block w-full px-3 py-2 text-center text-xs font-semibold text-link hover:bg-hover">
-              + {more} autre{more > 1 ? "s" : ""} dans Mails
-            </button>
-          )}
         </div>
       )}
 
