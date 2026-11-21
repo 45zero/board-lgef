@@ -18,6 +18,8 @@ type GoogleItem = { id: string; summary: string; start: string; end: string };
  * Journée en panneau latéral (ordinateur) : clic sur un jour de la vue Mois ou Semaine. Le calendrier
  * reste en place derrière ; on lit la journée, on ouvre un événement, on passe au jour voisin, puis on
  * replie. « Vue Jour » reste à un clic pour la grille horaire complète.
+ * Même panneau sur téléphone (`mobile`) : presque toute la largeur, en-tête pensé pour le pouce,
+ * glisser vers la droite pour replier, marges des zones sûres de l'iPhone.
  */
 export function DayDrawer({
   day,
@@ -34,6 +36,7 @@ export function DayDrawer({
   onCreate,
   onVoice,
   onOpenDayView,
+  mobile = false,
 }: {
   day: Date | null;
   /** Événements internes qui touchent ce jour (ceux de plusieurs jours compris). */
@@ -54,13 +57,18 @@ export function DayDrawer({
   onOpenGoogle: (id: string) => void;
   onCreate: () => void;
   onVoice: () => void;
-  onOpenDayView: () => void;
+  /** Absent sur téléphone (pas de vue Jour) : le bouton n'est pas affiché. */
+  onOpenDayView?: () => void;
+  mobile?: boolean;
 }) {
   const open = !!day;
   // Le dernier jour reste affiché pendant l'animation de fermeture.
   const [shown, setShown] = useState<Date | null>(day);
   if (day && (!shown || day.getTime() !== shown.getTime())) setShown(day);
   const closeRef = useRef<HTMLButtonElement>(null);
+  // Téléphone : glisser le panneau vers la droite le replie (le doigt le suit).
+  const swipe = useRef<{ x: number; y: number; id: number } | null>(null);
+  const [dragX, setDragX] = useState(0);
   // Heure courante, rafraîchie chaque minute tant que le panneau est ouvert (ligne « Maintenant »).
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -72,9 +80,39 @@ export function DayDrawer({
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || mobile) return;
     closeRef.current?.focus({ preventScroll: true });
-  }, [open]);
+  }, [open, mobile]);
+
+  const swipeHandlers = mobile
+    ? {
+        onPointerDown: (e: React.PointerEvent) => {
+          if (e.pointerType === "mouse") return;
+          swipe.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
+        },
+        onPointerMove: (e: React.PointerEvent) => {
+          const st = swipe.current;
+          if (!st || st.id !== e.pointerId) return;
+          const dx = e.clientX - st.x;
+          const dy = e.clientY - st.y;
+          // Geste vertical : c'est un défilement de la liste, on laisse faire.
+          if (dragX === 0 && Math.abs(dy) > Math.abs(dx)) {
+            swipe.current = null;
+            return;
+          }
+          if (dx > 8) setDragX(dx);
+        },
+        onPointerUp: () => {
+          if (swipe.current && dragX > 90) onClose();
+          swipe.current = null;
+          setDragX(0);
+        },
+        onPointerCancel: () => {
+          swipe.current = null;
+          setDragX(0);
+        },
+      }
+    : {};
 
   useEffect(() => {
     if (!open || paused) return;
@@ -133,9 +171,11 @@ export function DayDrawer({
       <aside
         role="dialog"
         aria-label={`Journée du ${format(d, "EEEE d MMMM yyyy", { locale: fr })}`}
-        className={`absolute bottom-0 right-0 top-0 flex w-[440px] max-w-[92vw] flex-col border-l border-line bg-card shadow-modal transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
-          open ? "translate-x-0" : "translate-x-full"
-        }`}
+        className={`absolute bottom-0 right-0 top-0 flex flex-col border-l border-line bg-card shadow-modal ${
+          dragX ? "" : "transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+        } ${mobile ? "w-[calc(100%-44px)] rounded-l-sheet" : "w-[440px] max-w-[92vw]"} ${open ? "translate-x-0" : "translate-x-full"}`}
+        style={dragX ? { transform: `translateX(${dragX}px)`, touchAction: "pan-y" } : mobile ? { touchAction: "pan-y" } : undefined}
+        {...swipeHandlers}
       >
         {/* Languette de repli, collée au bord du panneau. */}
         <button
@@ -151,6 +191,51 @@ export function DayDrawer({
           <ChevronsRight size={18} />
         </button>
 
+{mobile ? (
+        <header className="border-b border-line px-3 pb-2.5 pt-[calc(env(safe-area-inset-top)+12px)]">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">
+              {total === 0 ? "Aucun événement" : `${total} événement${total > 1 ? "s" : ""}`}
+              {isToday && <span className="ml-1.5 rounded-full bg-red px-1.5 py-px text-[9px] font-bold text-white">Aujourd&rsquo;hui</span>}
+            </div>
+            <button
+              ref={closeRef}
+              type="button"
+              onClick={onClose}
+              tabIndex={tab}
+              className="flex h-9 shrink-0 items-center gap-1 rounded-full bg-navy pl-3.5 pr-2.5 text-[13px] font-semibold text-white active:bg-navy-600"
+            >
+              Replier <ChevronsRight size={16} />
+            </button>
+          </div>
+          <div className="mt-2 flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onShiftDay(-1)}
+              tabIndex={tab}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line text-ink-3 active:bg-hover"
+              aria-label="Jour précédent"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <div className="min-w-0 flex-1 text-center">
+              <h2 className="truncate text-[17px] font-extrabold capitalize leading-tight text-ink">{format(d, "EEEE d MMMM", { locale: fr })}</h2>
+              <div className="flex h-4 justify-center text-ink-3">
+                <DayWeatherBadge day={d} forecast={forecast} />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onShiftDay(1)}
+              tabIndex={tab}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line text-ink-3 active:bg-hover"
+              aria-label="Jour suivant"
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        </header>
+        ) : (
         <header className="flex items-start gap-2 border-b border-line px-4 pb-3 pt-4">
           <div className="min-w-0 flex-1">
             <div className="flex items-center font-mono text-[10px] uppercase tracking-[0.1em] text-ink-4">
@@ -197,6 +282,7 @@ export function DayDrawer({
             </button>
           </div>
         </header>
+        )}
 
         {firstDeparture && (
           <div className="flex items-center gap-2.5 border-b border-line bg-subtle/60 px-4 py-2.5">
@@ -355,12 +441,12 @@ export function DayDrawer({
           </ol>
         </div>
 
-        <footer className="flex items-center gap-2 border-t border-line px-4 py-3">
+        <footer className={`flex items-center gap-2 border-t border-line ${mobile ? "px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pt-2.5" : "px-4 py-3"}`}>
           <button
             type="button"
             onClick={onCreate}
             tabIndex={tab}
-            className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-btn bg-navy text-xs font-semibold text-white hover:bg-navy-600"
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-btn bg-navy font-semibold text-white hover:bg-navy-600 ${mobile ? "h-11 text-[13px]" : "h-9 text-xs"}`}
           >
             <Plus size={14} /> Nouvel événement
           </button>
@@ -368,12 +454,13 @@ export function DayDrawer({
             type="button"
             onClick={onVoice}
             tabIndex={tab}
-            className="flex h-9 w-9 items-center justify-center rounded-btn border border-line text-navy hover:bg-hover"
+            className={`flex items-center justify-center rounded-btn border border-line text-navy hover:bg-hover ${mobile ? "h-11 w-11" : "h-9 w-9"}`}
             aria-label="Créer un événement à la voix"
             title="Créer un événement à la voix"
           >
             <Mic size={15} />
           </button>
+          {onOpenDayView && (
           <button
             type="button"
             onClick={onOpenDayView}
@@ -383,6 +470,7 @@ export function DayDrawer({
           >
             <CalendarDays size={14} /> Vue Jour
           </button>
+          )}
         </footer>
       </aside>
     </div>

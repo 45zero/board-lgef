@@ -2,8 +2,8 @@
 
 import { useGoogleMapsScript } from "@/hooks/useGoogleMapsScript";
 import { DirectorGlyph } from "@/components/board/calendar/DirectorGlyph";
-import { useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, ChevronDown, User, X, Plus, Camera, Video, Mic, Car } from "lucide-react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, ChevronDown, User, Camera, Video, Mic } from "lucide-react";
 import {
   addDays,
   addMonths,
@@ -31,11 +31,12 @@ import { isMultiDayEvent, isMyEvent, CALENDAR_ORG_KEYS } from "@/lib/board/calen
 import { ORG_COLORS, ORG_LABELS, type OrgKey } from "@/lib/board/tokens";
 import type { CalendarEvent } from "@/lib/board/calendar";
 import { MobileEventModal } from "@/components/board/mobile/MobileEventModal";
+import { DayDrawer } from "@/components/board/calendar/DayDrawer";
+import { useEventTeamCards } from "@/components/board/team/TeamCardOpener";
 import { VoiceEventDialog } from "@/components/board/calendar/VoiceEvent";
 import type { EventDraft } from "@/app/actions/event-dictation";
 import { DayWeatherBadge, useForecast } from "@/components/board/calendar/DayWeather";
 import { useMyTravelTimes } from "@/hooks/board/useMyTravelTimes";
-import { departureTime, formatTravel } from "@/lib/board/geo";
 
 type View = "mois" | "semaine";
 
@@ -134,6 +135,31 @@ export function MobileCalendrierScreen() {
     for (const e of events) counts[e.org] = (counts[e.org] ?? 0) + 1;
     return counts;
   }, [events]);
+
+  // Panneau de la journée : tout ce qui touche le jour choisi, bandeaux de plusieurs jours compris.
+  const dayEvents = useMemo(() => {
+    if (!selectedDay) return [];
+    const from = startOfDay(selectedDay).getTime();
+    const to = from + 86_400_000;
+    return filtered
+      .filter((e) => parseISO(e.start).getTime() < to && parseISO(e.end).getTime() > from)
+      .sort((a, b) => a.start.localeCompare(b.start));
+  }, [selectedDay, filtered]);
+  const dayTeamCards = useEventTeamCards(dayEvents.map((e) => e.id));
+  // Mes seuls trajets : calculés côté serveur depuis mon adresse, pour les événements où je suis sollicité.
+  const dayTravel = useMyTravelTimes(dayEvents);
+  const closeDay = useCallback(() => setSelectedDay(null), []);
+  const shiftDay = useCallback(
+    (delta: number) =>
+      setSelectedDay((d) => {
+        if (!d) return d;
+        const next = addDays(d, delta);
+        // Hors de la période affichée : le mois ou la semaine suit.
+        if (next < gridStart || next > gridEnd) setAnchor(next);
+        return next;
+      }),
+    [gridStart, gridEnd]
+  );
 
   const navPrev = () => setAnchor((a) => (view === "mois" ? subMonths(a, 1) : subWeeks(a, 1)));
   const navNext = () => setAnchor((a) => (view === "mois" ? addMonths(a, 1) : addWeeks(a, 1)));
@@ -395,12 +421,20 @@ export function MobileCalendrierScreen() {
         </div>
       )}
 
-      <DayPanel
-        open={!!selectedDay}
-        day={selectedDay ?? new Date()}
-        events={selectedDay ? eventsForDay(selectedDay) : []}
-        onClose={() => setSelectedDay(null)}
+      {/* Même panneau de la journée que sur ordinateur (trajets compris). */}
+      <DayDrawer
+        mobile
+        day={selectedDay}
+        events={dayEvents}
+        googleEvents={[]}
+        forecast={forecast}
+        teamCards={dayTeamCards}
+        travel={dayTravel}
+        paused={!!editing || voiceOpen}
+        onClose={closeDay}
+        onShiftDay={shiftDay}
         onOpenEvent={(ev) => setEditing(ev)}
+        onOpenGoogle={() => {}}
         onCreate={() => setEditing("new")}
         onVoice={() => setVoiceOpen(true)}
       />
@@ -440,108 +474,6 @@ export function MobileCalendrierScreen() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function DayPanel({
-  open,
-  day,
-  events,
-  onClose,
-  onOpenEvent,
-  onCreate,
-  onVoice,
-}: {
-  open: boolean;
-  day: Date;
-  events: CalendarEvent[];
-  onClose: () => void;
-  onOpenEvent: (ev: CalendarEvent) => void;
-  onCreate: () => void;
-  onVoice: () => void;
-}) {
-  const dayForecast = useForecast();
-  // Mes temps de route depuis chez moi (événements où je suis sollicité, mon adresse uniquement).
-  const travel = useMyTravelTimes(open ? events : []);
-  return (
-    <div
-      className={`fixed inset-0 z-40 flex justify-end transition-opacity duration-300 ${
-        open ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
-      }`}
-    >
-      <button className="w-[52px] bg-black/20" onClick={onClose} aria-label="Fermer" tabIndex={open ? 0 : -1} />
-      <div
-        className={`flex h-full w-[calc(100%-52px)] max-w-sm flex-col rounded-l-sheet bg-card shadow-modal transition-transform duration-300 ease-out ${
-          open ? "translate-x-0" : "translate-x-full"
-        }`}
-      >
-        <div className="flex items-center justify-between border-b border-line px-4 py-3">
-          <div>
-            <div className="font-mono text-[10px] text-ink-4">{events.length} événement{events.length > 1 ? "s" : ""}</div>
-            <div className="flex items-center gap-2 text-sm font-extrabold text-ink">
-              {format(day, "EEEE d MMMM yyyy", { locale: fr })}
-              <span className="font-normal text-ink-3">
-                <DayWeatherBadge day={day} forecast={dayForecast} />
-              </span>
-            </div>
-          </div>
-          <button onClick={onClose} className="text-ink-4">
-            <X size={18} />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-4">
-          {events.length === 0 && (
-            <div className="rounded-btn border border-dashed border-line p-4 text-center text-xs text-ink-4">
-              Aucun événement ce jour-là.
-            </div>
-          )}
-          {events.map((ev) => (
-            <button
-              key={ev.id}
-              onClick={() => onOpenEvent(ev)}
-              className="block w-full rounded-btn px-3 py-2 text-left"
-              style={{ background: ORG_COLORS[ev.org].bg }}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-[10px]" style={{ color: ORG_COLORS[ev.org].ink }}>
-                  {format(parseISO(ev.start), "HH:mm")}
-                </span>
-                <CoverageGlyph coverage={ev.coverage} published={ev.published} awaitingMe={ev.awaitingMyAnswer} size={13} />
-<DirectorGlyph status={ev.director} size={10} />
-              </div>
-              <div className="text-sm font-bold" style={{ color: ORG_COLORS[ev.org].ink }}>
-                {ev.title}
-              </div>
-              {travel[ev.id] && (
-                <div
-                  className="mt-1.5 flex items-center gap-1.5 rounded-[6px] border border-dashed px-2 py-1 text-[11px] font-semibold"
-                  style={{ borderColor: ORG_COLORS[ev.org].base, color: ORG_COLORS[ev.org].ink }}
-                >
-                  <Car size={12} className="shrink-0" />
-                  <span>Partir à {format(departureTime(ev.start, travel[ev.id].minutes), "HH:mm")}</span>
-                  <span className="truncate font-normal opacity-80">· {formatTravel(travel[ev.id])}</span>
-                </div>
-              )}
-            </button>
-          ))}
-          <div className="flex gap-2">
-            <button
-              onClick={onCreate}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-btn border border-dashed border-line py-2.5 text-xs font-semibold text-ink-3"
-            >
-              <Plus size={13} /> Nouvel événement
-            </button>
-            <button
-              onClick={onVoice}
-              className="flex items-center justify-center gap-1.5 rounded-btn border border-dashed border-line px-3 py-2.5 text-xs font-semibold text-navy"
-              aria-label="Créer un événement à la voix"
-            >
-              <Mic size={13} /> À la voix
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
