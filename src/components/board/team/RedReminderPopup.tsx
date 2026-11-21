@@ -14,30 +14,86 @@ import { MEMBER_STATUSES, type MemberStatus } from "@/lib/board/team";
 type Reminder = { cardId: string; title: string; dueAt: string | null; status: MemberStatus; remindedAt: string | null; by: string | null };
 
 // Son : les navigateurs (Safari surtout) n'autorisent l'audio qu'après un geste de l'utilisateur dans la
-// page. Le lecteur est donc créé / débloqué au premier clic ou touche n'importe où sur le board, puis
-// gardé : une relance qui arrive plus tard peut sonner. Page jamais touchée depuis son ouverture : pas de
-// son (le pop-up et le tremblement restent).
+// page. Le « wizz » est un vrai fichier son (WAV généré en mémoire) joué par un élément <audio> « amorcé »
+// en silence au premier clic / touche sur le board : un élément déjà lancé par un geste peut être rejoué
+// plus tard, même sans nouveau geste. Secours : Web Audio débloqué au même moment.
+// Page jamais touchée depuis son ouverture (ex. rechargée juste avant la relance) : pas de son possible.
+
+/** WAV du wizz : trois bourdonnements de 130 ms (carré 180 Hz modulé), 16 bits mono 22 kHz. */
+function wizzWavUrl(): string {
+  const rate = 22050;
+  const total = Math.round(rate * 0.48);
+  const data = new Int16Array(total);
+  for (let i = 0; i < total; i++) {
+    const t = i / rate;
+    const k = Math.floor(t / 0.16);
+    const local = t - k * 0.16;
+    if (k > 2 || local > 0.13) continue;
+    const env = Math.min(1, local / 0.01) * Math.min(1, (0.13 - local) / 0.03);
+    const f = 180 + 60 * Math.sin(2 * Math.PI * 38 * t);
+    const phase = (t * f) % 1;
+    data[i] = Math.round((phase < 0.5 ? 1 : -1) * env * 0.35 * 32767);
+  }
+  const buf = new ArrayBuffer(44 + data.length * 2);
+  const v = new DataView(buf);
+  const str = (o: number, x: string) => [...x].forEach((c, j) => v.setUint8(o + j, c.charCodeAt(0)));
+  str(0, "RIFF");
+  v.setUint32(4, 36 + data.length * 2, true);
+  str(8, "WAVE");
+  str(12, "fmt ");
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  str(36, "data");
+  v.setUint32(40, data.length * 2, true);
+  new Int16Array(buf, 44).set(data);
+  return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+}
+
+let el: HTMLAudioElement | null = null;
+let primed = false;
 let audio: AudioContext | null = null;
 
 function unlockAudio() {
   try {
+    if (!el) {
+      el = new Audio(wizzWavUrl());
+      el.preload = "auto";
+    }
+    if (!primed) {
+      const a = el;
+      a.muted = true;
+      void a
+        .play()
+        .then(() => {
+          a.pause();
+          a.currentTime = 0;
+          a.muted = false;
+          primed = true;
+        })
+        .catch(() => {
+          a.muted = false;
+        });
+    }
     if (!audio) {
       const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!Ctx) return;
-      audio = new Ctx();
+      if (Ctx) audio = new Ctx();
     }
-    if (audio.state === "suspended") void audio.resume();
+    if (audio && audio.state !== "running") void audio.resume();
   } catch {
     /* son indisponible */
   }
 }
 
-/** Petit « wizz » synthétisé (aucun fichier audio) : trois bourdonnements courts. */
-function playWizz() {
-  unlockAudio();
+/** Secours Web Audio : même wizz synthétisé à la volée. */
+function playWizzWebAudio() {
   const ctx = audio;
-  if (!ctx || ctx.state !== "running") return;
-  try {
+  if (!ctx) return;
+  const go = () => {
     const t0 = ctx.currentTime + 0.02;
     for (let i = 0; i < 3; i++) {
       const start = t0 + i * 0.16;
@@ -59,6 +115,21 @@ function playWizz() {
       osc.stop(start + 0.14);
       lfo.stop(start + 0.14);
     }
+  };
+  if (ctx.state === "running") go();
+  else void ctx.resume().then(() => ctx.state === "running" && go()).catch(() => undefined);
+}
+
+/** Le wizz : élément audio amorcé, sinon Web Audio. Silencieux si le navigateur refuse. */
+function playWizz() {
+  try {
+    if (el) {
+      el.muted = false;
+      el.currentTime = 0;
+      void el.play().catch(() => playWizzWebAudio());
+      return;
+    }
+    playWizzWebAudio();
   } catch {
     /* son indisponible : le pop-up suffit */
   }
@@ -86,11 +157,10 @@ export function RedReminderPopup() {
   // Débloque le son au premier geste sur le board (voir unlockAudio).
   useEffect(() => {
     const opts = { capture: true, passive: true } as const;
-    window.addEventListener("pointerdown", unlockAudio, opts);
-    window.addEventListener("keydown", unlockAudio, opts);
+    const events = ["pointerdown", "click", "touchend", "keydown"] as const;
+    for (const e of events) window.addEventListener(e, unlockAudio, opts);
     return () => {
-      window.removeEventListener("pointerdown", unlockAudio, opts);
-      window.removeEventListener("keydown", unlockAudio, opts);
+      for (const e of events) window.removeEventListener(e, unlockAudio, opts);
     };
   }, []);
   useLiveRefresh(["team_card_members", "notifications"], () => {

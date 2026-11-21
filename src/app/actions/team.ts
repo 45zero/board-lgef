@@ -18,6 +18,7 @@ import {
   type TeamPerson,
   type TeamWorkspace,
   isMemberStatus,
+  MEMBER_STATUSES,
   type MemberStatus,
   toReminderLevel,
   type ReminderLevel,
@@ -487,6 +488,8 @@ export const setMyCardStatus = async (cardId: string, status: MemberStatus) =>
   toResult(async () => {
     if (!isMemberStatus(status)) throw new Error("Statut inconnu.");
     const { supabase, userId } = await session();
+    // Relance en cours ? Celui qui a relancé sera prévenu de la réponse.
+    const before = (await supabase.from("team_card_members").select("reminder_level, reminded_by").eq("card_id", cardId).eq("user_id", userId).maybeSingle()).data;
     // Mettre à jour son statut répond à la relance : la cloche (orange ou rouge) disparaît.
     const rows = check(
       await supabase
@@ -497,20 +500,39 @@ export const setMyCardStatus = async (cardId: string, status: MemberStatus) =>
         .select("card_id")
     );
     if (!rows.length) throw new Error("Vous n'êtes pas assigné à cette carte.");
+    if (before?.reminder_level && before.reminded_by && before.reminded_by !== userId) {
+      const label = MEMBER_STATUSES.find((st) => st.id === status)?.label ?? status;
+      await notifyReminderAnswer(supabase, cardId, userId, before.reminded_by, `a mis à jour son statut : ${label}`);
+    }
   });
+
+/** Réponse à une relance (vu ou statut mis à jour) : notification à celui qui a relancé. */
+async function notifyReminderAnswer(supabase: Supabase, cardId: string, userId: string, to: string, what: string) {
+  try {
+    const [card, actor] = await Promise.all([supabase.from("team_cards").select("title").eq("id", cardId).single().then(check), actorOf(supabase, userId)]);
+    await notify(supabase, [to], { type: "card_commented", title: `${actor} ${what} — carte « ${card.title} »`, message: "Réponse à votre relance.", cardId, actor });
+  } catch {
+    /* la réponse est enregistrée ; la notification est un plus */
+  }
+}
 
 /** « Vu » sur une relance orange (clic sur la cloche) : elle disparaît. La rouge exige une mise à jour du statut. */
 export const ackTeamCardReminder = async (cardId: string) =>
   toResult(async () => {
     const { supabase, userId } = await session();
-    check(
+    const before = (await supabase.from("team_card_members").select("reminder_level, reminded_by").eq("card_id", cardId).eq("user_id", userId).maybeSingle()).data;
+    const rows = check(
       await supabase
         .from("team_card_members")
         .update({ reminder_level: 0, reminded_at: null, reminded_by: null })
         .eq("card_id", cardId)
         .eq("user_id", userId)
         .eq("reminder_level", 1)
+        .select("card_id")
     );
+    if (rows.length && before?.reminded_by && before.reminded_by !== userId) {
+      await notifyReminderAnswer(supabase, cardId, userId, before.reminded_by, "a pris note de votre relance");
+    }
   });
 
 /** Relances rouges en attente pour moi : pop-up du board tant que je n'ai pas mis à jour mon statut. */
